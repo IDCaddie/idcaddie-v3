@@ -54,7 +54,13 @@ tenants ─┬─< tenant_memberships >─ profiles (auth.users)
 
 ## Proposed changes to `0001_core_schema.sql` (for approval — not yet applied)
 
-> **#1 and #2 are now IMPLEMENTED** in `supabase/migrations/0002_org_scoped_rls.sql` (additive — `0001` is unchanged) and verified by `supabase/tests/org_rls_test.sql`. Canonical owning-org columns: `apps.responsible_org_id`, `contracts.procurement_org_id` (other org columns are informational). Org reads/writes are tenant-bound via `has_org_role_in_tenant`, and an `enforce_owning_org_tenant` trigger prevents a resource's owning-org from crossing tenants. `0002` also closed a pre-existing `0001` tenant-admin→owner self-promotion. The remaining items (#3–8) are still open.
+> **#1 and #2 are now IMPLEMENTED** in `supabase/migrations/0002_org_scoped_rls.sql` + `0003_org_access_union.sql` (additive — `0001` is unchanged) and verified by `supabase/tests/org_rls_test.sql`. The remaining items (#3–8) are still open.
+>
+> **MVP access model (the SQL best-practice split):**
+> - **Stewardship / WRITE is single-org:** `apps.responsible_org_id`, `contracts.procurement_org_id`. Only a manager of the steward org (or a tenant editor+) may write.
+> - **READ is multi-org / relationship-derived** (`0003`): an org user reads an **app** if their org is its `responsible_org_id` **OR** `paying_org_id` **OR** `procurement_owner_org_id`; a **contract** if their org is its `procurement_org_id` **OR** `paying_org_id`. This is what makes chargeback work when procurement is centralized (e.g. Omnicom): the agency that *pays* can see the resource even if it isn't the steward.
+> - **Tenant binding:** every org FK used for read or write is validated same-tenant by the `enforce_owning_org_tenant` trigger (`0003` broadened it to all access-relevant columns). `0002` also closed a pre-existing `0001` tenant-admin→owner self-promotion.
+> - **Future enterprise model** may replace these columns with a `resource_org_links` relationship table (`relation ∈ responsible|paying|procurement|consuming`) + recursive `parent_org_id` org hierarchy; access then derives from links (read = any relation, write = `responsible`).
 
 1. ✅ **Org roles in helper coverage.** Done in `0002`: `is_org_member`, `has_org_role`, `has_org_role_in_tenant`, `is_tenant_participant`; `organization_memberships` got admin-manage + own-read policies.
 2. ✅ **Resource→org scoping enforced.** Done in `0002`: org-scoped read + manage policies on `apps`/`contracts`, with exact-org checks (no cross-org/cross-tenant escalation) + the owning-org tenant trigger.

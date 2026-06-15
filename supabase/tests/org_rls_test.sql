@@ -32,6 +32,7 @@ insert into auth.users (id, email) values
   ('0a000000-0000-0000-0000-0000000000a1','mgr_a1@a.test'),
   ('0a000000-0000-0000-0000-0000000000a2','viewer_a1@a.test'),
   ('0a000000-0000-0000-0000-0000000000a3','mgr_a2@a.test'),
+  ('0a000000-0000-0000-0000-0000000000c1','agency_u@a.test'),
   ('0a000000-0000-0000-0000-0000000000e0','member_x@a.test'),
   ('0b000000-0000-0000-0000-000000000001','owner_b@b.test');
 
@@ -42,6 +43,7 @@ insert into public.profiles (id, email) values
   ('0a000000-0000-0000-0000-0000000000a1','mgr_a1@a.test'),
   ('0a000000-0000-0000-0000-0000000000a2','viewer_a1@a.test'),
   ('0a000000-0000-0000-0000-0000000000a3','mgr_a2@a.test'),
+  ('0a000000-0000-0000-0000-0000000000c1','agency_u@a.test'),
   ('0a000000-0000-0000-0000-0000000000e0','member_x@a.test'),
   ('0b000000-0000-0000-0000-000000000001','owner_b@b.test');
 
@@ -52,6 +54,8 @@ insert into public.tenants (id, name, slug) values
 insert into public.organizations (id, tenant_id, name) values
   ('1a1a1a1a-0000-0000-0000-000000000001','11111111-1111-1111-1111-111111111111','Org A1'),
   ('1a1a1a1a-0000-0000-0000-000000000002','11111111-1111-1111-1111-111111111111','Org A2'),
+  ('1a1a1a1a-0000-0000-0000-000000000003','11111111-1111-1111-1111-111111111111','Org A3 (agency)'),
+  ('1a1a1a1a-0000-0000-0000-0000000000cc','11111111-1111-1111-1111-111111111111','Central Procurement'),
   ('2b2b2b2b-0000-0000-0000-000000000001','22222222-2222-2222-2222-222222222222','Org B1');
 
 -- Tenant-wide roles (owner_a, admin_a, viewer_a, owner_b). org-only users get NO tenant_membership.
@@ -68,17 +72,25 @@ insert into public.organization_memberships (organization_id, user_id, role) val
   ('1a1a1a1a-0000-0000-0000-000000000001','0a000000-0000-0000-0000-0000000000a1','manager'),
   ('1a1a1a1a-0000-0000-0000-000000000001','0a000000-0000-0000-0000-0000000000a2','viewer'),
   ('1a1a1a1a-0000-0000-0000-000000000002','0a000000-0000-0000-0000-0000000000a3','manager'),
+  ('1a1a1a1a-0000-0000-0000-000000000003','0a000000-0000-0000-0000-0000000000c1','manager'), -- agency_u manages Org A3 only
   ('2b2b2b2b-0000-0000-0000-000000000001','0b000000-0000-0000-0000-000000000001','manager');
 
 -- Apps: A1->orgA1, A2->orgA2, A_none->NULL org (tenant-wide only), B1->orgB1.
-insert into public.apps (id, tenant_id, name, responsible_org_id) values
-  ('a9900000-0000-0000-0000-0000000000a1','11111111-1111-1111-1111-111111111111','App A1','1a1a1a1a-0000-0000-0000-000000000001'),
-  ('a9900000-0000-0000-0000-0000000000a2','11111111-1111-1111-1111-111111111111','App A2','1a1a1a1a-0000-0000-0000-000000000002'),
-  ('a9900000-0000-0000-0000-0000000000a0','11111111-1111-1111-1111-111111111111','App A-none',null),
-  ('b9900000-0000-0000-0000-0000000000b1','22222222-2222-2222-2222-222222222222','App B1','2b2b2b2b-0000-0000-0000-000000000001');
+-- A_pay/A_proc are stewarded by A2 but related to agency A3 via paying / procurement
+-- columns (used to prove related-org READ without granting A3 write).
+insert into public.apps (id, tenant_id, name, responsible_org_id, paying_org_id, procurement_owner_org_id) values
+  ('a9900000-0000-0000-0000-0000000000a1','11111111-1111-1111-1111-111111111111','App A1','1a1a1a1a-0000-0000-0000-000000000001',null,null),
+  ('a9900000-0000-0000-0000-0000000000a2','11111111-1111-1111-1111-111111111111','App A2','1a1a1a1a-0000-0000-0000-000000000002',null,null),
+  ('a9900000-0000-0000-0000-0000000000a0','11111111-1111-1111-1111-111111111111','App A-none',null,null,null),
+  ('a9900000-0000-0000-0000-0000000000af','11111111-1111-1111-1111-111111111111','App A-pay','1a1a1a1a-0000-0000-0000-000000000002','1a1a1a1a-0000-0000-0000-000000000003',null),
+  ('a9900000-0000-0000-0000-0000000000bf','11111111-1111-1111-1111-111111111111','App A-proc','1a1a1a1a-0000-0000-0000-000000000002',null,'1a1a1a1a-0000-0000-0000-000000000003'),
+  ('b9900000-0000-0000-0000-0000000000b1','22222222-2222-2222-2222-222222222222','App B1','2b2b2b2b-0000-0000-0000-000000000001',null,null);
 
-insert into public.contracts (id, tenant_id, contract_name, procurement_org_id) values
-  ('c0000000-0000-0000-0000-0000000000a1','11111111-1111-1111-1111-111111111111','Contract A1','1a1a1a1a-0000-0000-0000-000000000001');
+-- Contract A1 stewarded by org A1. Contract A-central models CENTRALIZED procurement:
+-- procurement_org_id = Central Procurement (which agency_u is NOT in), paying_org_id = agency A3.
+insert into public.contracts (id, tenant_id, contract_name, procurement_org_id, paying_org_id) values
+  ('c0000000-0000-0000-0000-0000000000a1','11111111-1111-1111-1111-111111111111','Contract A1','1a1a1a1a-0000-0000-0000-000000000001',null),
+  ('c0000000-0000-0000-0000-0000000000cc','11111111-1111-1111-1111-111111111111','Contract A-central','1a1a1a1a-0000-0000-0000-0000000000cc','1a1a1a1a-0000-0000-0000-000000000003');
 
 insert into public.audit_logs (id, tenant_id, action, resource_type) values
   ('ad000000-0000-0000-0000-0000000000a1','11111111-1111-1111-1111-111111111111','app.create','apps');
@@ -90,7 +102,7 @@ do $$ declare v int; begin
   select count(*) into v from public.apps where tenant_id='22222222-2222-2222-2222-222222222222';
   assert v = 0, format('T1 cross-tenant read: tenant A owner saw %s tenant B apps', v);
   select count(*) into v from public.apps where tenant_id='11111111-1111-1111-1111-111111111111';
-  assert v = 3, format('T1 tenant A owner should see 3 own apps, saw %s', v);
+  assert v = 5, format('T1 tenant A owner should see 5 own apps, saw %s', v);
 end $$;
 reset role;
 
@@ -99,7 +111,7 @@ select set_config('request.jwt.claims','{"sub":"0a000000-0000-0000-0000-00000000
 set role authenticated;
 do $$ declare v int; begin
   select count(*) into v from public.apps where tenant_id='11111111-1111-1111-1111-111111111111';
-  assert v = 3, format('T2 tenant viewer should read 3 apps, saw %s', v);
+  assert v = 5, format('T2 tenant viewer should read 5 apps, saw %s', v);
   update public.apps set notes='nope' where id='a9900000-0000-0000-0000-0000000000a1';
   get diagnostics v = row_count;
   assert v = 0, format('T2 tenant viewer edited an app (%s rows)', v);
@@ -468,6 +480,78 @@ do $$ declare v int; begin
     where tenant_id='11111111-1111-1111-1111-111111111111' and user_id='0a000000-0000-0000-0000-0000000000ad';
   get diagnostics v = row_count;
   assert v = 1, format('T16 owner should be able to promote an admin to owner (%s rows)', v);
+end $$;
+reset role;
+
+-- ── Test 18: related-org READ via paying_org_id (0003 union) ─────────────────
+-- agency_u manages only Org A3; App A-pay is stewarded by A2 but paid by A3.
+select set_config('request.jwt.claims','{"sub":"0a000000-0000-0000-0000-0000000000c1"}',false);
+set role authenticated;
+do $$ declare v int; begin
+  select count(*) into v from public.apps where id='a9900000-0000-0000-0000-0000000000af';
+  assert v = 1, format('T18 agency should READ app via paying_org_id (%s)', v);
+  select count(*) into v from public.apps where id='a9900000-0000-0000-0000-0000000000a1';
+  assert v = 0, format('T18 agency should NOT read an unrelated app (%s)', v);
+  select count(*) into v from public.apps;  -- only A-pay (paying) + A-proc (procurement)
+  assert v = 2, format('T18 agency should see exactly its 2 related apps (%s)', v);
+end $$;
+reset role;
+
+-- ── Test 19: related-org READ via procurement_owner_org_id (0003 union) ──────
+select set_config('request.jwt.claims','{"sub":"0a000000-0000-0000-0000-0000000000c1"}',false);
+set role authenticated;
+do $$ declare v int; begin
+  select count(*) into v from public.apps where id='a9900000-0000-0000-0000-0000000000bf';
+  assert v = 1, format('T19 agency should READ app via procurement_owner_org_id (%s)', v);
+end $$;
+reset role;
+
+-- ── Test 20: centralized procurement — agency reads contract via paying_org_id ─
+-- Contract A-central is procured by Central Procurement (agency_u is NOT a member),
+-- paid by agency A3. Single-column procurement scoping would hide it; the union shows it.
+select set_config('request.jwt.claims','{"sub":"0a000000-0000-0000-0000-0000000000c1"}',false);
+set role authenticated;
+do $$ declare v int; begin
+  select count(*) into v from public.contracts where id='c0000000-0000-0000-0000-0000000000cc';
+  assert v = 1, format('T20 agency should READ contract via paying_org_id under central procurement (%s)', v);
+  select count(*) into v from public.contracts where id='c0000000-0000-0000-0000-0000000000a1';
+  assert v = 0, format('T20 agency should NOT read an unrelated contract (%s)', v);
+  select count(*) into v from public.contracts;
+  assert v = 1, format('T20 agency should see exactly its 1 related contract (%s)', v);
+end $$;
+reset role;
+
+-- ── Test 21: related (paying/procurement) does NOT grant write — steward only ─
+select set_config('request.jwt.claims','{"sub":"0a000000-0000-0000-0000-0000000000c1"}',false);
+set role authenticated;
+do $$ declare v int; begin
+  update public.apps set notes='x' where id='a9900000-0000-0000-0000-0000000000af';      -- steward = A2
+  get diagnostics v = row_count;
+  assert v = 0, format('T21 paying-related agency wrote a non-steward app (%s rows)', v);
+  update public.contracts set status='x' where id='c0000000-0000-0000-0000-0000000000cc'; -- steward = Central Proc
+  get diagnostics v = row_count;
+  assert v = 0, format('T21 paying-related agency wrote a non-steward contract (%s rows)', v);
+end $$;
+reset role;
+
+-- ── Test 22+23: trigger tenant-binds the broadened org columns ────────────────
+select set_config('request.jwt.claims','{"sub":"0a000000-0000-0000-0000-000000000001"}',false);
+set role authenticated;
+do $$ declare ok boolean := false; begin
+  begin
+    update public.apps set paying_org_id='2b2b2b2b-0000-0000-0000-000000000001' -- org B1 (tenant B)
+      where id='a9900000-0000-0000-0000-0000000000a1';
+    ok := false;
+  exception when check_violation then ok := true; end;
+  assert ok, 'T22 foreign-tenant paying_org_id was not blocked by the trigger';
+end $$;
+do $$ declare ok boolean := false; begin
+  begin
+    update public.apps set procurement_owner_org_id='2b2b2b2b-0000-0000-0000-000000000001'
+      where id='a9900000-0000-0000-0000-0000000000a1';
+    ok := false;
+  exception when check_violation then ok := true; end;
+  assert ok, 'T23 foreign-tenant procurement_owner_org_id was not blocked by the trigger';
 end $$;
 reset role;
 

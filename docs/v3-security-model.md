@@ -45,4 +45,10 @@ Grounded in [current-security-risk-map.md](./current-security-risk-map.md). Each
 - **Hashed tokens, real revocation** ← legacy ingestor/inbound tokens were plaintext / id-as-secret, non-constant-time compare (`handleIngestData.js:42`); API keys/SCIM were already hashed (keep that pattern).
 - **Validated, non-destructive imports** ← legacy CSV/API ingest full-replaced and hard-deleted unmatched users with no validation/audit (`onFileLinkedToApp.js:283-290`).
 
-> Org-scoped roles (`org_manager`/`org_viewer`) are **net-new** — no legacy analog. They are now enforced in `supabase/migrations/0002_org_scoped_rls.sql` (org reads/writes bound to the resource's tenant via `has_org_role_in_tenant`, exact-org manager checks, an owning-org→tenant integrity trigger, and append-only audit). Verified by `supabase/tests/org_rls_test.sql` (T1–T17, all passing). `0002` also fixed a pre-existing `0001` tenant-admin→owner self-promotion. Org scoping for child tables (`app_users`, `license_*`, `files`, `invoices`, `app_contracts`) remains deferred (still tenant-scoped).
+> Org-scoped roles (`org_manager`/`org_viewer`) are **net-new** — no legacy analog. Enforced in `supabase/migrations/0002_org_scoped_rls.sql` + `0003_org_access_union.sql`, verified by `supabase/tests/org_rls_test.sql` (T1–T23, all passing).
+>
+> **Stewardship vs. read (MVP rule):**
+> - **WRITE is single-org/steward:** apps via `responsible_org_id`, contracts via `procurement_org_id` (or a tenant editor+). Being merely paying/procurement-related does **not** grant write.
+> - **READ is multi-org/related:** app read = `responsible_org_id` OR `paying_org_id` OR `procurement_owner_org_id`; contract read = `procurement_org_id` OR `paying_org_id`. This keeps chargeback visibility intact under centralized procurement.
+> - Every org FK used for read/write is tenant-bound by the `enforce_owning_org_tenant` trigger. `0002` also fixed a pre-existing `0001` tenant-admin→owner self-promotion.
+> - Org scoping for child tables (`app_users`, `license_*`, `files`, `invoices`, `app_contracts`) remains deferred (still tenant-scoped). A future `resource_org_links` table + org hierarchy may supersede the column-based model.

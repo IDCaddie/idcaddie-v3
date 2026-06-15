@@ -21,13 +21,23 @@ Before building UI, prove these pass against local Supabase.
 9. service-role job can write license_evaluations.
 10. browser anon/authenticated client cannot read integration secrets.
 
-## Org-scoped policies — IMPLEMENTED in migration 0002
+## Org-scoped policies — IMPLEMENTED in migrations 0002 + 0003
 
-Cases 1–8 plus the org/cross-tenant/escalation matrix are now enforced by
-`supabase/migrations/0002_org_scoped_rls.sql` and covered by the runnable suite
-`supabase/tests/org_rls_test.sql` (T1–T17). That suite has been executed against
-Postgres 16 with a Supabase-style `auth` shim — all assertions pass
-(`ALL ORG-RLS ASSERTIONS PASSED`).
+Cases 1–8 plus the org/cross-tenant/escalation matrix are enforced by
+`supabase/migrations/0002_org_scoped_rls.sql` and `0003_org_access_union.sql`,
+covered by the runnable suite `supabase/tests/org_rls_test.sql` (T1–T23). The suite
+has been executed against Postgres 16 with a Supabase-style `auth` shim — all
+assertions pass (`ALL ORG-RLS ASSERTIONS PASSED`).
+
+### Access model: stewardship (write) vs. related-org (read)
+- **WRITE / steward (single-org):** apps `responsible_org_id`, contracts `procurement_org_id` (or tenant editor+).
+- **READ (multi-org, 0003):** app = responsible OR paying OR procurement-owner org; contract = procurement OR paying org. Keeps chargeback visible under centralized procurement.
+- Tenant binding on every access org FK via the `enforce_owning_org_tenant` trigger.
+
+Union-read cases (T18–T23): read app via `paying_org_id`; read app via
+`procurement_owner_org_id`; read contract via `paying_org_id`; **centralized-procurement**
+contract still readable by the paying agency; paying/procurement relation does **not**
+grant write; foreign-tenant `paying_org_id` and `procurement_owner_org_id` blocked by the trigger.
 
 Coverage added beyond the original cases:
 - Cross-tenant **write** denial for tenant-wide roles (not just read).
