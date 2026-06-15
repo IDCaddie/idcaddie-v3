@@ -1,0 +1,17 @@
+name: RLS migration tests
+
+# Applies all Supabase migrations to a throwaway Postgres and runs the RLS
+# assertion suite. Uses Docker (preinstalled on ubuntu runners) via the same
+# scripts/test-rls.sh used locally — never hosted Supabase, no service-role keys.
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  rls:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run RLS migration tests
+        run: bash scripts/test-rls.sh
