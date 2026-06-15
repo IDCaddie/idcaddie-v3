@@ -33,3 +33,16 @@ A user can read tenant rows only if they have an active membership in that tenan
 - Audit logs cannot be updated/deleted by normal users.
 - Files are inaccessible outside tenant.
 - Service-role functions do not expose raw credentials to users.
+
+## Legacy findings driving this model
+Grounded in [current-security-risk-map.md](./current-security-risk-map.md). Each v3 rule above closes a concrete legacy failure:
+- **RLS over frontend filtering** ← legacy authorized via ~198 direct client Firestore calls + `DataProvider.js:47-62` filtering; `list` rules were open to any auth user (`firestore.rules:75,150,176,295`).
+- **Exact per-org/per-resource role checks** ← legacy group-manager rule was not group-specific → cross-group edit escalation (`firestore.rules:388-409`, P0).
+- **Credentials service-role only + encrypted** ← legacy stored integration secrets in **plaintext** at `IDCApps/{id}/private/scraperCredentials` (`scraperConfigManager.js:122-128`, P0).
+- **Append-only audit (DB-enforced)** ← legacy `logs` were append-only by convention only; `scraperLogs` editor-writable/deletable (`firestore.rules:110-113`), Admin-SDK could delete, 90-day hard purge (`cleanupOldLogs.js`).
+- **Tenant boundary in Postgres** ← legacy isolation was project-per-tenant (`webapp/.firebaserc`); no in-DB scoping.
+- **Re-secure privileged operations** ← several legacy callables shipped with **no auth check** (`sendVerificationEmail`, `syncAppApps`, `calculateFieldValues`, `sendUserInviteEmail`).
+- **Hashed tokens, real revocation** ← legacy ingestor/inbound tokens were plaintext / id-as-secret, non-constant-time compare (`handleIngestData.js:42`); API keys/SCIM were already hashed (keep that pattern).
+- **Validated, non-destructive imports** ← legacy CSV/API ingest full-replaced and hard-deleted unmatched users with no validation/audit (`onFileLinkedToApp.js:283-290`).
+
+> Org-scoped roles (`org_manager`/`org_viewer`) are **net-new** — no legacy analog. They require the org-membership policies noted in [v3-data-model.md](./v3-data-model.md) (proposed changes #1–2); the current `0001_core_schema.sql` does not yet enforce org scope, so the org-manager RLS tests would fail until added.
