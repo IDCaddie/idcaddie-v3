@@ -1,0 +1,19 @@
+name: Migration safety
+
+# Static checks over supabase/migrations: sequential numbering, no duplicate
+# numbers, no unsafe keywords (DROP TABLE / TRUNCATE / DISABLE ROW LEVEL SECURITY)
+# without a "-- safety-ack:" note. Fast, no Docker/database. See docs/migration-workflow.md.
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  migration-safety:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify the checker itself
+        run: bash scripts/check-migration-safety.sh selftest
+      - name: Check migrations
+        run: bash scripts/check-migration-safety.sh

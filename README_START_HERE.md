@@ -33,16 +33,28 @@ A secure Omnicom/Flywheel source-of-truth MVP:
 - stale users report
 - audit log
 
-## Running the RLS tests
-Authorization lives in Postgres RLS, so it is tested directly against Postgres
-(not the app). Run the full suite locally with Docker:
+## Developer workflow (database changes)
 
-```bash
-bash scripts/test-rls.sh
-```
+Authorization lives in Postgres RLS, so the database is developed and tested
+**locally first** — never against hosted Supabase, and never with service-role keys.
+Full rules: [`docs/migration-workflow.md`](docs/migration-workflow.md).
 
-It applies every `supabase/migrations/*.sql` to a throwaway `postgres:16` container
-(with a Supabase-style `auth` shim), then runs `supabase/tests/*_test.sql` and fails
-on any assertion error. The same script runs in CI on every pull request
-(`.github/workflows/rls-tests.yml`). No hosted Supabase, no service-role keys.
-See `supabase/tests/rls_test_plan.md` for details.
+For any schema/RLS change:
+
+1. Add the next sequential migration `supabase/migrations/000N_<description>.sql`.
+   **Never edit an already-merged migration** — fix forward with a new one.
+2. Add/extend authorization assertions in `supabase/tests/*_test.sql`
+   (at least one positive and one negative).
+3. Run both checks locally before opening the PR:
+   ```bash
+   bash scripts/check-migration-safety.sh   # numbering + unsafe-keyword lint
+   bash scripts/test-rls.sh                  # apply all migrations + run RLS assertions
+   ```
+4. Fill in [`docs/migration-checklist.md`](docs/migration-checklist.md) in the PR.
+
+CI runs both scripts on every pull request (`.github/workflows/`). Both use a
+throwaway `postgres:16` Docker container with a Supabase-style `auth` shim — no
+hosted Supabase, no service-role keys. Applying migrations to a hosted environment
+is a **separate, reviewed deployment step**, not part of merging a PR.
+
+See `supabase/tests/rls_test_plan.md` for test details.
