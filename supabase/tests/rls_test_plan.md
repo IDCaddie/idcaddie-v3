@@ -53,7 +53,17 @@ Still tenant-scoped (org scoping deferred — see migration header): `app_users`
 `license_rules`, `license_evaluations`, `files`, `invoices`, `app_contracts`.
 
 ### Run locally
-The committed test assumes a Supabase-style environment (`auth.uid()`, roles
-`authenticated`/`service_role`, table grants). For plain Postgres, provide a shim
-(create `auth.uid()` reading `request.jwt.claims`, the two roles, and grants),
-apply `0001` then `0002`, then run `org_rls_test.sql` with `psql -v ON_ERROR_STOP=1`.
+
+```bash
+bash scripts/test-rls.sh
+```
+
+That script (the same one CI runs — `.github/workflows/rls-tests.yml`) spins up a
+throwaway `postgres:16` container, installs a Supabase-style `auth` shim
+(`auth.uid()` + the `authenticated`/`service_role` roles hosted Supabase provides),
+applies every `supabase/migrations/*.sql` in order, applies the test-role grants,
+then runs every `supabase/tests/*_test.sql` with `ON_ERROR_STOP=1`. Any failed
+assertion fails the run (non-zero exit); the container is removed even on failure.
+Requires Docker. It never touches hosted Supabase and uses no service-role keys.
+
+New test files are picked up automatically as long as they are named `*_test.sql`.

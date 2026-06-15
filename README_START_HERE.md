@@ -32,3 +32,17 @@ A secure Omnicom/Flywheel source-of-truth MVP:
 - unmanaged users report
 - stale users report
 - audit log
+
+## Running the RLS tests
+Authorization lives in Postgres RLS, so it is tested directly against Postgres
+(not the app). Run the full suite locally with Docker:
+
+```bash
+bash scripts/test-rls.sh
+```
+
+It applies every `supabase/migrations/*.sql` to a throwaway `postgres:16` container
+(with a Supabase-style `auth` shim), then runs `supabase/tests/*_test.sql` and fails
+on any assertion error. The same script runs in CI on every pull request
+(`.github/workflows/rls-tests.yml`). No hosted Supabase, no service-role keys.
+See `supabase/tests/rls_test_plan.md` for details.
