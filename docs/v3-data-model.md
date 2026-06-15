@@ -54,8 +54,16 @@ tenants ─┬─< tenant_memberships >─ profiles (auth.users)
 
 ## Proposed changes to `0001_core_schema.sql` (for approval — not yet applied)
 
-1. **Org roles in helper coverage.** The skeleton's `has_tenant_role` only checks `tenant_memberships`. Add an `is_org_member(org_id, roles[])` helper and org-scoped policies so `org_manager`/`org_viewer` actually grant/limit access. Currently no table is scoped to `organization_memberships` (the org-scope tests in `supabase/tests/rls_test_plan.md:6-7` would fail). **P0 for the security model.**
-2. **Resource→org scoping columns are present but unenforced.** `apps`/`contracts` have `*_org_id` columns, but RLS policies (`0001_core_schema.sql:287-321`) only gate by `is_tenant_member`/`has_tenant_role` — they ignore org. Add org-scoped `USING`/`WITH CHECK` clauses for org_manager/org_viewer.
+> **#1 and #2 are now IMPLEMENTED** in `supabase/migrations/0002_org_scoped_rls.sql` + `0003_org_access_union.sql` (additive — `0001` is unchanged) and verified by `supabase/tests/org_rls_test.sql`. The remaining items (#3–8) are still open.
+>
+> **MVP access model (the SQL best-practice split):**
+> - **Stewardship / WRITE is single-org:** `apps.responsible_org_id`, `contracts.procurement_org_id`. Only a manager of the steward org (or a tenant editor+) may write.
+> - **READ is multi-org / relationship-derived** (`0003`): an org user reads an **app** if their org is its `responsible_org_id` **OR** `paying_org_id` **OR** `procurement_owner_org_id`; a **contract** if their org is its `procurement_org_id` **OR** `paying_org_id`. This is what makes chargeback work when procurement is centralized (e.g. Omnicom): the agency that *pays* can see the resource even if it isn't the steward.
+> - **Tenant binding:** every org FK used for read or write is validated same-tenant by the `enforce_owning_org_tenant` trigger (`0003` broadened it to all access-relevant columns). `0002` also closed a pre-existing `0001` tenant-admin→owner self-promotion.
+> - **Future enterprise model** may replace these columns with a `resource_org_links` relationship table (`relation ∈ responsible|paying|procurement|consuming`) + recursive `parent_org_id` org hierarchy; access then derives from links (read = any relation, write = `responsible`).
+
+1. ✅ **Org roles in helper coverage.** Done in `0002`: `is_org_member`, `has_org_role`, `has_org_role_in_tenant`, `is_tenant_participant`; `organization_memberships` got admin-manage + own-read policies.
+2. ✅ **Resource→org scoping enforced.** Done in `0002`: org-scoped read + manage policies on `apps`/`contracts`, with exact-org checks (no cross-org/cross-tenant escalation) + the owning-org tenant trigger.
 3. **Append-only audit hardening.** Skeleton has a SELECT policy and "no update/delete policies" comment (`:323-325`) — but with RLS enabled and no INSERT policy, inserts also fail for normal roles (writes come via service role). Document explicitly: audit writes are service-role only; add a revoke of UPDATE/DELETE even from table owner where feasible, and a retention/archive policy (legacy hard-purged at 90 days — **do not** port that).
 4. **Encrypted credential store (deferred connectors, but model now).** Add a `connector_credentials` table reachable **only** via service-role / `SECURITY DEFINER` RPC, secrets stored via Supabase Vault/pgsodium — never the plaintext `IDCApps/{id}/private` pattern. Keep out of MVP tables but reserve the boundary.
 5. **Tokens hashed.** Any token table (API keys, future ingest) stores `token_hash` + short prefix only (legacy already did this for API keys/SCIM — adopt universally; do NOT port plaintext ingestor/inbound tokens).
