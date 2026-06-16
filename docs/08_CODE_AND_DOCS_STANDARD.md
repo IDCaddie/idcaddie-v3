@@ -28,11 +28,19 @@ and the living-docs policy. Reviewer enforcement: [07_P0_REVIEW_CHECKLIST](./07_
 AI/generated code is reviewed like any other: read every line, confirm it matches an actual
 need, delete speculative breadth, verify auth/tests. Do not merge code you cannot explain.
 
-### Vendor / bot agent PRs (Vercel, etc.)
+### Vendor and bot agent PRs
 Automated vendor PRs are **not exempt** from docs / risk / changelog discipline. A small,
 low-risk vendor PR (e.g. Vercel telemetry) may be accepted, but it must be reconciled into the
 docs, risk register, and changelog **before** it is marked ready/merged — by a human or agent,
 not the bot. Verify what it actually changed (read the diff), then document it honestly.
+
+### Connected agent permissions
+Connected coding agents and external tools (Claude/Vercel/GitHub/Supabase) **propose on
+branches; humans dispose on `main`.** Every agent-generated PR must complete the
+[PR template](../.github/pull_request_template.md), update docs/risk/changelog (or carry a valid
+`.docs-not-needed.md`), pass CI, and get human review before merge — agents never auto-merge,
+bypass CI, touch secrets, or run hosted Supabase migrations. The full allowed/not-allowed/required
+policy is canonical in [09 · Connected agent permissions](./09_AGENT_HANDOFF.md#connected-agent-permissions); the automation risk is [04 · RISK-014](./04_RISK_REGISTER.md).
 
 ### When to abstract (and not)
 Abstract on the **third** real duplication, not the first. One implementation ⇒ no

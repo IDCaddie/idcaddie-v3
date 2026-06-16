@@ -7,6 +7,21 @@ from PRs verified via `git log` / `gh pr list`.
 
 ---
 
+### PR #8 — Connected agent governance · 2026-06-16
+- **Category:** docs / governance.
+- **What:** added a canonical **"Connected agent permissions"** policy ([09](./09_AGENT_HANDOFF.md#connected-agent-permissions))
+  for connected coding agents/tools (Claude/Vercel/GitHub/Supabase) — allowed/not-allowed/required.
+  Short audience-specific sections in [07](./07_P0_REVIEW_CHECKLIST.md) (reviewer), [08](./08_CODE_AND_DOCS_STANDARD.md)
+  (discipline), and `README_START_HERE` (entry point) **link** to it, not restate it. Opened **RISK-014**.
+- **Why:** make safe usage of connected automation explicit and reviewable — agents propose on branches; humans dispose on `main`.
+- **Security impact:** none to runtime — docs only. Reinforces no-auto-merge, no-secrets, no-hosted-Supabase, no-service-role, human-review-before-merge.
+- **Tests run (local, verified):** `npm run lint` clean; `npm run build` exit 0; `check-auth-safety.sh` 6/6 + clean;
+  `check-docs-updated.sh` 0/0; `check-migration-safety.sh` pass; `test-rls.sh` → `ALL ORG-RLS ASSERTIONS PASSED`.
+- **Docs updated:** `09` (canonical), `08`, `07`, `04` (RISK-014), `README_START_HERE`, this entry.
+- **Follow-ups:** confirm GitHub branch protection on `main` (review + green CI required) matches the documented policy (RISK-014).
+
+---
+
 ### PR #7 — Install Vercel Speed Insights · 2026-06-16
 - **Category:** infra / telemetry (Vercel agent PR, reconciled per [08](./08_CODE_AND_DOCS_STANDARD.md)).
 - **What:** added `@vercel/speed-insights@^2.0.0` and a bare `<SpeedInsights />` in the root

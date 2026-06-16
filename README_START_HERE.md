@@ -26,6 +26,15 @@ and there is **no product UI yet**. Authoritative status: [`docs/00_PRODUCT_STAT
 - **Telemetry:** Vercel preview/platform telemetry (Web Analytics + Speed Insights) exists, platform-only. Do **not** add production/custom domains yet, add custom events, or treat platform telemetry as an audit/product source of truth ([04 · RISK-013](docs/04_RISK_REGISTER.md)).
 - Every PR updates docs / risk / changelog, or justifies why not.
 
+## Connected agent permissions
+Connected coding agents and tools (Claude/Vercel/GitHub/Supabase) **propose on branches; humans
+dispose on `main`.** Agents may branch, edit, open PRs, run local checks, read CI/deploy status,
+and create Vercel **preview** deployments. They may **not** push to `main`, auto-merge, bypass CI,
+touch secrets/service-role keys, run hosted Supabase migrations, change DNS/custom domains, promote
+production, or silently add telemetry/auth/billing/imports/exports/integrations. Every agent PR
+needs a completed template, docs/risk/changelog updates, green CI, and **human review before
+merge**. Full policy: [09 · Connected agent permissions](docs/09_AGENT_HANDOFF.md#connected-agent-permissions).
+
 ## Required checks before any PR
 ```bash
 bash scripts/check-migration-safety.sh selftest   # the checker checks itself
