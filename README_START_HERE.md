@@ -12,10 +12,10 @@ authorization source of truth**. We preserve validated workflows and port **no**
 Firebase code.
 
 ## Current status (one line)
-**Phase 2 — auth/session skeleton on the RLS foundation.** Schema + RLS are tested
-locally and CI-enforced; an auth skeleton (login, server session, protected routes) is
-built but **not exercised against hosted Supabase**, tenant/org context is a placeholder,
-and there is **no product UI yet**. Authoritative status: [`docs/00_PRODUCT_STATUS.md`](docs/00_PRODUCT_STATUS.md).
+**Phase 2 — auth + read-only tenant/org context on the RLS foundation.** Schema + RLS are
+tested locally and CI-enforced; an auth skeleton (login, server session, protected routes) and
+read-only tenant/org context resolution are built but **not exercised against hosted Supabase**,
+with no tenant switching and **no product UI yet**. Authoritative status: [`docs/00_PRODUCT_STATUS.md`](docs/00_PRODUCT_STATUS.md).
 
 ## Non-negotiables (apply to every change)
 - Do **not** run against hosted Supabase — local-first only.
@@ -44,7 +44,7 @@ bash scripts/check-auth-safety.sh                  # src/ has no service-role/ha
 bash scripts/check-docs-updated.sh                 # docs-drift gate
 bash scripts/pr-review-summary.sh                  # categorize the diff + reviewer focus
 ```
-For app/UI changes also run `npm run lint` and `npm run build`.
+For app/UI changes also run `npm run lint`, `npm run build`, and `npm test`.
 All of these also run in CI on every PR (`.github/workflows/`).
 
 ## Quick starts

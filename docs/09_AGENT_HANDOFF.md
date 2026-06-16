@@ -5,10 +5,11 @@ Read this + [00_PRODUCT_STATUS](./00_PRODUCT_STATUS.md) before doing anything. R
 also live in `AGENTS.md` / `claude/CLAUDE.md`.
 
 ## Current repo state (verify before trusting — see [00](./00_PRODUCT_STATUS.md))
-Phase 2 — auth/session skeleton built on the data/RLS foundation. Migrations `0001`–`0003`
+Phase 2 — auth + tenant/org context, built on the data/RLS foundation. Migrations `0001`–`0003`
 are `implemented`, `verified-local`, `ci-enforced`, **not hosted-applied**. The auth skeleton
-(login, server session via `src/proxy.ts`, protected `(authenticated)/` group) is built but
-**not exercised against hosted Supabase Auth**; tenant/org context is a placeholder only. No
+(login, server session via `src/proxy.ts`, protected `(authenticated)/` group) **and read-only
+tenant/org context resolution** (`src/lib/auth/tenant-context.ts`, shown in the protected shell)
+are built but **not exercised against hosted Supabase**. No tenant switching, no provisioning, no
 product UI. Vercel **Web Analytics + Speed Insights** are present (platform telemetry only, bare
 components, no custom events). Legacy Firebase is still production. Don't trust any prompt's
 "seeded" history — re-verify from `git log`, `gh pr list`, `ls supabase/migrations`, and the source/test files.
@@ -32,7 +33,7 @@ components, no custom events). Legacy Firebase is still production. Don't trust 
    bash scripts/check-docs-updated.sh
    bash scripts/pr-review-summary.sh
    ```
-   For app/UI work also run `npm run lint` and `npm run build`.
+   For app/UI work also run `npm run lint`, `npm run build`, and `npm test`.
 3. Update docs per the [docs-update policy](./08_CODE_AND_DOCS_STANDARD.md#required-updates-per-change-docs-update-policy):
    at minimum add a [05_ENGINEERING_CHANGELOG](./05_ENGINEERING_CHANGELOG.md) entry; touch
    [04_RISK_REGISTER](./04_RISK_REGISTER.md) if risk changed.
@@ -76,15 +77,14 @@ production, hosted Supabase, secrets, or DNS without human review.
 Rationale and the automation risk: [04 · RISK-014](./04_RISK_REGISTER.md). Reviewer enforcement: [07 · Connected agent PRs](./07_P0_REVIEW_CHECKLIST.md#connected-agent-permissions). Discipline for vendor/bot PRs: [08](./08_CODE_AND_DOCS_STANDARD.md#vendor-and-bot-agent-prs).
 
 ## Current next recommended task
-**Tenant/org context resolution** (build-sequence Stage 3): derive the user's tenant + org
-memberships server-side from the membership tables and expose a read-only context, replacing
-the `src/lib/auth/tenant-context.ts` placeholder. Prove one RLS-scoped read end-to-end. No
-writes, no product UI. P0 watch: context from membership rows (not client input or JWT claims);
-no service-role; do not weaken RLS. (Stage 2 auth skeleton is done — PR #6.)
+**Read-only app inventory** (build-sequence Stage 4): a first real screen listing `apps` the
+user may read, RLS-scoped, using the resolved tenant/org context. No writes, no client-side
+filtering, no child-table data that's still tenant-only (RISK-002). P0 watch: RLS is the boundary;
+no service-role; org-only users see only related apps. (Stage 3 tenant/org context is done — PR #9.)
 
 ## Current open risks to respect
-`not-hosted-applied`; child tables tenant-scoped (org scoping deferred); no tenant/org
-context resolution yet (RISK-012); no credential vault; imports/exports destructive-in-legacy
+`not-hosted-applied`; child tables tenant-scoped (org scoping deferred); no tenant switching /
+user provisioning yet (RISK-012); no credential vault; imports/exports destructive-in-legacy
 (don't port). Full list:
 [04_RISK_REGISTER](./04_RISK_REGISTER.md).
 

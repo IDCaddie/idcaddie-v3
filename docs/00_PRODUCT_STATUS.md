@@ -21,10 +21,11 @@ foundation on Postgres with RLS as the authorization source of truth. We **prese
 validated workflows, port no Firebase code**.
 
 ## Current phase
-**Phase 2 — auth/session skeleton (in progress).** The secure data/RLS foundation
-(Phase 1) is complete; the **auth/session skeleton** is now built (login, server-side
-session via Proxy, protected route group) but tenant/org context resolution is **not**
-wired yet. No product UI exists. Nothing is **applied to any hosted Supabase environment**.
+**Phase 2 — auth + tenant/org context (in progress).** The secure data/RLS foundation
+(Phase 1) is complete; the **auth/session skeleton** (login, server session via Proxy,
+protected route group) and **read-only tenant/org context resolution** are now built. The
+protected shell displays the resolved context. No product UI (inventory/contracts/etc.); no
+tenant switching or user provisioning. Nothing is **applied to any hosted Supabase environment**.
 
 ## Merged PRs (verified from `git log` / `gh pr list`)
 | PR | Commit | What it added |
@@ -46,7 +47,8 @@ PR #6 (this branch, auth/session skeleton) is **not yet merged**.
 | Migration safety (numbering, unsafe keywords) | `ci-enforced` (PR #3) |
 | Migrations applied to hosted Supabase (staging/prod) | **not done** — `not-hosted-applied` |
 | Auth/session skeleton (login, server session via Proxy, protected route group, no service-role) | `implemented` (PR #6); `verified-local` (build + `check-auth-safety.sh`); **not** exercised against hosted Supabase Auth |
-| Tenant/org context resolution (memberships → scoped reads) | `planned` (next; placeholder stub only — `src/lib/auth/tenant-context.ts`) |
+| Tenant/org context resolution (read-only; memberships → active tenant + org list, RLS-scoped) | `implemented` (PR #9); `verified-local` (build + unit tests); **not** exercised against hosted Supabase |
+| Tenant switching UI / user provisioning / invites | `planned` (not built; deterministic first tenant chosen — RISK-012) |
 | Product UI / app workflows | `planned` (auth shell only; no inventory/contracts/etc.) |
 | Child-table org scoping (`app_users`, `files`, `invoices`, `license_*`, `app_contracts`) | `deferred` (still tenant-scoped) |
 | `resource_org_links` relationship table + org hierarchy | `deferred` |
@@ -96,13 +98,11 @@ One-line decisions; deep rationale in the linked canonical docs.
 - **Deploy v3 today?** No. No UI, no hosted DB, legacy Firebase is still production.
 - **Safely keep building on this foundation?** Yes — *after* `scripts/check-docs-updated.sh`,
   `check-migration-safety.sh`, and `test-rls.sh` pass. The RLS model is tested and CI-enforced.
-- **Next safest build step?** Tenant/org context resolution (read-only) on top of the
-  auth skeleton — no data mutation, RLS already covers reads. See [06_BUILD_SEQUENCE.md](./06_BUILD_SEQUENCE.md).
+- **Next safest build step?** A read-only app inventory page over `apps`, RLS-scoped, using
+  the resolved tenant/org context — no data mutation. See [06_BUILD_SEQUENCE.md](./06_BUILD_SEQUENCE.md).
 
 ## Next recommended PRs
-1. Tenant/org context resolution (read-only): derive memberships server-side from the
-   membership tables, proving an RLS-scoped read end-to-end. Replaces the placeholder stub.
-2. Read-only app inventory page (first real screen) over `apps`, RLS-scoped.
-3. First steward-only write surface (e.g. contracts), audited.
+1. Read-only app inventory page (first real screen) over `apps`, RLS-scoped (build-sequence Stage 4).
+2. First steward-only write surface (e.g. contracts), audited.
 
 (These are `planned`. Each must follow [07_P0_REVIEW_CHECKLIST.md](./07_P0_REVIEW_CHECKLIST.md) and update [04](./04_RISK_REGISTER.md)/[05](./05_ENGINEERING_CHANGELOG.md).)

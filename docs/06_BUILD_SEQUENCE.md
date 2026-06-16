@@ -12,7 +12,7 @@ passed, CI green.
 |---|-------|--------|
 | 1 | Clean-app operating system (docs/CI/foundation) | `implemented` |
 | 2 | Auth/session skeleton | `implemented` (PR #6) |
-| 3 | Tenant/org context (read-only) | `planned` (next) |
+| 3 | Tenant/org context (read-only) | `implemented` (PR #9) |
 | 4 | Read-only app inventory | `planned` |
 | 5 | Contracts | `planned` |
 | 6 | People / app users | `planned` |
@@ -42,17 +42,19 @@ passed, CI green.
 - **Deliberately not built:** business reads/writes, tenant switching UI, signup/tenant creation,
   OAuth/SAML/SCIM, tenant/org context resolution.
 
-### Stage 3 — Tenant/org context (read-only) (next)
-- **Goal:** derive the user's tenant + org memberships server-side; expose read-only context.
-  Replaces the `src/lib/auth/tenant-context.ts` placeholder.
-- **Prereq:** Stage 2 ✅.
-- **P0 risks:** tenant/org from client input instead of membership rows; RLS bypass via service-role.
-- **Tests:** RLS-scoped read returns only the user's tenant; cross-tenant returns 0 (extend `org_rls_test.sql` patterns at the app layer with an integration test).
-- **Done:** context comes only from membership rows; proven RLS-scoped read end-to-end.
+### Stage 3 — Tenant/org context (read-only) ✅ (PR #9)
+- **Goal:** derive the user's tenant + org memberships server-side; expose read-only context. **Done.**
+- **Built:** `resolveTenantContext()` reads own `tenant_memberships`/`organization_memberships` (+
+  embedded `tenants`/`organizations`) via the user-scoped server client — RLS-scoped, no service-role,
+  no client filtering, no JWT claims. Active tenant = deterministic first (no switcher). Pure derivation
+  in `tenant-context-derive.ts` with unit tests; resolved context shown in the protected shell.
+- **Zero-membership:** safe — `no_membership` / `no_tenant_membership` states, "No tenant access
+  configured yet", no crash, nothing created.
+- **No migration** (existing RLS already permits these reads). **Not built:** tenant switching, provisioning.
 
-### Stage 4 — Read-only app inventory
+### Stage 4 — Read-only app inventory (next)
 - **Goal:** first real screen — list `apps` the user may read.
-- **Prereq:** Stage 3. **P0 risks:** client-side filtering; leaking deferred child-table data.
+- **Prereq:** Stage 3 ✅. **P0 risks:** client-side filtering; leaking deferred child-table data.
 - **Tests:** org-only user sees only related apps; tenant viewer sees all tenant apps.
 - **Don't build yet:** edit/create. **Done:** read-only list, RLS-scoped, no client filtering.
 
