@@ -3,6 +3,10 @@ import { getAppDetailForCurrentUser } from "@/lib/data/apps";
 import { listContractsLinkedToApp } from "@/lib/data/links";
 import { listAppUsersForApp } from "@/lib/data/app-users";
 import { listMatchesForAppUsers } from "@/lib/data/app-user-matches";
+import {
+  summarizeAccountIntelligence,
+  STALE_CANDIDATE_DAYS,
+} from "@/lib/data/app-account-intelligence";
 
 export const metadata = { title: "App · ID Caddie" };
 
@@ -42,6 +46,12 @@ export default async function AppDetailPage({
   const matchByUser = new Map(
     (matches && matches.ok ? matches.data : []).map((m) => [m.appUserId, m]),
   );
+  // Read-only account intelligence summary, computed PURELY from the already-fetched, RLS-scoped roster
+  // + match rows (no people / identity_accounts / license / PII). Only shown when both reads succeeded.
+  const summary =
+    appUsers && appUsers.ok && matchesOk && matches && matches.ok
+      ? summarizeAccountIntelligence(appUsers.data, matches.data)
+      : null;
 
   return (
     <main className="flex flex-1 flex-col gap-6 p-8">
@@ -120,6 +130,38 @@ export default async function AppDetailPage({
               </ul>
             )}
           </section>
+
+          {summary && summary.totalVisibleAccounts > 0 ? (
+            <section className="space-y-2 text-sm">
+              <h2 className="font-medium">Account summary</h2>
+              <p className="text-xs text-zinc-500">
+                Based only on the app roster + visible match status. <strong>This is not UAR.</strong>{" "}
+                It does not use people, identity accounts, IdP status, license data, invoices, or files.
+              </p>
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                <Field label="Visible accounts" value={String(summary.totalVisibleAccounts)} />
+                <Field label="Matched accounts" value={String(summary.matchedAccounts)} />
+                <Field label="Unmatched accounts" value={String(summary.unmatchedAccounts)} />
+                <Field
+                  label="Match rate"
+                  value={`${Math.floor(summary.matchRate * 100)}%`}
+                />{/* floor, never round up — avoids showing 100% while unmatched > 0 */}
+                <Field
+                  label="Status: active / inactive / unknown"
+                  value={`${summary.activeAccounts} / ${summary.inactiveAccounts} / ${summary.unknownStatusAccounts}`}
+                />
+                <Field
+                  label={`Stale candidates (>${STALE_CANDIDATE_DAYS}d)`}
+                  value={String(summary.staleCandidates)}
+                />
+              </div>
+              <p className="text-xs text-zinc-500">
+                &ldquo;Unmatched&rdquo; = no visible match row for a visible account. &ldquo;Stale
+                candidate&rdquo; = the account&rsquo;s own last-active date looks older than{" "}
+                {STALE_CANDIDATE_DAYS} days — not confirmed stale, orphaned, deactivated, or managed.
+              </p>
+            </section>
+          ) : null}
 
           <section className="space-y-2 text-sm">
             <h2 className="font-medium">App users</h2>

@@ -102,6 +102,12 @@ passed, CI green.
 - **Verified:** **T30** + live spot-check — org-only users read only matches of app_users they can read; cross-tenant + non-member read none; a match read grants no `people`/`identity_accounts` read; org-only delete denied; planted corrupt cross-tenant match hidden by the tenant-bind.
 - **Still NOT built:** identity matching algorithm, people merge, UAR/orphaned/deactivated status, provisioning. `people` tenant-only + `identity_accounts` default-deny (unchanged). RISK-002 **narrowed, not closed**. OMC/Flywheel cutover stays **blocked**.
 
+### Stage 6d — Read-only account summary 🟡 (PR #24)
+- **Goal:** a small "Account summary" card on `/apps/[id]`, derived **purely** from already-visible data. **Done. No migration, no RLS change.**
+- **Built:** pure helper `src/lib/data/app-account-intelligence.ts` (+ unit tests) computing counts from the visible `app_users` roster + visible match rows: visible / matched / unmatched / match-rate, status breakdown (active/inactive/unknown), stale candidates (>90d from the account's own `last_active_at`). Card rendered above the App users table.
+- **Conservative by design — NOT UAR:** "unmatched" = no visible match row; "stale candidate" = own `last_active_at` older than 90d (not confirmed stale); null/unrecognized `status` → "unknown" (never inferred). **No `people`/`identity_accounts`/license/files/invoices/PII; no orphaned/deactivated/managed label; no matching algorithm; no provisioning.**
+- **Verified:** unit tests (7 cases); `test-rls.sh` unchanged at 152 (no policy change). RISK-002 + RISK-016 open. OMC/Flywheel cutover stays **blocked**.
+
 ### Stage 5 (writes) · Stage 6 — People · Stage 7 — License rules/evaluations · Stage 8 — Files/invoices
 - **Goal:** the source-of-truth surfaces, read first then writes (steward-only).
 - **P0 risks:** writes outside RLS; child tables **not org-scoped for reads** — `people` is **tenant-only**, and `identity_accounts`/`license_rules`/`license_evaluations`/`files`/`invoices` are **default-deny** (no read policy). (`app_contracts` — `0006` — `app_users` — `0007` — and `app_user_identity_matches` — `0008` — are now org-scoped read.) Add org-scoped read policies + tests **before** any further per-org surface ships (RISK-002; canonical map [02 §8](./02_SECURITY_AND_RLS.md)). Also: destructive edits without audit; no identity matching / license eval / provisioning yet.

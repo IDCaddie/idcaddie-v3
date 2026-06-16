@@ -7,6 +7,19 @@ from PRs verified via `git log` / `gh pr list`.
 
 ---
 
+### PR #24 — Add read-only app account intelligence summary · 2026-06-16
+- **Category:** read-only product surface (derived data). **No migration, no RLS change, no schema/types change, no new policy.**
+- **What:** a small "Account summary" card on `/apps/[id]`, computed **purely** from data the user can already read — the visible `app_users` roster (`0007`) and the visible `app_user_identity_matches` rows (`0008`). New **pure** helper `src/lib/data/app-account-intelligence.ts` (no DB, no imports, no service-role) + unit tests.
+- **Shows:** visible accounts, matched, unmatched, match rate, status breakdown (active / inactive / unknown), and stale candidates (>90d from the account's own `last_active_at`). All counts derive from direct `app_users` columns + match-row existence.
+- **Deliberately conservative (no overclaim):** "unmatched" = no visible match row for a visible account; "stale candidate" = the account's own `last_active_at` looks older than a fixed 90d threshold — **not** confirmed stale; status buckets come only from the app_user's own `status` text (null/unrecognized → "unknown", never inferred). **This is NOT UAR.** No "orphaned"/"deactivated"/"managed" label, no identity matching algorithm, no people merge, no license evaluation, no provisioning.
+- **Does NOT read or expose:** `people`, `identity_accounts`, `license_*`, `files`, `invoices`, raw payloads, person ids, identity-account ids, IdP provider/status fields. The summary's `noPersonDataUsed`/`noIdentityAccountDataUsed` flags are literal `true`.
+- **Tests:** `src/lib/data/app-account-intelligence.test.ts` (7 cases: empty roster, all-matched + dedup of multiple match rows, some-unmatched + stray-match-id guard, stale threshold, null `last_active_at` = unknown not stale, status null/unrecognized = unknown, needs only roster+matches). **`npm test` 5 → 12 tests.** **No RLS change → `test-rls.sh` stays at 152 assertions.**
+- **RISK-002 / RISK-016:** **both remain open.** No table read scope changed. OMC/Flywheel cutover remains **blocked**.
+- **Generated types:** unchanged (no schema change). No service-role, no hosted apply, no write/delete surface.
+- **Tests run (local, verified):** `npm test` 12/12; lint/tsc/build clean (`ƒ /apps/[id]`); `test-rls.sh` → `ALL ORG-RLS ASSERTIONS PASSED` (152, unchanged); `gen-types-local.sh` → no diff.
+
+---
+
 ### PR #23 — Add org-scoped read access for app-user matches · 2026-06-16
 - **Category:** RLS narrowing + read-only product surface. Forward migration `0008` (one SELECT policy) + a minimal match-status column. Implements [12_IDENTITY_MATCHING_READ_SCOPE](./12_IDENTITY_MATCHING_READ_SCOPE.md) §5 (validated in PR #22).
 - **Migration `0008_org_scoped_app_user_identity_matches_read.sql`:** `app_user_identity_matches` was **default-deny**; this adds ONE permissive `SELECT` policy `org members read related app_user_identity_matches` — read a match row iff you can already read the linked **`app_user`** (itself org-scoped by `0007`), via `EXISTS (select 1 from app_users au where au.id = ... and au.tenant_id = ...)` with an **explicit tenant-bind**. A tenant member reads all tenant matches transitively (they read all tenant app_users); an org-only user reads only matches of app_users they can read. **SELECT only**; no write policy (matching writes are service-role/definer); **no `DELETE`**. `people` and `identity_accounts` are **untouched**.

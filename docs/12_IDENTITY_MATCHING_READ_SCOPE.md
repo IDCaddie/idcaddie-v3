@@ -180,6 +180,9 @@ assertions in T27 27a / T29 29f were dropped (they would now be wrong). The safe
 ## 9. Honest status (do not overclaim)
 - `app_user_identity_matches` org-read (match **status**): **implemented** (`0008`, PR #23 — §5; T30). Status only, no PII.
 - Identity matching **algorithm**: **not implemented** (matches are written by a future server-side job).
+- Read-only **matched/unmatched + stale-candidate COUNT summary** (PR #24): **implemented** — a pure helper
+  over the visible `app_users` roster + visible match rows (the app-side approach this design mandates). It
+  is **not UAR**: no `people`/`identity_accounts` read, no orphaned/managed/deactivated status, no PII.
 - Unmanaged-account / UAR / stale-users report: **not implemented.**
 - Managed/orphaned/deactivated status: **not implemented** (needs §4's `security_invoker` view; not built).
 - `people` merge: **not implemented.** Provisioning / deprovisioning: **not implemented.**
