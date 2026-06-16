@@ -7,6 +7,13 @@ the previous. Status uses the [taxonomy](./10_DOCS_INDEX.md#status-taxonomy). St
 `implemented`/`verified-local`/`ci-enforced`; Stages 4–6 ship **read-only** surfaces (`implemented`,
 `verified-local`) with **writes deferred**; Stages 7+ are `planned`/`deferred`. Nothing is hosted-applied.
 
+> **Parity-driven next-PR order (PR #28):** the *near-term* implementation order is now re-ranked around
+> the legacy→v3 parity contract — see [14_LEGACY_UX_WORKFLOW_PARITY_MAP §8](./14_LEGACY_UX_WORKFLOW_PARITY_MAP.md#8-next-implementation-order-re-ranked-around-parity)
+> (parity map → contract audit-on-write → contract create/edit parity → link/unlink → import → UAR →
+> stale → exports → license/spend/files/invoices → hosted apply). Every user-facing stage must preserve
+> the legacy workflow or get the difference approved (doc 14 §6). **Cutover is gated on workflow parity,
+> not on completing these stages' backends.**
+
 Global "done" for every stage: code + tests + docs updated, `04_RISK_REGISTER` and
 `05_ENGINEERING_CHANGELOG` updated, [07_P0_REVIEW_CHECKLIST](./07_P0_REVIEW_CHECKLIST.md)
 passed, CI green.

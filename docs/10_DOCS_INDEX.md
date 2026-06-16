@@ -41,6 +41,7 @@ list + detail, linked app↔contract panels, app-user roster + match status, acc
 | [11_LEGACY_PARITY_AND_OMC_CHECKLIST](./11_LEGACY_PARITY_AND_OMC_CHECKLIST.md) | legacy→v3 capability parity + OMC cutover go/no-go | product owner, buyers (Mike/Jon) | living (every parity PR) |
 | [12_IDENTITY_MATCHING_READ_SCOPE](./12_IDENTITY_MATCHING_READ_SCOPE.md) | **design** for safely reading identity/account/matching data | security reviewers, future implementer | design (match-status slice built PR #23) |
 | [13_CONTRACT_STEWARD_WRITE_DESIGN](./13_CONTRACT_STEWARD_WRITE_DESIGN.md) | **design** for contract writes (RLS authority exists; write UI/path/audit not built) | security reviewers, future implementer | design (update when write UI is built) |
+| [14_LEGACY_UX_WORKFLOW_PARITY_MAP](./14_LEGACY_UX_WORKFLOW_PARITY_MAP.md) | the **legacy→v3 parity contract** ("same product, better backend") + the per-workflow cutover gate | product owner, reviewers, implementers | living (update every parity-bound PR) |
 
 ## Existing docs (reconciled — linked, not duplicated)
 | Doc | Canonical for | Note |

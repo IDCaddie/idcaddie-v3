@@ -7,6 +7,17 @@ from PRs verified via `git log` / `gh pr list`.
 
 ---
 
+### PR #28 — Document legacy UX and workflow parity map · 2026-06-16
+- **Category:** product-readiness / parity contract — **docs only. No migration, no RLS change, no UI, no code, no `database.types.ts` change.** New doc [14_LEGACY_UX_WORKFLOW_PARITY_MAP](./14_LEGACY_UX_WORKFLOW_PARITY_MAP.md).
+- **What:** the exact legacy→v3 parity contract so v3 becomes a **same-product-experience / better-backend replacement** with **no user-visible regression**. Defines the doctrine, a glossary (Same / Better-approved / Missing / Intentionally-removed / Cutover-blocker / Backend-only / User-visible / parity / exact-output-parity / approved-replacement), a **legacy route/screen parity table** (12 columns, ~26 legacy areas) and a **current v3 route parity table** (`/`, `/login`, `/logout`, `/apps`, `/apps/[id]`, `/contracts`, `/contracts/[id]`), the **release/cutover gate**, a new **PR review rule**, the **backend-improvement policy**, the **re-ranked implementation order** (parity map → contract audit-on-write → contract create/edit → link/unlink → import → UAR → stale → exports → license/spend/files/invoices → hosted apply), and an explicit **`needs legacy inspection`** unknowns list.
+- **Honesty discipline:** the legacy source (`frontend-v2/`,`webapp/`,`extension/`) is **outside this repo**, so legacy *routes/goals* come from documented evidence ([11]) but **exact fields/button-labels/filters/sorts/export formats are marked `needs legacy inspection` — not invented**. No legacy workflow is yet **Same**; shipped v3 surfaces are **Partial** (read-only subsets).
+- **Release rule recorded:** cutover is blocked on **workflow parity**, not backend/RLS readiness alone; an unapproved user-visible change is a blocking review finding; backend-only improvements are exempt from product approval but never copy a legacy backend anti-pattern.
+- **Other docs:** `00` (parity doctrine), `07` (new P0 line — user-visible workflow changes need parity approval), `09` (next-task = contract audit-on-write, must preserve legacy parity), `10` (index), `11` (points to the detailed map), `06` (roadmap re-ranked around parity).
+- **Risk posture (unchanged):** RISK-002 + RISK-016 **open**; hard delete blocked; contract writes/audit/UI not built; **OMC/Flywheel cutover + new paid-customer onboarding blocked**.
+- **Tests run (local, verified):** `npm test` 12/12; lint/tsc/build clean; `test-rls.sh` → 153 (unchanged); `check-*`/`gen-types-local.sh` → no diff.
+
+---
+
 ### PR #27 — Harden app-contract link read tenant binding · 2026-06-16
 - **Category:** RLS hardening (defense-in-depth). Forward migration `0009` (replaces one SELECT policy) + one new test. **No schema/types change, no UI, no write path, no service-role, no hosted apply.**
 - **Migration `0009_harden_app_contracts_read_tenant_bind.sql`:** `drop`+recreate the `0006` org-scoped `SELECT` policy `org members read related app_contracts`, now pinning `a.tenant_id = app_contracts.tenant_id` (app branch) and `c.tenant_id = app_contracts.tenant_id` (contract branch) explicitly — matching the standard already set by `0007` (app_users) and `0008` (matches). The policy is now **self-sufficient for tenant isolation** rather than relying solely on the `0005` same-tenant FKs. **SELECT only**; the tenant-member read and editor `INSERT`/`UPDATE` (`0004`) are untouched; **no `DELETE`, no `FOR ALL`**. `0006` is **not edited** (forward migration only). No other table changed (`people`/`identity_accounts`/`license_*`/`files`/`invoices` not broadened).

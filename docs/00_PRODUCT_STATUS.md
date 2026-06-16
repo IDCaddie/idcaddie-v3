@@ -20,6 +20,15 @@ Evidence: [current-security-risk-map.md](./current-security-risk-map.md),
 foundation on Postgres with RLS as the authorization source of truth. We **preserve
 validated workflows, port no Firebase code**.
 
+## Parity doctrine — same product, better backend
+v3 is a **same-product-experience / better-backend replacement**, not a redesign. Users must feel
+*"this is the same ID Caddie I know."* The backend improves (real tenant isolation, RLS, append-only
+audit, non-destructive imports, same-tenant integrity, no hard deletes, better auth/session, safer
+exports, cleaner schema), but the **user-facing workflow preserves legacy behavior unless a difference
+is intentionally approved**. The per-workflow parity contract and the hard cutover gate live in
+[14_LEGACY_UX_WORKFLOW_PARITY_MAP](./14_LEGACY_UX_WORKFLOW_PARITY_MAP.md): **cutover is blocked on
+workflow parity, not on backend/RLS readiness alone.**
+
 ## Current phase
 **Read-only governance foundation + contract write design.** The secure data/RLS foundation,
 the auth/session skeleton, and read-only tenant/org context resolution are complete, and a set of

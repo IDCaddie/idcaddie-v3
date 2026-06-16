@@ -87,12 +87,14 @@ production, hosted Supabase, secrets, or DNS without human review.
 Rationale and the automation risk: [04 · RISK-014](./04_RISK_REGISTER.md). Reviewer enforcement: [07 · Connected agent PRs](./07_P0_REVIEW_CHECKLIST.md#connected-agent-permissions). Discipline for vendor/bot PRs: [08](./08_CODE_AND_DOCS_STANDARD.md#vendor-and-bot-agent-prs).
 
 ## Current next recommended task
-**`app_contracts` read tenant-bind hardening is DONE — PR #27** (`0009` — the org-scoped read policy now pins
-`a.tenant_id`/`c.tenant_id = app_contracts.tenant_id` explicitly, matching `0007`/`0008`; valid behavior unchanged; proven by T28h).
-All three org-scoped child reads (`app_contracts`/`app_users`/`app_user_identity_matches`) are now self-sufficiently tenant-bound.
+**Legacy UX/workflow parity map is DONE — PR #28** ([14_LEGACY_UX_WORKFLOW_PARITY_MAP](./14_LEGACY_UX_WORKFLOW_PARITY_MAP.md)).
+It is now the **contract that gates cutover**: every parity-bound PR must preserve the legacy user workflow (or get the difference
+approved + documented there), and **cutover is blocked on workflow parity, not backend/RLS readiness**. Before claiming **Same** for any
+workflow, inspect the running legacy app for exact fields/labels/filters/exports (doc 14 §9 — `needs legacy inspection`; do not invent).
 
-**The recommended next step is contract audit-on-write, then the write path/UI** (the write RLS authority already exists in `0004`):
-1. **Contract audit-on-write** — a DB-side `SECURITY DEFINER` `AFTER INSERT/UPDATE` trigger on `contracts` capturing `actor = auth.uid()` (`audit_logs` is append-only with **no `authenticated` INSERT**, so audit MUST be DB-side, **never** a service-role app route). A forward migration. Land it **before** any write UI. See [doc 13 §4](./13_CONTRACT_STEWARD_WRITE_DESIGN.md).
+**The recommended next step is contract audit-on-write, then the write path/UI** (the write RLS authority already exists in `0004`) —
+**and the contract create/edit UI must match the legacy contract-form workflow** (doc 14 §3, fields/actions = `needs legacy inspection` first):
+1. **Contract audit-on-write** — a DB-side `SECURITY DEFINER` `AFTER INSERT/UPDATE` trigger on `contracts` capturing `actor = auth.uid()` (`audit_logs` is append-only with **no `authenticated` INSERT**, so audit MUST be DB-side, **never** a service-role app route). A forward migration. Land it **before** any write UI. See [doc 13 §4](./13_CONTRACT_STEWARD_WRITE_DESIGN.md). (Invisible backend improvement — no parity approval needed.)
 2. **Contract write path** — a server action on the **anon** client (NEVER service-role; validation ≠ authz), gated by the existing RLS; **no `DELETE`/`FOR ALL`**; `paying_org_id` must never grant write. Land [doc 13 §7](./13_CONTRACT_STEWARD_WRITE_DESIGN.md) tests **before** UI.
 3. **Contract write UI** — last, after audit + path + tests.
 Alternative tracks (lower priority): the first reviewed **hosted-Supabase apply** (RISK-001); or an identity surface —
@@ -101,7 +103,7 @@ Alternative tracks (lower priority): the first reviewed **hosted-Supabase apply*
 Do NOT org-scope `people` or `identity_accounts` — no app anchor; org-scoping them leaks the tenant-wide HR/IdP directory (doc 12 §4/§6). `people` stays **tenant-only**; `identity_accounts` stays **default-deny**.
 Any account-intelligence work derives ONLY from visible `app_users` + visible matches (PR #24 pattern) — never read `people`/`identity` into an org surface, and do NOT relabel "unmatched/stale candidate" as "orphaned/deactivated/managed/UAR".
 Still NOT safe to surface: `people`, `identity_accounts`, `invoices`/`files`/`license_*`. No identity matching algorithm / merge / UAR / orphaned status / provisioning exists yet.
-(Stages 4/4b apps — PR #13/#14; Stage 5 contracts — PR #19; Stage 5b linked panels — PR #20; Stage 6a app-user roster — PR #21; Stage 6b identity read-scope design — PR #22; Stage 6c match status — PR #23; Stage 6d account summary — PR #24; Stage 5b contract write design — PR #25.)
+(Stages 4/4b apps — PR #13/#14; Stage 5 contracts — PR #19; Stage 5b linked panels — PR #20; Stage 6a app-user roster — PR #21; Stage 6b identity read-scope design — PR #22; Stage 6c match status — PR #23; Stage 6d account summary — PR #24; Stage 5b contract write design — PR #25; truth pass — PR #26; `0009` app_contracts tenant-bind — PR #27; legacy UX/workflow parity map — PR #28.)
 
 ## Current open risks to respect
 `not-hosted-applied`; child tables **not org-scoped for reads** — tenant-only (`people`) or default-deny (`identity_accounts`/`license_*`/`files`/`invoices`); `app_contracts` (`0006`) + `app_users` (`0007`) + `app_user_identity_matches` (`0008`) are now org-scoped read; see read map [02 §8](./02_SECURITY_AND_RLS.md) (RISK-002, narrowed not closed); no tenant switching /
