@@ -32,12 +32,15 @@ with a single multi-tenant Postgres + RLS.
 
 ## 2. Capability inventory
 Status values: `not-started` · `in-progress` · `implemented` · `verified` · `needs-verification`.
-"v3 status" reflects the **foundation** (schema/RLS/auth/data layer); no product UI exists yet.
+"v3 status" reflects the foundation (schema/RLS/auth/data layer) **plus the read-only product surfaces
+that now ship** (apps, app detail, contracts, contract detail, linked panels, app-user roster, match
+status, account summary — all RLS-scoped, read-only). **No write UI, no UAR, no matching algorithm, no
+imports/exports, no license/spend, no hosted apply.** Cutover remains **blocked** (§4).
 
 | Area | Legacy Firebase capability | Evidence (legacy paths) | v3 status today | Required v3 PR/stage | Parity target | Security improvement in v3 | Status |
 |---|---|---|---|---|---|---|---|
 | Authentication / login | Firebase Auth email/pw + SAML + OIDC; client-side `AuthGuard` | `frontend-v2/src/app/login/page.tsx`, `services/samlAuth.ts`, `services/oidcAuth.ts`, `components/AuthGuard.tsx` | email/pw skeleton + server session (Proxy) | done (PR #6); SSO = Stage ≥12 | email/pw at launch; SSO follows | server-side session + RLS, not client guard | `in-progress` |
-| Tenant / company / org model | "Groups" + one Firebase project per customer; custom claims | `company/groups/`, `webapp/.firebaserc`, `permissionSync.js` | tenants + organizations + memberships + RLS; context resolved | done (PR #1/#9) | one tenant = one OMC org tree | row-level isolation (66 RLS assertions) vs per-project | `verified` |
+| Tenant / company / org model | "Groups" + one Firebase project per customer; custom claims | `company/groups/`, `webapp/.firebaserc`, `permissionSync.js` | tenants + organizations + memberships + RLS; context resolved | done (PR #1/#9) | one tenant = one OMC org tree | row-level isolation (152 RLS assertions, T1–T30) vs per-project | `verified` |
 | App inventory | List apps w/ cost, license util, user metrics, CSV export | `frontend-v2/src/app/(authenticated)/IDCApps/page.tsx` | `/apps` screen (PR #13) — read-only list (name/vendor/category/status) via typed DAL; **no cost/license/user metrics or CSV yet** | Stage 4 ✅; metrics/export later | OMC sees the same inventory | RLS-scoped reads, no client filtering (verified: org-only user sees only related apps) | `implemented` (read-only list only) |
 | App detail | App metadata, user roster, linked contracts/invoices, license rules | `IDCApps/[id]/page.tsx` | `/apps/[id]` (PR #14) — read-only metadata (name/vendor/category/status/timestamps + owning-org **IDs**); **no roster/contracts/invoices/files/license rules; org names + edit deferred** | Stage 4b ✅; child surfaces later | per-app drill-down | RLS-scoped; route id is lookup-only, not authz (verified) | `implemented` (metadata only) |
 | Contracts | List/detail/create; renewal & expiry dates; gantt | `contracts/page.tsx`, `contracts/[id]/`, `contracts/create/`, `contracts/gantt/` | `/contracts` + `/contracts/[id]` **read-only** (PR #19) — typed DAL, direct `contracts` columns, related-org RLS. **Write DESIGNED, not built** ([13](./13_CONTRACT_STEWARD_WRITE_DESIGN.md), PR #25): write RLS authority exists (`0004` — procurement-steward / tenant-editor); UI/path/audit deferred. **No create/edit/gantt** | Stage 5 | OMC sees contracts + renewal dates | RLS related-org read (verified); write = procurement-org steward / tenant editor+, `paying_org_id` read-only | `partial` (read-only list + detail; create/edit `not-started`, design only) |
@@ -60,14 +63,17 @@ Status values: `not-started` · `in-progress` · `implemented` · `verified` · 
 | Vendor/app enrichment scraper | Chrome extension: page email detection (SHA-256 hashed) → Firestore | `extension/content.js`, `extension/auth.js` | none | deferred / maybe-DELETE | optional enrichment | n/a (deferred; privacy review first) | `not-started` |
 
 ## 3. OMC / Omnicom paid-client acceptance checklist
-Practical go/no-go. **Nearly all NO today** — v3 has the secure foundation and a first read-only
-app-inventory list (PR #13); every other surface is still missing.
+Practical go/no-go. **Still NO for cutover today.** Several **read-only** surfaces now ship — app
+inventory + detail (PR #13/#14), contracts list + detail (PR #19), linked app↔contract panels (PR #20),
+app-user roster (PR #21), match status (PR #23), account summary (PR #24) — but **writes, UAR, matching
+algorithm, license/spend, imports/exports, reports, and any hosted deployment are still missing**, so
+acceptance is **not** close. OMC cutover and new paid-customer onboarding remain **blocked** (§4).
 
 | # | Question | Today | Gated by |
 |---|----------|-------|----------|
-| 1 | Can OMC see the same app inventory? | **Partial** — read-only list (name/vendor/category/status) shipped (PR #13); cost/license/user metrics, CSV export, and app detail still missing | Stage 4 ✅ (list); metrics/detail/export later |
-| 2 | Can OMC see ownership / paying / procurement orgs? | **No** | Stage 4–5 (owning-org fields surfaced) |
-| 3 | Can OMC see contracts and renewal dates? | **No** | Stage 5 |
+| 1 | Can OMC see the same app inventory? | **Partial** — read-only list + detail (incl. app-user roster, match status, account summary) shipped (PR #13/#14/#21/#23/#24); cost/license/user metrics + CSV export still missing | Stage 4 ✅ (read-only); metrics/export later |
+| 2 | Can OMC see ownership / paying / procurement orgs? | **Partial** — owning-org **IDs** surfaced on `/apps/[id]` + `/contracts/[id]` (PR #14/#19); org **names** + drill-down deferred | Stage 4–5 (org-name enrichment) |
+| 3 | Can OMC see contracts and renewal dates? | **Partial** — read-only contracts list + detail with renewal/start/end dates shipped (PR #19); create/edit/gantt missing | Stage 5 ✅ (read-only); write later |
 | 4 | Can OMC identify unmanaged accounts? | **No** | Stage 6–7 (UAR) |
 | 5 | Can OMC identify stale users? | **No** | Stage 6–7 |
 | 6 | Can OMC import / update app-user data? | **No** | Stage 11 (non-destructive import) |

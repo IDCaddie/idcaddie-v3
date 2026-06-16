@@ -5,22 +5,26 @@ Read this + [00_PRODUCT_STATUS](./00_PRODUCT_STATUS.md) before doing anything. R
 also live in `AGENTS.md` / `claude/CLAUDE.md`.
 
 ## Current repo state (verify before trusting — see [00](./00_PRODUCT_STATUS.md))
-Phase 2 — auth + tenant/org context, built on the data/RLS foundation. Migrations `0001`–`0003`
-are `implemented`, `verified-local`, `ci-enforced`, **not hosted-applied**. The auth skeleton
-(login, server session via `src/proxy.ts`, protected `(authenticated)/` group) **and read-only
-tenant/org context resolution** (`src/lib/auth/tenant-context.ts`, shown in the protected shell)
-are built but **not exercised against hosted Supabase**. No tenant switching, no provisioning, no
-product UI. Vercel **Web Analytics + Speed Insights** are present (platform telemetry only, bare
-components, no custom events). Legacy Firebase is still production. Don't trust any prompt's
-"seeded" history — re-verify from `git log`, `gh pr list`, `ls supabase/migrations`, and the source/test files.
+Read-only governance foundation + contract write design (PRs #1–#25 merged, main @ `84140b6`).
+Migrations `0001`–`0008` are `implemented`, `verified-local`, `ci-enforced`, **not hosted-applied**
+(`org_rls_test.sql` = 152 assertions, T1–T30; 12 vitest tests). Auth/session skeleton, read-only
+tenant/org context, and a typed read-only DAL are built. **Read-only product surfaces ship:** `/apps`
++ `/apps/[id]` (with app-user roster, match-status column, account-summary card), `/contracts` +
+`/contracts/[id]`, and linked app↔contract panels — all RLS-scoped, **no writes**, **not** exercised
+against hosted Supabase. **Design-only:** identity matching read-scope (doc 12; match-status slice
+built) and contract steward **write** (doc 13 — write RLS authority exists in `0004`, but write
+path/UI/audit do **not**). No tenant switching, no provisioning, no write UI, no UAR, no hosted apply.
+Vercel **Web Analytics + Speed Insights** are present (platform telemetry only, bare components). Legacy
+Firebase is still production; OMC cutover + new paid-customer onboarding **blocked**. Don't trust any
+prompt's "seeded" history — re-verify from `git log`, `gh pr list`, `ls supabase/migrations`, and the source/test files.
 
 ## Non-negotiable rules
 - **Never run against hosted Supabase.** Local throwaway Postgres only (`scripts/test-rls.sh`).
 - **Never use service-role keys** outside trusted server/test paths; never in the client.
 - **Never weaken RLS**; never filter for security in the client.
-- **Never edit a merged migration** (`0001`–`0005`) — fix forward with `000N_*.sql`.
+- **Never edit a merged migration** (`0001`–`0008`) — fix forward with `000N_*.sql`.
 - **Never re-add hard-delete** to core evidence tables (`organizations`/`apps`/`contracts`/`app_contracts`/`people`/`app_users`): no `FOR ALL`/`FOR DELETE` policy — write surfaces add `INSERT`+`UPDATE` only (`0004`, [02 §4b](./02_SECURITY_AND_RLS.md)). Archive/soft-delete UI is deferred (not built).
-- **New tenant-scoped child/link table** ⇒ add a composite same-tenant FK `(parent_ref, tenant_id) → parent(id, tenant_id)` (and `UNIQUE (id, tenant_id)` on the parent) so cross-tenant references fail at the DB, not just hide under RLS (`0005`, [02 §5b](./02_SECURITY_AND_RLS.md)). Migrations are now `0001`–`0005`.
+- **New tenant-scoped child/link table** ⇒ add a composite same-tenant FK `(parent_ref, tenant_id) → parent(id, tenant_id)` (and `UNIQUE (id, tenant_id)` on the parent) so cross-tenant references fail at the DB, not just hide under RLS (`0005`, [02 §5b](./02_SECURITY_AND_RLS.md)). Migrations are now `0001`–`0008`.
 - **Never build UI ahead of its build-sequence prerequisites** ([06](./06_BUILD_SEQUENCE.md)).
 - **Never expand telemetry** — no custom events, no PII/tenant/customer/business data in analytics, no new instrumentation, until a production privacy review ([04 · RISK-013](./04_RISK_REGISTER.md)).
 - **Never hosted-apply the local fixture.** `supabase/fixtures/local_demo.sql` is local-only synthetic data; run it only via `bash scripts/seed-local-demo.sh` (throwaway container). Never add it to `supabase/migrations/`, never `supabase db push`, never point it at the linked project ([04 · RISK-015](./04_RISK_REGISTER.md)).

@@ -7,6 +7,16 @@ from PRs verified via `git log` / `gh pr list`.
 
 ---
 
+### PR #26 — Correct current-state docs after contract write design · 2026-06-16
+- **Category:** docs/readiness correction — **docs only. No code, no migration, no RLS change, no `database.types.ts` change, no feature work.**
+- **What:** a current-state truth pass. A deep review found no confirmed P0 / cross-tenant leak / service-role bypass / hard-delete regression; the live issue was **stale canonical docs**. A 4-agent audit found **30 stale claims** (built read-only surfaces described as "no product UI"; narrative frozen around PR #5/#6 while the status *tables* stayed current; stale counts/migration ranges). All fixed.
+- **Fixed:** `00` (Current phase, Merged-PRs section, verified stamp `ee59c6c`→`84140b6`, Next-PRs, "Can we…?" + explicit paid-customer-onboarding-blocked); `01` (Frontend status, repo-structure block, "Current"/"Intentionally missing"); `06` (intro + stage table — read-only stages 4–6 now `implemented`); `09` (Current-repo-state header; migration range `0001`–`0003`/`0005`→`0001`–`0008`); `10` ("v3 product UI is planned"→ read-only UI implemented); `11` ("no product UI exists yet", §3 narrative, OMC acceptance rows, "66"→152 assertions); `03` (migration table extended `0006`/`0007`/`0008`); `04` (RISK-C03 "83"→full suite). New review note `docs/reviews/PR26_DOCS_TRUTH_PASS.md`.
+- **Risk posture (unchanged):** RISK-001 / RISK-002 / RISK-016 **open**; hard delete blocked; OMC/Flywheel cutover **blocked**; new paid-customer onboarding **blocked**.
+- **Go/no-go recorded:** contract audit-on-write = yes (next); contract write UI = no (audit first); OMC cutover = no; paid customer = no.
+- **Tests run (local, verified):** `npm test` 12/12 (unchanged); lint/tsc/build clean; `test-rls.sh` → 152 assertions (unchanged); `check-*`/`gen-types-local.sh` → no diff.
+
+---
+
 ### PR #25 — Document contract steward write design · 2026-06-16
 - **Category:** security design / guardrail — **docs only. No migration, no RLS change, no UI, no audit, no write path, no `database.types.ts` change.** New doc [13_CONTRACT_STEWARD_WRITE_DESIGN](./13_CONTRACT_STEWARD_WRITE_DESIGN.md).
 - **Verified finding (not a guess):** the contract write **RLS authority already exists** — shipped in `0002`, split into `INSERT`/`UPDATE` (no `DELETE`) by `0004`. A live `pg_policies` dump on a fresh `0001`–`0008` DB confirms: `editors insert/update contracts` (`has_tenant_role` owner/admin/editor) **+** `org managers insert/update org contracts` (`has_org_role_in_tenant(procurement_org_id, …, ['manager'])`), **0** `DELETE`/`ALL` policies, and the `enforce_owning_org_tenant` trigger covering `procurement_org_id`+`paying_org_id`. It already matches the recommended steward model.

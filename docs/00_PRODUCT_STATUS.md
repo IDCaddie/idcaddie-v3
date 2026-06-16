@@ -1,7 +1,7 @@
 # 00 · Product Status — ID Caddie v3
 
 **Canonical source for: current status.** First doc to read. Last verified against the
-repo on 2026-06-15 (git `ee59c6c`). Status words are defined in [10_DOCS_INDEX](./10_DOCS_INDEX.md#status-taxonomy).
+repo on 2026-06-16 (git `84140b6`, PRs #1–#25 merged). Status words are defined in [10_DOCS_INDEX](./10_DOCS_INDEX.md#status-taxonomy).
 
 ## What ID Caddie v3 is
 An enterprise SaaS-governance platform: the source of truth for *what apps a company
@@ -21,28 +21,44 @@ foundation on Postgres with RLS as the authorization source of truth. We **prese
 validated workflows, port no Firebase code**.
 
 ## Current phase
-**Phase 2 — auth + tenant/org context (in progress).** The secure data/RLS foundation
-(Phase 1) is complete; the **auth/session skeleton** (login, server session via Proxy,
-protected route group) and **read-only tenant/org context resolution** are now built. The
-protected shell displays the resolved context. No product UI (inventory/contracts/etc.); no
-tenant switching or user provisioning. Nothing is **applied to any hosted Supabase environment**.
+**Read-only governance foundation + contract write design.** The secure data/RLS foundation,
+the auth/session skeleton, and read-only tenant/org context resolution are complete, and a set of
+**read-only product surfaces** now ship on top of them (all RLS-scoped, no writes):
+- `/apps` inventory (PR #13) and `/apps/[id]` app detail (PR #14)
+- `/contracts` list and `/contracts/[id]` detail (PR #19)
+- linked app↔contract panels on detail pages (PR #20)
+- `/apps/[id]` app-user roster (PR #21), match-status column (PR #23), and account-summary card (PR #24)
 
-## Merged PRs (verified from `git log` / `gh pr list`)
-| PR | Commit | What it added |
-|----|--------|---------------|
-| #1 | `f7c5c75` | Org-scoped RLS foundation (`0002`) + related-org read model (`0003`) + the `org_rls_test.sql` suite. Closed two live-verified bugs: cross-tenant org-pointer leak and tenant-admin self-promotion. |
-| #2 | `bfffb84` | `scripts/test-rls.sh` + `.github/workflows/rls-tests.yml` — applies all migrations to a throwaway Postgres and runs the RLS suite on every PR. |
-| #3 | `ee59c6c` | Migration discipline: `migration-workflow.md`, `migration-checklist.md`, `scripts/check-migration-safety.sh`, `.github/workflows/migration-safety.yml`. |
-| #4 | `b245209` | Clean-app operating system: canonical docs `00`–`10`, PR template, docs-drift + reviewer-aid CI (`review-discipline.yml`), `check-docs-updated.sh` / `pr-review-summary.sh`. |
-| #5 | `a86fb37` | Vercel Web Analytics integration (`@vercel/analytics` in the root layout). Automated PR; not part of the v3 build sequence. |
+**Design-only (docs, nothing built):** identity matching read-scope ([12](./12_IDENTITY_MATCHING_READ_SCOPE.md),
+PR #22 — only the match-*status* slice is built) and the contract steward **write** path
+([13](./13_CONTRACT_STEWARD_WRITE_DESIGN.md), PR #25 — the write *RLS authority* already exists in `0004`,
+but the write path / UI / audit do **not**).
+
+**Not built:** anything applied to a **hosted Supabase environment**; contract write path/UI/audit; archive
+/ soft-delete; `app_contracts` writes; UAR / unmanaged-account report; identity matching *algorithm*;
+`people` org-read (stays tenant-only); `identity_accounts` read (default-deny); license rules/evaluation;
+spend/chargeback; files/invoices; people directory; provisioning; tenant switching; imports/exports;
+connectors. **OMC/Flywheel cutover and new paid-customer onboarding remain blocked.**
+
+## Merged PRs
+**PRs #1–#25 are merged** (main @ `84140b6`). The full per-PR engineering log is the canonical
+source — see [05_ENGINEERING_CHANGELOG](./05_ENGINEERING_CHANGELOG.md); do not maintain a second
+PR table here (it drifts). Milestone summary:
+- **Foundation / discipline:** RLS foundation + tests (#1/#2), migration discipline (#3), clean-app
+  operating system + docs/CI (#4), app CI (#15).
+- **Auth + data layer:** auth/session skeleton (#6), tenant/org context (#9), demo fixture (#10), typed read-only DAL (#11).
+- **Security hardening (migrations):** destructive-delete hardening `0004` (#16), same-tenant integrity `0005` (#17),
+  child-table read truth-pass (#18), org-scoped reads `0006`/`0007`/`0008` for app_contracts/app_users/app_user_identity_matches (#20/#21/#23).
+- **Read-only surfaces:** app inventory (#13), app detail (#14), contracts list+detail (#19), linked panels (#20),
+  app-user roster (#21), match status (#23), account summary (#24).
+- **Design docs (nothing built):** identity matching read-scope (#22), contract steward write design (#25).
 
 Migration `0001` (core schema) predates the numbered PRs (rebuild starter pack).
-PR #6 (this branch, auth/session skeleton) is **not yet merged**.
 
 ## Status of the foundation
 | Item | Status |
 |------|--------|
-| Schema `0001`, org RLS `0002`, related-org read `0003` | `implemented` |
+| Migrations `0001`–`0008` (core schema, org RLS, related-org read, delete hardening, child integrity, org-scoped child reads) | `implemented`, `verified-local`, `ci-enforced`; `not-hosted-applied` |
 | RLS model (tenant isolation, steward writes, related-org reads, audit immutability, no admin self-promotion) | `implemented`, `verified-local` (152 assertions in `org_rls_test.sql`), `ci-enforced` (PR #2) |
 | No normal hard-delete of core evidence tables (`organizations`/`apps`/`contracts`/`app_contracts`/`people`/`app_users`) | `implemented` (PR #16 — `0004`; `FOR ALL` split into `INSERT`+`UPDATE`, no `DELETE`); `verified-local` (T17/T24/T25). Archive/soft-delete UI **not built** |
 | Same-tenant child integrity (cross-tenant child/link writes fail at the DB) | `implemented` (PR #17 — `0005`; composite `(parent_ref, tenant_id)` FKs); `verified-local` (T26). Org-scoped child-table **reads** still deferred (RISK-002) |
@@ -59,7 +75,7 @@ PR #6 (this branch, auth/session skeleton) is **not yet merged**.
 | Read-only linked apps ↔ contracts panels (`/contracts/[id]`, `/apps/[id]`) | **`partial` — read-only only** (PR #20 — `0006` org-scoped `SELECT` on `app_contracts`, typed DAL `src/lib/data/links.ts`). Shows only links to apps/contracts the user may read; **no linking/unlinking/editing**. `verified-local` (T28 + spot-check: org-only users see only related links; cross-tenant + non-member → none) |
 | App CI (lint · vitest · `tsc --noEmit` · `next build`) + deterministic build (system fonts, no remote font fetch) | `implemented` + `ci-enforced` (PR #15 — `.github/workflows/app-ci.yml`); metadata/README hygiene fixed |
 | Invoices · files · license surfaces · app-contract linking *writes* · contract writes | `deferred` (default-deny tables or write surfaces — not built; RISK-002 open for reads) |
-| Product UI / app workflows (people, reports, writes) | `planned` (read-only apps + contracts + linked panels exist) |
+| Product **write** workflows (create/edit/people directory/reports/imports/exports) | `planned` / `deferred` — **read-only** apps, app detail, contracts, contract detail, linked panels, app-user roster, match status, and account summary already ship (see rows above); no write UI yet |
 | Read-only app-user roster (`/apps/[id]` "App users") | **`partial` — read-only only** (PR #21 — `0007` org-scoped `SELECT` on `app_users`, typed DAL `src/lib/data/app-users.ts`). Direct `app_users` columns only; org-only users see only users of apps they may read. **No** matching/provisioning/utilization/edit. `verified-local` (T29 + spot-check: org-only users see only related apps' users; cross-tenant + non-member → none) |
 | Child-table read scope (canonical map: [02 §8](./02_SECURITY_AND_RLS.md), pinned by T27/T28/T29/T30) | `partial` — `app_contracts` (`0006`) + `app_users` (`0007`) + `app_user_identity_matches` (`0008`) now **org-scoped read**; **tenant-only** (`people`) + **default-deny** (`identity_accounts`/`license_*`/`files`/`invoices`) remain; org-only users read none of those. Org-scoped reads for the rest still `deferred` (RISK-002, narrowed not closed) |
 | Read-only app-user **match status** (`/apps/[id]` "Match" column) | **`partial` — read-only status only** (PR #23 — `0008` org-scoped `SELECT` on `app_user_identity_matches`, typed DAL `src/lib/data/app-user-matches.ts`). Shows matched/unmatched (+ optional method/confidence) for app_users you may read; **no `person_id`, no person name, no identity-account details, no PII**. `verified-local` (T30 + spot-check). **No matching algorithm / merge / UAR / orphaned status / provisioning.** `people` tenant-only + `identity_accounts` default-deny (unchanged). RISK-002 + RISK-016 open |
@@ -107,18 +123,20 @@ One-line decisions; deep rationale in the linked canonical docs.
 - Do **not** build UI that bypasses RLS or filters data in the client for "security".
 - Do **not** use service-role keys outside trusted server/test paths.
 - Do **not** add connectors/credential handling until the encrypted-credential boundary is designed.
-- Do **not** edit `0001`/`0002`/`0003` — fix forward with a new migration.
+- Do **not** edit a merged migration (`0001`–`0008`) — fix forward with a new migration.
 - Do **not** cut OMC/Flywheel off legacy Firebase until all P0/P1 parity items are `verified` + signed off ([11](./11_LEGACY_PARITY_AND_OMC_CHECKLIST.md)).
 
 ## Can we…?
-- **Deploy v3 today?** No. No UI, no hosted DB, legacy Firebase is still production.
+- **Deploy v3 to customers today?** No. Only **read-only** surfaces exist (no writes), **nothing is applied
+  to a hosted Supabase environment**, and legacy Firebase is still production.
+- **Cut OMC/Flywheel over to v3?** **No — blocked** until all P0/P1 parity items are `verified` + signed off ([11](./11_LEGACY_PARITY_AND_OMC_CHECKLIST.md)).
+- **Onboard a new paid customer?** **No — blocked.** No hosted environment, no write/provisioning path, no UAR/reporting parity.
 - **Safely keep building on this foundation?** Yes — *after* `scripts/check-docs-updated.sh`,
   `check-migration-safety.sh`, and `test-rls.sh` pass. The RLS model is tested and CI-enforced.
-- **Next safest build step?** A read-only app inventory page over `apps`, RLS-scoped, using
-  the resolved tenant/org context — no data mutation. See [06_BUILD_SEQUENCE.md](./06_BUILD_SEQUENCE.md).
 
-## Next recommended PRs
-1. Read-only app inventory page (first real screen) over `apps`, RLS-scoped (build-sequence Stage 4).
-2. First steward-only write surface (e.g. contracts), audited.
+## Next recommended PRs (the read-only surfaces above are done)
+1. **Contract audit-on-write** — a DB-side `SECURITY DEFINER` audit trigger (the write RLS authority already exists; `audit_logs` is append-only with no `authenticated` INSERT, so audit must be DB-side, never service-role). See [13_CONTRACT_STEWARD_WRITE_DESIGN](./13_CONTRACT_STEWARD_WRITE_DESIGN.md).
+2. **Contract write path + UI** — a server action on the anon client (never service-role), gated by the existing RLS, landing [13 §7](./13_CONTRACT_STEWARD_WRITE_DESIGN.md) tests **before** UI; audit first.
+3. First reviewed **hosted-Supabase apply** (RISK-001 — still nothing applied to any hosted env).
 
-(These are `planned`. Each must follow [07_P0_REVIEW_CHECKLIST.md](./07_P0_REVIEW_CHECKLIST.md) and update [04](./04_RISK_REGISTER.md)/[05](./05_ENGINEERING_CHANGELOG.md).)
+(These are `planned`. Each must follow [07_P0_REVIEW_CHECKLIST.md](./07_P0_REVIEW_CHECKLIST.md) and update [04](./04_RISK_REGISTER.md)/[05](./05_ENGINEERING_CHANGELOG.md). Detailed ordering: [09_AGENT_HANDOFF](./09_AGENT_HANDOFF.md).)

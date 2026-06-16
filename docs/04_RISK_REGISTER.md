@@ -34,7 +34,7 @@ Severity: P0 (critical) · P1 (high) · P2 (medium) · P3 (low). Status uses the
 |----|-----|-----------|-------------|
 | RISK-C01 | P0 | PR #1 (`0002`/`0003`, tests T7/T22+23) | Cross-tenant org-pointer leak — a member could point a resource's owning-org at a foreign-tenant org and that org's members read/edited it. Closed by tenant-bound reads + `enforce_owning_org_tenant`; original exploit replayed and blocked. |
 | RISK-C02 | P1 | PR #1 (`0002`, test T16) | Tenant-admin self-promotion to `owner` / owner demotion. Closed by owner/admin membership policy split. |
-| RISK-C03 | P1 | PR #2 | RLS regressions could merge unnoticed. Closed by `test-rls.sh` + `rls-tests.yml` (full migration chain + 83 assertions on every PR). |
+| RISK-C03 | P1 | PR #2 | RLS regressions could merge unnoticed. Closed by `test-rls.sh` + `rls-tests.yml` (full migration chain + the complete `org_rls_test.sql` assertion suite — currently 152 assertions, T1–T30 — on every PR). |
 | RISK-C04 | P2 | PR #3 | Dangerous/disordered migrations could merge. Closed by `check-migration-safety.sh` + `migration-safety.yml`. |
 | RISK-C05 | P2 | PR #4 | Documentation/risk drift invisible to reviewers. Mitigated by `check-docs-updated.sh` + `review-discipline.yml` + this register. |
 | RISK-C06 | P1 | PR #6 | **Auth/session not built** (was RISK-005). Closed by the auth skeleton: `@supabase/ssr` user-scoped server client, `src/proxy.ts` session refresh + route guard, login/logout, protected route group. `check-auth-safety.sh` proves no service-role/no client-side role storage. *Caveat:* not yet exercised against hosted Supabase Auth (tracked by RISK-001). |

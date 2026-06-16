@@ -6,7 +6,7 @@
 ## Stack
 | Layer | Choice | Status |
 |---|---|---|
-| Frontend | Next.js App Router (TypeScript) | auth shell — `implemented` (login + protected group), product UI `planned` |
+| Frontend | Next.js App Router (TypeScript) | auth shell `implemented`; **read-only** product UI `implemented` (apps, app detail, contracts, contract detail, linked panels, app-user roster, match status, account summary); write UI `planned` |
 | Auth | Supabase Auth (`@supabase/ssr`) | skeleton `implemented` (email+password, server session via Proxy); `verified-local` (build); not hosted-exercised |
 | Database | Supabase Postgres | schema `implemented`, `not-hosted-applied` |
 | Authorization | Postgres Row-Level Security | `implemented`, `verified-local`, `ci-enforced` |
@@ -27,17 +27,17 @@ root layout. They run as **Vercel platform telemetry** — anonymous page views 
 
 ## Repo structure
 ```
-src/app/                 root layout · login/ · logout/ (route handler) · (authenticated)/ group
+src/app/                 root layout · login/ · logout/ · (authenticated)/ group: apps/ · apps/[id]/ · contracts/ · contracts/[id]/ (read-only product screens)
 src/proxy.ts             Next.js 16 Proxy (renamed Middleware): session refresh + route guard
 src/lib/supabase/        env · client (browser) · server (user-scoped, typed with Database) · proxy (session helper)
 src/lib/auth/            session (current user) · tenant-context (RLS-scoped resolver) · tenant-context-derive (pure logic + tests)
-src/lib/data/            server-only, read-only DAL (apps.ts) — typed DTOs over the user-scoped client
+src/lib/data/            server-only, read-only DAL (apps · contracts · links · app-users · app-user-matches · app-account-intelligence) — typed DTOs over the user-scoped client
 src/lib/database.types.ts generated Supabase types (via scripts/gen-types-local.sh; do not hand-edit)
-supabase/migrations/     0001 core schema · 0002 org-scoped RLS · 0003 related-org read   (append-only)
-supabase/tests/          org_rls_test.sql (152 assertions) · rls_test_plan.md
-scripts/                 test-rls.sh · check-migration-safety.sh · check-docs-updated.sh · pr-review-summary.sh · check-auth-safety.sh
+supabase/migrations/     0001 core schema · 0002 org RLS · 0003 related-org read · 0004 delete hardening · 0005 child integrity · 0006-0008 org-scoped child reads   (append-only)
+supabase/tests/          org_rls_test.sql (152 assertions, T1-T30) · rls_test_plan.md
+scripts/                 test-rls.sh · check-migration-safety.sh · check-docs-updated.sh · pr-review-summary.sh · check-auth-safety.sh · gen-types-local.sh
 .github/workflows/       app-ci.yml (lint/test/tsc/build) · rls-tests.yml · migration-safety.yml · review-discipline.yml
-docs/                    canonical docs 00–10 (this set) + design/legacy docs (see 10_DOCS_INDEX)
+docs/                    canonical docs 00-13 (this set) + design/legacy docs (see 10_DOCS_INDEX)
 claude/                  agent rules + prompts
 ```
 Full map + onboarding path: [10_DOCS_INDEX.md](./10_DOCS_INDEX.md).
@@ -72,12 +72,12 @@ Rejected-pattern evidence: [current-security-risk-map.md](./current-security-ris
 ## Server/client boundary
 - **Client:** render only; calls server actions / route handlers; holds no secrets; never the service-role key. *(No interactive client components yet; `src/lib/supabase/client.ts` is the browser-client seam for future use.)* — partly `implemented`.
 - **Server (Next.js, user-scoped):** `src/lib/supabase/server.ts` builds a Supabase client bound to the request's auth cookies (anon key only), **typed with the generated `Database`**; all reads/writes flow through RLS. The login Server Action, `getSessionUser()`, and the `src/lib/data/` DAL use it. — `implemented`.
-- **Data access layer (`src/lib/data/`):** server-only (imports `next/headers` transitively), **read-only** typed helpers (e.g. `listAppsForCurrentUser()`) returning column-subset DTOs. They take **no** `tenant_id` from the caller — RLS scopes visibility. Never import them from Client Components. — `implemented` (apps; contracts/orgs follow the same shape when their screens land).
+- **Data access layer (`src/lib/data/`):** server-only (imports `next/headers` transitively), **read-only** typed helpers (e.g. `listAppsForCurrentUser()`) returning column-subset DTOs. They take **no** `tenant_id` from the caller — RLS scopes visibility. Never import them from Client Components. — `implemented` (apps, contracts, links, app-users, app-user matches, account-intelligence; same read-only column-subset shape; org/people-directory DALs follow when those screens land).
 - **Proxy (`src/proxy.ts`):** in Next.js 16, Middleware is renamed **Proxy** (`node_modules/next/dist/docs/.../16-proxy.md`). It refreshes the session and redirects unauthenticated requests off protected routes. It does **not** read app data or decide tenant/org access. — `implemented`.
 - **Trusted server jobs (service-role):** isolated; only for operations RLS can't express (audit writes, license evaluation, future imports). Never reachable from the browser. — `deferred` (no such code exists yet).
 
 ## Current vs target
-- **Current:** Postgres schema + RLS (tested locally + CI) + an auth/session skeleton + read-only tenant/org context resolution (`src/lib/auth/tenant-context.ts`, displayed in the protected shell). No tenant switching, no product UI.
+- **Current:** Postgres schema + RLS (tested locally + CI) + an auth/session skeleton + read-only tenant/org context resolution (`src/lib/auth/tenant-context.ts`) + **read-only product surfaces** (apps, app detail, contracts, contract detail, linked panels, app-user roster, match status, account summary), all RLS-scoped. No tenant switching, **no write UI**, nothing hosted-applied.
 - **Target (incremental, see [06](./06_BUILD_SEQUENCE.md)):** auth/session → tenant/org context → read-only inventory → contracts/people → writes → files/imports → connectors.
 
 ## What must exist before UI reads data
@@ -89,6 +89,7 @@ lets the app *use* the foundation correctly. It reads only the user's own member
 user-scoped server client (never service-role, never client-side filtering, never JWT claims).
 
 ## Intentionally missing today
-Product UI · tenant switching · user provisioning/invites · imports/exports · connectors/credentials ·
-org-hierarchy traversal · child-table org scoping · hosted deployment. All tracked in
+Write UI / product workflows · tenant switching · user provisioning/invites · imports/exports · connectors/credentials ·
+org-hierarchy traversal · remaining child-table org scoping (`people` stays tenant-only; `identity_accounts`/`license_*`/`files`/`invoices` default-deny) ·
+contract write path/UI/audit · archive/soft-delete · hosted deployment. All tracked in
 [04_RISK_REGISTER.md](./04_RISK_REGISTER.md) and sequenced in [06_BUILD_SEQUENCE.md](./06_BUILD_SEQUENCE.md).

@@ -17,6 +17,9 @@ links them rather than restating:
 | `0003_org_access_union.sql` | Related-org **read** model (union of owning-org columns); broadened integrity trigger to all access org FKs. | PR #1 |
 | `0004_destructive_delete_hardening.sql` | Remove normal authenticated **hard-delete** from core evidence tables (`organizations`/`apps`/`contracts`/`app_contracts`/`people`/`app_users`): drop broad `FOR ALL` manage policies, recreate as `INSERT` + `UPDATE` only (no `DELETE`). RLS-only (no schema change). This is where the **contract write authority** lives (tenant editor+ / procurement-org steward); the future write *path*/*audit*/*UI* are designed in [13_CONTRACT_STEWARD_WRITE_DESIGN](./13_CONTRACT_STEWARD_WRITE_DESIGN.md) (not yet built). | PR #16 |
 | `0005_same_tenant_child_integrity.sql` | **Same-tenant relational integrity:** `UNIQUE (id, tenant_id)` on 7 parents + composite same-tenant FKs on child/link tables (`app_contracts`/`app_users`/`app_user_identity_matches`/`identity_accounts`/`organizations`/`license_rules`/`license_evaluations`/`invoices`) so a child can't reference a cross-tenant parent. Constraints only (adds FK Relationships to generated types). | PR #17 |
+| `0006_org_scoped_app_contracts_read.sql` | One permissive `SELECT` policy making `app_contracts` **org-scoped for read** — read a link iff you can read the linked **app OR contract** (reuses their RLS; tenant-bound by `0005`). SELECT-only, no `DELETE`. Proven by T28. | PR #20 |
+| `0007_org_scoped_app_users_read.sql` | One `SELECT` policy making `app_users` **org-scoped for read** — read a row iff you can read the linked **app** (explicit tenant-bind, mirrors `0003`). SELECT-only, no `DELETE`. Proven by T29 (incl. T29h corrupt-row defense). | PR #21 |
+| `0008_org_scoped_app_user_identity_matches_read.sql` | One `SELECT` policy making `app_user_identity_matches` **org-scoped for read** — read a match iff you can read the linked **`app_user`** (explicit tenant-bind). Exposes match *status*, no PII. SELECT-only, no `DELETE`. Proven by T30. | PR #23 |
 
 ## Workflow (summary — full rules in [migration-workflow.md](./migration-workflow.md))
 1. **Local first.** Never develop against hosted Supabase; never use service-role keys for normal dev.
@@ -83,4 +86,4 @@ Then add positive + negative tests to `supabase/tests/org_rls_test.sql`.
 - ❌ a `SELECT` policy without a tenant condition (directly or via helper).
 - ❌ frontend filtering used as a security boundary.
 - ❌ a service-role workaround to "get around" a too-strict RLS policy — fix the policy + test it.
-- ❌ editing `0001`/`0002`/`0003`.
+- ❌ editing any merged migration (`0001`–`0008`) — fix forward with a new `000N_*.sql`.
