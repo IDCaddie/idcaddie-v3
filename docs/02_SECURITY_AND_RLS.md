@@ -3,7 +3,7 @@
 **Canonical source for: the authorization model.** Every other doc links here instead of
 re-explaining RLS. Implemented in `supabase/migrations/0002_org_scoped_rls.sql`,
 `0003_org_access_union.sql`, and `0004_destructive_delete_hardening.sql`; proven by
-`supabase/tests/org_rls_test.sql` (83 assertions, T1–T26, `verified-local`, `ci-enforced` via
+`supabase/tests/org_rls_test.sql` (98 assertions, T1–T27, `verified-local`, `ci-enforced` via
 PR #2). Schema: [v3-data-model.md](./v3-data-model.md).
 Design rationale & legacy evidence: [v3-security-model.md](./v3-security-model.md),
 [current-security-risk-map.md](./current-security-risk-map.md).
@@ -118,15 +118,50 @@ manage all membership rows; **admins** manage only non-`owner` rows and cannot w
 | 15 | Tenant **owner/admin/editor** hard-deletes a core evidence row | denied (0 rows); row survives; editor `UPDATE` still works | no `DELETE` policy (`0004`) | T24 |
 | 16 | App inventory/detail reads still valid after hardening | rows returned | SELECT policies untouched | T25 |
 | 17 | Child/link row references a parent in **another tenant** | write fails (foreign_key_violation); valid same-tenant + nullable links still insert | composite same-tenant FKs (`0005`) | T26 |
+| 18 | Org-only user reads a **tenant-only** child table (`people`/`app_users`/`app_contracts`); any user reads a **default-deny** table (`identity_accounts`/`files`/`invoices`/`license_*`/`app_user_identity_matches`) | 0 rows | tenant-only `SELECT` is `is_tenant_member`-gated; default-deny has no policy | T27 |
 
-Test labels map to the `-- Test N` blocks in `org_rls_test.sql` (26 scenarios; T3+4 and
+Test labels map to the `-- Test N` blocks in `org_rls_test.sql` (27 scenarios; T3+4 and
 T22+23 are combined blocks).
 
-## 8. Deferred / known gaps (open in [04_RISK_REGISTER.md](./04_RISK_REGISTER.md))
-- **Child tables tenant-scoped, not org-scoped:** `app_users`, `files`, `invoices`,
-  `license_rules`, `license_evaluations`, `app_contracts` enforce `tenant_id` but not
-  per-org reads. Safe (no cross-tenant leak) but an org-only user may see tenant-wide
-  child rows. Org-scope them when a feature reads them per-org. (RISK-002)
+## 8. Read-scope inventory — what each table actually exposes (canonical)
+Derived from live `pg_policies` on a fresh `0001`–`0005` DB (the SQL, **not** prose) and proven by
+**T27**. This is the single source of truth for read access; other docs link here. Three read classes
+decide whether a table is safe to surface: **tenant+org** (org-only users can read), **tenant-only**
+(tenant members read every tenant row; org-only users read nothing), and **default-deny** (no `SELECT`
+policy — unreadable by any normal `authenticated` user; only service-role / `SECURITY DEFINER` paths).
+
+| Table | Class | Who can `SELECT` today | Safe to surface in UI? |
+|---|---|---|---|
+| `apps` | core | tenant members **+ related-org** (responsible/paying/procurement, union) | ✅ shipped (`/apps`) |
+| `contracts` | core | tenant members **+ related-org** (procurement/paying) | scoped read OK; UI not built |
+| `organizations` | core | tenant members **+ own org** (`is_org_member`) | ✅ scoped |
+| `tenants` | root | tenant members + org participants (`is_tenant_participant`) | n/a |
+| `tenant_memberships` | membership | tenant members | admin surface only |
+| `organization_memberships` | membership | own rows + tenant admins | admin surface only |
+| `profiles` | auth | own row only (`id = auth.uid()`) | own |
+| `people` | core/child | **tenant members only — NOT org-scoped** | ❌ not until org-scoped (RISK-002) |
+| `app_users` | child | **tenant members only — NOT org-scoped** | ❌ not until org-scoped (RISK-002) |
+| `app_contracts` | link | **tenant members only — NOT org-scoped** | ❌ not until org-scoped (RISK-002) |
+| `audit_logs` | audit | tenant members (append-only; insert via trusted paths) | read-only viewer later |
+| `identity_accounts` | child | **default-deny** (no policy) | ❌ no read policy |
+| `app_user_identity_matches` | link | **default-deny** (no policy) | ❌ no read policy |
+| `license_rules` | child | **default-deny** (no policy) | ❌ no read policy |
+| `license_evaluations` | child | **default-deny** (no policy) | ❌ no read policy |
+| `files` | child | **default-deny** (no policy) | ❌ no read policy |
+| `invoices` | child | **default-deny** (no policy) | ❌ no read policy |
+
+> **`0005` is write-integrity only, not read authorization.** The same-tenant composite FKs (§5b)
+> reject a cross-tenant *write*; they grant **no** read. A table can have `0005` FK protection and
+> still be default-deny or tenant-only for reads (e.g. `app_users`, `invoices`). Surfacing any
+> **tenant-only** or **default-deny** table to org-only users requires new org-scoped read policies
+> first (RISK-002) — do not assume a child table is org-readable because it has a same-tenant FK.
+
+## 8b. Deferred / known gaps (open in [04_RISK_REGISTER.md](./04_RISK_REGISTER.md))
+- **Child tables not org-scoped for reads (RISK-002, open):** `people`, `app_users`, `app_contracts`
+  are **tenant-read only** (a tenant member sees every tenant row; an org-only user sees nothing);
+  `identity_accounts`, `app_user_identity_matches`, `license_rules`, `license_evaluations`, `files`,
+  `invoices` are **default-deny** (no read policy at all). None leak cross-tenant. Org-scoped *read*
+  policies + tests are required before any of these is surfaced per-org. (T27 pins this reality.)
 - **Audit retention unresolved:** deletes are blocked, so there is no purge/archival path
   yet; `audit_logs` grows unbounded. Needs a partition/archival design. (RISK-009)
 - **`resource_org_links` + org hierarchy deferred:** today access is column-based and

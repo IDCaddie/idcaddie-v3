@@ -7,6 +7,19 @@ from PRs verified via `git log` / `gh pr list`.
 
 ---
 
+### PR #18 — Document and test child-table RLS read scope · 2026-06-16
+- **Category:** security truth pass — **docs + tests only, no migration, no UI** (a guardrail before child read surfaces).
+- **What:** an honest read-scope inventory of all 17 public tables, derived from **live `pg_policies`** on a fresh `0001`–`0005` DB (the SQL, not prose), plus a denial test that pins the current reality.
+- **Key finding / correction:** docs were **overclaiming**. Old §8 / RISK-002 / test-plan called `files`/`invoices`/`license_rules`/`license_evaluations` "tenant-scoped" (implying readable) and said "org-only users may see tenant-wide child rows." Reality: those 6 tables are **default-deny** (RLS on, **no read policy** — `identity_accounts`, `app_user_identity_matches`, `license_rules`, `license_evaluations`, `files`, `invoices`); `people`/`app_users`/`app_contracts` are **tenant-only** (tenant members read, **org-only users read nothing**); only `apps`/`contracts`/`organizations` are org-readable. No table leaks cross-tenant.
+- **Docs corrected:** `02 §8` rewritten as the **canonical read-scope inventory table** + explicit "`0005` is write-integrity only, not read authorization"; threat row #18 added; `04` RISK-002 reworded (kept **open**, the wrong "may see tenant-wide child rows" line removed); `06`/`07`/`09`/`11`/`rls_test_plan.md` de-conflated tenant-only vs default-deny; `11` invoices/identity/license rows no longer imply a verified read model.
+- **Tests:** added **T27** (read-scope truth pass): 6 default-deny tables read **0** even by a tenant owner (despite seeded rows); 3 tenant-only tables read by owner but **0** by an org-only user; positive controls so the zeros are policy, not empty tables. **83 → 98 assertions**, T1–**T27**. Adds **no policy**, broadens **no** access.
+- **RISK-002:** **open · clarified** — *not* closed (no org-scoped child read policies were implemented; this PR only documents + denial-tests the truth).
+- **Generated types:** **unchanged** — no schema change (no migration); `gen-types-local.sh` reproduces the committed `database.types.ts` byte-identically.
+- **Security / migration / service-role / hosted impact:** none — no migration, no policy change, no service-role, no hosted apply, no UI. Strictly documents and tests existing behavior.
+- **Tests run (local, verified):** `test-rls.sh` → `ALL ORG-RLS ASSERTIONS PASSED` (0001–0005, T1–T27, 98 assertions); `npm test` 5/5; lint/tsc/build clean; `check-auth-safety`/`check-docs-updated`/`check-migration-safety` pass; `gen-types-local.sh` → no diff.
+
+---
+
 ### PR #17 — Add same-tenant child integrity constraints · 2026-06-16
 - **Category:** database / integrity hardening (no product UI).
 - **What:** `0005_same_tenant_child_integrity.sql` — prevent cross-tenant child/link corruption at the

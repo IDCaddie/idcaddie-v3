@@ -75,7 +75,7 @@ passed, CI green.
 
 ### Stage 5 — Contracts · Stage 6 — People/app users · Stage 7 — License rules/evaluations · Stage 8 — Files/invoices
 - **Goal:** the source-of-truth surfaces, read first then writes (steward-only).
-- **P0 risks:** writes outside RLS; child tables still tenant-scoped (RISK-002 — org-scope before per-org reads ship); destructive edits without audit.
+- **P0 risks:** writes outside RLS; child tables **not org-scoped for reads** — `people`/`app_users`/`app_contracts` are **tenant-only**, and `identity_accounts`/`app_user_identity_matches`/`license_rules`/`license_evaluations`/`files`/`invoices` are **default-deny** (no read policy). Add org-scoped read policies + tests **before** any per-org surface ships (RISK-002; canonical map [02 §8](./02_SECURITY_AND_RLS.md), pinned by T27). Also: destructive edits without audit.
 - **Delete guardrail (PR #16 / `0004`):** core evidence tables have **no hard-delete** policy — write surfaces add `INSERT`/`UPDATE` only; never re-add `FOR ALL`/`DELETE`. **Hard delete + archive/soft-delete UI are deferred** to a future audited admin/break-glass path (not built — RISK-C07).
 - **Integrity guardrail (PR #17 / `0005`):** child/link writes that reference a cross-tenant parent fail at the DB (composite same-tenant FKs). New child tables must add the same `(parent_ref, tenant_id) → parent(id, tenant_id)` FK. Org-scoped child-table **reads** are still deferred (RISK-002).
 - **Tests:** steward write allowed, non-steward denied, related-org read works; audit row written on change.

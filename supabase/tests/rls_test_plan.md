@@ -25,7 +25,7 @@ Before building UI, prove these pass against local Supabase.
 
 Cases 1–8 plus the org/cross-tenant/escalation matrix are enforced by
 `supabase/migrations/0002_org_scoped_rls.sql` and `0003_org_access_union.sql`,
-covered by the runnable suite `supabase/tests/org_rls_test.sql` (T1–T26, 83 assertions). The
+covered by the runnable suite `supabase/tests/org_rls_test.sql` (T1–T27, 98 assertions). The
 suite has been executed against Postgres 16 with a Supabase-style `auth` shim — all
 assertions pass (`ALL ORG-RLS ASSERTIONS PASSED`).
 
@@ -40,6 +40,14 @@ parent(id, tenant_id)` FKs on `app_contracts`/`app_users`/`app_user_identity_mat
 `license_evaluations`/`invoices`. T26 = 11 cross-tenant link inserts each rejected with
 `foreign_key_violation`; valid same-tenant links + nullable (MATCH SIMPLE) links still insert.
 This is write-integrity only — org-scoped child-table reads remain deferred (RISK-002).
+
+**Child-table read-scope truth pass (T27, PR #18 — docs/tests only, no migration):** asserts the
+*current* read reality without broadening it. The 6 **default-deny** tables (`identity_accounts`,
+`app_user_identity_matches`, `license_rules`, `license_evaluations`, `files`, `invoices`) return 0
+rows even to a tenant **owner** (despite seeded rows). The 3 **tenant-only** tables (`people`,
+`app_users`, `app_contracts`) are readable by tenant members but return 0 rows to an **org-only**
+user. Positive controls (owner reads tenant rows; org-only user reads its own-org app) prove the
+zeros are policy, not empty tables. Canonical read map: [docs/02 §8](../../docs/02_SECURITY_AND_RLS.md).
 
 ### Access model: stewardship (write) vs. related-org (read)
 - **WRITE / steward (single-org):** apps `responsible_org_id`, contracts `procurement_org_id` (or tenant editor+).
@@ -61,8 +69,10 @@ Coverage added beyond the original cases:
 - A pre-existing **0001 escalation** (tenant admin self-promoting to `owner` / demoting the owner) — closed by splitting into owner-only vs admin-non-owner membership policies.
 - audit_logs append-only verified against `authenticated` (no write policy) **and** `service_role` (BYPASSRLS, blocked by trigger incl. writable-CTE / upsert / MERGE).
 
-Still tenant-scoped (org scoping deferred — see migration header): `app_users`,
-`license_rules`, `license_evaluations`, `files`, `invoices`, `app_contracts`.
+Not org-scoped for reads (RISK-002; reality pinned by T27, canonical map [docs/02 §8](../../docs/02_SECURITY_AND_RLS.md)):
+**tenant-only** (tenant members read, org-only users do not) — `people`, `app_users`, `app_contracts`;
+**default-deny** (no read policy at all) — `identity_accounts`, `app_user_identity_matches`,
+`license_rules`, `license_evaluations`, `files`, `invoices`.
 
 ### Run locally
 

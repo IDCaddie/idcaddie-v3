@@ -90,7 +90,7 @@ status/renewal dates. No writes, no client-side filtering, no caller-supplied id
 (RISK-002) — don't surface per-org-inconsistent counts. (Stages 4 + 4b app inventory/detail done — PR #13/#14.)
 
 ## Current open risks to respect
-`not-hosted-applied`; child tables tenant-scoped (org scoping deferred); no tenant switching /
+`not-hosted-applied`; child tables **not org-scoped for reads** — tenant-only (`people`/`app_users`/`app_contracts`) or default-deny (`identity_accounts`/`app_user_identity_matches`/`license_*`/`files`/`invoices`); see read map [02 §8](./02_SECURITY_AND_RLS.md), pinned by T27 (RISK-002); no tenant switching /
 user provisioning yet (RISK-012); no credential vault; imports/exports destructive-in-legacy
 (don't port — legacy deletes "outdated" users, `onFileLinkedToApp.js:290`); v3 must not miss legacy
 paid-client (OMC/Flywheel) capabilities (RISK-016). Full list:
