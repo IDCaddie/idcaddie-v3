@@ -43,8 +43,9 @@ PR #6 (this branch, auth/session skeleton) is **not yet merged**.
 | Item | Status |
 |------|--------|
 | Schema `0001`, org RLS `0002`, related-org read `0003` | `implemented` |
-| RLS model (tenant isolation, steward writes, related-org reads, audit immutability, no admin self-promotion) | `implemented`, `verified-local` (82 assertions in `org_rls_test.sql`), `ci-enforced` (PR #2) |
+| RLS model (tenant isolation, steward writes, related-org reads, audit immutability, no admin self-promotion) | `implemented`, `verified-local` (83 assertions in `org_rls_test.sql`), `ci-enforced` (PR #2) |
 | No normal hard-delete of core evidence tables (`organizations`/`apps`/`contracts`/`app_contracts`/`people`/`app_users`) | `implemented` (PR #16 — `0004`; `FOR ALL` split into `INSERT`+`UPDATE`, no `DELETE`); `verified-local` (T17/T24/T25). Archive/soft-delete UI **not built** |
+| Same-tenant child integrity (cross-tenant child/link writes fail at the DB) | `implemented` (PR #17 — `0005`; composite `(parent_ref, tenant_id)` FKs); `verified-local` (T26). Org-scoped child-table **reads** still deferred (RISK-002) |
 | Migration safety (numbering, unsafe keywords) | `ci-enforced` (PR #3) |
 | Migrations applied to hosted Supabase (staging/prod) | **not done** — `not-hosted-applied` |
 | Auth/session skeleton (login, server session via Proxy, protected route group, no service-role) | `implemented` (PR #6); `verified-local` (build + `check-auth-safety.sh`); **not** exercised against hosted Supabase Auth |

@@ -3,7 +3,7 @@
 **Canonical source for: the authorization model.** Every other doc links here instead of
 re-explaining RLS. Implemented in `supabase/migrations/0002_org_scoped_rls.sql`,
 `0003_org_access_union.sql`, and `0004_destructive_delete_hardening.sql`; proven by
-`supabase/tests/org_rls_test.sql` (82 assertions, T1–T25, `verified-local`, `ci-enforced` via
+`supabase/tests/org_rls_test.sql` (83 assertions, T1–T26, `verified-local`, `ci-enforced` via
 PR #2). Schema: [v3-data-model.md](./v3-data-model.md).
 Design rationale & legacy evidence: [v3-security-model.md](./v3-security-model.md),
 [current-security-risk-map.md](./current-security-risk-map.md).
@@ -77,6 +77,21 @@ access-relevant org FK whose organization is in a different tenant — for `apps
 (`procurement_org_id`, `paying_org_id`). This closes the cross-tenant org-pointer leak
 (see §7) at the data layer, in addition to the tenant binding inside the read policies.
 
+## 5b. Same-tenant child integrity (relational, not RLS)
+`0005` enforces that a child/link row cannot reference a parent row in a **different tenant** —
+at the constraint layer, so a corrupt write *fails* rather than just being hidden by RLS. Each
+referenced parent gets a `UNIQUE (id, tenant_id)`, and each child gets a composite FK
+`(parent_ref, tenant_id) → parent(id, tenant_id)`, so the parent must live in the child's tenant:
+`app_contracts → apps, contracts`; `app_users → apps`; `app_user_identity_matches → app_users, people`; `identity_accounts → people`;
+`organizations → organizations` (self, `parent_org_id`); `license_rules → apps`;
+`license_evaluations → apps, app_users, license_rules`; `invoices → files, apps, contracts`.
+`MATCH SIMPLE` (default) keeps nullable links (invoices
+`file_id`/`app_id`/`contract_id`, `license_evaluations.license_rule_id`) valid when null;
+`ON DELETE NO ACTION` adds **no** new cascade (so `0004`'s hard-delete protection is unaffected).
+This is **write integrity only** — it does **not** add org-scoped *read* policies for those child
+tables (still deferred — RISK-002), and the `organizations` self-FK only keeps `parent_org_id`
+in-tenant; org-hierarchy *traversal/inheritance* stays deferred (RISK-004). Proven by T26.
+
 ## 6. Tenant-admin self-promotion blocked
 `0001`'s membership policy gated only on the actor's role, letting an `admin` set their
 own row to `owner` or demote the owner (tenant takeover). `0002` splits it: **owners**
@@ -102,8 +117,9 @@ manage all membership rows; **admins** manage only non-`owner` rows and cannot w
 | 14 | Org manager hard-deletes its own-org app | denied (0 rows) | no `DELETE` policy (`0004`) | T17 |
 | 15 | Tenant **owner/admin/editor** hard-deletes a core evidence row | denied (0 rows); row survives; editor `UPDATE` still works | no `DELETE` policy (`0004`) | T24 |
 | 16 | App inventory/detail reads still valid after hardening | rows returned | SELECT policies untouched | T25 |
+| 17 | Child/link row references a parent in **another tenant** | write fails (foreign_key_violation); valid same-tenant + nullable links still insert | composite same-tenant FKs (`0005`) | T26 |
 
-Test labels map to the `-- Test N` blocks in `org_rls_test.sql` (25 scenarios; T3+4 and
+Test labels map to the `-- Test N` blocks in `org_rls_test.sql` (26 scenarios; T3+4 and
 T22+23 are combined blocks).
 
 ## 8. Deferred / known gaps (open in [04_RISK_REGISTER.md](./04_RISK_REGISTER.md))
@@ -121,5 +137,6 @@ T22+23 are combined blocks).
 - New tenant-owned table ⇒ `tenant_id NOT NULL` + RLS keyed on `is_tenant_member`.
 - New access-relevant org FK ⇒ add it to `enforce_owning_org_tenant` (tenant-bound) **and** a test.
 - **No `FOR ALL` (or `FOR DELETE`) policy on a core evidence table** (`organizations`, `apps`, `contracts`, `app_contracts`, `people`, `app_users`, …) — it silently grants hard-delete. Write policies are `INSERT` + `UPDATE` only until an audited admin/archive path exists (`0004`, §4b).
+- **New tenant-scoped child/link table** ⇒ give referenced parents `UNIQUE (id, tenant_id)` and the child a composite FK `(parent_ref, tenant_id) → parent(id, tenant_id)` so cross-tenant references fail at the constraint layer (`0005`, §5b) — RLS alone only hides them, it doesn't prevent the write.
 - Never weaken RLS, never filter for security in the client, never use the service-role
   key in a request path. Reviewer enforcement: [07_P0_REVIEW_CHECKLIST.md](./07_P0_REVIEW_CHECKLIST.md).

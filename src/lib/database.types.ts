@@ -43,11 +43,25 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "app_contracts_app_same_tenant"
+            columns: ["app_id", "tenant_id"]
+            isOneToOne: false
+            referencedRelation: "apps"
+            referencedColumns: ["id", "tenant_id"]
+          },
+          {
             foreignKeyName: "app_contracts_contract_id_fkey"
             columns: ["contract_id"]
             isOneToOne: false
             referencedRelation: "contracts"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "app_contracts_contract_same_tenant"
+            columns: ["contract_id", "tenant_id"]
+            isOneToOne: false
+            referencedRelation: "contracts"
+            referencedColumns: ["id", "tenant_id"]
           },
           {
             foreignKeyName: "app_contracts_tenant_id_fkey"
@@ -121,6 +135,20 @@ export type Database = {
             referencedRelation: "tenants"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "auim_app_user_same_tenant"
+            columns: ["app_user_id", "tenant_id"]
+            isOneToOne: false
+            referencedRelation: "app_users"
+            referencedColumns: ["id", "tenant_id"]
+          },
+          {
+            foreignKeyName: "auim_person_same_tenant"
+            columns: ["person_id", "tenant_id"]
+            isOneToOne: false
+            referencedRelation: "people"
+            referencedColumns: ["id", "tenant_id"]
+          },
         ]
       }
       app_users: {
@@ -176,6 +204,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "apps"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "app_users_app_same_tenant"
+            columns: ["app_id", "tenant_id"]
+            isOneToOne: false
+            referencedRelation: "apps"
+            referencedColumns: ["id", "tenant_id"]
           },
           {
             foreignKeyName: "app_users_tenant_id_fkey"
@@ -529,6 +564,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "identity_accounts_person_same_tenant"
+            columns: ["person_id", "tenant_id"]
+            isOneToOne: false
+            referencedRelation: "people"
+            referencedColumns: ["id", "tenant_id"]
+          },
+          {
             foreignKeyName: "identity_accounts_tenant_id_fkey"
             columns: ["tenant_id"]
             isOneToOne: false
@@ -586,6 +628,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "invoices_app_same_tenant"
+            columns: ["app_id", "tenant_id"]
+            isOneToOne: false
+            referencedRelation: "apps"
+            referencedColumns: ["id", "tenant_id"]
+          },
+          {
             foreignKeyName: "invoices_contract_id_fkey"
             columns: ["contract_id"]
             isOneToOne: false
@@ -593,11 +642,25 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "invoices_contract_same_tenant"
+            columns: ["contract_id", "tenant_id"]
+            isOneToOne: false
+            referencedRelation: "contracts"
+            referencedColumns: ["id", "tenant_id"]
+          },
+          {
             foreignKeyName: "invoices_file_id_fkey"
             columns: ["file_id"]
             isOneToOne: false
             referencedRelation: "files"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "invoices_file_same_tenant"
+            columns: ["file_id", "tenant_id"]
+            isOneToOne: false
+            referencedRelation: "files"
+            referencedColumns: ["id", "tenant_id"]
           },
           {
             foreignKeyName: "invoices_tenant_id_fkey"
@@ -651,6 +714,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "license_evaluations_app_same_tenant"
+            columns: ["app_id", "tenant_id"]
+            isOneToOne: false
+            referencedRelation: "apps"
+            referencedColumns: ["id", "tenant_id"]
+          },
+          {
             foreignKeyName: "license_evaluations_app_user_id_fkey"
             columns: ["app_user_id"]
             isOneToOne: false
@@ -658,11 +728,25 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "license_evaluations_app_user_same_tenant"
+            columns: ["app_user_id", "tenant_id"]
+            isOneToOne: false
+            referencedRelation: "app_users"
+            referencedColumns: ["id", "tenant_id"]
+          },
+          {
             foreignKeyName: "license_evaluations_license_rule_id_fkey"
             columns: ["license_rule_id"]
             isOneToOne: false
             referencedRelation: "license_rules"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "license_evaluations_rule_same_tenant"
+            columns: ["license_rule_id", "tenant_id"]
+            isOneToOne: false
+            referencedRelation: "license_rules"
+            referencedColumns: ["id", "tenant_id"]
           },
           {
             foreignKeyName: "license_evaluations_tenant_id_fkey"
@@ -714,6 +798,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "apps"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "license_rules_app_same_tenant"
+            columns: ["app_id", "tenant_id"]
+            isOneToOne: false
+            referencedRelation: "apps"
+            referencedColumns: ["id", "tenant_id"]
           },
           {
             foreignKeyName: "license_rules_tenant_id_fkey"
@@ -798,6 +889,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "organizations"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "organizations_parent_same_tenant"
+            columns: ["parent_org_id", "tenant_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id", "tenant_id"]
           },
           {
             foreignKeyName: "organizations_tenant_id_fkey"

@@ -19,6 +19,8 @@
 -- ── Fixtures (seeded as the privileged/superuser role; RLS bypassed for setup) ─
 reset role;
 truncate table
+  public.invoices, public.files, public.license_evaluations, public.license_rules,
+  public.app_user_identity_matches, public.identity_accounts,
   public.audit_logs, public.app_contracts, public.app_users, public.people,
   public.apps, public.contracts,
   public.organization_memberships, public.tenant_memberships,
@@ -657,6 +659,101 @@ do $$ declare v int; begin
   select count(*) into v from public.apps where id='a9900000-0000-0000-0000-0000000000a1';
   assert v = 1, format('T25 org mgr A1 detail read of own-org App A1 should be 1, saw %s', v);
 end $$;
+reset role;
+
+-- ── Test 26: same-tenant child integrity (migration 0005) ────────────────────
+-- Constraint layer (run as the privileged role; RLS bypassed). A child/link row may not
+-- reference a parent in another tenant. TenantA=1111…, TenantB=2222… (both seeded).
+reset role;
+
+-- 26a: VALID same-tenant child rows insert. ON_ERROR_STOP aborts the run if any fails, so these
+-- lines double as positive assertions that valid same-tenant links still work.
+insert into public.license_rules (id, tenant_id, app_id, name) values
+  ('11000000-0000-0000-0000-0000000000a1','11111111-1111-1111-1111-111111111111','a9900000-0000-0000-0000-0000000000a1','Rule A1');
+insert into public.license_evaluations (id, tenant_id, app_id, app_user_id, license_rule_id) values
+  ('12000000-0000-0000-0000-0000000000a1','11111111-1111-1111-1111-111111111111','a9900000-0000-0000-0000-0000000000a1','a5000000-0000-0000-0000-0000000000a1','11000000-0000-0000-0000-0000000000a1');
+insert into public.files (id, tenant_id, storage_path, original_filename) values
+  ('13000000-0000-0000-0000-0000000000a1','11111111-1111-1111-1111-111111111111','/demo/a1.pdf','a1.pdf');
+insert into public.invoices (id, tenant_id, file_id, app_id, contract_id) values
+  ('14000000-0000-0000-0000-0000000000a1','11111111-1111-1111-1111-111111111111','13000000-0000-0000-0000-0000000000a1','a9900000-0000-0000-0000-0000000000a1','c0000000-0000-0000-0000-0000000000a1');
+-- nullable invoice (all parent refs NULL) — proves MATCH SIMPLE keeps nullable links valid.
+insert into public.invoices (id, tenant_id) values
+  ('14000000-0000-0000-0000-0000000000a2','11111111-1111-1111-1111-111111111111');
+-- valid same-tenant identity_account (child of people via person_id).
+insert into public.identity_accounts (id, tenant_id, person_id, provider, email) values
+  ('16000000-0000-0000-0000-0000000000a1','11111111-1111-1111-1111-111111111111','7e000000-0000-0000-0000-0000000000a1','okta','ia_a1@a.test');
+-- valid same-tenant org parent (Org A1's parent = Org A2, both tenant A).
+update public.organizations set parent_org_id = '1a1a1a1a-0000-0000-0000-000000000002'
+  where id = '1a1a1a1a-0000-0000-0000-000000000001';
+-- valid tenant-B app_user (child of App B1) — exists only to isolate the license_rule_id
+-- cross-tenant FK below: its app_id+app_user_id are valid tenant-B, so license_rule_id is the sole violation.
+insert into public.app_users (id, tenant_id, app_id) values
+  ('a5000000-0000-0000-0000-0000000000b1','22222222-2222-2222-2222-222222222222','b9900000-0000-0000-0000-0000000000b1');
+
+-- 26b: CROSS-TENANT links must each fail with foreign_key_violation (11 of them).
+do $$ declare n int := 0; begin
+  begin
+    insert into public.app_contracts (app_id, contract_id, tenant_id) values
+      ('a9900000-0000-0000-0000-0000000000a2','c0000000-0000-0000-0000-0000000000cc','22222222-2222-2222-2222-222222222222');
+    raise exception 'T26 app_contracts cross-tenant link was allowed';
+  exception when foreign_key_violation then n := n + 1; end;
+  begin
+    insert into public.app_users (id, tenant_id, app_id) values
+      ('a5000000-0000-0000-0000-0000000000b9','22222222-2222-2222-2222-222222222222','a9900000-0000-0000-0000-0000000000a1');
+    raise exception 'T26 app_users cross-tenant link was allowed';
+  exception when foreign_key_violation then n := n + 1; end;
+  begin
+    insert into public.app_user_identity_matches (id, tenant_id, app_user_id, person_id, match_method) values
+      ('15000000-0000-0000-0000-0000000000b9','22222222-2222-2222-2222-222222222222','a5000000-0000-0000-0000-0000000000a1','7e000000-0000-0000-0000-0000000000a1','email');
+    raise exception 'T26 auim cross-tenant link was allowed';
+  exception when foreign_key_violation then n := n + 1; end;
+  begin
+    insert into public.license_rules (id, tenant_id, app_id, name) values
+      ('11000000-0000-0000-0000-0000000000b9','22222222-2222-2222-2222-222222222222','a9900000-0000-0000-0000-0000000000a1','Bad');
+    raise exception 'T26 license_rules cross-tenant link was allowed';
+  exception when foreign_key_violation then n := n + 1; end;
+  begin
+    insert into public.license_evaluations (id, tenant_id, app_id, app_user_id) values
+      ('12000000-0000-0000-0000-0000000000b9','22222222-2222-2222-2222-222222222222','a9900000-0000-0000-0000-0000000000a1','a5000000-0000-0000-0000-0000000000a1');
+    raise exception 'T26 license_evaluations cross-tenant link was allowed';
+  exception when foreign_key_violation then n := n + 1; end;
+  begin
+    -- license_rule_id path isolated: tenant-B eval, valid tenant-B app_id+app_user_id, tenant-A rule.
+    insert into public.license_evaluations (id, tenant_id, app_id, app_user_id, license_rule_id) values
+      ('12000000-0000-0000-0000-0000000000ba','22222222-2222-2222-2222-222222222222','b9900000-0000-0000-0000-0000000000b1','a5000000-0000-0000-0000-0000000000b1','11000000-0000-0000-0000-0000000000a1');
+    raise exception 'T26 license_evaluations.license_rule cross-tenant link was allowed';
+  exception when foreign_key_violation then n := n + 1; end;
+  begin
+    insert into public.invoices (id, tenant_id, file_id) values
+      ('14000000-0000-0000-0000-0000000000b9','22222222-2222-2222-2222-222222222222','13000000-0000-0000-0000-0000000000a1');
+    raise exception 'T26 invoices.file cross-tenant link was allowed';
+  exception when foreign_key_violation then n := n + 1; end;
+  begin
+    insert into public.invoices (id, tenant_id, app_id) values
+      ('14000000-0000-0000-0000-0000000000ba','22222222-2222-2222-2222-222222222222','a9900000-0000-0000-0000-0000000000a1');
+    raise exception 'T26 invoices.app cross-tenant link was allowed';
+  exception when foreign_key_violation then n := n + 1; end;
+  begin
+    insert into public.invoices (id, tenant_id, contract_id) values
+      ('14000000-0000-0000-0000-0000000000bb','22222222-2222-2222-2222-222222222222','c0000000-0000-0000-0000-0000000000a1');
+    raise exception 'T26 invoices.contract cross-tenant link was allowed';
+  exception when foreign_key_violation then n := n + 1; end;
+  begin
+    insert into public.identity_accounts (id, tenant_id, person_id, provider, email) values
+      ('16000000-0000-0000-0000-0000000000b9','22222222-2222-2222-2222-222222222222','7e000000-0000-0000-0000-0000000000a1','okta','bad@b.test');
+    raise exception 'T26 identity_accounts cross-tenant link was allowed';
+  exception when foreign_key_violation then n := n + 1; end;
+  begin
+    update public.organizations set parent_org_id = '2b2b2b2b-0000-0000-0000-000000000001'  -- Org B1 (tenant B)
+      where id = '1a1a1a1a-0000-0000-0000-000000000001';                                     -- Org A1 (tenant A)
+    raise exception 'T26 organizations cross-tenant parent link was allowed';
+  exception when foreign_key_violation then n := n + 1; end;
+  assert n = 11, format('T26 expected 11 cross-tenant FK rejections, got %s', n);
+end $$;
+
+-- 26c: a valid same-tenant identity match still inserts (after the cross-tenant attempt failed).
+insert into public.app_user_identity_matches (id, tenant_id, app_user_id, person_id, match_method) values
+  ('15000000-0000-0000-0000-0000000000a1','11111111-1111-1111-1111-111111111111','a5000000-0000-0000-0000-0000000000a1','7e000000-0000-0000-0000-0000000000a1','email');
 reset role;
 
 do $$ begin raise notice 'ALL ORG-RLS ASSERTIONS PASSED'; end $$;

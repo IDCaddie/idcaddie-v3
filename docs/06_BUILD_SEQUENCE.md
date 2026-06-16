@@ -77,6 +77,7 @@ passed, CI green.
 - **Goal:** the source-of-truth surfaces, read first then writes (steward-only).
 - **P0 risks:** writes outside RLS; child tables still tenant-scoped (RISK-002 — org-scope before per-org reads ship); destructive edits without audit.
 - **Delete guardrail (PR #16 / `0004`):** core evidence tables have **no hard-delete** policy — write surfaces add `INSERT`/`UPDATE` only; never re-add `FOR ALL`/`DELETE`. **Hard delete + archive/soft-delete UI are deferred** to a future audited admin/break-glass path (not built — RISK-C07).
+- **Integrity guardrail (PR #17 / `0005`):** child/link writes that reference a cross-tenant parent fail at the DB (composite same-tenant FKs). New child tables must add the same `(parent_ref, tenant_id) → parent(id, tenant_id)` FK. Org-scoped child-table **reads** are still deferred (RISK-002).
 - **Tests:** steward write allowed, non-steward denied, related-org read works; audit row written on change.
 - **Done:** each surface read-then-write under RLS, audited.
 
