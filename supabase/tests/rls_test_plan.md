@@ -37,7 +37,7 @@ T25 = `/apps` + `/apps/[id]` reads still valid.
 
 **Same-tenant child integrity (T26, migration `0005`):** composite `(parent_ref, tenant_id) →
 parent(id, tenant_id)` FKs on `app_contracts`/`app_users`/`app_user_identity_matches`/`identity_accounts`/`license_rules`/
-`license_evaluations`/`invoices`. T26 = 10 cross-tenant link inserts each rejected with
+`license_evaluations`/`invoices`. T26 = 11 cross-tenant link inserts each rejected with
 `foreign_key_violation`; valid same-tenant links + nullable (MATCH SIMPLE) links still insert.
 This is write-integrity only — org-scoped child-table reads remain deferred (RISK-002).
 

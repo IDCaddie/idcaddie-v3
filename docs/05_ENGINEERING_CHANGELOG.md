@@ -28,7 +28,7 @@ from PRs verified via `git log` / `gh pr list`.
 - **Generated types impact:** **yes, verified** — composite FKs add FK Relationships metadata to
   `src/lib/database.types.ts` (+98 lines, Relationships-only; no Row/Insert/Update/column change). Regenerated
   via `gen-types-local.sh` and **included**.
-- **RLS/test impact:** added **T26** (10 cross-tenant link inserts each rejected with `foreign_key_violation`;
+- **RLS/test impact:** added **T26** (11 cross-tenant link inserts each rejected with `foreign_key_violation`;
   valid same-tenant + nullable links insert). RLS reads (T1/T25), hard-delete denial (T17/T24), audit
   immutability (T6) all still pass. 82 → **83 assertions**, T1–**T26**. Added license_rules/evaluations/files/invoices truncate entries.
 - **Product / security / service-role / hosted impact:** none beyond stricter invalid-write prevention; `/apps`+`/apps/[id]` build/read unchanged; no service-role; hosted Supabase untouched.
