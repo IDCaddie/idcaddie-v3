@@ -73,7 +73,13 @@ passed, CI green.
 - **Deferred (documented):** org-name enrichment (IDs shown for now); app-user roster, linked contracts,
   invoices, files, license rules, and all edits — **not** built.
 
-### Stage 5 — Contracts · Stage 6 — People/app users · Stage 7 — License rules/evaluations · Stage 8 — Files/invoices
+### Stage 5 — Contracts (read-only slice) 🟡 (PR #19)
+- **Goal:** read-only contract visibility from the `contracts` table only. **Read-only slice done; writes + linked surfaces deferred.**
+- **Built:** `src/app/(authenticated)/contracts/page.tsx` + `contracts/[id]/page.tsx` + typed DAL `src/lib/data/contracts.ts` (`listContractsForCurrentUser`, `getContractDetailForCurrentUser`). Direct `contracts` columns only; `[id]` is a lookup key (RLS decides; hidden → `not_found`). `/contracts` linked from the shell.
+- **Verified (RLS spot-check):** tenant owner sees both demo contracts; org-only users see only their related contract (procurement/paying org union, `0003`); unrelated org-only + non-member → `not_found`.
+- **Intentionally NOT built:** create/edit/delete/archive, import/export, file upload, invoices, **linked-apps table / app-contract linking** — `app_contracts` is tenant-only and invoices/files default-deny; surfacing them needs org-scoped read policies first (RISK-002, **open**). OMC/Flywheel contracts cutover stays **blocked**.
+
+### Stage 5 (writes) · Stage 6 — People/app users · Stage 7 — License rules/evaluations · Stage 8 — Files/invoices
 - **Goal:** the source-of-truth surfaces, read first then writes (steward-only).
 - **P0 risks:** writes outside RLS; child tables **not org-scoped for reads** — `people`/`app_users`/`app_contracts` are **tenant-only**, and `identity_accounts`/`app_user_identity_matches`/`license_rules`/`license_evaluations`/`files`/`invoices` are **default-deny** (no read policy). Add org-scoped read policies + tests **before** any per-org surface ships (RISK-002; canonical map [02 §8](./02_SECURITY_AND_RLS.md), pinned by T27). Also: destructive edits without audit.
 - **Delete guardrail (PR #16 / `0004`):** core evidence tables have **no hard-delete** policy — write surfaces add `INSERT`/`UPDATE` only; never re-add `FOR ALL`/`DELETE`. **Hard delete + archive/soft-delete UI are deferred** to a future audited admin/break-glass path (not built — RISK-C07).

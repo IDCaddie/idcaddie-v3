@@ -83,11 +83,18 @@ production, hosted Supabase, secrets, or DNS without human review.
 Rationale and the automation risk: [04 · RISK-014](./04_RISK_REGISTER.md). Reviewer enforcement: [07 · Connected agent PRs](./07_P0_REVIEW_CHECKLIST.md#connected-agent-permissions). Discipline for vendor/bot PRs: [08](./08_CODE_AND_DOCS_STANDARD.md#vendor-and-bot-agent-prs).
 
 ## Current next recommended task
-**Read-only contracts** (build-sequence Stage 5): a list (and maybe detail) of `contracts` the user
-may read, via a new typed DAL helper following the `apps.ts` pattern; show contract name/vendor/
-status/renewal dates. No writes, no client-side filtering, no caller-supplied id/tenant_id as authz
-(RLS scopes the read), no app↔contract write UI. Note: `app_contracts` is still tenant-only RLS
-(RISK-002) — don't surface per-org-inconsistent counts. (Stages 4 + 4b app inventory/detail done — PR #13/#14.)
+**Read-only contracts is DONE — PR #19** (`/contracts` + `/contracts/[id]`, typed DAL `src/lib/data/contracts.ts`,
+related-org RLS, direct `contracts` columns only). Linked apps / invoices / files were intentionally NOT
+surfaced (`app_contracts` tenant-only; invoices/files default-deny — RISK-002 open).
+
+Next safe step — pick one, do NOT surface child/link tables until their read scope is fixed:
+- **(a) Org-scoped child-table read policies (RISK-002):** add + test org-scoped `SELECT` policies for `app_contracts`
+  (and later `app_users`), which would *unblock* a linked-apps panel on contract/app detail. This is the real
+  unblock for "linked" surfaces — until then keep them deferred.
+- **(b) Contracts steward writes:** `INSERT`/`UPDATE` only, **never `DELETE`/`FOR ALL`** (PR #16 / `0004`), steward-org gated, audited.
+
+Do NOT surface `app_contracts`/`invoices`/`files`/`license_*` reads without org-scoped policies + tests first.
+(Stages 4 + 4b app inventory/detail done — PR #13/#14; Stage 5 contracts read-only slice — PR #19.)
 
 ## Current open risks to respect
 `not-hosted-applied`; child tables **not org-scoped for reads** — tenant-only (`people`/`app_users`/`app_contracts`) or default-deny (`identity_accounts`/`app_user_identity_matches`/`license_*`/`files`/`invoices`); see read map [02 §8](./02_SECURITY_AND_RLS.md), pinned by T27 (RISK-002); no tenant switching /

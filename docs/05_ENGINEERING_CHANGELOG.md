@@ -7,6 +7,17 @@ from PRs verified via `git log` / `gh pr list`.
 
 ---
 
+### PR #19 — Add read-only contracts surfaces · 2026-06-16
+- **Category:** product surface — **read-only** (`/contracts` + `/contracts/[id]`). No migration, no schema change.
+- **What:** the next safe read surface, mirroring `/apps`. New typed server-only DAL `src/lib/data/contracts.ts` (`listContractsForCurrentUser`, `getContractDetailForCurrentUser`) returning explicit DTOs; new server-rendered routes `src/app/(authenticated)/contracts/page.tsx` and `contracts/[id]/page.tsx`; a `/contracts` link + badge on the authenticated home.
+- **Data access:** reads **only direct `contracts` columns** via the user-scoped anon server client. RLS is the authorization boundary (tenant members + procurement/paying related-org union, `0002`/`0003`). No `tenant_id` from the caller; route `[id]` is a lookup key only — an unreadable id returns the same `not_found` as a missing one (no enumeration).
+- **Intentionally NOT built (honest):** no create/edit/delete/archive, no import/export, no file upload, no invoices, **no linked-apps table** and **no app-contract linking UI**. The DAL queries **no** `app_contracts`, `invoices`, `files`, `license_rules`, `license_evaluations`, `identity_accounts`, or `app_user_identity_matches` — those child/link tables are tenant-only or default-deny and are not safe to surface (**RISK-002 stays open**).
+- **Security / migration / service-role / hosted impact:** none beyond a new read surface. No migration (`0001`–`0005` untouched), `database.types.ts` unchanged, no service-role, no hosted apply, no RLS change, no child-read broadening.
+- **OMC/Flywheel:** cutover remains **blocked** — this is a partial read-only slice, not contracts parity.
+- **Tests run (local, verified):** `npm test` 5/5; lint/tsc/build clean (`ƒ /contracts`, `ƒ /contracts/[id]`); `test-rls.sh` → `ALL ORG-RLS ASSERTIONS PASSED` (98 assertions, unchanged); `gen-types-local.sh` → no diff. **RLS spot-check** (fresh migrated DB, my DAL's exact queries): owner_a `2|1|1`; org-only mgr_a1 `1|1|0` (procurement-org related); org-only agency_u `1|0|1` (paying-org related); owner_b (other tenant) `0|0|0`; member_x (non-member) `0|0|0`.
+
+---
+
 ### PR #18 — Document and test child-table RLS read scope · 2026-06-16
 - **Category:** security truth pass — **docs + tests only, no migration, no UI** (a guardrail before child read surfaces).
 - **What:** an honest read-scope inventory of all 17 public tables, derived from **live `pg_policies`** on a fresh `0001`–`0005` DB (the SQL, not prose), plus a denial test that pins the current reality.

@@ -39,13 +39,17 @@ export default async function ProtectedHome() {
         <Badge label="tenant context" state="on" />
         <Badge label="org context" state="on" />
         <Badge label="app inventory (read-only)" state="on" />
+        <Badge label="contracts (read-only)" state="on" />
         <Badge label="tenant switching" state="soon" />
         <Badge label="hosted Supabase" state="off" />
       </div>
 
-      <nav className="text-sm">
+      <nav className="flex flex-col gap-1 text-sm">
         <Link href="/apps" className="font-medium underline">
           → Apps inventory (read-only)
+        </Link>
+        <Link href="/contracts" className="font-medium underline">
+          → Contracts (read-only)
         </Link>
       </nav>
 
