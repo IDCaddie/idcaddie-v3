@@ -7,6 +7,19 @@ from PRs verified via `git log` / `gh pr list`.
 
 ---
 
+### PR #23 — Add org-scoped read access for app-user matches · 2026-06-16
+- **Category:** RLS narrowing + read-only product surface. Forward migration `0008` (one SELECT policy) + a minimal match-status column. Implements [12_IDENTITY_MATCHING_READ_SCOPE](./12_IDENTITY_MATCHING_READ_SCOPE.md) §5 (validated in PR #22).
+- **Migration `0008_org_scoped_app_user_identity_matches_read.sql`:** `app_user_identity_matches` was **default-deny**; this adds ONE permissive `SELECT` policy `org members read related app_user_identity_matches` — read a match row iff you can already read the linked **`app_user`** (itself org-scoped by `0007`), via `EXISTS (select 1 from app_users au where au.id = ... and au.tenant_id = ...)` with an **explicit tenant-bind**. A tenant member reads all tenant matches transitively (they read all tenant app_users); an org-only user reads only matches of app_users they can read. **SELECT only**; no write policy (matching writes are service-role/definer); **no `DELETE`**. `people` and `identity_accounts` are **untouched**.
+- **Tests:** **T30** (18 assertions): tenant owner reads all 3 tenant matches; org-only `mgr_a1` reads only App A1's match; `mgr_a2` reads App A-pay + App A2; `agency_u` reads only App A-pay; `owner_b` (other tenant) and a pure non-member read **0**; a match read grants **no** `people`/`identity_accounts` read (org-only still 0); org-only delete denied (no DELETE policy); `app_users` (T29) + `app_contracts` (T28) org-read still hold; and **T30h** plants an FK-bypassed corrupt cross-tenant match and proves the explicit tenant-bind hides it. Updated **T27 27a** / **T29 29f** (app_user_identity_matches dropped from their default-deny assertions). **136 → 152 assertions**, T1–**T30**.
+- **Generated types:** `database.types.ts` **unchanged** — a policy is not schema; `gen-types-local.sh` reproduces it byte-identically.
+- **Read-only UI:** `/apps/[id]` app-user roster gains a **"Match"** column (matched / unmatched, optional `match_method`/`confidence`) via new typed DAL `src/lib/data/app-user-matches.ts`. **Unmatched is derived server-side** by comparing the visible roster against visible match rows — never by reading `people`/`identity`. Shows **no** `person_id`, identity-account id, person name, IdP provider/email/status, or `raw_payload`.
+- **RISK-002:** **narrowed, NOT closed** — `app_contracts` (PR #20), `app_users` (PR #21), and now `app_user_identity_matches` (PR #23) read are org-scoped. `people` stays tenant-only; `identity_accounts`/`license_*`/`files`/`invoices` stay default-deny.
+- **Not built (honest):** no identity matching algorithm, no people merge, no UAR / orphaned / deactivated status, no provisioning/deprovisioning, no import/export, no write/review UI. `people` and `identity_accounts` org-read intentionally **not** added.
+- **Security / service-role / hosted impact:** no service-role, no hosted apply, no `db push`/`--linked`. Read-only, tenant-bound (no cross-tenant leak — T30 + live spot-check). OMC/Flywheel cutover remains **blocked**.
+- **Tests run (local, verified):** `test-rls.sh` → `ALL ORG-RLS ASSERTIONS PASSED` (0001–0008, 152 assertions); `npm test` 5/5; lint/tsc/build clean (`ƒ /apps/[id]`); `check-migration-safety` pass; `gen-types-local.sh` → no diff.
+
+---
+
 ### PR #22 — Document identity matching read-scope design · 2026-06-16
 - **Category:** security design / guardrail — **docs only. No migration, no schema/types change, no UI, no policy, no new test assertions.**
 - **What:** a precise, evidence-based design for how identity / account / matching data may be safely **read** in future PRs, before any implementation. New doc [12_IDENTITY_MATCHING_READ_SCOPE](./12_IDENTITY_MATCHING_READ_SCOPE.md).

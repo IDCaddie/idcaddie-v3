@@ -25,7 +25,7 @@ Before building UI, prove these pass against local Supabase.
 
 Cases 1–8 plus the org/cross-tenant/escalation matrix are enforced by
 `supabase/migrations/0002_org_scoped_rls.sql` and `0003_org_access_union.sql`,
-covered by the runnable suite `supabase/tests/org_rls_test.sql` (T1–T29, 136 assertions). The
+covered by the runnable suite `supabase/tests/org_rls_test.sql` (T1–T30, 152 assertions). The
 suite has been executed against Postgres 16 with a Supabase-style `auth` shim — all
 assertions pass (`ALL ORG-RLS ASSERTIONS PASSED`).
 
@@ -71,18 +71,16 @@ depth, mirroring `0003`); **T29h** plants a normally-impossible FK-bypassed corr
 (`session_replication_role=replica`) and proves an org-only user who can read the parent app still
 cannot read it. Read-only — no identity matching / license eval / provisioning.
 
-**Identity-matching read-scope guardrail (PR #22 — design only, no new assertions).** The identity read
-model is designed in [docs/12](../../docs/12_IDENTITY_MATCHING_READ_SCOPE.md); the *current* safe posture
-it depends on is already proven by the existing suite (no duplication):
-| Guardrail (today) | Proven by |
-|---|---|
-| Tenant **owner** reads 0 `identity_accounts` and 0 `app_user_identity_matches` (default-deny) | T27 27a |
-| Org-only user reads 0 `people` (tenant-only) | T27 27b, T29 29f |
-| Org-only user reads 0 `identity_accounts` and 0 `app_user_identity_matches` (default-deny) | T29 29f |
-| Org-only user reads `app_users` for readable apps (`0007`) | T29 29b–29d (29a is the tenant-owner baseline) |
-| `app_contracts` org-read (`0006`) still holds | T28, T29 29g |
-A future identity/matching PR adds the org-scoped `app_user_identity_matches` policy (doc 12 §5) and
-flips the relevant T29 29f assertions in place, plus the doc 12 §7 tests — **before** any UI.
+**Org-scoped read for `app_user_identity_matches` (T30, migration `0008`, PR #23).** Implements
+[docs/12](../../docs/12_IDENTITY_MATCHING_READ_SCOPE.md) §5: read a match row iff you can read the linked
+**`app_user`** (itself org-scoped by `0007`), with an explicit tenant-bind. T30 proves: tenant owner
+reads all tenant matches (transitively); org-only users read only matches of app_users they can read
+(`mgr_a1`=App A1, `mgr_a2`=App A-pay+App A2, `agency_u`=App A-pay); `owner_b` (other tenant) + a pure
+non-member read 0; a match read grants **no** `people`/`identity_accounts` read (org-only still 0);
+org-only delete denied (no `DELETE` policy — row survives); `app_users` (T29) + `app_contracts` (T28)
+org-read still hold; and **T30h** plants an FK-bypassed corrupt cross-tenant match and proves the
+explicit tenant-bind hides it. Exposes match **status** only — no person/identity PII. The
+`app_user_identity_matches` default-deny assertions in T27 27a / T29 29f were dropped (now org-scoped).
 
 ### Access model: stewardship (write) vs. related-org (read)
 - **WRITE / steward (single-org):** apps `responsible_org_id`, contracts `procurement_org_id` (or tenant editor+).
@@ -104,11 +102,11 @@ Coverage added beyond the original cases:
 - A pre-existing **0001 escalation** (tenant admin self-promoting to `owner` / demoting the owner) — closed by splitting into owner-only vs admin-non-owner membership policies.
 - audit_logs append-only verified against `authenticated` (no write policy) **and** `service_role` (BYPASSRLS, blocked by trigger incl. writable-CTE / upsert / MERGE).
 
-Not org-scoped for reads (RISK-002, narrowed by PR #20/#21; reality pinned by T27/T28/T29, canonical map [docs/02 §8](../../docs/02_SECURITY_AND_RLS.md)):
+Not org-scoped for reads (RISK-002, narrowed by PR #20/#21/#23; reality pinned by T27/T28/T29/T30, canonical map [docs/02 §8](../../docs/02_SECURITY_AND_RLS.md)):
 **tenant-only** (tenant members read, org-only users do not) — `people`;
-**default-deny** (no read policy at all) — `identity_accounts`, `app_user_identity_matches`,
+**default-deny** (no read policy at all) — `identity_accounts`,
 `license_rules`, `license_evaluations`, `files`, `invoices`.
-`app_contracts` (`0006`) and `app_users` (`0007`) are now **org-scoped for read** — no longer in this list.
+`app_contracts` (`0006`), `app_users` (`0007`), and `app_user_identity_matches` (`0008`) are now **org-scoped for read** — no longer in this list.
 
 ### Run locally
 

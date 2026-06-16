@@ -83,20 +83,20 @@ production, hosted Supabase, secrets, or DNS without human review.
 Rationale and the automation risk: [04 · RISK-014](./04_RISK_REGISTER.md). Reviewer enforcement: [07 · Connected agent PRs](./07_P0_REVIEW_CHECKLIST.md#connected-agent-permissions). Discipline for vendor/bot PRs: [08](./08_CODE_AND_DOCS_STANDARD.md#vendor-and-bot-agent-prs).
 
 ## Current next recommended task
-**Identity/matching read-scope DESIGN is DONE — PR #22** (docs only — [12_IDENTITY_MATCHING_READ_SCOPE](./12_IDENTITY_MATCHING_READ_SCOPE.md)).
-Nothing was built/policy-changed; the design decides the safe future read model. RISK-002 still **narrowed, not closed**.
+**App-user match status is DONE — PR #23** (`0008` org-scoped `SELECT` on `app_user_identity_matches`;
+"Match" column on `/apps/[id]`; DAL `src/lib/data/app-user-matches.ts`; proven by T30). Implements doc 12 §5.
+RISK-002 still **narrowed, not closed**.
 
-Next safe step — pick one; obey doc 12 for anything identity-related:
+Next safe step — pick one; obey [doc 12](./12_IDENTITY_MATCHING_READ_SCOPE.md) for anything identity-related:
 - **(a) Contracts steward writes:** `INSERT`/`UPDATE` only, **never `DELETE`/`FOR ALL`** (PR #16 / `0004`), steward-org gated, audited.
-- **(b) Matched/unmatched per app_user (follow [doc 12](./12_IDENTITY_MATCHING_READ_SCOPE.md)):** add ONE org-scoped `SELECT` on `app_user_identity_matches` gated on a **readable `app_user`** (mirror `0007`, explicit tenant-bind, SELECT-only, no DELETE; doc 12 §5). Land doc 12 §7 tests **before** any UI. Show match *status*, not person PII.
+- **(b) Richer "managed vs orphaned" status** (needs a tenant-only column): build it via a **`security_invoker` view** (caller RLS scopes it) — or a `SECURITY DEFINER` fn that re-derives scope — returning only a status enum; **NEVER** read `people`/`identity_accounts` rows into an org surface. Follow doc 12 §4 (the definer trap) + §7.7 (exact readable-only count test).
 
 Do NOT org-scope `people` or `identity_accounts` — no app anchor; org-scoping them leaks the tenant-wide HR/IdP directory (doc 12 §4/§6). `people` stays **tenant-only**; `identity_accounts` stays **default-deny**.
-Still NOT safe to surface: `people`, `identity_accounts`, `app_user_identity_matches`, `invoices`/`files`/`license_*`.
-No identity matching / UAR / license eval / provisioning exists yet.
-(Stages 4/4b apps — PR #13/#14; Stage 5 contracts — PR #19; Stage 5b linked panels — PR #20; Stage 6a app-user roster — PR #21; Stage 6b identity read-scope design — PR #22.)
+Still NOT safe to surface: `people`, `identity_accounts`, `invoices`/`files`/`license_*`. No identity matching algorithm / merge / UAR / orphaned status / provisioning exists yet.
+(Stages 4/4b apps — PR #13/#14; Stage 5 contracts — PR #19; Stage 5b linked panels — PR #20; Stage 6a app-user roster — PR #21; Stage 6b identity read-scope design — PR #22; Stage 6c match status — PR #23.)
 
 ## Current open risks to respect
-`not-hosted-applied`; child tables **not org-scoped for reads** — tenant-only (`people`) or default-deny (`identity_accounts`/`app_user_identity_matches`/`license_*`/`files`/`invoices`); `app_contracts` (`0006`/PR #20) + `app_users` (`0007`/PR #21) are now org-scoped read; see read map [02 §8](./02_SECURITY_AND_RLS.md) (RISK-002, narrowed not closed); no tenant switching /
+`not-hosted-applied`; child tables **not org-scoped for reads** — tenant-only (`people`) or default-deny (`identity_accounts`/`license_*`/`files`/`invoices`); `app_contracts` (`0006`) + `app_users` (`0007`) + `app_user_identity_matches` (`0008`) are now org-scoped read; see read map [02 §8](./02_SECURITY_AND_RLS.md) (RISK-002, narrowed not closed); no tenant switching /
 user provisioning yet (RISK-012); no credential vault; imports/exports destructive-in-legacy
 (don't port — legacy deletes "outdated" users, `onFileLinkedToApp.js:290`); v3 must not miss legacy
 paid-client (OMC/Flywheel) capabilities (RISK-016). Full list:

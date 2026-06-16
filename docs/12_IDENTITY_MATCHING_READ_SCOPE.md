@@ -28,7 +28,7 @@ Schema: [v3-data-model.md](./v3-data-model.md) / `0001_core_schema.sql`. Current
 | Table | Current read | Anchor (what ties a row to an app?) | Sensitive fields |
 |---|---|---|---|
 | `app_users` | **org-scoped read** (`0007`, you can read the row iff you can read its `app_id`) | `app_id` → `apps` (org-readable) | `email`, `display_name`, `external_user_id` (the app's own roster) |
-| `app_user_identity_matches` | **default-deny** | `app_user_id` → `app_users` (org-readable) **and** `person_id` → `people` (tenant-only) | links an app_user to a **person**; `match_method`, `confidence`, `reviewed_by/at` |
+| `app_user_identity_matches` | **org-scoped read** (`0008`, PR #23 — you can read the row iff you can read its `app_user`) | `app_user_id` → `app_users` (org-readable) **and** `person_id` → `people` (tenant-only) | links an app_user to a **person**; `match_method`, `confidence`, `reviewed_by/at` |
 | `people` | **tenant-only** (`is_tenant_member`) | **none** (not tied to any app) | `primary_email`, `full_name`, `manager_email`, `employee_status`, `department`, `title`, `raw_payload` — a full **HR directory** |
 | `identity_accounts` | **default-deny** | **none** (ties to `person_id` → `people`, not to an app) | `email`, `external_id`, `provider`, `status`, `raw_payload` (IdP scrape — may hold tokens/scopes/groups) |
 
@@ -95,13 +95,13 @@ status enum server-side, and a **trap** between them:
 Default to the `security_invoker` view; reach for `SECURITY DEFINER` only when a tenant-only column is
 genuinely required, and then test the scoping explicitly (§7.7).
 
-## 5. Exact future RLS policy shape (the one concrete recommendation)
-When a future PR implements matched/unmatched, add **one** org-scoped `SELECT` policy on
-`app_user_identity_matches`, mirroring `0007` (reuse `app_users` RLS via `EXISTS`, with an **explicit
-tenant-bind** so the policy is self-sufficient — see T29h):
+## 5. The org-scoped match-read policy — **IMPLEMENTED in `0008` (PR #23)**
+This was the design's one concrete recommendation; **`0008` ships it verbatim** (proven by T30). One
+org-scoped `SELECT` policy on `app_user_identity_matches`, mirroring `0007` (reuse `app_users` RLS via
+`EXISTS`, with an **explicit tenant-bind** so the policy is self-sufficient — see T29h/T30h):
 
 ```sql
--- FUTURE (not in this PR). Read a match row iff you can read its app_user (which is itself org-scoped).
+-- Shipped in 0008. Read a match row iff you can read its app_user (which is itself org-scoped).
 create policy "org members read related app_user_identity_matches"
 on public.app_user_identity_matches
 for select using (
@@ -163,27 +163,27 @@ A future identity/matching PR is **not allowed to ship UI** until all of these p
 8. Existing `app_contracts` (T28) and `app_users` (T29) org-read still pass; `people`/`identity` default
    posture (T27 27a/27b) unchanged for tenant owner.
 
-## 8. Current guardrails — already proven (this PR adds no new assertions)
-The current safe posture this design depends on is **already pinned** by the existing suite — this PR
-documents the mapping instead of duplicating tests (see [rls_test_plan](../supabase/tests/rls_test_plan.md)):
+## 8. Guardrails — proven by the suite
+PR #23 implemented §5 (migration `0008`) and added **T30**; the `app_user_identity_matches` default-deny
+assertions in T27 27a / T29 29f were dropped (they would now be wrong). The safe posture is pinned by:
 | Guardrail (today) | Proven by |
 |---|---|
-| Tenant **owner** reads 0 `identity_accounts` and 0 `app_user_identity_matches` (default-deny) | **T27 27a** |
-| Org-only user reads 0 `people` (tenant-only) | **T27 27b**, **T29 29f** |
-| Org-only user reads 0 `identity_accounts` and 0 `app_user_identity_matches` (default-deny) | **T29 29f** |
-| Org-only user **can** read `app_users` for readable apps (`0007`) | **T29 29b–29d** (29a is the tenant-owner baseline) |
-| `app_contracts` org-read (`0006`) still holds | **T28**, **T29 29g** |
+| Tenant **owner** reads 0 `identity_accounts` (default-deny) | **T27 27a**, **T30 30a** |
+| Org-only user reads 0 `people` (tenant-only) | **T27 27b**, **T29 29f**, **T30 30b** |
+| Org-only user reads 0 `identity_accounts` (default-deny) | **T29 29f**, **T30 30b** |
+| Org-only user reads `app_user_identity_matches` **only** for readable app_users; a match read grants no `people`/`identity_accounts` read | **T30 30b–30d** (cross-tenant/non-member 30e; corrupt-row 30h) |
+| Org-only user reads `app_users` for readable apps (`0007`) | **T29 29b–29d**, **T30 30g** |
+| `app_contracts` org-read (`0006`) still holds | **T28**, **T29 29g**, **T30 30g** |
+| `app_user_identity_matches` has **no `DELETE`** policy (delete denied) | **T30 30f** |
 | No service-role assumption (suite runs as `authenticated`) | whole suite |
 
-Because all of the above already pass, **no migration and no new test are added by this PR.** If a
-reviewer wants a single named "identity guardrail" block, the future implementing PR will convert the
-relevant T29 29f assertions in-place (they are the rows that must flip when the match policy lands).
-
 ## 9. Honest status (do not overclaim)
-- Identity matching: **not implemented.**
+- `app_user_identity_matches` org-read (match **status**): **implemented** (`0008`, PR #23 — §5; T30). Status only, no PII.
+- Identity matching **algorithm**: **not implemented** (matches are written by a future server-side job).
 - Unmanaged-account / UAR / stale-users report: **not implemented.**
+- Managed/orphaned/deactivated status: **not implemented** (needs §4's `security_invoker` view; not built).
+- `people` merge: **not implemented.** Provisioning / deprovisioning: **not implemented.**
 - `identity_accounts` read: **not implemented** (default-deny).
 - `people` org-read: **not implemented** (tenant-only; this design recommends it stays that way).
-- `app_user_identity_matches` org-read: **not implemented** (default-deny; §5 is the *future* shape).
-- RISK-002: **open** (narrowed for `app_contracts`/`app_users` only). RISK-016 / OMC parity: **open.**
+- RISK-002: **open** (narrowed for `app_contracts`/`app_users`/`app_user_identity_matches`). RISK-016 / OMC parity: **open.**
 - OMC/Flywheel cutover: **blocked.**

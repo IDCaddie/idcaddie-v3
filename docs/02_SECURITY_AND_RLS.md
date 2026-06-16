@@ -3,8 +3,9 @@
 **Canonical source for: the authorization model.** Every other doc links here instead of
 re-explaining RLS. Implemented in `supabase/migrations/0002_org_scoped_rls.sql`,
 `0003_org_access_union.sql`, `0004_destructive_delete_hardening.sql`, and
-`0006_org_scoped_app_contracts_read.sql`, and `0007_org_scoped_app_users_read.sql`; proven by
-`supabase/tests/org_rls_test.sql` (136 assertions, T1–T29, `verified-local`, `ci-enforced` via
+`0006_org_scoped_app_contracts_read.sql`, `0007_org_scoped_app_users_read.sql`, and
+`0008_org_scoped_app_user_identity_matches_read.sql`; proven by
+`supabase/tests/org_rls_test.sql` (152 assertions, T1–T30, `verified-local`, `ci-enforced` via
 PR #2). Schema: [v3-data-model.md](./v3-data-model.md).
 Design rationale & legacy evidence: [v3-security-model.md](./v3-security-model.md),
 [current-security-risk-map.md](./current-security-risk-map.md).
@@ -119,11 +120,12 @@ manage all membership rows; **admins** manage only non-`owner` rows and cannot w
 | 15 | Tenant **owner/admin/editor** hard-deletes a core evidence row | denied (0 rows); row survives; editor `UPDATE` still works | no `DELETE` policy (`0004`) | T24 |
 | 16 | App inventory/detail reads still valid after hardening | rows returned | SELECT policies untouched | T25 |
 | 17 | Child/link row references a parent in **another tenant** | write fails (foreign_key_violation); valid same-tenant + nullable links still insert | composite same-tenant FKs (`0005`) | T26 |
-| 18 | Org-only user reads the **tenant-only** child table `people`; any user reads a **default-deny** table (`identity_accounts`/`files`/`invoices`/`license_*`/`app_user_identity_matches`) | 0 rows | tenant-only `SELECT` is `is_tenant_member`-gated; default-deny has no policy | T27 |
+| 18 | Org-only user reads the **tenant-only** child table `people`; any user reads a **default-deny** table (`identity_accounts`/`files`/`invoices`/`license_*`) | 0 rows | tenant-only `SELECT` is `is_tenant_member`-gated; default-deny has no policy | T27 |
 | 19 | Org-only user reads an `app_contracts` link tied to an app/contract they **cannot** read (or a cross-tenant / non-member read) | 0 rows; reads only links to a readable app **or** contract | `0006` org-scoped `SELECT` (reuses `apps`/`contracts` RLS; tenant-bound by `0005`) | T28 |
 | 20 | Org-only user reads `app_users` for an app they **cannot** read (or a cross-tenant / non-member read) | 0 rows; reads only users of apps they can read | `0007` org-scoped `SELECT` (reuses `apps` RLS; tenant-bound by `0005`) | T29 |
+| 21 | Org-only user reads `app_user_identity_matches` for an app_user they **cannot** read (or cross-tenant / non-member); a match read grants no `people`/`identity_accounts` read | 0 rows; reads only matches of readable app_users; `people`/`identity_accounts` stay 0 | `0008` org-scoped `SELECT` (reuses `app_users` RLS; explicit tenant-bind) | T30 |
 
-Test labels map to the `-- Test N` blocks in `org_rls_test.sql` (29 scenarios; T3+4 and
+Test labels map to the `-- Test N` blocks in `org_rls_test.sql` (30 scenarios; T3+4 and
 T22+23 are combined blocks).
 
 ## 8. Read-scope inventory — what each table actually exposes (canonical)
@@ -147,7 +149,7 @@ policy — unreadable by any normal `authenticated` user; only service-role / `S
 | `app_contracts` | link | tenant members **+ related-org** — readable if you can read the linked **app OR contract** (`0006`) | ✅ read-only linked panels (PR #20); no link/unlink UI |
 | `audit_logs` | audit | tenant members (append-only; insert via trusted paths) | read-only viewer later |
 | `identity_accounts` | child | **default-deny** (no policy) | ❌ no read policy |
-| `app_user_identity_matches` | link | **default-deny** (no policy) | ❌ no read policy |
+| `app_user_identity_matches` | link | tenant members **+ related-org** — readable if you can read the linked **app_user** (`0008`) | ✅ read-only **match status** on `/apps/[id]` (PR #23); no PII, no edit |
 | `license_rules` | child | **default-deny** (no policy) | ❌ no read policy |
 | `license_evaluations` | child | **default-deny** (no policy) | ❌ no read policy |
 | `files` | child | **default-deny** (no policy) | ❌ no read policy |
@@ -169,6 +171,11 @@ is itself filtered by the parent's SELECT policies for the invoking user, so it 
   ALSO pins `a.tenant_id = app_users.tenant_id` explicitly (mirroring `0003`), so the policy is
   self-sufficient for tenant isolation — even a planted FK-bypassed corrupt cross-tenant row is denied
   (proven by T29h). Powers the read-only "App users" roster on `/apps/[id]`. Proven by **T29**.
+- **`app_user_identity_matches`** (`0008`): read a match row iff you can read the linked **`app_user`**
+  (itself org-scoped by `0007`), with the same explicit tenant-bind (denies a planted corrupt row —
+  T30h). Exposes match **status** (`match_method`/`confidence`/`reviewed_at`), **not** person PII —
+  `person_id` stays opaque, and it grants **no** read on `people` (tenant-only) or `identity_accounts`
+  (default-deny, unchanged). Powers the matched/unmatched column on the roster (PR #23). Proven by **T30**.
 
 Both are **read-only** — the tenant-member read and editor `INSERT`/`UPDATE` are unchanged, and **no
 `DELETE`** policy was added. Org-only users see only rows tied to a parent they can read; cross-tenant
@@ -177,19 +184,19 @@ and non-members see none. No identity matching, license evaluation, or provision
 `0007`'s is a safe future follow-up.)
 
 ## 8b. Deferred / known gaps (open in [04_RISK_REGISTER.md](./04_RISK_REGISTER.md))
-- **Identity / account / matching read scope is DESIGNED, not implemented** —
-  [12_IDENTITY_MATCHING_READ_SCOPE](./12_IDENTITY_MATCHING_READ_SCOPE.md). Decision: keep `people`
-  **tenant-only** and `identity_accounts` **default-deny** (no app anchor → not org-scopable); the only
-  future org-scoped identity read is `app_user_identity_matches`, gated on a **readable `app_user`**
-  (mirrors `0007`, §5 of doc 12), exposing match *status* not person PII. **No matching, no UAR, no
-  `identity_accounts`/`people` org-read exists.** Future implementation must land doc 12 §7 tests first.
-- **Child tables not org-scoped for reads (RISK-002, open — narrowed by PR #20/#21):** `people`
+- **Identity / account / matching read scope** — design in
+  [12_IDENTITY_MATCHING_READ_SCOPE](./12_IDENTITY_MATCHING_READ_SCOPE.md). The **match-status** slice is
+  now **implemented** (`0008`/§8a — `app_user_identity_matches` org-scoped read, status only). Still
+  deferred: `people` stays **tenant-only** and `identity_accounts` stays **default-deny** (no app anchor
+  → not org-scopable). **No identity matching algorithm, no people merge, no UAR/orphaned/deactivated
+  status, no `identity_accounts`/`people` org-read exists.** Any of those must land doc 12 §7 tests first.
+- **Child tables not org-scoped for reads (RISK-002, open — narrowed by PR #20/#21/#23):** `people`
   is **tenant-read only** (a tenant member sees every tenant row; an org-only user sees nothing);
-  `identity_accounts`, `app_user_identity_matches`, `license_rules`, `license_evaluations`, `files`,
+  `identity_accounts`, `license_rules`, `license_evaluations`, `files`,
   `invoices` are **default-deny** (no read policy at all). None leak cross-tenant. Org-scoped *read*
   policies + tests are required before any of these is surfaced per-org. (T27 pins this reality.)
-  `app_contracts` (`0006`) and `app_users` (`0007`) are **no longer here** — both are org-scoped for
-  read (§8a). RISK-002 stays open.
+  `app_contracts` (`0006`), `app_users` (`0007`), and `app_user_identity_matches` (`0008`) are **no
+  longer here** — all three are org-scoped for read (§8a). RISK-002 stays open.
 - **Audit retention unresolved:** deletes are blocked, so there is no purge/archival path
   yet; `audit_logs` grows unbounded. Needs a partition/archival design. (RISK-009)
 - **`resource_org_links` + org hierarchy deferred:** today access is column-based and
