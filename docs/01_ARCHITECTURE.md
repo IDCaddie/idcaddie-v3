@@ -14,7 +14,16 @@
 | Hosting | Vercel | `planned` |
 | Tests | SQL/RLS assertions (`psql`), Playwright (future) | RLS lane `ci-enforced`; E2E `planned` |
 
-Dependencies present (`package.json`): `@supabase/supabase-js`, `@supabase/ssr`, `zod`. No ORM — SQL + RLS are the contract.
+Dependencies present (`package.json`): `@supabase/supabase-js`, `@supabase/ssr`, `zod`,
+`@vercel/analytics`, `@vercel/speed-insights`. No ORM — SQL + RLS are the contract.
+
+## Platform telemetry (Vercel)
+`@vercel/analytics` (Web Analytics, PR #5) and `@vercel/speed-insights` (Speed Insights, PR #7)
+are installed; `src/app/layout.tsx` renders bare `<Analytics />` and `<SpeedInsights />` in the
+root layout. They run as **Vercel platform telemetry** — anonymous page views and Core Web Vitals.
+- **No custom events** (no `track()` calls); no PII, tenant IDs, user emails, app/contract names, spend data, tokens, or secrets are sent.
+- They **must not** become a source of truth for product usage, billing, audit, security, authorization, customer reporting, or compliance. Those live in Postgres/RLS and the audit log.
+- Needs a production privacy/telemetry review before any real customer traffic is pointed at v3 ([04 · RISK-013](./04_RISK_REGISTER.md)).
 
 ## Repo structure
 ```

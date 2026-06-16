@@ -7,6 +7,24 @@ from PRs verified via `git log` / `gh pr list`.
 
 ---
 
+### PR #7 — Install Vercel Speed Insights · 2026-06-16
+- **Category:** infra / telemetry (Vercel agent PR, reconciled per [08](./08_CODE_AND_DOCS_STANDARD.md)).
+- **What:** added `@vercel/speed-insights@^2.0.0` and a bare `<SpeedInsights />` in the root
+  layout (`src/app/layout.tsx`), alongside the existing `<Analytics />` (PR #5). 3 files only:
+  `package.json`, `package-lock.json`, `layout.tsx`.
+- **Why:** Vercel platform performance telemetry (Core Web Vitals).
+- **Security/privacy impact:** none to DB / RLS / auth / service-role / DNS; **no custom events**;
+  no PII/tenant/customer/business data sent. Platform telemetry only — not an audit/product/billing
+  source of truth. Needs a production privacy review before customer traffic ([04 · RISK-013](./04_RISK_REGISTER.md)).
+- **Tests run (local, verified):** `npm run lint` clean; `npm run build` exit 0; `check-auth-safety.sh`
+  6/6 + scan clean; `check-migration-safety.sh` pass; `test-rls.sh` → `ALL ORG-RLS ASSERTIONS PASSED`;
+  `check-docs-updated.sh` 0/0; `pr-review-summary.sh` pass.
+- **Docs updated:** this reconciliation — `00`, `01` (platform-telemetry section), `04` (RISK-013),
+  `07` (telemetry review section), `08` (vendor/bot PR rule), `09`, `README_START_HERE`, PR template checkbox.
+- **Follow-ups:** production privacy/telemetry review (RISK-013); do not expand telemetry or add custom events.
+
+---
+
 ### PR #6 — Add auth session skeleton · 2026-06-15
 - **Category:** app / auth / security.
 - **What:** `@supabase/ssr` clients — `src/lib/supabase/{env,client,server,proxy}.ts` (browser +

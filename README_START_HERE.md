@@ -23,6 +23,7 @@ and there is **no product UI yet**. Authoritative status: [`docs/00_PRODUCT_STAT
 - Do **not** rely on frontend filtering for authorization — RLS decides.
 - Do **not** weaken RLS or edit a merged migration — fix forward.
 - Do **not** build UI ahead of the foundation it depends on.
+- **Telemetry:** Vercel preview/platform telemetry (Web Analytics + Speed Insights) exists, platform-only. Do **not** add production/custom domains yet, add custom events, or treat platform telemetry as an audit/product source of truth ([04 · RISK-013](docs/04_RISK_REGISTER.md)).
 - Every PR updates docs / risk / changelog, or justifies why not.
 
 ## Required checks before any PR

@@ -28,6 +28,12 @@ and the living-docs policy. Reviewer enforcement: [07_P0_REVIEW_CHECKLIST](./07_
 AI/generated code is reviewed like any other: read every line, confirm it matches an actual
 need, delete speculative breadth, verify auth/tests. Do not merge code you cannot explain.
 
+### Vendor / bot agent PRs (Vercel, etc.)
+Automated vendor PRs are **not exempt** from docs / risk / changelog discipline. A small,
+low-risk vendor PR (e.g. Vercel telemetry) may be accepted, but it must be reconciled into the
+docs, risk register, and changelog **before** it is marked ready/merged — by a human or agent,
+not the bot. Verify what it actually changed (read the diff), then document it honestly.
+
 ### When to abstract (and not)
 Abstract on the **third** real duplication, not the first. One implementation ⇒ no
 interface/factory. A value that never changes ⇒ a constant, not config. Prefer deleting
