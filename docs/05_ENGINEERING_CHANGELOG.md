@@ -7,6 +7,30 @@ from PRs verified via `git log` / `gh pr list`.
 
 ---
 
+### PR #5 — Add auth session skeleton · 2026-06-15
+- **Category:** app / auth / security.
+- **What:** `@supabase/ssr` clients — `src/lib/supabase/{env,client,server,proxy}.ts` (browser +
+  user-scoped server, anon key only); `src/proxy.ts` (Next.js 16 **Proxy** — the renamed
+  Middleware — for session refresh + protected-route redirect); routes `login/` (email+password
+  Server Action), `logout/` (route handler), `(authenticated)/` group with a server-side guard;
+  `src/lib/auth/{session,tenant-context}.ts` (tenant-context is a Stage-3 placeholder). Replaced
+  the Create-Next-App starter `src/app/page.tsx` (it collided with the authenticated group's `/`).
+  Added `scripts/check-auth-safety.sh` (+ selftest), wired into `review-discipline.yml`.
+- **Why:** the minimum safe identity/session foundation future app UI builds on, without
+  product UI, migrations, or service-role keys.
+- **Security impact:** introduces the auth boundary. No service-role key anywhere in `src/`
+  (enforced by `check-auth-safety.sh`); authorization over data remains RLS. Proxy does **not**
+  make tenant/org decisions or read app data.
+- **Tenant/RLS impact:** none to RLS. Tenant/org context is a placeholder; no data is read yet.
+- **Migration impact:** none — no DB change (verified by `check-migration-safety.sh`; `test-rls.sh` still green).
+- **Tests run (local, verified):** `npm run lint` clean; `npm run build` exit 0 (Proxy detected);
+  `check-auth-safety.sh selftest` 6/6 + scan clean; `check-migration-safety.sh` pass; `test-rls.sh`
+  → `ALL ORG-RLS ASSERTIONS PASSED`; `check-docs-updated.sh` / `pr-review-summary.sh` pass.
+- **Docs updated:** `00`, `01`, `06`, `04` (closed RISK-005→C06, opened RISK-012), `09`, `README_START_HERE`.
+- **Follow-ups:** not exercised against hosted Supabase Auth (RISK-001); Stage 3 tenant/org context next.
+
+---
+
 ### PR #4 — Add ID Caddie clean-app operating system · 2026-06-15
 - **Category:** docs / process / CI.
 - **What:** Canonical doc set `docs/00`–`10`, true-entry `README_START_HERE.md`, PR template,

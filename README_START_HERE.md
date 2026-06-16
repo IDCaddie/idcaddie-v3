@@ -12,9 +12,10 @@ authorization source of truth**. We preserve validated workflows and port **no**
 Firebase code.
 
 ## Current status (one line)
-**Phase 1 — secure data/RLS foundation only.** Schema + RLS exist, are tested
-locally, and are CI-enforced; **nothing is applied to hosted Supabase** and there
-is **no product UI yet**. Authoritative status: [`docs/00_PRODUCT_STATUS.md`](docs/00_PRODUCT_STATUS.md).
+**Phase 2 — auth/session skeleton on the RLS foundation.** Schema + RLS are tested
+locally and CI-enforced; an auth skeleton (login, server session, protected routes) is
+built but **not exercised against hosted Supabase**, tenant/org context is a placeholder,
+and there is **no product UI yet**. Authoritative status: [`docs/00_PRODUCT_STATUS.md`](docs/00_PRODUCT_STATUS.md).
 
 ## Non-negotiables (apply to every change)
 - Do **not** run against hosted Supabase — local-first only.
@@ -29,9 +30,11 @@ is **no product UI yet**. Authoritative status: [`docs/00_PRODUCT_STATUS.md`](do
 bash scripts/check-migration-safety.sh selftest   # the checker checks itself
 bash scripts/check-migration-safety.sh            # migration numbering + unsafe-keyword lint
 bash scripts/test-rls.sh                           # apply ALL migrations to throwaway Postgres + run RLS suite (needs Docker)
+bash scripts/check-auth-safety.sh                  # src/ has no service-role/hardcoded keys/client-side role storage
 bash scripts/check-docs-updated.sh                 # docs-drift gate
 bash scripts/pr-review-summary.sh                  # categorize the diff + reviewer focus
 ```
+For app/UI changes also run `npm run lint` and `npm run build`.
 All of these also run in CI on every PR (`.github/workflows/`).
 
 ## Quick starts

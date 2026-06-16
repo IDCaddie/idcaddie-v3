@@ -11,8 +11,8 @@ passed, CI green.
 | # | Stage | Status |
 |---|-------|--------|
 | 1 | Clean-app operating system (docs/CI/foundation) | `implemented` |
-| 2 | Auth/session skeleton | `planned` (next) |
-| 3 | Tenant/org context (read-only) | `planned` |
+| 2 | Auth/session skeleton | `implemented` (PR #5) |
+| 3 | Tenant/org context (read-only) | `planned` (next) |
 | 4 | Read-only app inventory | `planned` |
 | 5 | Contracts | `planned` |
 | 6 | People / app users | `planned` |
@@ -31,18 +31,21 @@ passed, CI green.
 - **Goal:** repo is self-explaining, self-checking, RLS-tested. **Done:** docs 00–10, RLS
   suite + safety + docs-drift CI all green.
 
-### Stage 2 — Auth/session skeleton (next)
-- **Goal:** Supabase Auth login + server-side session + route protection. No business data.
-- **Prereq:** Stage 1.
-- **P0 risks:** session in client only; service-role key leaking into request paths; auth bypass.
-- **Tests:** session presence/absence redirects; no service-role key in client bundle (grep test).
-- **Docs:** `00`, `01` (server/client boundary), `05`.
-- **Don't build yet:** business reads/writes, tenant switching UI.
-- **Done:** an authenticated user has a server session; unauthenticated users are redirected.
+### Stage 2 — Auth/session skeleton ✅ (PR #5)
+- **Goal:** Supabase Auth login + server-side session + route protection. No business data. **Done.**
+- **Built:** `@supabase/ssr` browser + user-scoped server clients (anon key only); `src/proxy.ts`
+  (Next.js 16 Proxy) for session refresh + protected-route redirect; `login/` (email+password
+  Server Action), `logout/` route handler, `(authenticated)/` group with a server-side guard;
+  `src/lib/auth/` session + tenant-context placeholder.
+- **Verified:** `npm run build` + lint clean; `scripts/check-auth-safety.sh` (no service-role /
+  no hardcoded keys / no client-side role storage). **Not** exercised against hosted Supabase Auth.
+- **Deliberately not built:** business reads/writes, tenant switching UI, signup/tenant creation,
+  OAuth/SAML/SCIM, tenant/org context resolution.
 
-### Stage 3 — Tenant/org context (read-only)
+### Stage 3 — Tenant/org context (read-only) (next)
 - **Goal:** derive the user's tenant + org memberships server-side; expose read-only context.
-- **Prereq:** Stage 2.
+  Replaces the `src/lib/auth/tenant-context.ts` placeholder.
+- **Prereq:** Stage 2 ✅.
 - **P0 risks:** tenant/org from client input instead of membership rows; RLS bypass via service-role.
 - **Tests:** RLS-scoped read returns only the user's tenant; cross-tenant returns 0 (extend `org_rls_test.sql` patterns at the app layer with an integration test).
 - **Done:** context comes only from membership rows; proven RLS-scoped read end-to-end.

@@ -19,7 +19,8 @@ Used consistently across all docs. Never blur these.
 | `legacy-production` | the current Firebase system still serving users |
 
 Today: migrations are `implemented` + `verified-local` + `ci-enforced`, **not** `staged`/
-`production-applied`. Firebase is `legacy-production`. v3 UI is `planned`.
+`production-applied`. The auth/session skeleton is `implemented` (not hosted-exercised).
+Firebase is `legacy-production`. v3 product UI is `planned`.
 
 ## Canonical docs (this set)
 | Doc | Canonical for | Reader | Status |

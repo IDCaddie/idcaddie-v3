@@ -21,10 +21,10 @@ foundation on Postgres with RLS as the authorization source of truth. We **prese
 validated workflows, port no Firebase code**.
 
 ## Current phase
-**Phase 1 — secure data/RLS foundation.** No product UI is built yet (only the
-Create-Next-App shell in `src/app/`). The database schema and its access control
-exist, are tested locally, and are enforced in CI — but are **not applied to any
-hosted Supabase environment**.
+**Phase 2 — auth/session skeleton (in progress).** The secure data/RLS foundation
+(Phase 1) is complete; the **auth/session skeleton** is now built (login, server-side
+session via Proxy, protected route group) but tenant/org context resolution is **not**
+wired yet. No product UI exists. Nothing is **applied to any hosted Supabase environment**.
 
 ## Merged PRs (verified from `git log` / `gh pr list`)
 | PR | Commit | What it added |
@@ -32,8 +32,10 @@ hosted Supabase environment**.
 | #1 | `f7c5c75` | Org-scoped RLS foundation (`0002`) + related-org read model (`0003`) + the `org_rls_test.sql` suite. Closed two live-verified bugs: cross-tenant org-pointer leak and tenant-admin self-promotion. |
 | #2 | `bfffb84` | `scripts/test-rls.sh` + `.github/workflows/rls-tests.yml` — applies all migrations to a throwaway Postgres and runs the RLS suite on every PR. |
 | #3 | `ee59c6c` | Migration discipline: `migration-workflow.md`, `migration-checklist.md`, `scripts/check-migration-safety.sh`, `.github/workflows/migration-safety.yml`. |
+| #4 | `b245209` | Clean-app operating system: canonical docs `00`–`10`, PR template, docs-drift + reviewer-aid CI (`review-discipline.yml`), `check-docs-updated.sh` / `pr-review-summary.sh`. |
 
 Migration `0001` (core schema) predates the numbered PRs (rebuild starter pack).
+PR #5 (this branch, auth/session skeleton) is **not yet merged**.
 
 ## Status of the foundation
 | Item | Status |
@@ -42,8 +44,9 @@ Migration `0001` (core schema) predates the numbered PRs (rebuild starter pack).
 | RLS model (tenant isolation, steward writes, related-org reads, audit immutability, no admin self-promotion) | `implemented`, `verified-local` (66 assertions in `org_rls_test.sql`), `ci-enforced` (PR #2) |
 | Migration safety (numbering, unsafe keywords) | `ci-enforced` (PR #3) |
 | Migrations applied to hosted Supabase (staging/prod) | **not done** — `not-hosted-applied` |
-| Product UI / app workflows | `planned` (only Next shell exists) |
-| Auth/session, tenant/org context wiring | `planned` |
+| Auth/session skeleton (login, server session via Proxy, protected route group, no service-role) | `implemented` (PR #5); `verified-local` (build + `check-auth-safety.sh`); **not** exercised against hosted Supabase Auth |
+| Tenant/org context resolution (memberships → scoped reads) | `planned` (next; placeholder stub only — `src/lib/auth/tenant-context.ts`) |
+| Product UI / app workflows | `planned` (auth shell only; no inventory/contracts/etc.) |
 | Child-table org scoping (`app_users`, `files`, `invoices`, `license_*`, `app_contracts`) | `deferred` (still tenant-scoped) |
 | `resource_org_links` relationship table + org hierarchy | `deferred` |
 | Imports/exports, integrations/connectors, credential vault | `deferred` |
@@ -54,6 +57,9 @@ Migration `0001` (core schema) predates the numbered PRs (rebuild starter pack).
   Supabase's `auth.uid()`/roles but is not Supabase itself; first hosted apply is unproven.
 - The GitHub-hosted CI run validates the Docker flow on `ubuntu-latest`; confirm it
   stays green (it is `ci-enforced`, not assume-green).
+- The auth skeleton **compiles and passes static safety checks**, but login/logout have
+  not been exercised against a live Supabase Auth instance (no hosted env). The end-to-end
+  login → session → protected-route flow is unproven against real Supabase.
 
 ## Key decisions (ADR-lite)
 One-line decisions; deep rationale in the linked canonical docs.
@@ -78,12 +84,13 @@ One-line decisions; deep rationale in the linked canonical docs.
 - **Deploy v3 today?** No. No UI, no hosted DB, legacy Firebase is still production.
 - **Safely keep building on this foundation?** Yes — *after* `scripts/check-docs-updated.sh`,
   `check-migration-safety.sh`, and `test-rls.sh` pass. The RLS model is tested and CI-enforced.
-- **Next safest build step?** The auth/session skeleton, then read-only tenant/org
-  context — no data mutation, RLS already covers reads. See [06_BUILD_SEQUENCE.md](./06_BUILD_SEQUENCE.md).
+- **Next safest build step?** Tenant/org context resolution (read-only) on top of the
+  auth skeleton — no data mutation, RLS already covers reads. See [06_BUILD_SEQUENCE.md](./06_BUILD_SEQUENCE.md).
 
 ## Next recommended PRs
-1. Auth/session skeleton (Supabase Auth, server-side session, route protection) — no business data writes.
-2. Tenant/org context provider (read-only), proving RLS-scoped reads end-to-end.
-3. Read-only app inventory page (first real screen) over `apps`, RLS-scoped.
+1. Tenant/org context resolution (read-only): derive memberships server-side from the
+   membership tables, proving an RLS-scoped read end-to-end. Replaces the placeholder stub.
+2. Read-only app inventory page (first real screen) over `apps`, RLS-scoped.
+3. First steward-only write surface (e.g. contracts), audited.
 
 (These are `planned`. Each must follow [07_P0_REVIEW_CHECKLIST.md](./07_P0_REVIEW_CHECKLIST.md) and update [04](./04_RISK_REGISTER.md)/[05](./05_ENGINEERING_CHANGELOG.md).)

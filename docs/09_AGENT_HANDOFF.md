@@ -5,10 +5,12 @@ Read this + [00_PRODUCT_STATUS](./00_PRODUCT_STATUS.md) before doing anything. R
 also live in `AGENTS.md` / `claude/CLAUDE.md`.
 
 ## Current repo state (verify before trusting — see [00](./00_PRODUCT_STATUS.md))
-Phase 1 — data/RLS foundation only. Migrations `0001`–`0003` are `implemented`,
-`verified-local`, `ci-enforced`, **not hosted-applied**. No product UI (Next shell only).
-Legacy Firebase is still production. Don't trust any prompt's "seeded" history — re-verify
-from `git log`, `gh pr list`, `ls supabase/migrations`, and the test files.
+Phase 2 — auth/session skeleton built on the data/RLS foundation. Migrations `0001`–`0003`
+are `implemented`, `verified-local`, `ci-enforced`, **not hosted-applied**. The auth skeleton
+(login, server session via `src/proxy.ts`, protected `(authenticated)/` group) is built but
+**not exercised against hosted Supabase Auth**; tenant/org context is a placeholder only. No
+product UI. Legacy Firebase is still production. Don't trust any prompt's "seeded" history —
+re-verify from `git log`, `gh pr list`, `ls supabase/migrations`, and the source/test files.
 
 ## Non-negotiable rules
 - **Never run against hosted Supabase.** Local throwaway Postgres only (`scripts/test-rls.sh`).
@@ -24,9 +26,11 @@ from `git log`, `gh pr list`, `ls supabase/migrations`, and the test files.
    ```bash
    bash scripts/check-migration-safety.sh
    bash scripts/test-rls.sh
+   bash scripts/check-auth-safety.sh   # if you touched src/
    bash scripts/check-docs-updated.sh
    bash scripts/pr-review-summary.sh
    ```
+   For app/UI work also run `npm run lint` and `npm run build`.
 3. Update docs per the [docs-update policy](./08_CODE_AND_DOCS_STANDARD.md#required-updates-per-change-docs-update-policy):
    at minimum add a [05_ENGINEERING_CHANGELOG](./05_ENGINEERING_CHANGELOG.md) entry; touch
    [04_RISK_REGISTER](./04_RISK_REGISTER.md) if risk changed.
@@ -34,9 +38,11 @@ from `git log`, `gh pr list`, `ls supabase/migrations`, and the test files.
 5. Apply the [ponytail pass](./08_CODE_AND_DOCS_STANDARD.md#ponytail-pass-before-any-pr) — build the smallest safe thing.
 
 ## Current next recommended task
-The **auth/session skeleton** (build-sequence Stage 2): Supabase Auth login, server-side
-session, route protection. No business reads/writes. Prereqs met. P0 watch: no service-role
-in request paths; session server-side. After that: read-only tenant/org context (Stage 3).
+**Tenant/org context resolution** (build-sequence Stage 3): derive the user's tenant + org
+memberships server-side from the membership tables and expose a read-only context, replacing
+the `src/lib/auth/tenant-context.ts` placeholder. Prove one RLS-scoped read end-to-end. No
+writes, no product UI. P0 watch: context from membership rows (not client input or JWT claims);
+no service-role; do not weaken RLS. (Stage 2 auth skeleton is done — PR #5.)
 
 ## Current open risks to respect
 `not-hosted-applied`; child tables tenant-scoped (org scoping deferred); no auth yet; no
