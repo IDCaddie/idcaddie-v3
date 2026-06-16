@@ -55,6 +55,11 @@ bash scripts/seed-local-demo.sh --keep   # leave the local DB up on 127.0.0.1:55
 Local-only, hosted-proof, all-synthetic data. **Never** hosted-apply the fixture
 (`supabase/fixtures/local_demo.sql` is not a migration) — see [03](docs/03_DATABASE_AND_MIGRATIONS.md#localdemo-fixture-not-a-migration).
 
+Regenerate the typed `Database` after a migration (local-only, hosted-proof):
+```bash
+bash scripts/gen-types-local.sh          # → src/lib/database.types.ts (throwaway DB; never --linked)
+```
+
 ## Quick starts
 - **Reviewer (Mike/Jon):** [00 Product Status](docs/00_PRODUCT_STATUS.md) → [04 Risk Register](docs/04_RISK_REGISTER.md) → [05 Changelog](docs/05_ENGINEERING_CHANGELOG.md).
 - **Security reviewer:** [02 Security & RLS](docs/02_SECURITY_AND_RLS.md) → `supabase/tests/org_rls_test.sql` → [04 Risk Register](docs/04_RISK_REGISTER.md) → [07 P0 Checklist](docs/07_P0_REVIEW_CHECKLIST.md).
