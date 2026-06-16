@@ -37,6 +37,12 @@ that now ship** (apps, app detail, contracts, contract detail, linked panels, ap
 status, account summary — all RLS-scoped, read-only). **No write UI, no UAR, no matching algorithm, no
 imports/exports, no license/spend, no hosted apply.** Cutover remains **blocked** (§4).
 
+> **This table is the capability *scorecard*.** The finer-grained, per-workflow **UX parity contract**
+> (legacy fields/buttons/filters/exports → v3, with the `needs legacy inspection` unknowns and the
+> "same product, better backend / no user-visible regression" rule) is
+> [14_LEGACY_UX_WORKFLOW_PARITY_MAP](./14_LEGACY_UX_WORKFLOW_PARITY_MAP.md). Cutover is gated on **workflow
+> parity there**, not on this scorecard or RLS readiness alone.
+
 | Area | Legacy Firebase capability | Evidence (legacy paths) | v3 status today | Required v3 PR/stage | Parity target | Security improvement in v3 | Status |
 |---|---|---|---|---|---|---|---|
 | Authentication / login | Firebase Auth email/pw + SAML + OIDC; client-side `AuthGuard` | `frontend-v2/src/app/login/page.tsx`, `services/samlAuth.ts`, `services/oidcAuth.ts`, `components/AuthGuard.tsx` | email/pw skeleton + server session (Proxy) | done (PR #6); SSO = Stage ≥12 | email/pw at launch; SSO follows | server-side session + RLS, not client guard | `in-progress` |
