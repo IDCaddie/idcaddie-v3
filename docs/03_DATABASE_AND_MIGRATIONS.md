@@ -15,6 +15,7 @@ links them rather than restating:
 | `0001_core_schema.sql` | Core tables (tenants, memberships, organizations, apps, contracts, app_contracts, people, identity_accounts, app_users, matches, license rules/evaluations, files, invoices, audit_logs); `tenant_id` + RLS enabled; `is_tenant_member` / `has_tenant_role`; baseline tenant policies. | starter (pre-PR) |
 | `0002_org_scoped_rls.sql` | Org-scoped RLS: org helpers, steward-write policies, audit append-only trigger, `enforce_owning_org_tenant`, tenant-admin self-promotion fix. | PR #1 |
 | `0003_org_access_union.sql` | Related-org **read** model (union of owning-org columns); broadened integrity trigger to all access org FKs. | PR #1 |
+| `0004_destructive_delete_hardening.sql` | Remove normal authenticated **hard-delete** from core evidence tables (`organizations`/`apps`/`contracts`/`app_contracts`/`people`/`app_users`): drop broad `FOR ALL` manage policies, recreate as `INSERT` + `UPDATE` only (no `DELETE`). RLS-only (no schema change). | PR #16 |
 
 ## Workflow (summary — full rules in [migration-workflow.md](./migration-workflow.md))
 1. **Local first.** Never develop against hosted Supabase; never use service-role keys for normal dev.

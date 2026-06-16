@@ -16,6 +16,7 @@ checked against is [02_SECURITY_AND_RLS.md](./02_SECURITY_AND_RLS.md).
 - ❌ A tenant-owned table without `tenant_id` + RLS.
 - ❌ An org FK used for access without tenant-binding (in `enforce_owning_org_tenant` **and** the policy).
 - ❌ A merged migration edited (not fixed forward).
+- ❌ A `FOR ALL` (or `FOR DELETE`) policy on a core evidence table (`organizations`/`apps`/`contracts`/`app_contracts`/`people`/`app_users`/…) — it silently grants hard-delete; write policies must be `INSERT`+`UPDATE` only until an audited admin/archive path exists (`0004`).
 - ❌ Telemetry/analytics carrying tenant IDs, app/contract names, user emails, spend data, tokens, secrets, or audit payloads.
 
 ## Section-by-section

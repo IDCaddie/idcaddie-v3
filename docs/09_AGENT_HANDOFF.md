@@ -18,7 +18,8 @@ components, no custom events). Legacy Firebase is still production. Don't trust 
 - **Never run against hosted Supabase.** Local throwaway Postgres only (`scripts/test-rls.sh`).
 - **Never use service-role keys** outside trusted server/test paths; never in the client.
 - **Never weaken RLS**; never filter for security in the client.
-- **Never edit a merged migration** (`0001`–`0003`) — fix forward with `000N_*.sql`.
+- **Never edit a merged migration** (`0001`–`0004`) — fix forward with `000N_*.sql`.
+- **Never re-add hard-delete** to core evidence tables (`organizations`/`apps`/`contracts`/`app_contracts`/`people`/`app_users`): no `FOR ALL`/`FOR DELETE` policy — write surfaces add `INSERT`+`UPDATE` only (`0004`, [02 §4b](./02_SECURITY_AND_RLS.md)). Archive/soft-delete UI is deferred (not built).
 - **Never build UI ahead of its build-sequence prerequisites** ([06](./06_BUILD_SEQUENCE.md)).
 - **Never expand telemetry** — no custom events, no PII/tenant/customer/business data in analytics, no new instrumentation, until a production privacy review ([04 · RISK-013](./04_RISK_REGISTER.md)).
 - **Never hosted-apply the local fixture.** `supabase/fixtures/local_demo.sql` is local-only synthetic data; run it only via `bash scripts/seed-local-demo.sh` (throwaway container). Never add it to `supabase/migrations/`, never `supabase db push`, never point it at the linked project ([04 · RISK-015](./04_RISK_REGISTER.md)).
