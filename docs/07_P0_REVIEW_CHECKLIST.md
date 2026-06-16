@@ -48,6 +48,20 @@ For each: ask the **questions**, watch the **red flags**, demand the **proof**, 
 - *Audit mutation:* an "edit log note" feature adding an `UPDATE audit_logs` path. **Block.**
 - *Service-role:* importing the service-role Supabase client in a client component. **Block.**
 
+## Connected agent permissions
+Reviewing a PR from a connected agent/tool (Claude/Vercel/GitHub/Supabase)? It is allowed to
+branch, edit, open PRs, run checks, read status, and create **preview** deployments — nothing
+more. Block it if it tries to:
+- push to `main`, auto-merge, or bypass/disable CI;
+- add/modify secrets or add a service-role key;
+- run a **hosted** Supabase migration (outside an explicit deployment-runbook PR);
+- change DNS / custom domains or promote a **production** deployment;
+- add telemetry/analytics/auth/billing/imports/exports/integrations **without** docs/risk/changelog.
+
+Require before approving an agent PR: completed PR template · docs/risk/changelog updated (or valid
+`.docs-not-needed.md`) · CI green · a human reviewer (this is you). Full policy: [09 · Connected
+agent permissions](./09_AGENT_HANDOFF.md#connected-agent-permissions); risk: [04 · RISK-014](./04_RISK_REGISTER.md).
+
 ## Verdict guide
 - **Pass:** no blockers; questions answered; proof present; docs/risk/changelog updated.
 - **Changes:** non-blocking gaps (missing test, weak naming, stale doc).

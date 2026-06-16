@@ -39,6 +39,42 @@ components, no custom events). Legacy Firebase is still production. Don't trust 
 4. Self-review against [07_P0_REVIEW_CHECKLIST](./07_P0_REVIEW_CHECKLIST.md).
 5. Apply the [ponytail pass](./08_CODE_AND_DOCS_STANDARD.md#ponytail-pass-before-any-pr) — build the smallest safe thing.
 
+## Connected agent permissions
+**Canonical policy for connected coding agents and external tools** (Claude, Vercel, GitHub,
+Supabase agents, and any future automation). Other docs link here; do not restate it.
+
+These tools act under the same rules as a human contributor, with a hard ceiling: **they
+propose on branches; humans dispose on `main`.** Nothing an agent does reaches `main`,
+production, hosted Supabase, secrets, or DNS without human review.
+
+**Allowed**
+- Create branches.
+- Edit files on branches.
+- Open PRs.
+- Run local checks (the scripts above; lint/build).
+- Read CI / deployment status.
+- Vercel may create **preview** deployments.
+
+**Not allowed**
+- Push directly to `main`.
+- Auto-merge PRs.
+- Bypass or disable CI.
+- Modify repo secrets / add new secrets.
+- Add or use service-role keys (see [non-negotiable rules](#non-negotiable-rules)).
+- Run **hosted** Supabase migrations (local-only; hosted apply is a separate reviewed runbook PR).
+- Change DNS / custom domains.
+- Promote / approve **production** deployments.
+- Silently add telemetry, analytics, auth, billing, imports, exports, or integrations **without** docs / risk / changelog updates.
+
+**Required for every agent-generated PR**
+- The [PR template](../.github/pull_request_template.md) is completed.
+- Docs / risk / changelog updated, or a valid [`.docs-not-needed.md`](../.docs-not-needed.template.md) justification.
+- CI is green.
+- A human reviews before merge.
+- No hosted Supabase changes unless a **deployment-runbook PR** explicitly authorizes them.
+
+Rationale and the automation risk: [04 · RISK-014](./04_RISK_REGISTER.md). Reviewer enforcement: [07 · Connected agent PRs](./07_P0_REVIEW_CHECKLIST.md#connected-agent-permissions). Discipline for vendor/bot PRs: [08](./08_CODE_AND_DOCS_STANDARD.md#vendor-and-bot-agent-prs).
+
 ## Current next recommended task
 **Tenant/org context resolution** (build-sequence Stage 3): derive the user's tenant + org
 memberships server-side from the membership tables and expose a read-only context, replacing
