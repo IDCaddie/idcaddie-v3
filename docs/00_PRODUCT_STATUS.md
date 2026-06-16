@@ -51,7 +51,8 @@ PR #6 (this branch, auth/session skeleton) is **not yet merged**.
 | Tenant switching UI / user provisioning / invites | `planned` (not built; deterministic first tenant chosen — RISK-012) |
 | Local/demo data fixture (synthetic; never hosted-applied) | `implemented` (PR #10 — `supabase/fixtures/local_demo.sql` via `scripts/seed-local-demo.sh`); local-only |
 | Typed DB types + read-only data access layer (server-only) | `implemented` (PR #11 — generated `database.types.ts`, typed server client, `src/lib/data/apps.ts`); `verified-local` (typed build) |
-| Product UI / app workflows | `planned` (auth shell only; no inventory/contracts/etc.) |
+| Read-only app inventory screen (`/apps`) | `implemented` (PR #13 — first product surface, server-rendered, typed DAL, RLS-scoped); `verified-local` (build + RLS query: owner sees all tenant apps, org-only user sees only related, non-member sees none) |
+| Product UI / app workflows (detail, contracts, people, reports, writes) | `planned` (only the read-only apps list exists) |
 | Child-table org scoping (`app_users`, `files`, `invoices`, `license_*`, `app_contracts`) | `deferred` (still tenant-scoped) |
 | `resource_org_links` relationship table + org hierarchy | `deferred` |
 | Imports/exports, integrations/connectors, credential vault | `deferred` |

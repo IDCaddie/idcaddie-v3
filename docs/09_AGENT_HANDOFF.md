@@ -79,10 +79,11 @@ production, hosted Supabase, secrets, or DNS without human review.
 Rationale and the automation risk: [04 · RISK-014](./04_RISK_REGISTER.md). Reviewer enforcement: [07 · Connected agent PRs](./07_P0_REVIEW_CHECKLIST.md#connected-agent-permissions). Discipline for vendor/bot PRs: [08](./08_CODE_AND_DOCS_STANDARD.md#vendor-and-bot-agent-prs).
 
 ## Current next recommended task
-**Read-only app inventory** (build-sequence Stage 4): a first real screen listing `apps` the
-user may read, RLS-scoped, using the resolved tenant/org context. No writes, no client-side
-filtering, no child-table data that's still tenant-only (RISK-002). P0 watch: RLS is the boundary;
-no service-role; org-only users see only related apps. (Stage 3 tenant/org context is done — PR #9.)
+**Read-only app detail** (build-sequence Stage 4b), then **contracts** (Stage 5). Drill into one
+app read-only via a new typed DAL helper (same shape as `listAppsForCurrentUser()`); no writes, no
+client-side filtering, no child-table data still tenant-only (RISK-002). P0 watch: RLS is the boundary;
+no service-role; no caller-supplied id used as an authorization input (RLS scopes the read).
+(Stage 4 read-only app inventory is done — PR #13.)
 
 ## Current open risks to respect
 `not-hosted-applied`; child tables tenant-scoped (org scoping deferred); no tenant switching /

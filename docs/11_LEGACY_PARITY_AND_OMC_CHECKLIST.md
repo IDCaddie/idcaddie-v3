@@ -38,7 +38,7 @@ Status values: `not-started` · `in-progress` · `implemented` · `verified` · 
 |---|---|---|---|---|---|---|---|
 | Authentication / login | Firebase Auth email/pw + SAML + OIDC; client-side `AuthGuard` | `frontend-v2/src/app/login/page.tsx`, `services/samlAuth.ts`, `services/oidcAuth.ts`, `components/AuthGuard.tsx` | email/pw skeleton + server session (Proxy) | done (PR #6); SSO = Stage ≥12 | email/pw at launch; SSO follows | server-side session + RLS, not client guard | `in-progress` |
 | Tenant / company / org model | "Groups" + one Firebase project per customer; custom claims | `company/groups/`, `webapp/.firebaserc`, `permissionSync.js` | tenants + organizations + memberships + RLS; context resolved | done (PR #1/#9) | one tenant = one OMC org tree | row-level isolation (66 RLS assertions) vs per-project | `verified` |
-| App inventory | List apps w/ cost, license util, user metrics, CSV export | `frontend-v2/src/app/(authenticated)/IDCApps/page.tsx` | `apps` table + RLS + typed DAL `listAppsForCurrentUser()` | **Stage 4 (next)** | OMC sees the same inventory | RLS-scoped reads, no client filtering | `not-started` (DAL ready, PR #11) |
+| App inventory | List apps w/ cost, license util, user metrics, CSV export | `frontend-v2/src/app/(authenticated)/IDCApps/page.tsx` | `/apps` screen (PR #13) — read-only list (name/vendor/category/status) via typed DAL; **no cost/license/user metrics or CSV yet** | Stage 4 ✅; metrics/export later | OMC sees the same inventory | RLS-scoped reads, no client filtering (verified: org-only user sees only related apps) | `implemented` (read-only list only) |
 | App detail | App metadata, user roster, linked contracts/invoices, license rules | `IDCApps/[id]/page.tsx` | `apps` + child tables in schema | Stage 4–5 | per-app drill-down | RLS; owning-org fields | `not-started` |
 | Contracts | List/detail/create; renewal & expiry dates; gantt | `contracts/page.tsx`, `contracts/[id]/`, `contracts/create/`, `contracts/gantt/` | `contracts` table (+ renewal/expiry cols) + RLS | Stage 5 | OMC sees contracts + renewal dates | RLS; related-org read | `not-started` |
 | App–contract linking | `linkedDocs.IDCApps` cross-refs, cost allocation % | `contracts/[id]/page.tsx`, `IDCApps/[id]/page.tsx` | `app_contracts` table + RLS | Stage 5 | linked apps↔contracts | tenant-bound FKs | `not-started` |
@@ -60,11 +60,12 @@ Status values: `not-started` · `in-progress` · `implemented` · `verified` · 
 | Vendor/app enrichment scraper | Chrome extension: page email detection (SHA-256 hashed) → Firestore | `extension/content.js`, `extension/auth.js` | none | deferred / maybe-DELETE | optional enrichment | n/a (deferred; privacy review first) | `not-started` |
 
 ## 3. OMC / Omnicom paid-client acceptance checklist
-Practical go/no-go. **All are NO today** — v3 has the secure foundation but no product UI yet.
+Practical go/no-go. **Nearly all NO today** — v3 has the secure foundation and a first read-only
+app-inventory list (PR #13); every other surface is still missing.
 
 | # | Question | Today | Gated by |
 |---|----------|-------|----------|
-| 1 | Can OMC see the same app inventory? | **No** | Stage 4 (read-only inventory) |
+| 1 | Can OMC see the same app inventory? | **Partial** — read-only list (name/vendor/category/status) shipped (PR #13); cost/license/user metrics, CSV export, and app detail still missing | Stage 4 ✅ (list); metrics/detail/export later |
 | 2 | Can OMC see ownership / paying / procurement orgs? | **No** | Stage 4–5 (owning-org fields surfaced) |
 | 3 | Can OMC see contracts and renewal dates? | **No** | Stage 5 |
 | 4 | Can OMC identify unmanaged accounts? | **No** | Stage 6–7 (UAR) |

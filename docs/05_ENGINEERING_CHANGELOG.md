@@ -7,6 +7,27 @@ from PRs verified via `git log` / `gh pr list`.
 
 ---
 
+### PR #13 — Add read-only app inventory · 2026-06-16
+- **Category:** app / product UI (first product surface).
+- **What:** `src/app/(authenticated)/apps/page.tsx` — a server-rendered, **read-only** Apps inventory
+  list (name/vendor/category/status) consuming `listAppsForCurrentUser()` (PR #11 DAL), with safe empty
+  and generic-error states and **no** create/edit/delete. Added a link to it from the protected shell
+  and updated its status badges. The DAL was used **unchanged** (already returned the needed columns).
+- **Why:** restore the first major legacy capability (app inventory) while keeping v3 safer.
+- **Data access / RLS impact:** reads only via the user-scoped server DAL; **RLS is the authority**.
+  No caller-supplied `tenant_id`, no client-side filtering. Verified with the DAL's exact query against
+  the seeded fixture: tenant owner → all 3 apps; org-only Marketing user → only the 2 related apps
+  (RLS `0003` org-union read); non-member → 0.
+- **Security impact:** read-only; no service-role; no browser storage of role/tenant; no secrets.
+- **Migration impact:** **none** (`check-migration-safety.sh` green). **Service-role impact:** none.
+- **Tests run (local, verified):** `npm test` 5/5; `npm run lint`/`build` exit 0 (`/apps` dynamic);
+  `check-auth-safety.sh`, `check-migration-safety.sh`, `check-docs-updated.sh` pass; `test-rls.sh`
+  → `ALL ORG-RLS ASSERTIONS PASSED`; `seed-local-demo.sh` + RLS spot-check (3 / 2 / 0 apps).
+- **Docs updated:** `00`, `06` (Stage 4 ✅, 4b next), `09`, `11` (App-inventory row + OMC #1 → partial), `04` (RISK-006 narrowed), this entry.
+- **Follow-ups:** app detail (Stage 4b), then contracts (Stage 5); cost/license/user metrics + CSV export later. **Not done:** detail, contracts, people, imports, exports, reports, writes.
+
+---
+
 ### PR #12 — Add legacy Firebase capability map and OMC parity checklist · 2026-06-16
 - **Category:** docs / product control.
 - **What:** `docs/11_LEGACY_PARITY_AND_OMC_CHECKLIST.md` — a legacy→v3 capability inventory (22 areas

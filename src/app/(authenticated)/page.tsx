@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { resolveTenantContext } from "@/lib/auth/tenant-context";
 
 export const metadata = { title: "ID Caddie" };
@@ -37,10 +38,16 @@ export default async function ProtectedHome() {
         <Badge label="auth/session" state="on" />
         <Badge label="tenant context" state="on" />
         <Badge label="org context" state="on" />
+        <Badge label="app inventory (read-only)" state="on" />
         <Badge label="tenant switching" state="soon" />
-        <Badge label="product UI" state="off" />
         <Badge label="hosted Supabase" state="off" />
       </div>
+
+      <nav className="text-sm">
+        <Link href="/apps" className="font-medium underline">
+          → Apps inventory (read-only)
+        </Link>
+      </nav>
 
       {ctx === null ? (
         // Should not happen (layout guards), but never crash.
