@@ -756,4 +756,44 @@ insert into public.app_user_identity_matches (id, tenant_id, app_user_id, person
   ('15000000-0000-0000-0000-0000000000a1','11111111-1111-1111-1111-111111111111','a5000000-0000-0000-0000-0000000000a1','7e000000-0000-0000-0000-0000000000a1','email');
 reset role;
 
+-- ── Test 27: child/link READ-scope truth pass (PR #18) ───────────────────────
+-- Asserts the CURRENT read reality — adds NO policy and broadens NO access. Guards against a
+-- future change silently making a default-deny table readable or surfacing a tenant-only child
+-- table as if it were org-scoped. Canonical inventory: docs/02_SECURITY_AND_RLS.md §8.
+-- By now every default-deny table has ≥1 tenant-A row (seeded in fixtures / T26), so a 0 count
+-- proves the *policy* hides it, not an empty table.
+
+-- 27a: DEFAULT-DENY tables (RLS on, NO policy) are unreadable even by a tenant OWNER.
+select set_config('request.jwt.claims','{"sub":"0a000000-0000-0000-0000-000000000001"}',false); -- owner_a (tenant A owner)
+set role authenticated;
+do $$ declare v int; begin
+  select count(*) into v from public.identity_accounts;         assert v = 0, format('T27 owner_a saw %s identity_accounts (default-deny)', v);
+  select count(*) into v from public.app_user_identity_matches; assert v = 0, format('T27 owner_a saw %s app_user_identity_matches (default-deny)', v);
+  select count(*) into v from public.license_rules;             assert v = 0, format('T27 owner_a saw %s license_rules (default-deny)', v);
+  select count(*) into v from public.license_evaluations;       assert v = 0, format('T27 owner_a saw %s license_evaluations (default-deny)', v);
+  select count(*) into v from public.files;                     assert v = 0, format('T27 owner_a saw %s files (default-deny)', v);
+  select count(*) into v from public.invoices;                  assert v = 0, format('T27 owner_a saw %s invoices (default-deny)', v);
+  -- positive control: the SAME owner DOES read the tenant-readable child tables (so the 0s above are policy, not empty tables)
+  select count(*) into v from public.people        where tenant_id='11111111-1111-1111-1111-111111111111'; assert v >= 1, format('T27 owner_a should read tenant people, saw %s', v);
+  select count(*) into v from public.app_users     where tenant_id='11111111-1111-1111-1111-111111111111'; assert v >= 1, format('T27 owner_a should read tenant app_users, saw %s', v);
+  select count(*) into v from public.app_contracts where tenant_id='11111111-1111-1111-1111-111111111111'; assert v >= 1, format('T27 owner_a should read tenant app_contracts, saw %s', v);
+end $$;
+reset role;
+
+-- 27b: TENANT-READ-NOT-ORG-SCOPED tables (people/app_users/app_contracts) are is_tenant_member-gated,
+-- so an ORG-ONLY user (mgr_a1, no tenant membership) reads ZERO from them — they are NOT org-scoped and
+-- must not be surfaced to org-only users until org-scoped read policies exist (RISK-002).
+select set_config('request.jwt.claims','{"sub":"0a000000-0000-0000-0000-0000000000a1"}',false); -- mgr_a1 (org-only, manages Org A1)
+set role authenticated;
+do $$ declare v int; begin
+  select count(*) into v from public.people;        assert v = 0, format('T27 org-only mgr_a1 saw %s people (not org-scoped)', v);
+  select count(*) into v from public.app_users;     assert v = 0, format('T27 org-only mgr_a1 saw %s app_users (not org-scoped)', v);
+  select count(*) into v from public.app_contracts; assert v = 0, format('T27 org-only mgr_a1 saw %s app_contracts (not org-scoped)', v);
+  select count(*) into v from public.files;         assert v = 0, format('T27 org-only mgr_a1 saw %s files (default-deny)', v);
+  select count(*) into v from public.invoices;      assert v = 0, format('T27 org-only mgr_a1 saw %s invoices (default-deny)', v);
+  -- positive control: mgr_a1 CAN read its own-org App A1 (proves a valid org session, not always-0)
+  select count(*) into v from public.apps where id='a9900000-0000-0000-0000-0000000000a1'; assert v = 1, format('T27 org-only mgr_a1 should read own-org App A1, saw %s', v);
+end $$;
+reset role;
+
 do $$ begin raise notice 'ALL ORG-RLS ASSERTIONS PASSED'; end $$;
