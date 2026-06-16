@@ -1,15 +1,16 @@
 import Link from "next/link";
 import { getAppDetailForCurrentUser } from "@/lib/data/apps";
 import { listContractsLinkedToApp } from "@/lib/data/links";
+import { listAppUsersForApp } from "@/lib/data/app-users";
 
 export const metadata = { title: "App · ID Caddie" };
 
 // Read-only app detail (build-sequence Stage 4b). The [id] route param is ONLY a lookup key —
 // RLS decides whether the signed-in user may read the row, so an id for another tenant's app
 // returns the same "not found" as a non-existent id (no enumeration). Linked contracts are
-// read-only via RLS-backed app_contracts (org-scoped read, 0006 / PR #20) — only contracts the
-// user may read are shown. No create/edit/delete, no app users/invoices/files, no client
-// filtering. Server-rendered.
+// read-only via RLS-backed app_contracts (org-scoped read, 0006 / PR #20); the app-user roster is
+// read-only via RLS-backed app_users (org-scoped read, 0007 / PR #21). No create/edit/delete, no
+// provisioning, no identity matching, no invoices/files/license. No client filtering. Server-rendered.
 function Field({ label, value }: { label: string; value: string }) {
   return (
     <div>
@@ -27,6 +28,7 @@ export default async function AppDetailPage({
   const { id } = await params;
   const result = await getAppDetailForCurrentUser(id);
   const linkedContracts = result.ok ? await listContractsLinkedToApp(id) : null;
+  const appUsers = result.ok ? await listAppUsersForApp(id) : null;
 
   return (
     <main className="flex flex-1 flex-col gap-6 p-8">
@@ -106,9 +108,61 @@ export default async function AppDetailPage({
             )}
           </section>
 
+          <section className="space-y-2 text-sm">
+            <h2 className="font-medium">App users</h2>
+            <p className="text-xs text-zinc-500">
+              Accounts on this app that you may read (RLS-scoped). Read-only — direct roster fields
+              only; no identity matching, license utilization, or provisioning.
+            </p>
+            {!appUsers || !appUsers.ok ? (
+              <p className="text-zinc-600 dark:text-zinc-400">
+                Could not load app users right now.
+              </p>
+            ) : appUsers.data.length === 0 ? (
+              <p className="text-zinc-600 dark:text-zinc-400">No app users you can access.</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full border-collapse text-left">
+                  <thead>
+                    <tr className="border-b border-zinc-300 text-zinc-500 dark:border-zinc-700">
+                      <th className="py-2 pr-4 font-medium">Name</th>
+                      <th className="py-2 pr-4 font-medium">Email</th>
+                      <th className="py-2 pr-4 font-medium">External ID</th>
+                      <th className="py-2 pr-4 font-medium">Status</th>
+                      <th className="py-2 pr-4 font-medium">License</th>
+                      <th className="py-2 pr-4 font-medium">Last active</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {appUsers.data.map((u) => (
+                      <tr key={u.id} className="border-b border-zinc-200 dark:border-zinc-800">
+                        <td className="py-2 pr-4">{u.displayName ?? "—"}</td>
+                        <td className="py-2 pr-4 text-zinc-600 dark:text-zinc-400">
+                          {u.email ?? "—"}
+                        </td>
+                        <td className="py-2 pr-4 text-zinc-600 dark:text-zinc-400">
+                          {u.externalUserId ?? "—"}
+                        </td>
+                        <td className="py-2 pr-4 text-zinc-600 dark:text-zinc-400">
+                          {u.status ?? "—"}
+                        </td>
+                        <td className="py-2 pr-4 text-zinc-600 dark:text-zinc-400">
+                          {u.licenseType ?? "—"}
+                        </td>
+                        <td className="py-2 pr-4 text-zinc-600 dark:text-zinc-400">
+                          {u.lastActiveAt ? u.lastActiveAt.slice(0, 10) : "—"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </section>
+
           <p className="text-xs text-zinc-500">
-            App users, invoices, files, and license rules are not shown yet (tenant-only or
-            default-deny — RISK-002).
+            Identity matches, license rules/utilization, invoices, and files are not shown yet
+            (default-deny — RISK-002). No identity merge, provisioning, or deprovisioning.
           </p>
         </>
       )}

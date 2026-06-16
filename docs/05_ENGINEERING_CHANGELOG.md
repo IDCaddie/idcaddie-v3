@@ -7,6 +7,20 @@ from PRs verified via `git log` / `gh pr list`.
 
 ---
 
+### PR #21 — Add org-scoped read access for app users · 2026-06-16
+- **Category:** RLS narrowing + read-only product surface. Forward migration `0007` (one SELECT policy) + read-only roster UI.
+- **What:** unblocks a read-only **per-app user roster** by first making `app_users` org-scoped for **read**, then showing it on `/apps/[id]`.
+- **Migration `0007_org_scoped_app_users_read.sql`:** adds ONE permissive `SELECT` policy `org members read related app_users` — an org-only user may read an `app_users` row iff they can already read the linked **app** under their existing related-org RLS (the `EXISTS (select 1 from apps ...)` subquery reuses `apps` RLS). The subquery **also pins `a.tenant_id = app_users.tenant_id` explicitly** (mirroring `0003`), so the policy is self-sufficient for tenant isolation rather than relying solely on the `0005` same-tenant FK (defense-in-depth raised in adversarial review). **SELECT only** — the tenant-member read and editor `INSERT`/`UPDATE` (`0004`) are unchanged; **no `DELETE`** added. No other table changed.
+- **Tests:** **T29** (24 assertions): tenant owner reads all 4 tenant-A app_users; org-only `mgr_a1` (OrgA1) reads only App A1's 2 users; `mgr_a2` (OrgA2) reads App A-pay (responsible) + App A2; `agency_u` (OrgA3) reads only App A-pay (paying); `owner_b` (other tenant) reads only its own tenant-B user (0 tenant-A); a pure non-member (`nobody`) reads **0**; an org-only delete is denied (no DELETE policy — row survives); `people`/`identity_accounts`/`app_user_identity_matches`/`license_*`/`invoices`/`files` still read **0** for an org-only user (no broadening); `app_contracts` T28 behavior still holds; and **T29h** plants a normally-impossible FK-bypassed corrupt cross-tenant row and proves the explicit tenant-bind keeps it hidden. Updated **T27**/**T28** (app_users dropped from their tenant-only/default-deny-only assertions). **114 → 136 assertions**, T1–**T29**.
+- **Generated types:** `database.types.ts` **unchanged** — a policy is not schema; `gen-types-local.sh` reproduces it byte-identically.
+- **Read-only UI:** `/apps/[id]` gains an "App users" section via a new typed DAL `src/lib/data/app-users.ts` (`listAppUsersForApp`). Shows **direct `app_users` columns only** (name, email, external id, status, license type, last active) — `raw_payload`/`source` excluded. **No** identity matching, person/identity joins, license utilization, provisioning, deprovisioning, edit/remove, or import/export.
+- **RISK-002:** **narrowed, NOT closed** — `app_contracts` (PR #20) and now `app_users` (PR #21) read are org-scoped. `people` stays tenant-only; `identity_accounts`/`app_user_identity_matches`/`license_*`/`files`/`invoices` stay default-deny.
+- **Security / service-role / hosted impact:** no service-role, no hosted apply, no `db push`/`--linked`. Read-only, tenant-bound (proven no cross-tenant leak via T29 + a live spot-check). No write/delete/provisioning surface.
+- **OMC/Flywheel:** cutover remains **blocked**.
+- **Tests run (local, verified):** `test-rls.sh` → `ALL ORG-RLS ASSERTIONS PASSED` (0001–0007, 136 assertions); `npm test` 5/5; lint/tsc/build clean (`ƒ /apps/[id]`); `check-migration-safety` pass; `gen-types-local.sh` → no diff.
+
+---
+
 ### PR #20 — Add org-scoped read access for app-contract links · 2026-06-16
 - **Category:** RLS narrowing + read-only product surface. Forward migration `0006` (one SELECT policy) + read-only UI.
 - **What:** unblocks read-only **linked apps / linked contracts** by first making `app_contracts` org-scoped for **read**, then using it.

@@ -782,16 +782,15 @@ do $$ declare v int; begin
 end $$;
 reset role;
 
--- 27b: TENANT-READ-NOT-ORG-SCOPED tables (people/app_users) are is_tenant_member-gated, so an
--- ORG-ONLY user (mgr_a1, no tenant membership) reads ZERO from them — they are NOT org-scoped and
--- must not be surfaced to org-only users until org-scoped read policies exist (RISK-002).
--- NOTE: app_contracts is NO LONGER in this list — PR #20 / 0006 made it org-scoped for READ; its
--- org-only read behavior is proven in T28 below.
+-- 27b: TENANT-READ-NOT-ORG-SCOPED tables (people) are is_tenant_member-gated, so an ORG-ONLY user
+-- (mgr_a1, no tenant membership) reads ZERO from them — they are NOT org-scoped and must not be
+-- surfaced to org-only users until org-scoped read policies exist (RISK-002).
+-- NOTE: app_contracts (PR #20 / 0006) and app_users (PR #21 / 0007) are NO LONGER in this list —
+-- both are org-scoped for READ; their org-only read behavior is proven in T28 / T29 below.
 select set_config('request.jwt.claims','{"sub":"0a000000-0000-0000-0000-0000000000a1"}',false); -- mgr_a1 (org-only, manages Org A1)
 set role authenticated;
 do $$ declare v int; begin
   select count(*) into v from public.people;        assert v = 0, format('T27 org-only mgr_a1 saw %s people (not org-scoped)', v);
-  select count(*) into v from public.app_users;     assert v = 0, format('T27 org-only mgr_a1 saw %s app_users (not org-scoped)', v);
   select count(*) into v from public.files;         assert v = 0, format('T27 org-only mgr_a1 saw %s files (default-deny)', v);
   select count(*) into v from public.invoices;      assert v = 0, format('T27 org-only mgr_a1 saw %s invoices (default-deny)', v);
   -- positive control: mgr_a1 CAN read its own-org App A1 (proves a valid org session, not always-0)
@@ -861,12 +860,12 @@ do $$ declare v int; begin
 end $$;
 reset role;
 
--- 28e: app_contracts is READ-only org-scoped — the OTHER child/link tables are unchanged. An org-only
--- user still reads ZERO from the default-deny tables (no broadening leaked out of this migration).
+-- 28e: app_contracts is READ-only org-scoped — the OTHER default-deny child tables are unchanged. An
+-- org-only user still reads ZERO from them (no broadening leaked out of 0006). (app_users is covered by
+-- T29 below — it becomes org-scoped in 0007, so it is intentionally NOT asserted 0 here.)
 select set_config('request.jwt.claims','{"sub":"0a000000-0000-0000-0000-0000000000a1"}',false); -- mgr_a1
 set role authenticated;
 do $$ declare v int; begin
-  select count(*) into v from public.app_users;            assert v = 0, format('T28 mgr_a1 app_users still tenant-only, saw %s', v);
   select count(*) into v from public.identity_accounts;    assert v = 0, format('T28 mgr_a1 identity_accounts still default-deny, saw %s', v);
   select count(*) into v from public.license_rules;        assert v = 0, format('T28 mgr_a1 license_rules still default-deny, saw %s', v);
   select count(*) into v from public.license_evaluations;  assert v = 0, format('T28 mgr_a1 license_evaluations still default-deny, saw %s', v);
@@ -874,5 +873,119 @@ do $$ declare v int; begin
   select count(*) into v from public.files;                assert v = 0, format('T28 mgr_a1 files still default-deny, saw %s', v);
 end $$;
 reset role;
+
+-- ── Test 29: org-scoped READ for app_users (migration 0007, PR #21) ──────────────────────────
+-- app_users gains ONE org-scoped SELECT policy: an org-only user may read an app_user row iff they
+-- can already read the linked APP under their related-org RLS. Existing tenant-member read + editor
+-- insert/update are unchanged; NO delete policy added.
+-- Seed (privileged): tenant A app_users across three apps (fixture a5..a1 already in App A1).
+--   App A1    (resp OrgA1)              -> readable by mgr_a1 (OrgA1)
+--   App A-pay (resp OrgA2, paying OrgA3)-> readable by mgr_a2 (OrgA2, responsible) AND agency_u (OrgA3, paying)
+--   App A2    (resp OrgA2)              -> readable by mgr_a2 (OrgA2)
+reset role;
+insert into public.app_users (id, tenant_id, app_id, email) values
+  ('a5000000-0000-0000-0000-0000000000c1','11111111-1111-1111-1111-111111111111','a9900000-0000-0000-0000-0000000000a1','u_a1_2@a.test'),  -- App A1 (2nd user)
+  ('a5000000-0000-0000-0000-0000000000cf','11111111-1111-1111-1111-111111111111','a9900000-0000-0000-0000-0000000000af','u_apay@a.test'),  -- App A-pay
+  ('a5000000-0000-0000-0000-0000000000c2','11111111-1111-1111-1111-111111111111','a9900000-0000-0000-0000-0000000000a2','u_a2@a.test');    -- App A2
+-- App A1 now has a5..a1 (fixture) + a5..c1 = 2 users; App A-pay 1; App A2 1; App B1 has a5..b1 (tenant B).
+
+-- 29a: tenant owner reads ALL tenant-A app_users (4), and none of tenant B's.
+select set_config('request.jwt.claims','{"sub":"0a000000-0000-0000-0000-000000000001"}',false); -- owner_a
+set role authenticated;
+do $$ declare v int; begin
+  select count(*) into v from public.app_users where tenant_id='11111111-1111-1111-1111-111111111111'; assert v = 4, format('T29 owner_a should read 4 tenant-A app_users, saw %s', v);
+  select count(*) into v from public.app_users where app_id='b9900000-0000-0000-0000-0000000000b1';      assert v = 0, format('T29 owner_a must not read tenant-B App B1 users, saw %s', v);
+end $$;
+reset role;
+
+-- 29b: org-only mgr_a1 (Org A1) reads ONLY App A1's users (2); zero for apps it cannot read.
+select set_config('request.jwt.claims','{"sub":"0a000000-0000-0000-0000-0000000000a1"}',false); -- mgr_a1
+set role authenticated;
+do $$ declare v int; begin
+  select count(*) into v from public.app_users; assert v = 2, format('T29 mgr_a1 should read 2 app_users (App A1 only), saw %s', v);
+  select count(*) into v from public.app_users where app_id='a9900000-0000-0000-0000-0000000000a1'; assert v = 2, format('T29 mgr_a1 should read App A1 users, saw %s', v);
+  select count(*) into v from public.app_users where app_id='a9900000-0000-0000-0000-0000000000af'; assert v = 0, format('T29 mgr_a1 must NOT read App A-pay users, saw %s', v);
+  select count(*) into v from public.app_users where app_id='a9900000-0000-0000-0000-0000000000a2'; assert v = 0, format('T29 mgr_a1 must NOT read App A2 users, saw %s', v);
+end $$;
+reset role;
+
+-- 29c: org-only mgr_a2 (Org A2) reads App A-pay (responsible) + App A2 (responsible) users (2); not App A1.
+select set_config('request.jwt.claims','{"sub":"0a000000-0000-0000-0000-0000000000a3"}',false); -- mgr_a2
+set role authenticated;
+do $$ declare v int; begin
+  select count(*) into v from public.app_users; assert v = 2, format('T29 mgr_a2 should read 2 app_users (App A-pay + App A2), saw %s', v);
+  select count(*) into v from public.app_users where app_id='a9900000-0000-0000-0000-0000000000a1'; assert v = 0, format('T29 mgr_a2 must NOT read App A1 users, saw %s', v);
+end $$;
+reset role;
+
+-- 29d: org-only agency_u (Org A3) reads ONLY App A-pay (via paying org A3) users (1); not App A1/A2.
+select set_config('request.jwt.claims','{"sub":"0a000000-0000-0000-0000-0000000000c1"}',false); -- agency_u
+set role authenticated;
+do $$ declare v int; begin
+  select count(*) into v from public.app_users; assert v = 1, format('T29 agency_u should read 1 app_user (App A-pay), saw %s', v);
+  select count(*) into v from public.app_users where app_id='a9900000-0000-0000-0000-0000000000af'; assert v = 1, format('T29 agency_u should read App A-pay user, saw %s', v);
+  select count(*) into v from public.app_users where app_id='a9900000-0000-0000-0000-0000000000a1'; assert v = 0, format('T29 agency_u must NOT read App A1 users, saw %s', v);
+end $$;
+reset role;
+
+-- 29e: other-tenant owner_b reads only tenant-B users (1), zero tenant-A; pure non-member nobody reads 0.
+select set_config('request.jwt.claims','{"sub":"0b000000-0000-0000-0000-000000000001"}',false); -- owner_b (tenant B)
+set role authenticated;
+do $$ declare v int; begin
+  select count(*) into v from public.app_users where tenant_id='11111111-1111-1111-1111-111111111111'; assert v = 0, format('T29 owner_b must read 0 tenant-A app_users, saw %s', v);
+  select count(*) into v from public.app_users; assert v = 1, format('T29 owner_b should read only its own tenant-B app_user, saw %s', v);
+end $$;
+reset role;
+select set_config('request.jwt.claims','{"sub":"0a000000-0000-0000-0000-0000000000ff"}',false); -- nobody (non-member)
+set role authenticated;
+do $$ declare v int; begin
+  select count(*) into v from public.app_users; assert v = 0, format('T29 nobody (non-member) must read 0 app_users, saw %s', v);
+end $$;
+reset role;
+
+-- 29f: NO DELETE policy was introduced — even an org-only reader (and the tenant owner) cannot delete an
+-- app_user; the row survives. And the OTHER child tables are NOT broadened by 0007.
+select set_config('request.jwt.claims','{"sub":"0a000000-0000-0000-0000-0000000000a1"}',false); -- mgr_a1 (can READ App A1 users)
+set role authenticated;
+do $$ declare v int; begin
+  delete from public.app_users where id='a5000000-0000-0000-0000-0000000000a1';  -- App A1 user mgr_a1 can read
+  select count(*) into v from public.app_users where id='a5000000-0000-0000-0000-0000000000a1'; assert v = 1, format('T29 app_user must survive org-only delete (no DELETE policy), saw %s', v);
+  -- 0007 broadened ONLY app_users — the rest are still default-deny / tenant-only for an org-only user.
+  select count(*) into v from public.people;                  assert v = 0, format('T29 mgr_a1 people still tenant-only, saw %s', v);
+  select count(*) into v from public.identity_accounts;       assert v = 0, format('T29 mgr_a1 identity_accounts still default-deny, saw %s', v);
+  select count(*) into v from public.app_user_identity_matches; assert v = 0, format('T29 mgr_a1 app_user_identity_matches still default-deny, saw %s', v);
+  select count(*) into v from public.license_rules;           assert v = 0, format('T29 mgr_a1 license_rules still default-deny, saw %s', v);
+  select count(*) into v from public.license_evaluations;     assert v = 0, format('T29 mgr_a1 license_evaluations still default-deny, saw %s', v);
+  select count(*) into v from public.invoices;                assert v = 0, format('T29 mgr_a1 invoices still default-deny, saw %s', v);
+  select count(*) into v from public.files;                   assert v = 0, format('T29 mgr_a1 files still default-deny, saw %s', v);
+end $$;
+reset role;
+
+-- 29g: app_contracts org-scoped read (T28, 0006) still holds after 0007 — mgr_a1 still reads its 2 links.
+select set_config('request.jwt.claims','{"sub":"0a000000-0000-0000-0000-0000000000a1"}',false); -- mgr_a1
+set role authenticated;
+do $$ declare v int; begin
+  select count(*) into v from public.app_contracts; assert v = 2, format('T29 app_contracts T28 behavior should still hold (mgr_a1 reads 2), saw %s', v);
+end $$;
+reset role;
+
+-- 29h: DEFENSE-IN-DEPTH — the 0007 policy pins `a.tenant_id = app_users.tenant_id` explicitly, so it is
+-- self-sufficient for tenant isolation (not relying solely on the 0005 FK). Plant a normally-IMPOSSIBLE
+-- corrupt cross-tenant row by bypassing the FK (session_replication_role=replica, superuser only): a
+-- tenant-B app_user pointing at tenant-A App A1. mgr_a1 CAN read App A1, but must NOT read this row
+-- because its tenant_id (B) != App A1's tenant_id (A). (Without the explicit tenant-bind this would leak.)
+reset role;
+set session_replication_role = replica;  -- superuser: disable FK/triggers to plant the corrupt row
+insert into public.app_users (id, tenant_id, app_id) values
+  ('a5000000-0000-0000-0000-0000000000ee','22222222-2222-2222-2222-222222222222','a9900000-0000-0000-0000-0000000000a1');
+set session_replication_role = default;
+select set_config('request.jwt.claims','{"sub":"0a000000-0000-0000-0000-0000000000a1"}',false); -- mgr_a1 (can read App A1)
+set role authenticated;
+do $$ declare v int; begin
+  select count(*) into v from public.app_users where id='a5000000-0000-0000-0000-0000000000ee';
+  assert v = 0, format('T29 org policy must pin tenant — corrupt cross-tenant app_user must stay hidden, saw %s', v);
+end $$;
+reset role;
+delete from public.app_users where id='a5000000-0000-0000-0000-0000000000ee';  -- clean up planted row (superuser)
 
 do $$ begin raise notice 'ALL ORG-RLS ASSERTIONS PASSED'; end $$;
