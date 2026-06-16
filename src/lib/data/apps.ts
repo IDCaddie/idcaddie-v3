@@ -23,6 +23,68 @@ export type DataResult<T> =
   | { ok: true; data: T }
   | { ok: false; error: "query_failed" };
 
+// Read-only DTO for one app's detail. Owning-org references are exposed as IDs only;
+// org-name enrichment is deferred (it needs an embedded join whose visibility differs for
+// org-only users — kept out of this first detail page). Linked contracts/users/invoices/files
+// are intentionally NOT included here (app_contracts is still tenant-only RLS — RISK-002).
+export type AppDetail = {
+  id: string;
+  name: string;
+  vendorName: string | null;
+  category: string | null;
+  status: string;
+  responsibleOrgId: string | null;
+  payingOrgId: string | null;
+  procurementOrgId: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+// `not_found` covers both "no such app" and "RLS hid it" — deliberately indistinguishable so the
+// route param can't be used to enumerate other tenants' apps.
+export type AppDetailResult =
+  | { ok: true; data: AppDetail }
+  | { ok: false; error: "not_found" | "query_failed" };
+
+// Fetch one app's detail by id. The `appId` is ONLY a lookup key — RLS decides whether the
+// signed-in user may read the row; if RLS hides it, this returns `not_found`. No tenant_id from
+// the caller, no service-role, no writes.
+export async function getAppDetailForCurrentUser(appId: string): Promise<AppDetailResult> {
+  const supabase = await createClient();
+
+  const { data, error } = await supabase
+    .from("apps")
+    .select(
+      "id, name, vendor_name, category, status, responsible_org_id, paying_org_id, procurement_owner_org_id, created_at, updated_at",
+    )
+    .eq("id", appId)
+    .maybeSingle();
+
+  if (error) {
+    console.error("[data/apps] getAppDetailForCurrentUser query failed");
+    return { ok: false, error: "query_failed" };
+  }
+  if (!data) {
+    return { ok: false, error: "not_found" };
+  }
+
+  return {
+    ok: true,
+    data: {
+      id: data.id,
+      name: data.name,
+      vendorName: data.vendor_name,
+      category: data.category,
+      status: data.status,
+      responsibleOrgId: data.responsible_org_id,
+      payingOrgId: data.paying_org_id,
+      procurementOrgId: data.procurement_owner_org_id,
+      createdAt: data.created_at,
+      updatedAt: data.updated_at,
+    },
+  };
+}
+
 // List the apps the current user may read. RLS (keyed on the user's tenant/org memberships)
 // decides visibility — we pass no tenant filter; the database is the authorization boundary.
 export async function listAppsForCurrentUser(): Promise<DataResult<AppSummary[]>> {
