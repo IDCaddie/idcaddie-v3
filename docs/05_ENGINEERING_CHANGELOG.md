@@ -7,6 +7,26 @@ from PRs verified via `git log` / `gh pr list`.
 
 ---
 
+### PR #12 — Add legacy Firebase capability map and OMC parity checklist · 2026-06-16
+- **Category:** docs / product control.
+- **What:** `docs/11_LEGACY_PARITY_AND_OMC_CHECKLIST.md` — a legacy→v3 capability inventory (22 areas
+  with legacy file-path evidence, v3 status, required stage, parity target, security improvement,
+  status), an **OMC/Flywheel acceptance checklist** (go/no-go), a **hard cutover rule**, a P0/P1/P2/deferred
+  gap list, and a roadmap mapping next PRs to parity. Links to (does not duplicate) `current-product-map.md`.
+- **Why:** ensure v3 preserves the paying client's useful capabilities while improving security/RLS/audit —
+  and that nobody cuts OMC over with gaps.
+- **Verified, not invented:** evidence gathered from the legacy repo `/Users/samvemuri/Desktop/IDCaddie_Repo-main`
+  (e.g. paying client = **Flywheel Digital**, an Omnicom agency — `webapp/.firebaserc`, `deploy-flywheeldigital.sh`;
+  legacy import is **destructive** — deletes "outdated" users at `webapp/functions/src/files/onFileLinkedToApp.js:290`;
+  audit `logs` are mutable + 90-day-purged — `cleanupOldLogs.js`). Uncertain items marked `needs-verification`.
+- **Security/RLS/migration/service-role impact:** **none** — docs only; no code, no schema, no hosted Supabase.
+- **Tests run:** `npm test` 5/5; `npm run lint`/`build` exit 0; `check-auth-safety.sh`, `check-migration-safety.sh`,
+  `check-docs-updated.sh` pass; `test-rls.sh` → `ALL ORG-RLS ASSERTIONS PASSED`.
+- **Docs updated:** new `11`; `00` (parity/cutover gate row + do-not-do-yet), `04` (RISK-016), `06`, `09`, `10` (index + reading paths).
+- **Follow-ups:** each future product-surface PR updates `11` (status + OMC checklist) and links the PR.
+
+---
+
 ### PR #11 — Add typed data access layer · 2026-06-16
 - **Category:** app / data layer.
 - **What:** generated `src/lib/database.types.ts` (the `Database` type) from the migrations;

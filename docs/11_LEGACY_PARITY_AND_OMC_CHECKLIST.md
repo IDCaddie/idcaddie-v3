@@ -1,0 +1,119 @@
+# 11 · Legacy Capability Map & OMC Parity Checklist
+
+**Canonical source for: what v3 must preserve from the legacy Firebase app before moving the
+paying client off it, and the go/no-go to cut over.** This is a product-control doc — it tracks
+*parity*, not implementation detail. Deep legacy evidence (routes, collections, functions, with
+exact file paths and KEEP/REDESIGN/DEFER dispositions) lives in
+[current-product-map.md](./current-product-map.md) and [current-security-risk-map.md](./current-security-risk-map.md);
+this doc links there rather than restating it. v3 status is per [00_PRODUCT_STATUS](./00_PRODUCT_STATUS.md).
+
+> Evidence is cited from the legacy repo `/Users/samvemuri/Desktop/IDCaddie_Repo-main` (paths
+> relative to it) and from this repo. Claims that could not be verified from code/docs are marked
+> **needs-verification** — not asserted from memory.
+
+## 1. Executive summary
+**The paying client is Flywheel Digital (an Omnicom agency).** The legacy app is deployed
+per-customer as separate Firebase projects (`webapp/.firebaserc`: `flywheeldigital-cb222`,
+`idcaddiecorporate`, …) — isolation is "one project per customer", not row-level. v3 replaces this
+with a single multi-tenant Postgres + RLS.
+
+- **Preserve (the reason OMC pays):** the app inventory + ownership/paying/procurement orgs,
+  contracts with renewal tracking, app↔contract linking, people / app-user identity matching, the
+  **unmanaged-account** and **stale-user** reports, license utilization/waste, and spend/chargeback —
+  all tenant-scoped and exportable.
+- **Intentionally improve:** authorization moves from client-side `AuthGuard` + per-project isolation
+  to **Postgres RLS** (row-level, tested); audit logs become **append-only/tamper-evident** (legacy
+  `logs` are mutable and purged at 90 days via `cleanupOldLogs.js`); imports become **non-destructive**
+  (legacy deletes "outdated" users — `webapp/functions/src/files/onFileLinkedToApp.js:290`); scraper
+  credentials move from **plaintext** Firestore (`IDCApps/{id}/private/*`) to an encrypted,
+  service-role-only store; several callables that ship today **with no auth check** get re-secured.
+- **Do not cut over until complete:** see the [cutover rule](#4-cutover-rule). OMC stays on Firebase
+  until every P0/P1 parity item is implemented, verified, and signed off.
+
+## 2. Capability inventory
+Status values: `not-started` · `in-progress` · `implemented` · `verified` · `needs-verification`.
+"v3 status" reflects the **foundation** (schema/RLS/auth/data layer); no product UI exists yet.
+
+| Area | Legacy Firebase capability | Evidence (legacy paths) | v3 status today | Required v3 PR/stage | Parity target | Security improvement in v3 | Status |
+|---|---|---|---|---|---|---|---|
+| Authentication / login | Firebase Auth email/pw + SAML + OIDC; client-side `AuthGuard` | `frontend-v2/src/app/login/page.tsx`, `services/samlAuth.ts`, `services/oidcAuth.ts`, `components/AuthGuard.tsx` | email/pw skeleton + server session (Proxy) | done (PR #6); SSO = Stage ≥12 | email/pw at launch; SSO follows | server-side session + RLS, not client guard | `in-progress` |
+| Tenant / company / org model | "Groups" + one Firebase project per customer; custom claims | `company/groups/`, `webapp/.firebaserc`, `permissionSync.js` | tenants + organizations + memberships + RLS; context resolved | done (PR #1/#9) | one tenant = one OMC org tree | row-level isolation (66 RLS assertions) vs per-project | `verified` |
+| App inventory | List apps w/ cost, license util, user metrics, CSV export | `frontend-v2/src/app/(authenticated)/IDCApps/page.tsx` | `apps` table + RLS + typed DAL `listAppsForCurrentUser()` | **Stage 4 (next)** | OMC sees the same inventory | RLS-scoped reads, no client filtering | `not-started` (DAL ready, PR #11) |
+| App detail | App metadata, user roster, linked contracts/invoices, license rules | `IDCApps/[id]/page.tsx` | `apps` + child tables in schema | Stage 4–5 | per-app drill-down | RLS; owning-org fields | `not-started` |
+| Contracts | List/detail/create; renewal & expiry dates; gantt | `contracts/page.tsx`, `contracts/[id]/`, `contracts/create/`, `contracts/gantt/` | `contracts` table (+ renewal/expiry cols) + RLS | Stage 5 | OMC sees contracts + renewal dates | RLS; related-org read | `not-started` |
+| App–contract linking | `linkedDocs.IDCApps` cross-refs, cost allocation % | `contracts/[id]/page.tsx`, `IDCApps/[id]/page.tsx` | `app_contracts` table + RLS | Stage 5 | linked apps↔contracts | tenant-bound FKs | `not-started` |
+| People / users | Unified `people` directory (IdP + app-only), drill to accounts | `people/page.tsx`, `webapp/functions/.../rebuildPeopleCollection.js` | `people` table + RLS | Stage 6 | people directory | RLS; tenant-scoped | `not-started` |
+| Identity accounts | IdP identities (SCIM/scrapers), `idp.*` source | `people/settings/page.tsx`, `syncIdpAssignments.js` | `identity_accounts` table | Stage 6 | identity source-of-record | RLS | `not-started` |
+| App users | Per-app account roster `IDCApps/{id}/users` | `IDCApps/[id]/page.tsx` (users table) | `app_users` table (tenant-scoped) | Stage 6 | per-app accounts | RLS (org-scope deferred — RISK-002) | `not-started` |
+| Identity→app-user matching | Email/local-part match, IdP-priority merge | `watchUserUpdated.js`, `syncIdpAssignments.js`, `shared/identityStatus.js` | `app_user_identity_matches` table | Stage 6 | accurate matched/unmatched | server-side, tested matching | `not-started` |
+| Unmanaged accounts report (UAR) | Orphaned/managed/unknown per app; orphaned spend; critical-risk (IdP-deactivated still provisioned) | `IDCApps/insights/uar/page.tsx`, `utils/appMetrics.ts` (`resolveUAR`) | derivable from `app_users`+matches | Stage 6–7 | OMC identifies unmanaged accounts | RLS-scoped | `not-started` |
+| Stale users report | Per-app data freshness, days-since-update, thresholds | `IDCApps/insights/stale/page.tsx` | derivable from `app_users` | Stage 6–7 | OMC identifies stale users | RLS-scoped | `not-started` |
+| License rules / evaluations | Per-app seat rules (fixed/elastic), ELU/waste | `IDCApps/[id]/components/LicenseRulesConfig.tsx`, `utils/licenseEvaluation.ts`, `licenses/evaluateUserLicenses.js` | `license_rules` + `license_evaluations` tables | Stage 7 | license utilization/waste | RLS; evaluated server-side | `not-started` |
+| Spend / chargeback | Invoice link % allocation, monthly billing snapshot, cost reports | `billing/calculateMonthlyBilling.js`, `reports/cost-snapshot/`, `reports/it-spend/`, `invoices/` | `invoices` table; related-org **read** union for chargeback (RLS) | Stage 8 | chargeback by org | related-org read model (PR #1) | `not-started` (read model `verified`) |
+| Imports | CSV/email/API ingest → app users; **deletes outdated users** | `webapp/functions/src/files/onFileLinkedToApp.js:290`, `files/inbound/page.tsx` | none | Stage 11 | **non-destructive** (preview + soft-delete + audit) | no blind delete; upsert + audit (RISK-008) | `not-started` |
+| Exports | CSV per list/report; scheduled email reports (token-gated) | `utils/downloadFile.ts`, `reports/schedules/`, `scheduledJobs/generateReportRuns.js` | none | Stage 10 | **tenant-scoped** exports, no secrets | scoped query + audit | `not-started` |
+| Audit / history | `onWrite` triggers → `logs`; before/after diff viewer; 90-day purge | `webapp/functions/src/logging/*`, `logging/page.tsx`, `cleanupOldLogs.js` | `audit_logs` table — **append-only** (trigger blocks update/delete) | Stage 9 (UI) | read-only audit viewer | append-only/tamper-evident, no purge | `verified` (table); UI `not-started` |
+| Admin / settings | Company profile, domain allowlist, API keys, recompute | `admin/company/`, `admin/recompute/` | none | Stage ≥9 | admin surface | RLS; hashed API keys | `not-started` |
+| Connectors / integrations | 53+ OAuth scrapers (Okta/Google/Slack/Salesforce…), SCIM | `webapp/functions/src/appScraping/scrapers/*`, `scim/index.js` | none | Stage 12 | connector(s) behind vault | encrypted creds, service-role-only (RISK-007) | `not-started` |
+| Contract upload / storage | Firebase Storage `/files/{id}` + metadata | `webapp/functions/src/storage/*`, `files/page.tsx` | none (Supabase Storage deferred) | Stage 8 | tenant-scoped file storage | scoped storage policies | `not-started` |
+| AI contract ingestion / extraction | Google Document AI (contract/invoice processors) + Vertex AI/Gemini fallback | `webapp/functions/src/storage/processFileWithAI.js`, `handleDocumentAICompletion.js` | none | Stage ≥12 (deferred) | extract renewal/cost fields | provider boundary; no secrets in app tables | `not-started` |
+| Vendor/app enrichment scraper | Chrome extension: page email detection (SHA-256 hashed) → Firestore | `extension/content.js`, `extension/auth.js` | none | deferred / maybe-DELETE | optional enrichment | n/a (deferred; privacy review first) | `not-started` |
+
+## 3. OMC / Omnicom paid-client acceptance checklist
+Practical go/no-go. **All are NO today** — v3 has the secure foundation but no product UI yet.
+
+| # | Question | Today | Gated by |
+|---|----------|-------|----------|
+| 1 | Can OMC see the same app inventory? | **No** | Stage 4 (read-only inventory) |
+| 2 | Can OMC see ownership / paying / procurement orgs? | **No** | Stage 4–5 (owning-org fields surfaced) |
+| 3 | Can OMC see contracts and renewal dates? | **No** | Stage 5 |
+| 4 | Can OMC identify unmanaged accounts? | **No** | Stage 6–7 (UAR) |
+| 5 | Can OMC identify stale users? | **No** | Stage 6–7 |
+| 6 | Can OMC import / update app-user data? | **No** | Stage 11 (non-destructive import) |
+| 7 | Can OMC export scoped reports? | **No** | Stage 10 (tenant-scoped export) |
+| 8 | Can OMC trust the data is tenant-isolated? | **Yes** | RLS `verified` (PR #1/#9) — the foundation that makes the rest safe |
+| 9 | Can OMC keep using the old Firebase app until v3 is ready? | **Yes** | Legacy Firebase is `legacy-production` — unchanged by v3 |
+
+## 4. Cutover rule
+**Hard rule: do not move OMC/Flywheel from Firebase to v3 until every P0 and P1 parity item below
+is `implemented`, `verified`, and signed off** (by the product owner + a security reviewer). Until
+then, legacy Firebase remains production and v3 ships incrementally behind it. Partial parity is not
+a cutover; a half-migrated OMC is worse than no migration.
+
+## 5. Gap list
+- **P0 (cutover blockers — core of why OMC pays):** app inventory (#1,2) · contracts + renewal dates
+  (#3) · app↔contract linking · people / app-user matching · unmanaged-account report (#4) · stale-user
+  report (#5) · non-destructive import (#6) · tenant-scoped export (#7) · read-only audit viewer ·
+  license utilization · spend/chargeback. *(Tenant isolation #8 is already `verified`.)*
+- **P1 (needed for an enterprise paid client, can follow with sign-off):** SSO (SAML/OIDC) · SCIM
+  provisioning · admin/settings (domain allowlist, API keys) · automated identity matching · safe
+  write surfaces (steward-only, audited).
+- **P2 (nice-to-have improvements):** dashboards/widgets · scheduled email reports · contract gantt ·
+  AI contract ingestion (Document AI/LLM) · connector scrapers · cost-trend snapshots.
+- **Deferred / future:** Chrome enrichment extension (privacy review first) · org-hierarchy
+  inheritance + `resource_org_links` (RISK-003/004) · subscription billing of IdP users.
+
+## 6. Updated roadmap (next PRs to parity)
+Each stage closes specific parity items; sequence per [06_BUILD_SEQUENCE](./06_BUILD_SEQUENCE.md).
+
+| Next PR / stage | Closes parity for | OMC checklist |
+|---|---|---|
+| Read-only app inventory (Stage 4) | app inventory; owning-org fields | #1, #2 |
+| App detail (Stage 4–5) | app detail / roster | #1, #2 |
+| Contracts (Stage 5) | contracts + renewal dates; app↔contract linking | #3 |
+| People / app users (Stage 6) | people, identity accounts, app users, matching | #4, #5 (data) |
+| Unmanaged-accounts report (Stage 6–7) | UAR | #4 |
+| Stale-users report (Stage 6–7) | stale | #5 |
+| License + spend/chargeback (Stage 7–8) | license eval; chargeback | (#2 cost) |
+| Exports (Stage 10) | tenant-scoped reports | #7 |
+| Imports (Stage 11) | **non-destructive** app-user import | #6 |
+| Audit viewer (Stage 9) | read-only audit | — |
+| Safe writes (across stages) | steward-only edits, audited | — |
+| Storage (Stage 8) | contract upload | (#3 docs) |
+| AI contract ingestion (≥12, deferred) | renewal/cost extraction | — |
+| Connectors (Stage 12, deferred) | scraper sync behind vault | — |
+
+## 7. How to use this doc
+- A capability is **not parity** until its row is `verified` *and* the matching OMC checklist item is **Yes**.
+- Every PR that lands a parity surface updates its row here (status + "v3 status") and the matching
+  OMC checklist row, and links the PR. Drift here = an unverified cutover claim (RISK-016).

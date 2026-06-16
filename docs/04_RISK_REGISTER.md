@@ -25,6 +25,8 @@ Severity: P0 (critical) · P1 (high) · P2 (medium) · P3 (low). Status uses the
 
 | RISK-015 | P3 | open | **Local/demo fixture misuse.** `supabase/fixtures/local_demo.sql` writes synthetic rows (incl. `auth.users`) and, if ever applied to hosted Supabase, would inject fake tenants/users/data into a real environment. | Lives outside `supabase/migrations/` (never in the apply path); `seed-local-demo.sh` is hosted-proof (own throwaway container, refuses remote/`--linked`, no Supabase CLI, no service-role, no secrets); strong LOCAL-ONLY header; all-synthetic data; `auth.users` inserts only work against a local shim. | Inherent local-tool risk; mitigations make accidental hosted application very unlikely. Revisit if a hosted seed/runbook is ever introduced. |
 
+| RISK-016 | P2 | open | **v3 may miss legacy paid-client (OMC/Flywheel) capabilities if parity isn't tracked.** The legacy Firebase app has a large feature surface (inventory, contracts, people/matching, unmanaged/stale reports, license/spend, imports/exports, audit); cutting OMC over with gaps would regress the paying client. | A living parity scorecard + OMC go/no-go + hard cutover rule ([11_LEGACY_PARITY_AND_OMC_CHECKLIST](./11_LEGACY_PARITY_AND_OMC_CHECKLIST.md)); every product-surface PR updates it; legacy stays production until P0/P1 are `verified` + signed off. Evidence verified from the legacy repo, not memory. | Cutover sign-off once all P0/P1 parity items are `verified`. |
+
 ## Closed risks (verified)
 | ID | Sev | Closed by | What it was |
 |----|-----|-----------|-------------|

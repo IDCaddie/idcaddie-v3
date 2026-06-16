@@ -56,6 +56,7 @@ PR #6 (this branch, auth/session skeleton) is **not yet merged**.
 | `resource_org_links` relationship table + org hierarchy | `deferred` |
 | Imports/exports, integrations/connectors, credential vault | `deferred` |
 | Legacy Firebase | `legacy-production` (still serving customers) |
+| Legacy→v3 capability parity / OMC (Flywheel) cutover gate | tracked (PR #12 — [11_LEGACY_PARITY_AND_OMC_CHECKLIST](./11_LEGACY_PARITY_AND_OMC_CHECKLIST.md)); **no cutover until P0/P1 parity `verified` + signed off** |
 | Vercel Web Analytics + Speed Insights (platform telemetry) | `implemented` (PR #5, PR #7); platform-only, see below |
 
 ## Platform telemetry (Vercel)
@@ -95,6 +96,7 @@ One-line decisions; deep rationale in the linked canonical docs.
 - Do **not** use service-role keys outside trusted server/test paths.
 - Do **not** add connectors/credential handling until the encrypted-credential boundary is designed.
 - Do **not** edit `0001`/`0002`/`0003` — fix forward with a new migration.
+- Do **not** cut OMC/Flywheel off legacy Firebase until all P0/P1 parity items are `verified` + signed off ([11](./11_LEGACY_PARITY_AND_OMC_CHECKLIST.md)).
 
 ## Can we…?
 - **Deploy v3 today?** No. No UI, no hosted DB, legacy Firebase is still production.
