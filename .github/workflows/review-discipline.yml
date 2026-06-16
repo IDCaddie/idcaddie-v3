@@ -25,6 +25,10 @@ jobs:
         run: bash scripts/pr-review-summary.sh "origin/$BASE_BRANCH"
       - name: Migration safety
         run: bash scripts/check-migration-safety.sh
+      - name: Auth safety (self-test + scan src/)
+        run: |
+          bash scripts/check-auth-safety.sh selftest
+          bash scripts/check-auth-safety.sh
       - name: Docs-drift gate (must not fail open)
         env:
           REQUIRE_BASE: "1"
