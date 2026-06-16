@@ -30,7 +30,7 @@ root layout. They run as **Vercel platform telemetry** — anonymous page views 
 src/app/                 root layout · login/ · logout/ (route handler) · (authenticated)/ group
 src/proxy.ts             Next.js 16 Proxy (renamed Middleware): session refresh + route guard
 src/lib/supabase/        env · client (browser) · server (user-scoped) · proxy (session helper)
-src/lib/auth/            session (current user) · tenant-context (Stage-3 placeholder)
+src/lib/auth/            session (current user) · tenant-context (RLS-scoped resolver) · tenant-context-derive (pure logic + tests)
 supabase/migrations/     0001 core schema · 0002 org-scoped RLS · 0003 related-org read   (append-only)
 supabase/tests/          org_rls_test.sql (66 assertions) · rls_test_plan.md
 scripts/                 test-rls.sh · check-migration-safety.sh · check-docs-updated.sh · pr-review-summary.sh · check-auth-safety.sh
@@ -74,17 +74,18 @@ Rejected-pattern evidence: [current-security-risk-map.md](./current-security-ris
 - **Trusted server jobs (service-role):** isolated; only for operations RLS can't express (audit writes, license evaluation, future imports). Never reachable from the browser. — `deferred` (no such code exists yet).
 
 ## Current vs target
-- **Current:** Postgres schema + RLS (tested locally + CI) + an auth/session skeleton (login, server session via Proxy, protected route group). No tenant/org context, no product UI.
+- **Current:** Postgres schema + RLS (tested locally + CI) + an auth/session skeleton + read-only tenant/org context resolution (`src/lib/auth/tenant-context.ts`, displayed in the protected shell). No tenant switching, no product UI.
 - **Target (incremental, see [06](./06_BUILD_SEQUENCE.md)):** auth/session → tenant/org context → read-only inventory → contracts/people → writes → files/imports → connectors.
 
 ## What must exist before UI reads data
 1. Auth/session wired to Supabase — `implemented` (skeleton; not hosted-exercised).
 2. A user-scoped server Supabase client (RLS-bound) — `implemented` (`src/lib/supabase/server.ts`, no service-role in request paths).
-3. Tenant/org context derived from membership rows (not client input) — `planned` (next PR; only a placeholder stub today).
-RLS already guarantees that even a wrong query cannot cross tenants — but #3 must exist so
-the app *uses* the foundation correctly.
+3. Tenant/org context derived from membership rows (not client input) — `implemented` (`src/lib/auth/tenant-context.ts`, read-only, RLS-scoped; deterministic active tenant; no switching yet).
+RLS already guarantees that even a wrong query cannot cross tenants — the context resolver just
+lets the app *use* the foundation correctly. It reads only the user's own memberships via the
+user-scoped server client (never service-role, never client-side filtering, never JWT claims).
 
 ## Intentionally missing today
-Product UI · tenant/org context resolution · imports/exports · connectors/credentials ·
+Product UI · tenant switching · user provisioning/invites · imports/exports · connectors/credentials ·
 org-hierarchy traversal · child-table org scoping · hosted deployment. All tracked in
 [04_RISK_REGISTER.md](./04_RISK_REGISTER.md) and sequenced in [06_BUILD_SEQUENCE.md](./06_BUILD_SEQUENCE.md).

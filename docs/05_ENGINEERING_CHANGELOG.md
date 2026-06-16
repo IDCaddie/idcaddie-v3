@@ -7,6 +7,33 @@ from PRs verified via `git log` / `gh pr list`.
 
 ---
 
+### PR #9 — Add tenant and org context resolution · 2026-06-16
+- **Category:** app / auth.
+- **What:** `resolveTenantContext()` in `src/lib/auth/tenant-context.ts` reads the signed-in user's
+  own `tenant_memberships` and `organization_memberships` (with embedded `tenants`/`organizations`)
+  via the user-scoped server client, and derives an active tenant + org list. Pure logic split into
+  `tenant-context-derive.ts` with vitest unit tests (`tenant-context-derive.test.ts`); added a `test`
+  npm script. The protected shell (`(authenticated)/page.tsx`) now displays the resolved context with
+  status badges. Replaced the prior placeholder stub.
+- **Why:** build-sequence Stage 3 — let the app *use* the RLS foundation for real reads, without product UI.
+- **Migration impact:** **none.** Existing RLS already permits a user to read their own memberships and
+  the tenants/orgs those grant (`is_tenant_member` / `is_org_member` / `is_tenant_participant`); no schema
+  change was needed (verified by `check-migration-safety.sh`; `test-rls.sh` unchanged + green).
+- **Service-role impact:** **none** — anon, user-scoped server client only (enforced by `check-auth-safety.sh`).
+- **Tenant/RLS impact:** RLS remains the sole authority. The resolver filters to the user's own rows and
+  relies on RLS to scope visibility; only `status='active'` memberships resolve. No client-side filtering,
+  no JWT claims as authorization, no browser storage of role/tenant state.
+- **Behavior:** zero memberships → `no_membership` ("No tenant access configured yet"), safe, creates nothing;
+  org-only → `no_tenant_membership`; multiple tenants → deterministic first, `tenantSwitchingRequired=true`
+  (no switcher built); query error → safe generic message, no raw error surfaced.
+- **Tests run (local, verified):** `npm test` 5/5; `npm run lint` clean; `npm run build` exit 0 (Proxy detected);
+  `check-auth-safety.sh` 6/6 + scan clean; `check-migration-safety.sh` pass; `check-docs-updated.sh` 0/0;
+  `test-rls.sh` → `ALL ORG-RLS ASSERTIONS PASSED`.
+- **Docs updated:** `00`, `01`, `06` (Stage 3 done, Stage 4 next), `04` (RISK-012 narrowed to provisioning/switching), `09`.
+- **Follow-ups:** tenant switcher + user provisioning/invites (RISK-012); not exercised against hosted Supabase (RISK-001).
+
+---
+
 ### PR #8 — Connected agent governance · 2026-06-16
 - **Category:** docs / governance.
 - **What:** added a canonical **"Connected agent permissions"** policy ([09](./09_AGENT_HANDOFF.md#connected-agent-permissions))
