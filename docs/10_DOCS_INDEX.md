@@ -36,6 +36,7 @@ Firebase is `legacy-production`. v3 product UI is `planned`.
 | [08_CODE_AND_DOCS_STANDARD](./08_CODE_AND_DOCS_STANDARD.md) | code + docs bar, ponytail pass, docs-update policy | everyone | stable |
 | [09_AGENT_HANDOFF](./09_AGENT_HANDOFF.md) | how an agent continues safely | coding agents | living |
 | [10_DOCS_INDEX](./10_DOCS_INDEX.md) | this index + taxonomy | everyone | living |
+| [11_LEGACY_PARITY_AND_OMC_CHECKLIST](./11_LEGACY_PARITY_AND_OMC_CHECKLIST.md) | legacy→v3 capability parity + OMC cutover go/no-go | product owner, buyers (Mike/Jon) | living (every parity PR) |
 
 ## Existing docs (reconciled — linked, not duplicated)
 | Doc | Canonical for | Note |
@@ -50,7 +51,8 @@ Firebase is `legacy-production`. v3 product UI is `planned`.
 | [current-security-risk-map.md](./current-security-risk-map.md) | legacy security evidence (P0s) | history; informs `02`/`04` |
 
 ## Reading paths
-- **Mike/Jon (status/buyer):** [00](./00_PRODUCT_STATUS.md) → [04](./04_RISK_REGISTER.md) → [05](./05_ENGINEERING_CHANGELOG.md).
+- **Mike/Jon (status/buyer):** [00](./00_PRODUCT_STATUS.md) → [11 parity & OMC cutover](./11_LEGACY_PARITY_AND_OMC_CHECKLIST.md) → [04](./04_RISK_REGISTER.md) → [05](./05_ENGINEERING_CHANGELOG.md).
+- **Product / cutover owner:** [11_LEGACY_PARITY_AND_OMC_CHECKLIST](./11_LEGACY_PARITY_AND_OMC_CHECKLIST.md) → [current-product-map.md](./current-product-map.md) → [06](./06_BUILD_SEQUENCE.md).
 - **Security reviewer:** [02](./02_SECURITY_AND_RLS.md) → `supabase/tests/org_rls_test.sql` → [04](./04_RISK_REGISTER.md) → [07](./07_P0_REVIEW_CHECKLIST.md). Legacy: [current-security-risk-map.md](./current-security-risk-map.md).
 - **New engineer:** [README_START_HERE](../README_START_HERE.md) → [00](./00_PRODUCT_STATUS.md) → [01](./01_ARCHITECTURE.md) → [03](./03_DATABASE_AND_MIGRATIONS.md) → [06](./06_BUILD_SEQUENCE.md) → [08](./08_CODE_AND_DOCS_STANDARD.md).
 - **Coding agent:** [09_AGENT_HANDOFF](./09_AGENT_HANDOFF.md) → [00](./00_PRODUCT_STATUS.md) → [06](./06_BUILD_SEQUENCE.md) → [07](./07_P0_REVIEW_CHECKLIST.md).

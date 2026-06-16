@@ -1,6 +1,8 @@
 # 06 · Build Sequence
 
-**Canonical source for: build order and "what not to build yet".** Each stage is gated on
+**Canonical source for: build order and "what not to build yet".** Each stage maps to legacy→v3
+capability parity and the OMC cutover gate in [11_LEGACY_PARITY_AND_OMC_CHECKLIST](./11_LEGACY_PARITY_AND_OMC_CHECKLIST.md#6-updated-roadmap-next-prs-to-parity).
+Each stage is gated on
 the previous. Status uses the [taxonomy](./10_DOCS_INDEX.md#status-taxonomy). Stage 1 is
 `implemented`/`verified-local`/`ci-enforced`; everything below is `planned` or `deferred`.
 

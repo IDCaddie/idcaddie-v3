@@ -87,8 +87,15 @@ no service-role; org-only users see only related apps. (Stage 3 tenant/org conte
 ## Current open risks to respect
 `not-hosted-applied`; child tables tenant-scoped (org scoping deferred); no tenant switching /
 user provisioning yet (RISK-012); no credential vault; imports/exports destructive-in-legacy
-(don't port). Full list:
+(don't port — legacy deletes "outdated" users, `onFileLinkedToApp.js:290`); v3 must not miss legacy
+paid-client (OMC/Flywheel) capabilities (RISK-016). Full list:
 [04_RISK_REGISTER](./04_RISK_REGISTER.md).
+
+## Legacy parity (paid client)
+When you build a product surface, update its row in [11_LEGACY_PARITY_AND_OMC_CHECKLIST](./11_LEGACY_PARITY_AND_OMC_CHECKLIST.md)
+(status + OMC checklist) and link the PR. Verify legacy behavior from the legacy repo
+(`/Users/samvemuri/Desktop/IDCaddie_Repo-main`) and [current-product-map.md](./current-product-map.md) —
+never from memory; mark unverified claims `needs-verification`. Do **not** imply OMC can cut over until P0/P1 parity is verified.
 
 ## How to summarize at the end of a PR
 State: what changed, what you **verified** (with the command output), what is still
