@@ -37,6 +37,7 @@ Firebase is `legacy-production`. v3 product UI is `planned`.
 | [09_AGENT_HANDOFF](./09_AGENT_HANDOFF.md) | how an agent continues safely | coding agents | living |
 | [10_DOCS_INDEX](./10_DOCS_INDEX.md) | this index + taxonomy | everyone | living |
 | [11_LEGACY_PARITY_AND_OMC_CHECKLIST](./11_LEGACY_PARITY_AND_OMC_CHECKLIST.md) | legacy→v3 capability parity + OMC cutover go/no-go | product owner, buyers (Mike/Jon) | living (every parity PR) |
+| [12_IDENTITY_MATCHING_READ_SCOPE](./12_IDENTITY_MATCHING_READ_SCOPE.md) | **design** for safely reading identity/account/matching data (not implemented) | security reviewers, future implementer | design (update when matching is built) |
 
 ## Existing docs (reconciled — linked, not duplicated)
 | Doc | Canonical for | Note |

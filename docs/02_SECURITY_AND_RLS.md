@@ -177,6 +177,12 @@ and non-members see none. No identity matching, license evaluation, or provision
 `0007`'s is a safe future follow-up.)
 
 ## 8b. Deferred / known gaps (open in [04_RISK_REGISTER.md](./04_RISK_REGISTER.md))
+- **Identity / account / matching read scope is DESIGNED, not implemented** —
+  [12_IDENTITY_MATCHING_READ_SCOPE](./12_IDENTITY_MATCHING_READ_SCOPE.md). Decision: keep `people`
+  **tenant-only** and `identity_accounts` **default-deny** (no app anchor → not org-scopable); the only
+  future org-scoped identity read is `app_user_identity_matches`, gated on a **readable `app_user`**
+  (mirrors `0007`, §5 of doc 12), exposing match *status* not person PII. **No matching, no UAR, no
+  `identity_accounts`/`people` org-read exists.** Future implementation must land doc 12 §7 tests first.
 - **Child tables not org-scoped for reads (RISK-002, open — narrowed by PR #20/#21):** `people`
   is **tenant-read only** (a tenant member sees every tenant row; an org-only user sees nothing);
   `identity_accounts`, `app_user_identity_matches`, `license_rules`, `license_evaluations`, `files`,

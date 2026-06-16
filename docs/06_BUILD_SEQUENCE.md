@@ -91,6 +91,11 @@ passed, CI green.
 - **Verified:** **T29** + live spot-check — org-only users read only users of apps they can read; cross-tenant + non-member read none; org-only delete denied (no DELETE policy).
 - **Still NOT surfaced:** `people` (tenant-only), `identity_accounts`/`app_user_identity_matches`/`license_*`/`files`/`invoices` (default-deny). RISK-002 **narrowed, not closed**. OMC/Flywheel cutover stays **blocked**.
 
+### Stage 6b — Identity / matching read-scope DESIGN 📐 (PR #22, design only — nothing built)
+- **Goal:** decide the safe read model for identity/account/matching **before** building it. Recorded in [12_IDENTITY_MATCHING_READ_SCOPE](./12_IDENTITY_MATCHING_READ_SCOPE.md). **No migration, no policy, no UI, no tests added.**
+- **Decision:** keep `people` **tenant-only** and `identity_accounts` **default-deny** (no app anchor). The only future org-scoped identity read is `app_user_identity_matches`, gated on a **readable `app_user`** (mirror `0007`; SELECT-only; exposes match *status*, not person PII). Any unmanaged/UAR classification is computed **from the app side**, via a definer view returning only a status enum — never tenant-wide `people`/`identity` reads.
+- **A future implementing PR must** land the exact policy (doc 12 §5) and the exact tests (doc 12 §7) **before any UI**, and be re-reviewed for tenant-wide leakage. Current guardrails already pinned by T27 27a/27b + T29 29f.
+
 ### Stage 5 (writes) · Stage 6 — People · Stage 7 — License rules/evaluations · Stage 8 — Files/invoices
 - **Goal:** the source-of-truth surfaces, read first then writes (steward-only).
 - **P0 risks:** writes outside RLS; child tables **not org-scoped for reads** — `people` is **tenant-only**, and `identity_accounts`/`app_user_identity_matches`/`license_rules`/`license_evaluations`/`files`/`invoices` are **default-deny** (no read policy). (`app_contracts` — `0006`/PR #20 — and `app_users` — `0007`/PR #21 — are now org-scoped read.) Add org-scoped read policies + tests **before** any further per-org surface ships (RISK-002; canonical map [02 §8](./02_SECURITY_AND_RLS.md)). Also: destructive edits without audit; no identity matching / license eval / provisioning yet.

@@ -71,6 +71,19 @@ depth, mirroring `0003`); **T29h** plants a normally-impossible FK-bypassed corr
 (`session_replication_role=replica`) and proves an org-only user who can read the parent app still
 cannot read it. Read-only — no identity matching / license eval / provisioning.
 
+**Identity-matching read-scope guardrail (PR #22 — design only, no new assertions).** The identity read
+model is designed in [docs/12](../../docs/12_IDENTITY_MATCHING_READ_SCOPE.md); the *current* safe posture
+it depends on is already proven by the existing suite (no duplication):
+| Guardrail (today) | Proven by |
+|---|---|
+| Tenant **owner** reads 0 `identity_accounts` and 0 `app_user_identity_matches` (default-deny) | T27 27a |
+| Org-only user reads 0 `people` (tenant-only) | T27 27b, T29 29f |
+| Org-only user reads 0 `identity_accounts` and 0 `app_user_identity_matches` (default-deny) | T29 29f |
+| Org-only user reads `app_users` for readable apps (`0007`) | T29 29b–29d (29a is the tenant-owner baseline) |
+| `app_contracts` org-read (`0006`) still holds | T28, T29 29g |
+A future identity/matching PR adds the org-scoped `app_user_identity_matches` policy (doc 12 §5) and
+flips the relevant T29 29f assertions in place, plus the doc 12 §7 tests — **before** any UI.
+
 ### Access model: stewardship (write) vs. related-org (read)
 - **WRITE / steward (single-org):** apps `responsible_org_id`, contracts `procurement_org_id` (or tenant editor+).
 - **READ (multi-org, 0003):** app = responsible OR paying OR procurement-owner org; contract = procurement OR paying org. Keeps chargeback visible under centralized procurement.
