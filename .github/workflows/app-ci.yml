@@ -1,0 +1,31 @@
+name: App CI
+
+# Build/lint/test/typecheck the Next.js app on every PR — the app's release-hygiene gate.
+# Kept separate from the RLS Docker CI (rls-tests.yml) and the docs/migration checks
+# (review-discipline.yml, migration-safety.yml). Needs no hosted Supabase, no secrets:
+# the build is deterministic (system fonts, no remote font fetch) and all data pages are
+# dynamic, so it does not read NEXT_PUBLIC_SUPABASE_* at build time.
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  app:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Install (clean, lockfile-exact)
+        run: npm ci
+      - name: Lint
+        run: npm run lint
+      - name: Unit tests
+        run: npm test
+      - name: Typecheck
+        run: npx tsc --noEmit
+      - name: Build
+        run: npm run build

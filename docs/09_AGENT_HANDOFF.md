@@ -35,7 +35,9 @@ components, no custom events). Legacy Firebase is still production. Don't trust 
    bash scripts/check-docs-updated.sh
    bash scripts/pr-review-summary.sh
    ```
-   For app/UI work also run `npm run lint`, `npm run build`, and `npm test`.
+   For app/UI work also run `npm run lint`, `npm test`, `npx tsc --noEmit`, and `npm run build` —
+   all four are now `ci-enforced` on every PR by `.github/workflows/app-ci.yml`. Keep the build
+   deterministic: no `next/font/google` (use the system font stack in `globals.css`), no remote fetch at build.
 3. Update docs per the [docs-update policy](./08_CODE_AND_DOCS_STANDARD.md#required-updates-per-change-docs-update-policy):
    at minimum add a [05_ENGINEERING_CHANGELOG](./05_ENGINEERING_CHANGELOG.md) entry; touch
    [04_RISK_REGISTER](./04_RISK_REGISTER.md) if risk changed.

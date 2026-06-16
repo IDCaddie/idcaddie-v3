@@ -27,6 +27,8 @@ Severity: P0 (critical) · P1 (high) · P2 (medium) · P3 (low). Status uses the
 
 | RISK-016 | P2 | open | **v3 may miss legacy paid-client (OMC/Flywheel) capabilities if parity isn't tracked.** The legacy Firebase app has a large feature surface (inventory, contracts, people/matching, unmanaged/stale reports, license/spend, imports/exports, audit); cutting OMC over with gaps would regress the paying client. | A living parity scorecard + OMC go/no-go + hard cutover rule ([11_LEGACY_PARITY_AND_OMC_CHECKLIST](./11_LEGACY_PARITY_AND_OMC_CHECKLIST.md)); every product-surface PR updates it; legacy stays production until P0/P1 are `verified` + signed off. Evidence verified from the legacy repo, not memory. | Cutover sign-off once all P0/P1 parity items are `verified`. |
 
+| RISK-017 | P3 | open | **`next`'s bundled `postcss` has a moderate advisory** (GHSA-qx2v-qp2m-jg93 — XSS via unescaped `</style>` in CSS stringify). `npm audit` flags `node_modules/next/node_modules/postcss` (next-internal, build-time). Not safely fixable: the only `npm audit fix --force` path downgrades `next` to 9.3.3 (a breaking, ancient version). | Build-time only — the advisory needs postcss to stringify **attacker-controlled** CSS, which our build never does (it processes our own trusted CSS). No runtime/served exposure. The project's **own** top-level `postcss` is already 8.5.15 (patched); only `next`'s bundled 8.4.31 is affected. Not force-fixed (would break the app). | A `next` release > 16.3.0-canary.5 that bumps its bundled `postcss` ≥ 8.5.10; re-run `npm audit` and update on the next safe `next` upgrade. |
+
 ## Closed risks (verified)
 | ID | Sev | Closed by | What it was |
 |----|-----|-----------|-------------|

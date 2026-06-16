@@ -44,8 +44,9 @@ bash scripts/check-auth-safety.sh                  # src/ has no service-role/ha
 bash scripts/check-docs-updated.sh                 # docs-drift gate
 bash scripts/pr-review-summary.sh                  # categorize the diff + reviewer focus
 ```
-For app/UI changes also run `npm run lint`, `npm run build`, and `npm test`.
-All of these also run in CI on every PR (`.github/workflows/`).
+For app/UI changes also run `npm run lint`, `npm test`, `npx tsc --noEmit`, and `npm run build`.
+All of these run in CI on every PR (`.github/workflows/`): `app-ci.yml` gates lint/test/typecheck/build,
+`rls-tests.yml` runs the RLS suite, and `migration-safety.yml` / `review-discipline.yml` cover migrations + docs.
 
 ## Local demo data
 ```bash

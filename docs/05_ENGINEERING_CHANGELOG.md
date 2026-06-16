@@ -7,6 +7,29 @@ from PRs verified via `git log` / `gh pr list`.
 
 ---
 
+### PR #15 — Add app CI and release hygiene hardening · 2026-06-16
+- **Category:** CI / build / release hygiene (no product features).
+- **What:**
+  - **App CI** — `.github/workflows/app-ci.yml` runs `npm ci` → `npm run lint` → `npm test` →
+    `npx tsc --noEmit` → `npm run build` on every PR (kept separate from the RLS Docker CI).
+  - **Deterministic build** — removed `next/font/google` (Geist) from `src/app/layout.tsx`; fonts now
+    come from a system stack in `globals.css` `@theme`. **No remote (Google) font fetch at build.**
+  - **Metadata** — `src/app/layout.tsx` title `ID Caddie`, description "Contract-aware SaaS governance for complex organizations" (was Create-Next-App copy).
+  - **README** — replaced the starter `README.md` with a short pointer to `README_START_HERE.md` (the canonical entry point).
+- **Why:** make the app build/test path deterministic and CI-enforced before more product UI.
+- **Audit:** `npm audit --audit-level=moderate` → 2 moderate, both in **`next`'s bundled `postcss`**
+  (`node_modules/next/node_modules/postcss`, GHSA-qx2v-qp2m-jg93, build-time). The only `fix --force`
+  path downgrades `next` to 9.3.3 (breaking) — **not** applied. Tracked as **RISK-017**.
+- **Product impact:** none — no routes/pages/features. **Security/RLS/migration/service-role impact:** none — no DB/auth/schema change, hosted Supabase untouched, no secrets (CI build needs no env: data pages are dynamic).
+- **Tests run (local, verified):** `npm ci` exit 0; `npm run lint` clean; `npm test` 5/5;
+  `npx tsc --noEmit` exit 0 (clean fresh tree, no `.next`/`next-env.d.ts`); `npm run build` exit 0
+  (builds with **no** env vars + **no** Google font); `check-auth-safety.sh`, `check-migration-safety.sh`,
+  `check-docs-updated.sh` pass; `test-rls.sh` → `ALL ORG-RLS ASSERTIONS PASSED`.
+- **Docs updated:** `00`, `01` (workflow list), `04` (RISK-017), `09`, `README_START_HERE`, `README.md`, this entry.
+- **Follow-ups:** clear RISK-017 on the next safe `next` upgrade that bumps bundled postcss.
+
+---
+
 ### PR #14 — Add read-only app detail · 2026-06-16
 - **Category:** app / product UI.
 - **What:** `src/app/(authenticated)/apps/[id]/page.tsx` — a server-rendered, **read-only** app detail
