@@ -7,6 +7,31 @@ from PRs verified via `git log` / `gh pr list`.
 
 ---
 
+### PR #14 — Add read-only app detail · 2026-06-16
+- **Category:** app / product UI.
+- **What:** `src/app/(authenticated)/apps/[id]/page.tsx` — a server-rendered, **read-only** app detail
+  page (name/vendor/category/status/created/updated + owning-org IDs), with safe not-found/no-access
+  and generic-error states and **no** create/edit/delete. New typed DAL helper
+  `getAppDetailForCurrentUser(appId)` in `src/lib/data/apps.ts` (`AppDetail` DTO + `AppDetailResult`).
+  App names in `/apps` now link to the detail page.
+- **Why:** restore the next legacy capability (app detail drill-down) while keeping v3 safer.
+- **Route-param authorization:** the `[id]` param is **only a lookup key** — `getAppDetailForCurrentUser`
+  does `where id = $1` and relies on RLS; a hidden/foreign row returns `not_found` (indistinguishable
+  from non-existent, so the id can't enumerate other tenants' apps).
+- **Data access / RLS impact:** reads only via the user-scoped DAL; RLS is the authority. **Verified**
+  with the helper's exact query against the seeded fixture: owner reads all 3 app details; org-only
+  Marketing reads only its 2 related (Salesforce, Slack); the unrelated app (Google Workspace) and a
+  non-member → `not_found`/0.
+- **Security impact:** read-only; no service-role; no browser storage; no secrets; no `tenant_id`/param as authz.
+- **Migration impact:** **none**. **Service-role impact:** none.
+- **Tests run (local, verified):** `npm test` 5/5; `npm run lint`/`build` exit 0 (`/apps/[id]` dynamic);
+  `check-auth-safety.sh`, `check-migration-safety.sh`, `check-docs-updated.sh` pass; `test-rls.sh`
+  → `ALL ORG-RLS ASSERTIONS PASSED`; `seed-local-demo.sh` + RLS detail spot-check (owner 3 / org-only 2 / unrelated 0 / non-member 0).
+- **Docs updated:** `00`, `06` (Stage 4b ✅; Stage 5 contracts next), `09`, `11` (App-detail row → implemented metadata-only), `04` (RISK-006 narrowed), this entry.
+- **Follow-ups:** org-name enrichment; then contracts (Stage 5). **Not built:** app-user roster, linked contracts/invoices/files, license rules, all edits/imports/exports.
+
+---
+
 ### PR #13 — Add read-only app inventory · 2026-06-16
 - **Category:** app / product UI (first product surface).
 - **What:** `src/app/(authenticated)/apps/page.tsx` — a server-rendered, **read-only** Apps inventory

@@ -52,6 +52,7 @@ PR #6 (this branch, auth/session skeleton) is **not yet merged**.
 | Local/demo data fixture (synthetic; never hosted-applied) | `implemented` (PR #10 — `supabase/fixtures/local_demo.sql` via `scripts/seed-local-demo.sh`); local-only |
 | Typed DB types + read-only data access layer (server-only) | `implemented` (PR #11 — generated `database.types.ts`, typed server client, `src/lib/data/apps.ts`); `verified-local` (typed build) |
 | Read-only app inventory screen (`/apps`) | `implemented` (PR #13 — first product surface, server-rendered, typed DAL, RLS-scoped); `verified-local` (build + RLS query: owner sees all tenant apps, org-only user sees only related, non-member sees none) |
+| Read-only app detail screen (`/apps/[id]`) | `implemented` (PR #14 — server-rendered, typed DAL, route id is lookup-only not authz); `verified-local` (RLS query: owner reads all 3 details, org-only reads only its 2 related, unrelated/non-member → not_found) |
 | Product UI / app workflows (detail, contracts, people, reports, writes) | `planned` (only the read-only apps list exists) |
 | Child-table org scoping (`app_users`, `files`, `invoices`, `license_*`, `app_contracts`) | `deferred` (still tenant-scoped) |
 | `resource_org_links` relationship table + org hierarchy | `deferred` |

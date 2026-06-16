@@ -63,8 +63,15 @@ passed, CI green.
   Marketing user sees only the 2 apps related to their org (RLS `0003` org-union read); a non-member sees 0.
 - **Don't build yet:** edit/create, app detail, contracts UI, imports/exports.
 
-### Stage 4b — Read-only app detail (next)
-- **Goal:** drill-down for one app (read-only), then Stage 5 contracts. Same DAL pattern; no writes.
+### Stage 4b — Read-only app detail ✅ (PR #14)
+- **Goal:** drill-down for one app (read-only). **Done.**
+- **Built:** `src/app/(authenticated)/apps/[id]/page.tsx` + `getAppDetailForCurrentUser(id)` (typed DAL).
+  Shows name/vendor/category/status/timestamps + owning-org IDs; app names in `/apps` link here. The
+  `[id]` route param is a **lookup key only** — RLS decides; hidden rows → `not_found` (no enumeration).
+- **Verified (RLS query):** owner reads all 3 demo app details; org-only Marketing reads only its 2
+  related, and the unrelated app + non-member → 0 (not_found).
+- **Deferred (documented):** org-name enrichment (IDs shown for now); app-user roster, linked contracts,
+  invoices, files, license rules, and all edits — **not** built.
 
 ### Stage 5 — Contracts · Stage 6 — People/app users · Stage 7 — License rules/evaluations · Stage 8 — Files/invoices
 - **Goal:** the source-of-truth surfaces, read first then writes (steward-only).
