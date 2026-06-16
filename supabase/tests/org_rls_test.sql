@@ -876,6 +876,32 @@ do $$ declare v int; begin
 end $$;
 reset role;
 
+-- 28h: DEFENSE-IN-DEPTH (migration 0009) — the org policy now pins app/contract tenant explicitly
+-- (mirrors 0007/0008), so it is self-sufficient for tenant isolation rather than relying solely on the
+-- 0005 same-tenant FKs. Plant a normally-IMPOSSIBLE corrupt cross-tenant link by bypassing the FK
+-- (session_replication_role=replica, superuser only): tenant_id = tenant B, but (app_id, contract_id)
+-- point at a tenant-A App A1 + a tenant-A contract that mgr_a1 CAN read. Without the explicit tenant-bind
+-- (the old 0006 policy) mgr_a1 would leak this row via BOTH branches; the 0009 bind hides it because
+-- App A1.tenant_id (A) != the link's tenant_id (B) and the contract's tenant_id (A) != B.
+reset role;
+-- a tenant-A contract stewarded by Org A1 (mgr_a1-readable), not otherwise linked to App A1.
+insert into public.contracts (id, tenant_id, contract_name, procurement_org_id) values
+  ('c0000000-0000-0000-0000-0000000000c9','11111111-1111-1111-1111-111111111111','Contract A-h (T28h)','1a1a1a1a-0000-0000-0000-000000000001');
+set session_replication_role = replica;  -- superuser: bypass FK/triggers to plant the corrupt link
+insert into public.app_contracts (app_id, contract_id, tenant_id) values
+  ('a9900000-0000-0000-0000-0000000000a1','c0000000-0000-0000-0000-0000000000c9','22222222-2222-2222-2222-222222222222');
+set session_replication_role = default;
+select set_config('request.jwt.claims','{"sub":"0a000000-0000-0000-0000-0000000000a1"}',false); -- mgr_a1 (reads App A1 + Contract A-h)
+set role authenticated;
+do $$ declare v int; begin
+  select count(*) into v from public.app_contracts where tenant_id='22222222-2222-2222-2222-222222222222';
+  assert v = 0, format('T28h org policy must pin tenant — corrupt cross-tenant app_contracts link must stay hidden, saw %s', v);
+end $$;
+reset role;
+-- clean up the planted link + helper contract (superuser; no DELETE policy needed — RLS bypassed).
+delete from public.app_contracts where app_id='a9900000-0000-0000-0000-0000000000a1' and contract_id='c0000000-0000-0000-0000-0000000000c9';
+delete from public.contracts where id='c0000000-0000-0000-0000-0000000000c9';
+
 -- ── Test 29: org-scoped READ for app_users (migration 0007, PR #21) ──────────────────────────
 -- app_users gains ONE org-scoped SELECT policy: an org-only user may read an app_user row iff they
 -- can already read the linked APP under their related-org RLS. Existing tenant-member read + editor

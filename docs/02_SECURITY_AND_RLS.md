@@ -4,8 +4,9 @@
 re-explaining RLS. Implemented in `supabase/migrations/0002_org_scoped_rls.sql`,
 `0003_org_access_union.sql`, `0004_destructive_delete_hardening.sql`, and
 `0006_org_scoped_app_contracts_read.sql`, `0007_org_scoped_app_users_read.sql`, and
-`0008_org_scoped_app_user_identity_matches_read.sql`; proven by
-`supabase/tests/org_rls_test.sql` (152 assertions, T1–T30, `verified-local`, `ci-enforced` via
+`0008_org_scoped_app_user_identity_matches_read.sql`, and
+`0009_harden_app_contracts_read_tenant_bind.sql`; proven by
+`supabase/tests/org_rls_test.sql` (153 assertions, T1–T30, `verified-local`, `ci-enforced` via
 PR #2). Schema: [v3-data-model.md](./v3-data-model.md).
 Design rationale & legacy evidence: [v3-security-model.md](./v3-security-model.md),
 [current-security-risk-map.md](./current-security-risk-map.md).
@@ -121,7 +122,7 @@ manage all membership rows; **admins** manage only non-`owner` rows and cannot w
 | 16 | App inventory/detail reads still valid after hardening | rows returned | SELECT policies untouched | T25 |
 | 17 | Child/link row references a parent in **another tenant** | write fails (foreign_key_violation); valid same-tenant + nullable links still insert | composite same-tenant FKs (`0005`) | T26 |
 | 18 | Org-only user reads the **tenant-only** child table `people`; any user reads a **default-deny** table (`identity_accounts`/`files`/`invoices`/`license_*`) | 0 rows | tenant-only `SELECT` is `is_tenant_member`-gated; default-deny has no policy | T27 |
-| 19 | Org-only user reads an `app_contracts` link tied to an app/contract they **cannot** read (or a cross-tenant / non-member read) | 0 rows; reads only links to a readable app **or** contract | `0006` org-scoped `SELECT` (reuses `apps`/`contracts` RLS; tenant-bound by `0005`) | T28 |
+| 19 | Org-only user reads an `app_contracts` link tied to an app/contract they **cannot** read (or a cross-tenant / non-member read); a planted FK-bypassed corrupt cross-tenant link | 0 rows; reads only links to a readable app **or** contract; corrupt link denied | `0006` org-scoped `SELECT` + `0009` explicit tenant-bind (reuses `apps`/`contracts` RLS; tenant-bound by `0005` + the explicit clause) | T28, T28h |
 | 20 | Org-only user reads `app_users` for an app they **cannot** read (or a cross-tenant / non-member read) | 0 rows; reads only users of apps they can read | `0007` org-scoped `SELECT` (reuses `apps` RLS; tenant-bound by `0005`) | T29 |
 | 21 | Org-only user reads `app_user_identity_matches` for an app_user they **cannot** read (or cross-tenant / non-member); a match read grants no `people`/`identity_accounts` read | 0 rows; reads only matches of readable app_users; `people`/`identity_accounts` stay 0 | `0008` org-scoped `SELECT` (reuses `app_users` RLS; explicit tenant-bind) | T30 |
 
@@ -162,11 +163,14 @@ policy — unreadable by any normal `authenticated` user; only service-role / `S
 > first (RISK-002) — do not assume a child table is org-readable because it has a same-tenant FK.
 
 ### 8a. Org-scoped read for link/child tables (`0006`/`0007`, PR #20/#21)
-Two tables have an org-scoped `SELECT` policy that **reuses the parent's RLS** — the `EXISTS` subquery
+Three tables have an org-scoped `SELECT` policy that **reuses the parent's RLS** — the `EXISTS` subquery
 is itself filtered by the parent's SELECT policies for the invoking user, so it grants nothing beyond
-"you can already read the parent"; the `0005` same-tenant FKs keep each tenant-bound:
-- **`app_contracts`** (`0006`): read a link iff you can read the linked **app OR contract**. Powers the
-  read-only "linked apps"/"linked contracts" panels. Proven by **T28**.
+"you can already read the parent"; each ALSO pins the parent's `tenant_id = <child>.tenant_id`
+explicitly, so the policy is self-sufficient for tenant isolation (not relying solely on the `0005`
+same-tenant FKs) — a planted FK-bypassed corrupt cross-tenant row is denied:
+- **`app_contracts`** (`0006`, hardened by **`0009`** PR #27): read a link iff you can read the linked
+  **app OR contract**, with explicit tenant-bind on both branches. Powers the read-only "linked apps"/
+  "linked contracts" panels. Proven by **T28** (valid) + **T28h** (corrupt-row defense).
 - **`app_users`** (`0007`): read an app-user row iff you can read the linked **app**. Its subquery
   ALSO pins `a.tenant_id = app_users.tenant_id` explicitly (mirroring `0003`), so the policy is
   self-sufficient for tenant isolation — even a planted FK-bypassed corrupt cross-tenant row is denied
@@ -180,8 +184,10 @@ is itself filtered by the parent's SELECT policies for the invoking user, so it 
 Both are **read-only** — the tenant-member read and editor `INSERT`/`UPDATE` are unchanged, and **no
 `DELETE`** policy was added. Org-only users see only rows tied to a parent they can read; cross-tenant
 and non-members see none. No identity matching, license evaluation, or provisioning is implied.
-(`0006` binds tenant via the `0005` FK only — proven no-leak by T28; an explicit-clause hardening like
-`0007`'s is a safe future follow-up.)
+(`0006` originally bound tenant via the `0005` FK only; **`0009` (PR #27) hardened it** with the same
+explicit `a.tenant_id = app_contracts.tenant_id` / `c.tenant_id = app_contracts.tenant_id` clauses as
+`0007`/`0008`, so all three org-scoped child reads are now self-sufficient. Valid-row behavior is
+unchanged; a planted FK-bypassed corrupt cross-tenant link is now denied — proven by **T28h**.)
 
 ## 8b. Deferred / known gaps (open in [04_RISK_REGISTER.md](./04_RISK_REGISTER.md))
 - **Identity / account / matching read scope** — design in

@@ -8,7 +8,7 @@ RISK-016 / OMC parity (open). OMC/Flywheel cutover remains **blocked**.
 
 > **Verified finding (not a guess):** the contract write **RLS authority already exists** — it was
 > shipped in `0002` and split into `INSERT`/`UPDATE` (no `DELETE`) by `0004`. A live `pg_policies`
-> dump on a fresh `0001`–`0008` DB confirms exactly: `editors insert/update contracts`
+> dump on a fresh `0001`–`0009` DB confirms exactly: `editors insert/update contracts`
 > (`has_tenant_role` owner/admin/editor) **+** `org managers insert/update org contracts`
 > (`has_org_role_in_tenant(procurement_org_id, …, ['manager'])`), **0** `DELETE`/`ALL` policies, and the
 > `enforce_owning_org_tenant` trigger covering `procurement_org_id` + `paying_org_id`. **This already

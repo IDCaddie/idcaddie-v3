@@ -20,6 +20,7 @@ links them rather than restating:
 | `0006_org_scoped_app_contracts_read.sql` | One permissive `SELECT` policy making `app_contracts` **org-scoped for read** — read a link iff you can read the linked **app OR contract** (reuses their RLS; tenant-bound by `0005`). SELECT-only, no `DELETE`. Proven by T28. | PR #20 |
 | `0007_org_scoped_app_users_read.sql` | One `SELECT` policy making `app_users` **org-scoped for read** — read a row iff you can read the linked **app** (explicit tenant-bind, mirrors `0003`). SELECT-only, no `DELETE`. Proven by T29 (incl. T29h corrupt-row defense). | PR #21 |
 | `0008_org_scoped_app_user_identity_matches_read.sql` | One `SELECT` policy making `app_user_identity_matches` **org-scoped for read** — read a match iff you can read the linked **`app_user`** (explicit tenant-bind). Exposes match *status*, no PII. SELECT-only, no `DELETE`. Proven by T30. | PR #23 |
+| `0009_harden_app_contracts_read_tenant_bind.sql` | **Defense-in-depth:** replaces the `0006` org-scoped `SELECT` on `app_contracts` with one that pins `a.tenant_id`/`c.tenant_id = app_contracts.tenant_id` explicitly (matching `0007`/`0008`). **Valid-row behavior unchanged**; a planted FK-bypassed corrupt cross-tenant link is now denied. SELECT-only, no `DELETE`/`FOR ALL`; `0006` not edited. Proven by T28h. | PR #27 |
 
 ## Workflow (summary — full rules in [migration-workflow.md](./migration-workflow.md))
 1. **Local first.** Never develop against hosted Supabase; never use service-role keys for normal dev.
@@ -86,4 +87,4 @@ Then add positive + negative tests to `supabase/tests/org_rls_test.sql`.
 - ❌ a `SELECT` policy without a tenant condition (directly or via helper).
 - ❌ frontend filtering used as a security boundary.
 - ❌ a service-role workaround to "get around" a too-strict RLS policy — fix the policy + test it.
-- ❌ editing any merged migration (`0001`–`0008`) — fix forward with a new `000N_*.sql`.
+- ❌ editing any merged migration (`0001`–`0009`) — fix forward with a new `000N_*.sql`.

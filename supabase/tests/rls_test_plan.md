@@ -25,7 +25,7 @@ Before building UI, prove these pass against local Supabase.
 
 Cases 1–8 plus the org/cross-tenant/escalation matrix are enforced by
 `supabase/migrations/0002_org_scoped_rls.sql` and `0003_org_access_union.sql`,
-covered by the runnable suite `supabase/tests/org_rls_test.sql` (T1–T30, 152 assertions). The
+covered by the runnable suite `supabase/tests/org_rls_test.sql` (T1–T30, 153 assertions). The
 suite has been executed against Postgres 16 with a Supabase-style `auth` shim — all
 assertions pass (`ALL ORG-RLS ASSERTIONS PASSED`).
 
@@ -51,13 +51,17 @@ rows; org-only user reads its own-org app) prove the zeros are policy, not empty
 org-scoped read in `0006`/`0007` and T27 was updated accordingly — see T28/T29.) Canonical read map:
 [docs/02 §8](../../docs/02_SECURITY_AND_RLS.md).
 
-**Org-scoped read for `app_contracts` (T28, migration `0006`, PR #20):** `app_contracts` gains ONE
-org-scoped `SELECT` policy — an org-only user may read a link row iff they can already read the linked
-**app OR contract** under related-org RLS (the `EXISTS` subqueries reuse `apps`/`contracts` RLS;
-`0005` keeps it tenant-bound). T28 proves: tenant owner reads all tenant links; org-only users read
-only links tied to apps/contracts they can read (app-side **and** contract-side branches); cross-tenant
-(`owner_b`) and a pure non-member (`nobody`) read 0; and the default-deny/tenant-only tables still read
-0 for an org-only user (no broadening leaked). Read-only — no `DELETE` policy added.
+**Org-scoped read for `app_contracts` (T28, migration `0006`; hardened by `0009`, PR #20/#27):**
+`app_contracts` gains ONE org-scoped `SELECT` policy — an org-only user may read a link row iff they can
+already read the linked **app OR contract** under related-org RLS (the `EXISTS` subqueries reuse
+`apps`/`contracts` RLS; `0005` + the explicit tenant-bind added in **`0009`** keep it tenant-bound).
+T28 proves: tenant owner reads all tenant links; org-only users read only links tied to apps/contracts
+they can read (app-side **and** contract-side branches); cross-tenant (`owner_b`) and a pure non-member
+(`nobody`) read 0; and the default-deny/tenant-only tables still read 0 for an org-only user (no
+broadening leaked). **T28h** (`0009`) plants a normally-impossible FK-bypassed corrupt cross-tenant link
+(tenant B, but `(app_id, contract_id)` point at a tenant-A app + contract the org user CAN read) and
+proves the explicit tenant-bind hides it — a weak-vs-hardened check confirmed the old `0006` policy
+would leak it. Valid-row behavior is unchanged. Read-only — no `DELETE` policy added.
 
 **Org-scoped read for `app_users` (T29, migration `0007`, PR #21):** `app_users` gains ONE org-scoped
 `SELECT` policy — an org-only user may read an app-user row iff they can already read the linked **app**
