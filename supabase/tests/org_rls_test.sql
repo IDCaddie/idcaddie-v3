@@ -770,7 +770,9 @@ select set_config('request.jwt.claims','{"sub":"0a000000-0000-0000-0000-00000000
 set role authenticated;
 do $$ declare v int; begin
   select count(*) into v from public.identity_accounts;         assert v = 0, format('T27 owner_a saw %s identity_accounts (default-deny)', v);
-  select count(*) into v from public.app_user_identity_matches; assert v = 0, format('T27 owner_a saw %s app_user_identity_matches (default-deny)', v);
+  -- NOTE: app_user_identity_matches is NO LONGER default-deny — PR #23 / 0008 made it org-scoped read
+  -- (a tenant member reads it transitively via reading all tenant app_users). Its read behavior is
+  -- proven in T30 below; identity_accounts stays default-deny (asserted above).
   select count(*) into v from public.license_rules;             assert v = 0, format('T27 owner_a saw %s license_rules (default-deny)', v);
   select count(*) into v from public.license_evaluations;       assert v = 0, format('T27 owner_a saw %s license_evaluations (default-deny)', v);
   select count(*) into v from public.files;                     assert v = 0, format('T27 owner_a saw %s files (default-deny)', v);
@@ -950,10 +952,10 @@ set role authenticated;
 do $$ declare v int; begin
   delete from public.app_users where id='a5000000-0000-0000-0000-0000000000a1';  -- App A1 user mgr_a1 can read
   select count(*) into v from public.app_users where id='a5000000-0000-0000-0000-0000000000a1'; assert v = 1, format('T29 app_user must survive org-only delete (no DELETE policy), saw %s', v);
-  -- 0007 broadened ONLY app_users — the rest are still default-deny / tenant-only for an org-only user.
+  -- 0007 broadened ONLY app_users (and 0008 later adds app_user_identity_matches — proven in T30).
+  -- people / identity_accounts / license_* / invoices / files are still default-deny / tenant-only here.
   select count(*) into v from public.people;                  assert v = 0, format('T29 mgr_a1 people still tenant-only, saw %s', v);
   select count(*) into v from public.identity_accounts;       assert v = 0, format('T29 mgr_a1 identity_accounts still default-deny, saw %s', v);
-  select count(*) into v from public.app_user_identity_matches; assert v = 0, format('T29 mgr_a1 app_user_identity_matches still default-deny, saw %s', v);
   select count(*) into v from public.license_rules;           assert v = 0, format('T29 mgr_a1 license_rules still default-deny, saw %s', v);
   select count(*) into v from public.license_evaluations;     assert v = 0, format('T29 mgr_a1 license_evaluations still default-deny, saw %s', v);
   select count(*) into v from public.invoices;                assert v = 0, format('T29 mgr_a1 invoices still default-deny, saw %s', v);
@@ -987,5 +989,109 @@ do $$ declare v int; begin
 end $$;
 reset role;
 delete from public.app_users where id='a5000000-0000-0000-0000-0000000000ee';  -- clean up planted row (superuser)
+
+-- ── Test 30: org-scoped READ for app_user_identity_matches (migration 0008, PR #23) ──────────
+-- app_user_identity_matches gains ONE org-scoped SELECT policy (doc 12 §5): read a match row iff you
+-- can read the linked app_user (which is itself org-scoped by 0007), with an explicit tenant-bind. It
+-- exposes match STATUS, not PII: people stays tenant-only, identity_accounts stays default-deny.
+-- Existing matches: M1 = 15..a1 (app_user a5..a1 in App A1) from T26. Seed M2 (App A-pay) + M3 (App A2).
+reset role;
+insert into public.app_user_identity_matches (id, tenant_id, app_user_id, person_id, match_method) values
+  ('15000000-0000-0000-0000-0000000000cf','11111111-1111-1111-1111-111111111111','a5000000-0000-0000-0000-0000000000cf','7e000000-0000-0000-0000-0000000000a1','email'),  -- M2 App A-pay
+  ('15000000-0000-0000-0000-0000000000c2','11111111-1111-1111-1111-111111111111','a5000000-0000-0000-0000-0000000000c2','7e000000-0000-0000-0000-0000000000a1','email');  -- M3 App A2
+
+-- 30a: tenant owner reads ALL 3 tenant match rows (transitively — owner reads all tenant app_users).
+select set_config('request.jwt.claims','{"sub":"0a000000-0000-0000-0000-000000000001"}',false); -- owner_a
+set role authenticated;
+do $$ declare v int; begin
+  select count(*) into v from public.app_user_identity_matches where tenant_id='11111111-1111-1111-1111-111111111111';
+  assert v = 3, format('T30 owner_a should read all 3 tenant match rows, saw %s', v);
+  -- owner still reads 0 identity_accounts (default-deny, untouched by 0008)
+  select count(*) into v from public.identity_accounts; assert v = 0, format('T30 owner_a identity_accounts still default-deny, saw %s', v);
+end $$;
+reset role;
+
+-- 30b: org-only mgr_a1 (Org A1) reads ONLY App A1's match (M1); 0 for unreadable apps' matches.
+select set_config('request.jwt.claims','{"sub":"0a000000-0000-0000-0000-0000000000a1"}',false); -- mgr_a1
+set role authenticated;
+do $$ declare v int; begin
+  select count(*) into v from public.app_user_identity_matches; assert v = 1, format('T30 mgr_a1 should read 1 match (App A1), saw %s', v);
+  select count(*) into v from public.app_user_identity_matches where id='15000000-0000-0000-0000-0000000000a1'; assert v = 1, format('T30 mgr_a1 should read M1 (App A1), saw %s', v);
+  select count(*) into v from public.app_user_identity_matches where id='15000000-0000-0000-0000-0000000000cf'; assert v = 0, format('T30 mgr_a1 must NOT read M2 (App A-pay), saw %s', v);
+  -- match read grants NO collateral read: people + identity_accounts still 0 for the org-only user.
+  select count(*) into v from public.people;            assert v = 0, format('T30 mgr_a1 people still tenant-only, saw %s', v);
+  select count(*) into v from public.identity_accounts; assert v = 0, format('T30 mgr_a1 identity_accounts still default-deny, saw %s', v);
+end $$;
+reset role;
+
+-- 30c: org-only mgr_a2 (Org A2) reads App A-pay (responsible) + App A2 (responsible) matches (M2, M3); not M1.
+select set_config('request.jwt.claims','{"sub":"0a000000-0000-0000-0000-0000000000a3"}',false); -- mgr_a2
+set role authenticated;
+do $$ declare v int; begin
+  select count(*) into v from public.app_user_identity_matches; assert v = 2, format('T30 mgr_a2 should read 2 matches (App A-pay + App A2), saw %s', v);
+  select count(*) into v from public.app_user_identity_matches where id='15000000-0000-0000-0000-0000000000a1'; assert v = 0, format('T30 mgr_a2 must NOT read M1 (App A1), saw %s', v);
+end $$;
+reset role;
+
+-- 30d: org-only agency_u (Org A3) reads ONLY App A-pay (paying org A3) match (M2); not M1/M3.
+select set_config('request.jwt.claims','{"sub":"0a000000-0000-0000-0000-0000000000c1"}',false); -- agency_u
+set role authenticated;
+do $$ declare v int; begin
+  select count(*) into v from public.app_user_identity_matches; assert v = 1, format('T30 agency_u should read 1 match (App A-pay), saw %s', v);
+  select count(*) into v from public.app_user_identity_matches where id='15000000-0000-0000-0000-0000000000cf'; assert v = 1, format('T30 agency_u should read M2 (App A-pay), saw %s', v);
+  select count(*) into v from public.app_user_identity_matches where id='15000000-0000-0000-0000-0000000000a1'; assert v = 0, format('T30 agency_u must NOT read M1 (App A1), saw %s', v);
+end $$;
+reset role;
+
+-- 30e: other-tenant owner_b and pure non-member nobody read ZERO match rows (no cross-tenant leak).
+select set_config('request.jwt.claims','{"sub":"0b000000-0000-0000-0000-000000000001"}',false); -- owner_b (tenant B)
+set role authenticated;
+do $$ declare v int; begin
+  select count(*) into v from public.app_user_identity_matches; assert v = 0, format('T30 owner_b (tenant B) must read 0 tenant-A matches, saw %s', v);
+end $$;
+reset role;
+select set_config('request.jwt.claims','{"sub":"0a000000-0000-0000-0000-0000000000ff"}',false); -- nobody
+set role authenticated;
+do $$ declare v int; begin
+  select count(*) into v from public.app_user_identity_matches; assert v = 0, format('T30 nobody (non-member) must read 0 matches, saw %s', v);
+end $$;
+reset role;
+
+-- 30f: NO DELETE policy — an org-only user who CAN read M1 still cannot delete it (row survives).
+select set_config('request.jwt.claims','{"sub":"0a000000-0000-0000-0000-0000000000a1"}',false); -- mgr_a1
+set role authenticated;
+do $$ declare v int; begin
+  delete from public.app_user_identity_matches where id='15000000-0000-0000-0000-0000000000a1';
+  select count(*) into v from public.app_user_identity_matches where id='15000000-0000-0000-0000-0000000000a1';
+  assert v = 1, format('T30 match must survive org-only delete (no DELETE policy), saw %s', v);
+end $$;
+reset role;
+
+-- 30g: app_users (T29, 0007) and app_contracts (T28, 0006) org-read still hold after 0008.
+select set_config('request.jwt.claims','{"sub":"0a000000-0000-0000-0000-0000000000a1"}',false); -- mgr_a1
+set role authenticated;
+do $$ declare v int; begin
+  select count(*) into v from public.app_users;     assert v = 2, format('T30 app_users T29 still holds (mgr_a1 reads App A1 users = 2), saw %s', v);
+  select count(*) into v from public.app_contracts; assert v = 2, format('T30 app_contracts T28 still holds (mgr_a1 reads 2 links), saw %s', v);
+end $$;
+reset role;
+
+-- 30h: DEFENSE-IN-DEPTH — the explicit tenant-bind hides a normally-impossible FK-bypassed corrupt
+-- cross-tenant match (tenant B, app_user a5..a1 which is tenant A). mgr_a1 CAN read App A1's a5..a1 but
+-- must NOT read this match because its tenant_id (B) != the app_user's tenant_id (A).
+reset role;
+set session_replication_role = replica;  -- superuser: bypass FK to plant the corrupt row
+-- distinct person_id (FK bypassed) so the unique(app_user_id, person_id) doesn't collide with M1.
+insert into public.app_user_identity_matches (id, tenant_id, app_user_id, person_id, match_method) values
+  ('15000000-0000-0000-0000-0000000000ee','22222222-2222-2222-2222-222222222222','a5000000-0000-0000-0000-0000000000a1','7e000000-0000-0000-0000-0000000000ee','email');
+set session_replication_role = default;
+select set_config('request.jwt.claims','{"sub":"0a000000-0000-0000-0000-0000000000a1"}',false); -- mgr_a1
+set role authenticated;
+do $$ declare v int; begin
+  select count(*) into v from public.app_user_identity_matches where id='15000000-0000-0000-0000-0000000000ee';
+  assert v = 0, format('T30 match policy must pin tenant — corrupt cross-tenant match must stay hidden, saw %s', v);
+end $$;
+reset role;
+delete from public.app_user_identity_matches where id='15000000-0000-0000-0000-0000000000ee';  -- clean up (superuser)
 
 do $$ begin raise notice 'ALL ORG-RLS ASSERTIONS PASSED'; end $$;

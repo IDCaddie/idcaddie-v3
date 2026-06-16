@@ -2,6 +2,7 @@ import Link from "next/link";
 import { getAppDetailForCurrentUser } from "@/lib/data/apps";
 import { listContractsLinkedToApp } from "@/lib/data/links";
 import { listAppUsersForApp } from "@/lib/data/app-users";
+import { listMatchesForAppUsers } from "@/lib/data/app-user-matches";
 
 export const metadata = { title: "App · ID Caddie" };
 
@@ -9,8 +10,10 @@ export const metadata = { title: "App · ID Caddie" };
 // RLS decides whether the signed-in user may read the row, so an id for another tenant's app
 // returns the same "not found" as a non-existent id (no enumeration). Linked contracts are
 // read-only via RLS-backed app_contracts (org-scoped read, 0006 / PR #20); the app-user roster is
-// read-only via RLS-backed app_users (org-scoped read, 0007 / PR #21). No create/edit/delete, no
-// provisioning, no identity matching, no invoices/files/license. No client filtering. Server-rendered.
+// read-only via RLS-backed app_users (org-scoped read, 0007 / PR #21), with a minimal matched/
+// unmatched status from RLS-backed app_user_identity_matches (org-scoped read, 0008 / PR #23) —
+// status only, NO person/identity PII. No create/edit/delete, no provisioning, no identity matching
+// algorithm, no merge, no invoices/files/license. No client filtering. Server-rendered.
 function Field({ label, value }: { label: string; value: string }) {
   return (
     <div>
@@ -29,6 +32,16 @@ export default async function AppDetailPage({
   const result = await getAppDetailForCurrentUser(id);
   const linkedContracts = result.ok ? await listContractsLinkedToApp(id) : null;
   const appUsers = result.ok ? await listAppUsersForApp(id) : null;
+  // Minimal matched/unmatched status, derived server-side from RLS-scoped match rows for THIS roster's
+  // app_users. Empty/failed map ⇒ status shown as "—" (unknown), never a misleading "unmatched".
+  const matches =
+    appUsers && appUsers.ok
+      ? await listMatchesForAppUsers(appUsers.data.map((u) => u.id))
+      : null;
+  const matchesOk = !!matches?.ok;
+  const matchByUser = new Map(
+    (matches && matches.ok ? matches.data : []).map((m) => [m.appUserId, m]),
+  );
 
   return (
     <main className="flex flex-1 flex-col gap-6 p-8">
@@ -112,7 +125,8 @@ export default async function AppDetailPage({
             <h2 className="font-medium">App users</h2>
             <p className="text-xs text-zinc-500">
               Accounts on this app that you may read (RLS-scoped). Read-only — direct roster fields
-              only; no identity matching, license utilization, or provisioning.
+              plus a minimal matched/unmatched status (no person names, emails, or identity-provider
+              data). No identity matching, license utilization, or provisioning.
             </p>
             {!appUsers || !appUsers.ok ? (
               <p className="text-zinc-600 dark:text-zinc-400">
@@ -131,29 +145,50 @@ export default async function AppDetailPage({
                       <th className="py-2 pr-4 font-medium">Status</th>
                       <th className="py-2 pr-4 font-medium">License</th>
                       <th className="py-2 pr-4 font-medium">Last active</th>
+                      <th className="py-2 pr-4 font-medium">Match</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {appUsers.data.map((u) => (
-                      <tr key={u.id} className="border-b border-zinc-200 dark:border-zinc-800">
-                        <td className="py-2 pr-4">{u.displayName ?? "—"}</td>
-                        <td className="py-2 pr-4 text-zinc-600 dark:text-zinc-400">
-                          {u.email ?? "—"}
-                        </td>
-                        <td className="py-2 pr-4 text-zinc-600 dark:text-zinc-400">
-                          {u.externalUserId ?? "—"}
-                        </td>
-                        <td className="py-2 pr-4 text-zinc-600 dark:text-zinc-400">
-                          {u.status ?? "—"}
-                        </td>
-                        <td className="py-2 pr-4 text-zinc-600 dark:text-zinc-400">
-                          {u.licenseType ?? "—"}
-                        </td>
-                        <td className="py-2 pr-4 text-zinc-600 dark:text-zinc-400">
-                          {u.lastActiveAt ? u.lastActiveAt.slice(0, 10) : "—"}
-                        </td>
-                      </tr>
-                    ))}
+                    {appUsers.data.map((u) => {
+                      const match = matchByUser.get(u.id);
+                      return (
+                        <tr key={u.id} className="border-b border-zinc-200 dark:border-zinc-800">
+                          <td className="py-2 pr-4">{u.displayName ?? "—"}</td>
+                          <td className="py-2 pr-4 text-zinc-600 dark:text-zinc-400">
+                            {u.email ?? "—"}
+                          </td>
+                          <td className="py-2 pr-4 text-zinc-600 dark:text-zinc-400">
+                            {u.externalUserId ?? "—"}
+                          </td>
+                          <td className="py-2 pr-4 text-zinc-600 dark:text-zinc-400">
+                            {u.status ?? "—"}
+                          </td>
+                          <td className="py-2 pr-4 text-zinc-600 dark:text-zinc-400">
+                            {u.licenseType ?? "—"}
+                          </td>
+                          <td className="py-2 pr-4 text-zinc-600 dark:text-zinc-400">
+                            {u.lastActiveAt ? u.lastActiveAt.slice(0, 10) : "—"}
+                          </td>
+                          <td className="py-2 pr-4">
+                            {!matchesOk ? (
+                              <span className="text-zinc-500">—</span>
+                            ) : match ? (
+                              <span className="text-green-700 dark:text-green-400">
+                                matched
+                                {match.matchMethod ? (
+                                  <span className="text-zinc-500"> · {match.matchMethod}</span>
+                                ) : null}
+                                {match.confidence !== null ? (
+                                  <span className="text-zinc-500"> ({match.confidence})</span>
+                                ) : null}
+                              </span>
+                            ) : (
+                              <span className="text-zinc-500">unmatched</span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -161,8 +196,10 @@ export default async function AppDetailPage({
           </section>
 
           <p className="text-xs text-zinc-500">
-            Identity matches, license rules/utilization, invoices, and files are not shown yet
-            (default-deny — RISK-002). No identity merge, provisioning, or deprovisioning.
+            Only a matched/unmatched status is shown — no person names, identity-account details
+            (provider/email/status), license rules/utilization, invoices, or files. No identity
+            matching algorithm, merge, provisioning, deprovisioning, or unmanaged-account report yet
+            (those tables stay tenant-only / default-deny — RISK-002).
           </p>
         </>
       )}
