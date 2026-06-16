@@ -34,6 +34,18 @@ bash scripts/pr-review-summary.sh         # categorize the diff + suggest review
 `.github/workflows/rls-tests.yml` and `migration-safety.yml`. `check-docs-updated.sh`
 runs in `review-discipline.yml`.
 
+## Local/demo fixture (NOT a migration)
+`supabase/fixtures/local_demo.sql` is sample data (a Demo Tenant, organizations, memberships,
+sample apps/contracts) for local dev and demos — **not** schema, **not** a migration, and it
+lives outside `supabase/migrations/` so it is never in the migration apply path.
+- Run it: `bash scripts/seed-local-demo.sh` (seed + verify, then tear down) or `--keep` to leave a
+  local DB up on `127.0.0.1:55432`. The script spins up its **own throwaway Postgres container**
+  (like `test-rls.sh`) — it cannot reach hosted Supabase, refuses remote/`--linked` args, calls no
+  Supabase CLI, uses no service-role key, and reads no secrets. The fixture is applied twice to prove idempotency.
+- **Never hosted-apply** it: it inserts synthetic rows into `auth.users` (valid only against a local
+  auth shim/stack; hosted GoTrue owns that table) and is all-synthetic demo data. See [04 · RISK-015](./04_RISK_REGISTER.md).
+- It is rerunnable: deterministic UUIDs + idempotent upserts, no `TRUNCATE`.
+
 ## Dangerous patterns the safety check flags
 `scripts/check-migration-safety.sh` fails on `DROP TABLE`, `TRUNCATE`, or
 `DISABLE ROW LEVEL SECURITY` unless the file carries an explicit

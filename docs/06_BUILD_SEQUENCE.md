@@ -56,6 +56,8 @@ passed, CI green.
 - **Goal:** first real screen — list `apps` the user may read.
 - **Prereq:** Stage 3 ✅. **P0 risks:** client-side filtering; leaking deferred child-table data.
 - **Tests:** org-only user sees only related apps; tenant viewer sees all tenant apps.
+- **Local data:** `supabase/fixtures/local_demo.sql` (via `scripts/seed-local-demo.sh`) provides a Demo
+  Tenant with orgs/memberships/apps/contracts to develop and demo against — local-only, see [03](./03_DATABASE_AND_MIGRATIONS.md#localdemo-fixture-not-a-migration).
 - **Don't build yet:** edit/create. **Done:** read-only list, RLS-scoped, no client filtering.
 
 ### Stage 5 — Contracts · Stage 6 — People/app users · Stage 7 — License rules/evaluations · Stage 8 — Files/invoices

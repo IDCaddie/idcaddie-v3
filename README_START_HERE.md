@@ -47,6 +47,14 @@ bash scripts/pr-review-summary.sh                  # categorize the diff + revie
 For app/UI changes also run `npm run lint`, `npm run build`, and `npm test`.
 All of these also run in CI on every PR (`.github/workflows/`).
 
+## Local demo data
+```bash
+bash scripts/seed-local-demo.sh          # load a synthetic Demo Tenant into a throwaway local DB (verify + tear down)
+bash scripts/seed-local-demo.sh --keep   # leave the local DB up on 127.0.0.1:55432 to poke with psql
+```
+Local-only, hosted-proof, all-synthetic data. **Never** hosted-apply the fixture
+(`supabase/fixtures/local_demo.sql` is not a migration) — see [03](docs/03_DATABASE_AND_MIGRATIONS.md#localdemo-fixture-not-a-migration).
+
 ## Quick starts
 - **Reviewer (Mike/Jon):** [00 Product Status](docs/00_PRODUCT_STATUS.md) → [04 Risk Register](docs/04_RISK_REGISTER.md) → [05 Changelog](docs/05_ENGINEERING_CHANGELOG.md).
 - **Security reviewer:** [02 Security & RLS](docs/02_SECURITY_AND_RLS.md) → `supabase/tests/org_rls_test.sql` → [04 Risk Register](docs/04_RISK_REGISTER.md) → [07 P0 Checklist](docs/07_P0_REVIEW_CHECKLIST.md).
