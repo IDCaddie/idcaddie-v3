@@ -25,8 +25,9 @@ export type DataResult<T> =
 
 // Read-only DTO for one app's detail. Owning-org references are exposed as IDs only;
 // org-name enrichment is deferred (it needs an embedded join whose visibility differs for
-// org-only users — kept out of this first detail page). Linked contracts/users/invoices/files
-// are intentionally NOT included here (app_contracts is still tenant-only RLS — RISK-002).
+// org-only users — kept out of this first detail page). Linked contracts are shown via a separate
+// RLS-backed DAL (src/lib/data/links.ts, org-scoped app_contracts read — 0006), not this DTO.
+// App users/invoices/files are intentionally NOT included (tenant-only / default-deny — RISK-002).
 export type AppDetail = {
   id: string;
   name: string;

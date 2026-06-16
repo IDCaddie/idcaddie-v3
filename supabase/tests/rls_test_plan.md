@@ -25,7 +25,7 @@ Before building UI, prove these pass against local Supabase.
 
 Cases 1–8 plus the org/cross-tenant/escalation matrix are enforced by
 `supabase/migrations/0002_org_scoped_rls.sql` and `0003_org_access_union.sql`,
-covered by the runnable suite `supabase/tests/org_rls_test.sql` (T1–T27, 98 assertions). The
+covered by the runnable suite `supabase/tests/org_rls_test.sql` (T1–T28, 114 assertions). The
 suite has been executed against Postgres 16 with a Supabase-style `auth` shim — all
 assertions pass (`ALL ORG-RLS ASSERTIONS PASSED`).
 
@@ -49,6 +49,14 @@ rows even to a tenant **owner** (despite seeded rows). The 3 **tenant-only** tab
 user. Positive controls (owner reads tenant rows; org-only user reads its own-org app) prove the
 zeros are policy, not empty tables. Canonical read map: [docs/02 §8](../../docs/02_SECURITY_AND_RLS.md).
 
+**Org-scoped read for `app_contracts` (T28, migration `0006`, PR #20):** `app_contracts` gains ONE
+org-scoped `SELECT` policy — an org-only user may read a link row iff they can already read the linked
+**app OR contract** under related-org RLS (the `EXISTS` subqueries reuse `apps`/`contracts` RLS;
+`0005` keeps it tenant-bound). T28 proves: tenant owner reads all tenant links; org-only users read
+only links tied to apps/contracts they can read (app-side **and** contract-side branches); cross-tenant
+(`owner_b`) and a pure non-member (`nobody`) read 0; and the default-deny/tenant-only tables still read
+0 for an org-only user (no broadening leaked). Read-only — no `DELETE` policy added.
+
 ### Access model: stewardship (write) vs. related-org (read)
 - **WRITE / steward (single-org):** apps `responsible_org_id`, contracts `procurement_org_id` (or tenant editor+).
 - **READ (multi-org, 0003):** app = responsible OR paying OR procurement-owner org; contract = procurement OR paying org. Keeps chargeback visible under centralized procurement.
@@ -69,10 +77,11 @@ Coverage added beyond the original cases:
 - A pre-existing **0001 escalation** (tenant admin self-promoting to `owner` / demoting the owner) — closed by splitting into owner-only vs admin-non-owner membership policies.
 - audit_logs append-only verified against `authenticated` (no write policy) **and** `service_role` (BYPASSRLS, blocked by trigger incl. writable-CTE / upsert / MERGE).
 
-Not org-scoped for reads (RISK-002; reality pinned by T27, canonical map [docs/02 §8](../../docs/02_SECURITY_AND_RLS.md)):
-**tenant-only** (tenant members read, org-only users do not) — `people`, `app_users`, `app_contracts`;
+Not org-scoped for reads (RISK-002, narrowed by PR #20; reality pinned by T27/T28, canonical map [docs/02 §8](../../docs/02_SECURITY_AND_RLS.md)):
+**tenant-only** (tenant members read, org-only users do not) — `people`, `app_users`;
 **default-deny** (no read policy at all) — `identity_accounts`, `app_user_identity_matches`,
 `license_rules`, `license_evaluations`, `files`, `invoices`.
+`app_contracts` is now **org-scoped for read** (`0006`, T28) — no longer in this list.
 
 ### Run locally
 

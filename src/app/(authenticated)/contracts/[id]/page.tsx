@@ -1,13 +1,15 @@
 import Link from "next/link";
 import { getContractDetailForCurrentUser } from "@/lib/data/contracts";
+import { listAppsLinkedToContract } from "@/lib/data/links";
 
 export const metadata = { title: "Contract · ID Caddie" };
 
 // Read-only contract detail (build-sequence Stage 5 — read-only slice). The [id] route param is
 // ONLY a lookup key — RLS decides whether the signed-in user may read the row, so an id for
 // another tenant's contract returns the same "not found" as a non-existent id (no enumeration).
-// No create/edit/delete/archive, no upload/import/export, no linked apps/invoices/files table
-// (app_contracts is tenant-only; invoices/files are default-deny — RISK-002). Server-rendered.
+// Linked apps are read-only via RLS-backed app_contracts (org-scoped read, 0006 / PR #20) — only
+// apps the user may read are shown. No create/edit/delete/archive, no upload/import/export, no
+// linking/unlinking. Invoices and files stay deferred (default-deny — RISK-002). Server-rendered.
 function Field({ label, value }: { label: string; value: string }) {
   return (
     <div>
@@ -24,6 +26,7 @@ export default async function ContractDetailPage({
 }) {
   const { id } = await params;
   const result = await getContractDetailForCurrentUser(id);
+  const linkedApps = result.ok ? await listAppsLinkedToContract(id) : null;
 
   return (
     <main className="flex flex-1 flex-col gap-6 p-8">
@@ -92,10 +95,37 @@ export default async function ContractDetailPage({
             <Field label="Updated" value={result.data.updatedAt.slice(0, 10)} />
           </section>
 
+          <section className="space-y-2 text-sm">
+            <h2 className="font-medium">Linked apps</h2>
+            <p className="text-xs text-zinc-500">
+              Apps linked to this contract that you may read (RLS-scoped). Read-only — no
+              linking/unlinking here.
+            </p>
+            {!linkedApps || !linkedApps.ok ? (
+              <p className="text-zinc-600 dark:text-zinc-400">
+                Could not load linked apps right now.
+              </p>
+            ) : linkedApps.data.length === 0 ? (
+              <p className="text-zinc-600 dark:text-zinc-400">No linked apps you can access.</p>
+            ) : (
+              <ul className="list-inside list-disc">
+                {linkedApps.data.map((app) => (
+                  <li key={app.id}>
+                    <Link href={`/apps/${app.id}`} className="underline">
+                      {app.name}
+                    </Link>
+                    {app.vendorName ? (
+                      <span className="text-zinc-500"> — {app.vendorName}</span>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+
           <p className="text-xs text-zinc-500">
-            Linked apps, invoices, and files are not shown yet — those child/link tables are not
-            safe to surface (app_contracts is tenant-only; invoices/files are default-deny —
-            RISK-002).
+            Invoices and files are not shown yet — those tables are default-deny and not safe to
+            surface (RISK-002).
           </p>
         </>
       )}
