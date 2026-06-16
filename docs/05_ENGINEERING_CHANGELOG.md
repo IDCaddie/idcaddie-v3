@@ -7,6 +7,17 @@ from PRs verified via `git log` / `gh pr list`.
 
 ---
 
+### PR #27 — Harden app-contract link read tenant binding · 2026-06-16
+- **Category:** RLS hardening (defense-in-depth). Forward migration `0009` (replaces one SELECT policy) + one new test. **No schema/types change, no UI, no write path, no service-role, no hosted apply.**
+- **Migration `0009_harden_app_contracts_read_tenant_bind.sql`:** `drop`+recreate the `0006` org-scoped `SELECT` policy `org members read related app_contracts`, now pinning `a.tenant_id = app_contracts.tenant_id` (app branch) and `c.tenant_id = app_contracts.tenant_id` (contract branch) explicitly — matching the standard already set by `0007` (app_users) and `0008` (matches). The policy is now **self-sufficient for tenant isolation** rather than relying solely on the `0005` same-tenant FKs. **SELECT only**; the tenant-member read and editor `INSERT`/`UPDATE` (`0004`) are untouched; **no `DELETE`, no `FOR ALL`**. `0006` is **not edited** (forward migration only). No other table changed (`people`/`identity_accounts`/`license_*`/`files`/`invoices` not broadened).
+- **Behavior unchanged for valid data:** the `0005` FKs already force a link's `tenant_id` to equal its app's and contract's, so the added clause is always true for real rows. Confirmed empirically (valid links still read identically) and by **T28** staying green.
+- **Tests:** **T28h** (1 assertion) plants a normally-impossible FK-bypassed corrupt cross-tenant link (tenant B, but `(app_id, contract_id)` point at a tenant-A App A1 + a tenant-A contract `mgr_a1` can read) and proves the explicit tenant-bind hides it — a weak-vs-hardened check confirmed the old `0006` policy would leak it (1) while `0009` denies it (0). T29 (app_users) + T30 (match status) + the valid T28 behavior all still pass. **152 → 153 assertions**, T1–T30.
+- **Generated types:** `database.types.ts` **unchanged** — a policy is not schema; `gen-types-local.sh` reproduces it byte-identically.
+- **RISK-002 / RISK-016:** **both remain open.** Hardening only — no read scope expanded, no risk closed. Hard delete blocked. Contract writes/audit/UI still **not built**. OMC/Flywheel cutover **blocked**.
+- **Tests run (local, verified):** `test-rls.sh` → `ALL ORG-RLS ASSERTIONS PASSED` (0001–0009, 153 assertions); `npm test` 12/12; lint/tsc/build clean; `check-migration-safety` pass (0009 forward-only, 0006 byte-identical); `gen-types-local.sh` → no diff.
+
+---
+
 ### PR #26 — Correct current-state docs after contract write design · 2026-06-16
 - **Category:** docs/readiness correction — **docs only. No code, no migration, no RLS change, no `database.types.ts` change, no feature work.**
 - **What:** a current-state truth pass. A deep review found no confirmed P0 / cross-tenant leak / service-role bypass / hard-delete regression; the live issue was **stale canonical docs**. A 4-agent audit found **30 stale claims** (built read-only surfaces described as "no product UI"; narrative frozen around PR #5/#6 while the status *tables* stayed current; stale counts/migration ranges). All fixed.

@@ -1,7 +1,7 @@
 # 00 · Product Status — ID Caddie v3
 
 **Canonical source for: current status.** First doc to read. Last verified against the
-repo on 2026-06-16 (git `84140b6`, PRs #1–#25 merged). Status words are defined in [10_DOCS_INDEX](./10_DOCS_INDEX.md#status-taxonomy).
+repo on 2026-06-16 (PRs through #27 merged). Status words are defined in [10_DOCS_INDEX](./10_DOCS_INDEX.md#status-taxonomy).
 
 ## What ID Caddie v3 is
 An enterprise SaaS-governance platform: the source of truth for *what apps a company
@@ -58,8 +58,8 @@ Migration `0001` (core schema) predates the numbered PRs (rebuild starter pack).
 ## Status of the foundation
 | Item | Status |
 |------|--------|
-| Migrations `0001`–`0008` (core schema, org RLS, related-org read, delete hardening, child integrity, org-scoped child reads) | `implemented`, `verified-local`, `ci-enforced`; `not-hosted-applied` |
-| RLS model (tenant isolation, steward writes, related-org reads, audit immutability, no admin self-promotion) | `implemented`, `verified-local` (152 assertions in `org_rls_test.sql`), `ci-enforced` (PR #2) |
+| Migrations `0001`–`0009` (core schema, org RLS, related-org read, delete hardening, child integrity, org-scoped child reads + tenant-bind hardening) | `implemented`, `verified-local`, `ci-enforced`; `not-hosted-applied` |
+| RLS model (tenant isolation, steward writes, related-org reads, audit immutability, no admin self-promotion) | `implemented`, `verified-local` (153 assertions in `org_rls_test.sql`), `ci-enforced` (PR #2) |
 | No normal hard-delete of core evidence tables (`organizations`/`apps`/`contracts`/`app_contracts`/`people`/`app_users`) | `implemented` (PR #16 — `0004`; `FOR ALL` split into `INSERT`+`UPDATE`, no `DELETE`); `verified-local` (T17/T24/T25). Archive/soft-delete UI **not built** |
 | Same-tenant child integrity (cross-tenant child/link writes fail at the DB) | `implemented` (PR #17 — `0005`; composite `(parent_ref, tenant_id)` FKs); `verified-local` (T26). Org-scoped child-table **reads** still deferred (RISK-002) |
 | Migration safety (numbering, unsafe keywords) | `ci-enforced` (PR #3) |
@@ -123,7 +123,7 @@ One-line decisions; deep rationale in the linked canonical docs.
 - Do **not** build UI that bypasses RLS or filters data in the client for "security".
 - Do **not** use service-role keys outside trusted server/test paths.
 - Do **not** add connectors/credential handling until the encrypted-credential boundary is designed.
-- Do **not** edit a merged migration (`0001`–`0008`) — fix forward with a new migration.
+- Do **not** edit a merged migration (`0001`–`0009`) — fix forward with a new migration.
 - Do **not** cut OMC/Flywheel off legacy Firebase until all P0/P1 parity items are `verified` + signed off ([11](./11_LEGACY_PARITY_AND_OMC_CHECKLIST.md)).
 
 ## Can we…?

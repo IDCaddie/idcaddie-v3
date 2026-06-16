@@ -5,9 +5,9 @@ Read this + [00_PRODUCT_STATUS](./00_PRODUCT_STATUS.md) before doing anything. R
 also live in `AGENTS.md` / `claude/CLAUDE.md`.
 
 ## Current repo state (verify before trusting — see [00](./00_PRODUCT_STATUS.md))
-Read-only governance foundation + contract write design (PRs #1–#25 merged, main @ `84140b6`).
-Migrations `0001`–`0008` are `implemented`, `verified-local`, `ci-enforced`, **not hosted-applied**
-(`org_rls_test.sql` = 152 assertions, T1–T30; 12 vitest tests). Auth/session skeleton, read-only
+Read-only governance foundation + contract write design (PRs through #27 merged; #27 adds the `0009`
+`app_contracts` read tenant-bind hardening). Migrations `0001`–`0009` are `implemented`, `verified-local`, `ci-enforced`, **not hosted-applied**
+(`org_rls_test.sql` = 153 assertions, T1–T30; 12 vitest tests). Auth/session skeleton, read-only
 tenant/org context, and a typed read-only DAL are built. **Read-only product surfaces ship:** `/apps`
 + `/apps/[id]` (with app-user roster, match-status column, account-summary card), `/contracts` +
 `/contracts/[id]`, and linked app↔contract panels — all RLS-scoped, **no writes**, **not** exercised
@@ -22,9 +22,9 @@ prompt's "seeded" history — re-verify from `git log`, `gh pr list`, `ls supaba
 - **Never run against hosted Supabase.** Local throwaway Postgres only (`scripts/test-rls.sh`).
 - **Never use service-role keys** outside trusted server/test paths; never in the client.
 - **Never weaken RLS**; never filter for security in the client.
-- **Never edit a merged migration** (`0001`–`0008`) — fix forward with `000N_*.sql`.
+- **Never edit a merged migration** (`0001`–`0009`) — fix forward with `000N_*.sql`.
 - **Never re-add hard-delete** to core evidence tables (`organizations`/`apps`/`contracts`/`app_contracts`/`people`/`app_users`): no `FOR ALL`/`FOR DELETE` policy — write surfaces add `INSERT`+`UPDATE` only (`0004`, [02 §4b](./02_SECURITY_AND_RLS.md)). Archive/soft-delete UI is deferred (not built).
-- **New tenant-scoped child/link table** ⇒ add a composite same-tenant FK `(parent_ref, tenant_id) → parent(id, tenant_id)` (and `UNIQUE (id, tenant_id)` on the parent) so cross-tenant references fail at the DB, not just hide under RLS (`0005`, [02 §5b](./02_SECURITY_AND_RLS.md)). Migrations are now `0001`–`0008`.
+- **New tenant-scoped child/link table** ⇒ add a composite same-tenant FK `(parent_ref, tenant_id) → parent(id, tenant_id)` (and `UNIQUE (id, tenant_id)` on the parent) so cross-tenant references fail at the DB, not just hide under RLS (`0005`, [02 §5b](./02_SECURITY_AND_RLS.md)). Migrations are now `0001`–`0009`.
 - **Never build UI ahead of its build-sequence prerequisites** ([06](./06_BUILD_SEQUENCE.md)).
 - **Never expand telemetry** — no custom events, no PII/tenant/customer/business data in analytics, no new instrumentation, until a production privacy review ([04 · RISK-013](./04_RISK_REGISTER.md)).
 - **Never hosted-apply the local fixture.** `supabase/fixtures/local_demo.sql` is local-only synthetic data; run it only via `bash scripts/seed-local-demo.sh` (throwaway container). Never add it to `supabase/migrations/`, never `supabase db push`, never point it at the linked project ([04 · RISK-015](./04_RISK_REGISTER.md)).
@@ -87,13 +87,16 @@ production, hosted Supabase, secrets, or DNS without human review.
 Rationale and the automation risk: [04 · RISK-014](./04_RISK_REGISTER.md). Reviewer enforcement: [07 · Connected agent PRs](./07_P0_REVIEW_CHECKLIST.md#connected-agent-permissions). Discipline for vendor/bot PRs: [08](./08_CODE_AND_DOCS_STANDARD.md#vendor-and-bot-agent-prs).
 
 ## Current next recommended task
-**Contract steward write DESIGN is DONE — PR #25** (docs only — [13_CONTRACT_STEWARD_WRITE_DESIGN](./13_CONTRACT_STEWARD_WRITE_DESIGN.md)).
-Key finding: the contract write **RLS authority already exists** (`0002`/`0004` — tenant editor+ **or** procurement-org `manager`;
-`paying_org_id` read-only; no `DELETE`/`FOR ALL`; tenant-bound by trigger). Nothing built/policy-changed. RISK-002 still **narrowed, not closed**.
+**`app_contracts` read tenant-bind hardening is DONE — PR #27** (`0009` — the org-scoped read policy now pins
+`a.tenant_id`/`c.tenant_id = app_contracts.tenant_id` explicitly, matching `0007`/`0008`; valid behavior unchanged; proven by T28h).
+All three org-scoped child reads (`app_contracts`/`app_users`/`app_user_identity_matches`) are now self-sufficiently tenant-bound.
 
-Next safe step — pick one; obey [doc 13](./13_CONTRACT_STEWARD_WRITE_DESIGN.md) for contract writes, [doc 12](./12_IDENTITY_MATCHING_READ_SCOPE.md) for identity:
-- **(a) Contract write UI/path (follow [doc 13](./13_CONTRACT_STEWARD_WRITE_DESIGN.md)):** the RLS already enforces authority — add a server-action write path on the **anon** client (NEVER service-role; validation ≠ authz), **no `DELETE`/`FOR ALL`**, and audit via a **DB-side `SECURITY DEFINER` trigger** (not service-role — `audit_logs` has no `authenticated` INSERT). `paying_org_id` must never grant write. Land doc 13 §7 tests **before** UI.
-- **(b) Richer "managed vs orphaned" status** (needs a tenant-only column): build it via a **`security_invoker` view** (caller RLS scopes it) — or a `SECURITY DEFINER` fn that re-derives scope — returning only a status enum; **NEVER** read `people`/`identity_accounts` rows into an org surface. Follow doc 12 §4 (the definer trap) + §7.7 (exact readable-only count test).
+**The recommended next step is contract audit-on-write, then the write path/UI** (the write RLS authority already exists in `0004`):
+1. **Contract audit-on-write** — a DB-side `SECURITY DEFINER` `AFTER INSERT/UPDATE` trigger on `contracts` capturing `actor = auth.uid()` (`audit_logs` is append-only with **no `authenticated` INSERT**, so audit MUST be DB-side, **never** a service-role app route). A forward migration. Land it **before** any write UI. See [doc 13 §4](./13_CONTRACT_STEWARD_WRITE_DESIGN.md).
+2. **Contract write path** — a server action on the **anon** client (NEVER service-role; validation ≠ authz), gated by the existing RLS; **no `DELETE`/`FOR ALL`**; `paying_org_id` must never grant write. Land [doc 13 §7](./13_CONTRACT_STEWARD_WRITE_DESIGN.md) tests **before** UI.
+3. **Contract write UI** — last, after audit + path + tests.
+Alternative tracks (lower priority): the first reviewed **hosted-Supabase apply** (RISK-001); or an identity surface —
+- **Richer "managed vs orphaned" status** (needs a tenant-only column): build it via a **`security_invoker` view** (caller RLS scopes it) — or a `SECURITY DEFINER` fn that re-derives scope — returning only a status enum; **NEVER** read `people`/`identity_accounts` rows into an org surface. Follow doc 12 §4 (the definer trap) + §7.7 (exact readable-only count test).
 
 Do NOT org-scope `people` or `identity_accounts` — no app anchor; org-scoping them leaks the tenant-wide HR/IdP directory (doc 12 §4/§6). `people` stays **tenant-only**; `identity_accounts` stays **default-deny**.
 Any account-intelligence work derives ONLY from visible `app_users` + visible matches (PR #24 pattern) — never read `people`/`identity` into an org surface, and do NOT relabel "unmatched/stale candidate" as "orphaned/deactivated/managed/UAR".
