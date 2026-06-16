@@ -43,7 +43,7 @@ PR #6 (this branch, auth/session skeleton) is **not yet merged**.
 | Item | Status |
 |------|--------|
 | Schema `0001`, org RLS `0002`, related-org read `0003` | `implemented` |
-| RLS model (tenant isolation, steward writes, related-org reads, audit immutability, no admin self-promotion) | `implemented`, `verified-local` (114 assertions in `org_rls_test.sql`), `ci-enforced` (PR #2) |
+| RLS model (tenant isolation, steward writes, related-org reads, audit immutability, no admin self-promotion) | `implemented`, `verified-local` (136 assertions in `org_rls_test.sql`), `ci-enforced` (PR #2) |
 | No normal hard-delete of core evidence tables (`organizations`/`apps`/`contracts`/`app_contracts`/`people`/`app_users`) | `implemented` (PR #16 — `0004`; `FOR ALL` split into `INSERT`+`UPDATE`, no `DELETE`); `verified-local` (T17/T24/T25). Archive/soft-delete UI **not built** |
 | Same-tenant child integrity (cross-tenant child/link writes fail at the DB) | `implemented` (PR #17 — `0005`; composite `(parent_ref, tenant_id)` FKs); `verified-local` (T26). Org-scoped child-table **reads** still deferred (RISK-002) |
 | Migration safety (numbering, unsafe keywords) | `ci-enforced` (PR #3) |
@@ -60,7 +60,8 @@ PR #6 (this branch, auth/session skeleton) is **not yet merged**.
 | App CI (lint · vitest · `tsc --noEmit` · `next build`) + deterministic build (system fonts, no remote font fetch) | `implemented` + `ci-enforced` (PR #15 — `.github/workflows/app-ci.yml`); metadata/README hygiene fixed |
 | Invoices · files · license surfaces · app-contract linking *writes* · contract writes | `deferred` (default-deny tables or write surfaces — not built; RISK-002 open for reads) |
 | Product UI / app workflows (people, reports, writes) | `planned` (read-only apps + contracts + linked panels exist) |
-| Child-table read scope (canonical map: [02 §8](./02_SECURITY_AND_RLS.md), pinned by T27/T28) | `partial` — `app_contracts` now **org-scoped read** (PR #20 / `0006`); **tenant-only** (`people`/`app_users`) + **default-deny** (`identity_accounts`/`app_user_identity_matches`/`license_*`/`files`/`invoices`) remain; org-only users read none of those. Org-scoped reads for the rest still `deferred` (RISK-002, narrowed not closed) |
+| Read-only app-user roster (`/apps/[id]` "App users") | **`partial` — read-only only** (PR #21 — `0007` org-scoped `SELECT` on `app_users`, typed DAL `src/lib/data/app-users.ts`). Direct `app_users` columns only; org-only users see only users of apps they may read. **No** matching/provisioning/utilization/edit. `verified-local` (T29 + spot-check: org-only users see only related apps' users; cross-tenant + non-member → none) |
+| Child-table read scope (canonical map: [02 §8](./02_SECURITY_AND_RLS.md), pinned by T27/T28/T29) | `partial` — `app_contracts` (PR #20 / `0006`) + `app_users` (PR #21 / `0007`) now **org-scoped read**; **tenant-only** (`people`) + **default-deny** (`identity_accounts`/`app_user_identity_matches`/`license_*`/`files`/`invoices`) remain; org-only users read none of those. Org-scoped reads for the rest still `deferred` (RISK-002, narrowed not closed) |
 | `resource_org_links` relationship table + org hierarchy | `deferred` |
 | Imports/exports, integrations/connectors, credential vault | `deferred` |
 | Legacy Firebase | `legacy-production` (still serving customers) |
