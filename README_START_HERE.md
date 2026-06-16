@@ -1,60 +1,48 @@
-# ID Caddie v3 Start Pack
+# START HERE — ID Caddie v3
 
-This pack is the starting point for rebuilding ID Caddie as a clean Supabase/Postgres enterprise SaaS app.
+True entry point for this repo. It links to the canonical docs; it does **not**
+restate them (so it can't go stale). Full index + reading paths:
+[`docs/10_DOCS_INDEX.md`](docs/10_DOCS_INDEX.md).
 
-## Rule of the rebuild
-Do not port Firebase code directly. Preserve validated workflows and rebuild the data/security foundation.
+## What this is
+A from-scratch, secure rebuild of ID Caddie — the enterprise source of truth for
+*what apps a company uses, who owns/pays/renews each, who has access, and what
+charges back to which org*. Built on Supabase/Postgres with **RLS as the
+authorization source of truth**. We preserve validated workflows and port **no**
+Firebase code.
 
-## Recommended first move
-1. Create a new repo named `idcaddie-v3`.
-2. Copy this pack into the repo.
-3. Paste `claude/prompts/01_repo_extraction.md` into Claude Code while it has access to the legacy repo.
-4. Do not let Claude write app code until it has produced the product map, data model, and security model.
+## Current status (one line)
+**Phase 1 — secure data/RLS foundation only.** Schema + RLS exist, are tested
+locally, and are CI-enforced; **nothing is applied to hosted Supabase** and there
+is **no product UI yet**. Authoritative status: [`docs/00_PRODUCT_STATUS.md`](docs/00_PRODUCT_STATUS.md).
 
-## Target stack
-- Next.js App Router
-- Supabase Auth
-- Supabase Postgres
-- Postgres RLS on every tenant-scoped table
-- Supabase Storage for files
-- Vercel hosting
-- Playwright browser tests
-- SQL/RLS integration tests
+## Non-negotiables (apply to every change)
+- Do **not** run against hosted Supabase — local-first only.
+- Do **not** use service-role keys outside approved server/test paths.
+- Do **not** rely on frontend filtering for authorization — RLS decides.
+- Do **not** weaken RLS or edit a merged migration — fix forward.
+- Do **not** build UI ahead of the foundation it depends on.
+- Every PR updates docs / risk / changelog, or justifies why not.
 
-## First milestone
-A secure Omnicom/Flywheel source-of-truth MVP:
-- login
-- organizations/agencies
-- apps
-- contracts
-- app-contract linking
-- people/app users import
-- unmanaged users report
-- stale users report
-- audit log
+## Required checks before any PR
+```bash
+bash scripts/check-migration-safety.sh selftest   # the checker checks itself
+bash scripts/check-migration-safety.sh            # migration numbering + unsafe-keyword lint
+bash scripts/test-rls.sh                           # apply ALL migrations to throwaway Postgres + run RLS suite (needs Docker)
+bash scripts/check-docs-updated.sh                 # docs-drift gate
+bash scripts/pr-review-summary.sh                  # categorize the diff + reviewer focus
+```
+All of these also run in CI on every PR (`.github/workflows/`).
 
-## Developer workflow (database changes)
+## Quick starts
+- **Reviewer (Mike/Jon):** [00 Product Status](docs/00_PRODUCT_STATUS.md) → [04 Risk Register](docs/04_RISK_REGISTER.md) → [05 Changelog](docs/05_ENGINEERING_CHANGELOG.md).
+- **Security reviewer:** [02 Security & RLS](docs/02_SECURITY_AND_RLS.md) → `supabase/tests/org_rls_test.sql` → [04 Risk Register](docs/04_RISK_REGISTER.md) → [07 P0 Checklist](docs/07_P0_REVIEW_CHECKLIST.md).
+- **New engineer:** this file → [00](docs/00_PRODUCT_STATUS.md) → [01 Architecture](docs/01_ARCHITECTURE.md) → [03 Database & Migrations](docs/03_DATABASE_AND_MIGRATIONS.md) → [06 Build Sequence](docs/06_BUILD_SEQUENCE.md) → [08 Code & Docs Standard](docs/08_CODE_AND_DOCS_STANDARD.md).
+- **Coding agent:** [09 Agent Handoff](docs/09_AGENT_HANDOFF.md) → [00](docs/00_PRODUCT_STATUS.md) → [06](docs/06_BUILD_SEQUENCE.md) → [07](docs/07_P0_REVIEW_CHECKLIST.md).
+- **Database reviewer:** [03](docs/03_DATABASE_AND_MIGRATIONS.md) → [`docs/v3-data-model.md`](docs/v3-data-model.md) → `supabase/migrations/` → [`docs/migration-workflow.md`](docs/migration-workflow.md).
 
-Authorization lives in Postgres RLS, so the database is developed and tested
-**locally first** — never against hosted Supabase, and never with service-role keys.
-Full rules: [`docs/migration-workflow.md`](docs/migration-workflow.md).
-
-For any schema/RLS change:
-
-1. Add the next sequential migration `supabase/migrations/000N_<description>.sql`.
-   **Never edit an already-merged migration** — fix forward with a new one.
-2. Add/extend authorization assertions in `supabase/tests/*_test.sql`
-   (at least one positive and one negative).
-3. Run both checks locally before opening the PR:
-   ```bash
-   bash scripts/check-migration-safety.sh   # numbering + unsafe-keyword lint
-   bash scripts/test-rls.sh                  # apply all migrations + run RLS assertions
-   ```
-4. Fill in [`docs/migration-checklist.md`](docs/migration-checklist.md) in the PR.
-
-CI runs both scripts on every pull request (`.github/workflows/`). Both use a
-throwaway `postgres:16` Docker container with a Supabase-style `auth` shim — no
-hosted Supabase, no service-role keys. Applying migrations to a hosted environment
-is a **separate, reviewed deployment step**, not part of merging a PR.
-
-See `supabase/tests/rls_test_plan.md` for test details.
+## Living-docs rule
+Docs, the [risk register](docs/04_RISK_REGISTER.md), and the
+[changelog](docs/05_ENGINEERING_CHANGELOG.md) are part of every change. The PR
+template and `scripts/check-docs-updated.sh` enforce it; the only opt-out is a
+filled-in `.docs-not-needed.md` (template: [`.docs-not-needed.template.md`](.docs-not-needed.template.md)).
