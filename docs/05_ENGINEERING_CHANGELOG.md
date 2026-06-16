@@ -7,6 +7,16 @@ from PRs verified via `git log` / `gh pr list`.
 
 ---
 
+### PR #25 — Document contract steward write design · 2026-06-16
+- **Category:** security design / guardrail — **docs only. No migration, no RLS change, no UI, no audit, no write path, no `database.types.ts` change.** New doc [13_CONTRACT_STEWARD_WRITE_DESIGN](./13_CONTRACT_STEWARD_WRITE_DESIGN.md).
+- **Verified finding (not a guess):** the contract write **RLS authority already exists** — shipped in `0002`, split into `INSERT`/`UPDATE` (no `DELETE`) by `0004`. A live `pg_policies` dump on a fresh `0001`–`0008` DB confirms: `editors insert/update contracts` (`has_tenant_role` owner/admin/editor) **+** `org managers insert/update org contracts` (`has_org_role_in_tenant(procurement_org_id, …, ['manager'])`), **0** `DELETE`/`ALL` policies, and the `enforce_owning_org_tenant` trigger covering `procurement_org_id`+`paying_org_id`. It already matches the recommended steward model.
+- **What the doc designs (the real gap):** the **application write path** (server action on the anon user-scoped client — never service-role; input validation that is *not* authorization), **audit-on-write** (must be a DB-side `SECURITY DEFINER` trigger because `audit_logs` is append-only with no `authenticated` INSERT path — *not* a service-role route; a future migration, deferred), and **UI** (RLS is the boundary; no client-side filtering for authz). It documents who can/cannot write (procurement-org steward `manager` + tenant editor+; **`paying_org_id` = read only, not write**; read ≠ write), cross-tenant prevention (trigger + `WITH CHECK`), the no-hard-delete posture (no `FOR ALL`/`DELETE`), and the **exact tests** a future write PR must prove — mapping each to existing coverage (T21 paying-org-no-write, T14 cross-tenant write, T22/T23 trigger, T17/T24 hard-delete) and flagging the new ones (audit-event, explicit positive steward INSERT, a `pg_policies` 0-`DELETE`/`ALL` guard).
+- **Out of scope:** contract archive/soft-delete (separate design), `app_contracts` link writes, files/invoices/license, identity/people.
+- **Honest status:** contract write **UI/path/audit not implemented**; archive/soft-delete not implemented; hard delete blocked (`0004`) and stays blocked. RISK-002 **open**, RISK-016 / OMC parity **open**, OMC/Flywheel cutover **blocked**.
+- **Tests run (local, verified):** `npm test` 12/12; lint/tsc/build clean; `test-rls.sh` → `ALL ORG-RLS ASSERTIONS PASSED` (152, unchanged); `check-*`/`gen-types-local.sh` → no diff.
+
+---
+
 ### PR #24 — Add read-only app account intelligence summary · 2026-06-16
 - **Category:** read-only product surface (derived data). **No migration, no RLS change, no schema/types change, no new policy.**
 - **What:** a small "Account summary" card on `/apps/[id]`, computed **purely** from data the user can already read — the visible `app_users` roster (`0007`) and the visible `app_user_identity_matches` rows (`0008`). New **pure** helper `src/lib/data/app-account-intelligence.ts` (no DB, no imports, no service-role) + unit tests.

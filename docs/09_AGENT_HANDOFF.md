@@ -83,18 +83,18 @@ production, hosted Supabase, secrets, or DNS without human review.
 Rationale and the automation risk: [04 · RISK-014](./04_RISK_REGISTER.md). Reviewer enforcement: [07 · Connected agent PRs](./07_P0_REVIEW_CHECKLIST.md#connected-agent-permissions). Discipline for vendor/bot PRs: [08](./08_CODE_AND_DOCS_STANDARD.md#vendor-and-bot-agent-prs).
 
 ## Current next recommended task
-**Read-only account summary is DONE — PR #24** (pure helper `src/lib/data/app-account-intelligence.ts`,
-"Account summary" card on `/apps/[id]`, unit-tested; **no migration, no RLS change** — `test-rls.sh` stays 152).
-Derived only from visible `app_users` + visible matches; **NOT UAR**. RISK-002 still **narrowed, not closed**.
+**Contract steward write DESIGN is DONE — PR #25** (docs only — [13_CONTRACT_STEWARD_WRITE_DESIGN](./13_CONTRACT_STEWARD_WRITE_DESIGN.md)).
+Key finding: the contract write **RLS authority already exists** (`0002`/`0004` — tenant editor+ **or** procurement-org `manager`;
+`paying_org_id` read-only; no `DELETE`/`FOR ALL`; tenant-bound by trigger). Nothing built/policy-changed. RISK-002 still **narrowed, not closed**.
 
-Next safe step — pick one; obey [doc 12](./12_IDENTITY_MATCHING_READ_SCOPE.md) for anything identity-related:
-- **(a) Contracts steward writes:** `INSERT`/`UPDATE` only, **never `DELETE`/`FOR ALL`** (PR #16 / `0004`), steward-org gated, audited.
+Next safe step — pick one; obey [doc 13](./13_CONTRACT_STEWARD_WRITE_DESIGN.md) for contract writes, [doc 12](./12_IDENTITY_MATCHING_READ_SCOPE.md) for identity:
+- **(a) Contract write UI/path (follow [doc 13](./13_CONTRACT_STEWARD_WRITE_DESIGN.md)):** the RLS already enforces authority — add a server-action write path on the **anon** client (NEVER service-role; validation ≠ authz), **no `DELETE`/`FOR ALL`**, and audit via a **DB-side `SECURITY DEFINER` trigger** (not service-role — `audit_logs` has no `authenticated` INSERT). `paying_org_id` must never grant write. Land doc 13 §7 tests **before** UI.
 - **(b) Richer "managed vs orphaned" status** (needs a tenant-only column): build it via a **`security_invoker` view** (caller RLS scopes it) — or a `SECURITY DEFINER` fn that re-derives scope — returning only a status enum; **NEVER** read `people`/`identity_accounts` rows into an org surface. Follow doc 12 §4 (the definer trap) + §7.7 (exact readable-only count test).
 
 Do NOT org-scope `people` or `identity_accounts` — no app anchor; org-scoping them leaks the tenant-wide HR/IdP directory (doc 12 §4/§6). `people` stays **tenant-only**; `identity_accounts` stays **default-deny**.
 Any account-intelligence work derives ONLY from visible `app_users` + visible matches (PR #24 pattern) — never read `people`/`identity` into an org surface, and do NOT relabel "unmatched/stale candidate" as "orphaned/deactivated/managed/UAR".
 Still NOT safe to surface: `people`, `identity_accounts`, `invoices`/`files`/`license_*`. No identity matching algorithm / merge / UAR / orphaned status / provisioning exists yet.
-(Stages 4/4b apps — PR #13/#14; Stage 5 contracts — PR #19; Stage 5b linked panels — PR #20; Stage 6a app-user roster — PR #21; Stage 6b identity read-scope design — PR #22; Stage 6c match status — PR #23; Stage 6d account summary — PR #24.)
+(Stages 4/4b apps — PR #13/#14; Stage 5 contracts — PR #19; Stage 5b linked panels — PR #20; Stage 6a app-user roster — PR #21; Stage 6b identity read-scope design — PR #22; Stage 6c match status — PR #23; Stage 6d account summary — PR #24; Stage 5b contract write design — PR #25.)
 
 ## Current open risks to respect
 `not-hosted-applied`; child tables **not org-scoped for reads** — tenant-only (`people`) or default-deny (`identity_accounts`/`license_*`/`files`/`invoices`); `app_contracts` (`0006`) + `app_users` (`0007`) + `app_user_identity_matches` (`0008`) are now org-scoped read; see read map [02 §8](./02_SECURITY_AND_RLS.md) (RISK-002, narrowed not closed); no tenant switching /

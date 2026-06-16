@@ -82,6 +82,14 @@ org-read still hold; and **T30h** plants an FK-bypassed corrupt cross-tenant mat
 explicit tenant-bind hides it. Exposes match **status** only — no person/identity PII. The
 `app_user_identity_matches` default-deny assertions in T27 27a / T29 29f were dropped (now org-scoped).
 
+**Contract write tests (future — design only, [docs/13](../../docs/13_CONTRACT_STEWARD_WRITE_DESIGN.md) §7).**
+The contract write **RLS authority already exists** (`0004` — tenant editor+ / procurement-org `manager`,
+no `DELETE`/`FOR ALL`), and much is already proven: **T21** (paying-org member cannot write — read ≠
+write), **T14** (cross-tenant write denied), **T22/T23** (trigger rejects foreign-tenant `procurement`/
+`paying` org), **T17/T24** (hard-delete denied). A future write-UI PR must add only the *missing* proofs
+(explicit positive steward `INSERT`, audit-event-on-write, a `pg_policies` 0-`DELETE`/`ALL` guard) plus
+the server-action-uses-anon-client check (`check-auth-safety.sh`) — **before** any write UI ships.
+
 ### Access model: stewardship (write) vs. related-org (read)
 - **WRITE / steward (single-org):** apps `responsible_org_id`, contracts `procurement_org_id` (or tenant editor+).
 - **READ (multi-org, 0003):** app = responsible OR paying OR procurement-owner org; contract = procurement OR paying org. Keeps chargeback visible under centralized procurement.
