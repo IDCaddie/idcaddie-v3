@@ -1,9 +1,10 @@
 # 02 · Security Model & RLS
 
 **Canonical source for: the authorization model.** Every other doc links here instead of
-re-explaining RLS. Implemented in `supabase/migrations/0002_org_scoped_rls.sql` and
-`0003_org_access_union.sql`; proven by `supabase/tests/org_rls_test.sql` (66 assertions,
-`verified-local`, `ci-enforced` via PR #2). Schema: [v3-data-model.md](./v3-data-model.md).
+re-explaining RLS. Implemented in `supabase/migrations/0002_org_scoped_rls.sql`,
+`0003_org_access_union.sql`, and `0004_destructive_delete_hardening.sql`; proven by
+`supabase/tests/org_rls_test.sql` (82 assertions, T1–T25, `verified-local`, `ci-enforced` via
+PR #2). Schema: [v3-data-model.md](./v3-data-model.md).
 Design rationale & legacy evidence: [v3-security-model.md](./v3-security-model.md),
 [current-security-risk-map.md](./current-security-risk-map.md).
 
@@ -54,6 +55,20 @@ including `BYPASSRLS` `service_role` — covering plain
 DML, writable CTEs, upserts, and `MERGE`. Inserts come only from trusted server paths
 (service-role / SECURITY DEFINER). Deletes are blocked even for retention (see gap below).
 
+## 4b. No hard-delete of core evidence (destructive-delete hardening)
+`0004` removes normal authenticated **hard-delete** from the core business/evidence tables —
+`organizations`, `apps`, `contracts`, `app_contracts`, `people`, `app_users`. `0001`/`0002` had
+broad `FOR ALL` manage policies that silently granted `DELETE`; `0004` drops them and recreates
+explicit `INSERT` + `UPDATE` policies with the **same** `USING`/`WITH CHECK` (so editors and org
+stewards keep create/edit), but **no `DELETE` policy** — so a `DELETE` affects 0 rows for every
+`authenticated` role. Reads (tenant + org-union) are untouched, so `/apps` and `/apps/[id]` are
+unaffected. `tenant_memberships`/`organization_memberships` keep delete (removing a member is normal,
+reversible access admin, not evidence destruction). The remaining core tables (`identity_accounts`,
+`app_user_identity_matches`, `license_rules`, `license_evaluations`, `files`, `invoices`) have RLS
+enabled but no policy = default-deny already (their future write policies must likewise omit `DELETE`).
+Hard delete, if ever needed, belongs in an audited admin/service break-glass path — **archive /
+soft-delete UI is not built** (deferred; tracked in [04](./04_RISK_REGISTER.md), [06](./06_BUILD_SEQUENCE.md)).
+
 ## 5. Cross-tenant integrity trigger
 Because access reads trust the owning-org columns, those columns must never point at
 another tenant's org. `enforce_owning_org_tenant` (`BEFORE INSERT/UPDATE`) rejects any
@@ -84,8 +99,11 @@ manage all membership rows; **admins** manage only non-`owner` rows and cannot w
 | 11 | Org-only user enumerates other tenants/sibling orgs | 0 rows | `is_org_member` / `is_tenant_participant` | T11, T13 |
 | 12 | Related-org (paying/procurement) **read** works | rows returned | `0003` union read | T18, T19, T20 |
 | 13 | Cross-tenant **write** by a tenant-wide role | denied | tenant policy `WITH CHECK` | T14 |
+| 14 | Org manager hard-deletes its own-org app | denied (0 rows) | no `DELETE` policy (`0004`) | T17 |
+| 15 | Tenant **owner/admin/editor** hard-deletes a core evidence row | denied (0 rows); row survives; editor `UPDATE` still works | no `DELETE` policy (`0004`) | T24 |
+| 16 | App inventory/detail reads still valid after hardening | rows returned | SELECT policies untouched | T25 |
 
-Test labels map to the `-- Test N` blocks in `org_rls_test.sql` (23 scenarios; T3+4 and
+Test labels map to the `-- Test N` blocks in `org_rls_test.sql` (25 scenarios; T3+4 and
 T22+23 are combined blocks).
 
 ## 8. Deferred / known gaps (open in [04_RISK_REGISTER.md](./04_RISK_REGISTER.md))
@@ -102,5 +120,6 @@ T22+23 are combined blocks).
 ## 9. Non-negotiables for any future change
 - New tenant-owned table ⇒ `tenant_id NOT NULL` + RLS keyed on `is_tenant_member`.
 - New access-relevant org FK ⇒ add it to `enforce_owning_org_tenant` (tenant-bound) **and** a test.
+- **No `FOR ALL` (or `FOR DELETE`) policy on a core evidence table** (`organizations`, `apps`, `contracts`, `app_contracts`, `people`, `app_users`, …) — it silently grants hard-delete. Write policies are `INSERT` + `UPDATE` only until an audited admin/archive path exists (`0004`, §4b).
 - Never weaken RLS, never filter for security in the client, never use the service-role
   key in a request path. Reviewer enforcement: [07_P0_REVIEW_CHECKLIST.md](./07_P0_REVIEW_CHECKLIST.md).

@@ -7,6 +7,32 @@ from PRs verified via `git log` / `gh pr list`.
 
 ---
 
+### PR #16 — Harden destructive delete policies · 2026-06-16
+- **Category:** database / RLS hardening (no product UI).
+- **What:** `0004_destructive_delete_hardening.sql` — remove normal authenticated **hard-delete** from
+  the 6 core evidence tables that had `FOR ALL` policies (`organizations`, `apps`, `contracts`,
+  `app_contracts`, `people`, `app_users`). For each, drop the broad `FOR ALL` manage policy (0001 tenant
+  editors + 0002 org-manager stewards) and recreate it as explicit `INSERT` + `UPDATE` policies with the
+  **same** `USING`/`WITH CHECK` — **no `DELETE` policy**, so `DELETE` affects 0 rows for every authenticated role.
+- **Current delete risk (closed):** before this, an editor/owner/admin/org-manager could hard-delete
+  evidence rows with no archive UI and no audit — RISK-C07.
+- **What deletes remain:** `tenant_memberships`/`organization_memberships` keep delete (member removal is
+  normal, reversible access admin). The other core tables (`identity_accounts`/`app_user_identity_matches`/
+  `license_rules`/`license_evaluations`/`files`/`invoices`) had **no** policy = default-deny already.
+- **Migration impact:** new forward migration only; **RLS-only, no schema/column change** —
+  `gen-types-local.sh` left `src/lib/database.types.ts` byte-identical. **Service-role / hosted Supabase: none.**
+- **RLS/test impact:** updated `org_rls_test.sql` — T17 own-org delete flips to denied; new **T24** (owner/admin
+  deny; editor `UPDATE` still works, `DELETE` denied; rows survive across all 6 tables) and **T25** (`/apps`+`/apps/[id]`
+  reads still valid). 66 → **82 assertions**, T1–**T25**. Added editor/person/app-user/app-contract seed rows.
+- **Product impact:** none — no UI/routes; `/apps` and `/apps/[id]` build and read unchanged.
+- **Tests run (local, verified):** `test-rls.sh` → `ALL ORG-RLS ASSERTIONS PASSED` (0001–0004 applied); `npm test` 5/5;
+  `npm run lint`/`tsc --noEmit`/`build` exit 0 (`/apps`+`/apps/[id]` dynamic); `check-migration-safety.sh`,
+  `check-auth-safety.sh`, `check-docs-updated.sh` pass; `gen-types-local.sh` → no type change.
+- **Docs updated:** `02` (§4b + threats T14–16 + non-negotiable), `03` (0004), `00`, `04` (RISK-C07), `06`, `07`, `09`, `rls_test_plan.md`.
+- **Follow-ups:** an audited admin/service break-glass delete + archive/soft-delete UI are **not built** (deferred).
+
+---
+
 ### PR #15 — Add app CI and release hygiene hardening · 2026-06-16
 - **Category:** CI / build / release hygiene (no product features).
 - **What:**

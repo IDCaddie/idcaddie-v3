@@ -19,7 +19,8 @@
 -- ── Fixtures (seeded as the privileged/superuser role; RLS bypassed for setup) ─
 reset role;
 truncate table
-  public.audit_logs, public.app_contracts, public.apps, public.contracts,
+  public.audit_logs, public.app_contracts, public.app_users, public.people,
+  public.apps, public.contracts,
   public.organization_memberships, public.tenant_memberships,
   public.organizations, public.profiles, public.tenants
 restart identity cascade;
@@ -34,6 +35,7 @@ insert into auth.users (id, email) values
   ('0a000000-0000-0000-0000-0000000000a3','mgr_a2@a.test'),
   ('0a000000-0000-0000-0000-0000000000c1','agency_u@a.test'),
   ('0a000000-0000-0000-0000-0000000000e0','member_x@a.test'),
+  ('0a000000-0000-0000-0000-0000000000ed','editor_a@a.test'),
   ('0b000000-0000-0000-0000-000000000001','owner_b@b.test');
 
 insert into public.profiles (id, email) values
@@ -45,6 +47,7 @@ insert into public.profiles (id, email) values
   ('0a000000-0000-0000-0000-0000000000a3','mgr_a2@a.test'),
   ('0a000000-0000-0000-0000-0000000000c1','agency_u@a.test'),
   ('0a000000-0000-0000-0000-0000000000e0','member_x@a.test'),
+  ('0a000000-0000-0000-0000-0000000000ed','editor_a@a.test'),
   ('0b000000-0000-0000-0000-000000000001','owner_b@b.test');
 
 insert into public.tenants (id, name, slug) values
@@ -63,6 +66,7 @@ insert into public.organizations (id, tenant_id, name) values
 insert into public.tenant_memberships (tenant_id, user_id, role) values
   ('11111111-1111-1111-1111-111111111111','0a000000-0000-0000-0000-000000000001','owner'),
   ('11111111-1111-1111-1111-111111111111','0a000000-0000-0000-0000-0000000000ad','admin'),
+  ('11111111-1111-1111-1111-111111111111','0a000000-0000-0000-0000-0000000000ed','editor'),
   ('11111111-1111-1111-1111-111111111111','0a000000-0000-0000-0000-000000000002','viewer'),
   ('22222222-2222-2222-2222-222222222222','0b000000-0000-0000-0000-000000000001','owner');
 
@@ -94,6 +98,17 @@ insert into public.contracts (id, tenant_id, contract_name, procurement_org_id, 
 
 insert into public.audit_logs (id, tenant_id, action, resource_type) values
   ('ad000000-0000-0000-0000-0000000000a1','11111111-1111-1111-1111-111111111111','app.create','apps');
+
+-- Evidence rows in the remaining protected tables, so the destructive-delete tests (T24/T25)
+-- act on rows that actually exist and are visible to the acting user.
+insert into public.people (id, tenant_id, primary_email) values
+  ('7e000000-0000-0000-0000-0000000000a1','11111111-1111-1111-1111-111111111111','person_a1@a.test');
+insert into public.app_users (id, tenant_id, app_id, email) values
+  ('a5000000-0000-0000-0000-0000000000a1','11111111-1111-1111-1111-111111111111',
+   'a9900000-0000-0000-0000-0000000000a1','appuser_a1@a.test');
+insert into public.app_contracts (app_id, contract_id, tenant_id) values
+  ('a9900000-0000-0000-0000-0000000000a1','c0000000-0000-0000-0000-0000000000a1',
+   '11111111-1111-1111-1111-111111111111');
 
 -- ── Test 1: Tenant A user cannot read Tenant B; sees all of its own tenant ─────
 select set_config('request.jwt.claims','{"sub":"0a000000-0000-0000-0000-000000000001"}',false);
@@ -556,7 +571,8 @@ end $$;
 reset role;
 
 -- ── Test 17 (DESTRUCTIVE, run last): org-manager DELETE scope ─────────────────
--- own-org delete allowed; cross-org and cross-tenant denied.
+-- 0004 removed org-manager hard-delete entirely: own-org, cross-org, and cross-tenant
+-- DELETE are ALL denied now (no DELETE policy on apps -> 0 rows for every authenticated role).
 select set_config('request.jwt.claims','{"sub":"0a000000-0000-0000-0000-0000000000a1"}',false);
 set role authenticated;
 do $$ declare v int; begin
@@ -568,7 +584,78 @@ do $$ declare v int; begin
   assert v = 0, format('T17 cross-tenant: mgr A1 deleted tenant B app (%s rows)', v);
   delete from public.apps where id='a9900000-0000-0000-0000-0000000000a1';  -- own org A1
   get diagnostics v = row_count;
-  assert v = 1, format('T17 own-org: mgr A1 should delete its org app (%s rows)', v);
+  assert v = 0, format('T17 own-org delete is now removed (0004): mgr A1 deleted its org app (%s rows)', v);
+end $$;
+reset role;
+
+-- ── Test 24: protected core tables reject hard-delete (0004 destructive-delete hardening) ──
+-- apps/contracts/organizations/app_contracts/people/app_users have NO DELETE policy, so a
+-- DELETE affects 0 rows for every authenticated role and the evidence row survives.
+-- 24a: tenant OWNER (highest tenant role) cannot delete any protected row.
+select set_config('request.jwt.claims','{"sub":"0a000000-0000-0000-0000-000000000001"}',false);
+set role authenticated;
+do $$ declare v int; begin
+  delete from public.apps          where id='a9900000-0000-0000-0000-0000000000a1';
+  get diagnostics v = row_count; assert v = 0, format('T24 owner deleted app (%s)', v);
+  delete from public.contracts     where id='c0000000-0000-0000-0000-0000000000a1';
+  get diagnostics v = row_count; assert v = 0, format('T24 owner deleted contract (%s)', v);
+  delete from public.organizations where id='1a1a1a1a-0000-0000-0000-000000000001';
+  get diagnostics v = row_count; assert v = 0, format('T24 owner deleted organization (%s)', v);
+  delete from public.app_contracts where app_id='a9900000-0000-0000-0000-0000000000a1';
+  get diagnostics v = row_count; assert v = 0, format('T24 owner deleted app_contract (%s)', v);
+  delete from public.people        where id='7e000000-0000-0000-0000-0000000000a1';
+  get diagnostics v = row_count; assert v = 0, format('T24 owner deleted person (%s)', v);
+  delete from public.app_users     where id='a5000000-0000-0000-0000-0000000000a1';
+  get diagnostics v = row_count; assert v = 0, format('T24 owner deleted app_user (%s)', v);
+  -- evidence rows survived:
+  assert (select count(*) from public.apps where id='a9900000-0000-0000-0000-0000000000a1') = 1, 'T24 app must survive';
+  assert (select count(*) from public.people where id='7e000000-0000-0000-0000-0000000000a1') = 1, 'T24 person must survive';
+  assert (select count(*) from public.app_users where id='a5000000-0000-0000-0000-0000000000a1') = 1, 'T24 app_user must survive';
+end $$;
+reset role;
+-- 24b: tenant ADMIN is likewise denied DELETE.
+select set_config('request.jwt.claims','{"sub":"0a000000-0000-0000-0000-0000000000ad"}',false);
+set role authenticated;
+do $$ declare v int; begin
+  delete from public.apps where id='a9900000-0000-0000-0000-0000000000a1';
+  get diagnostics v = row_count; assert v = 0, format('T24 admin deleted app (%s)', v);
+end $$;
+reset role;
+-- 24c: tenant EDITOR keeps UPDATE (write access preserved) but is denied DELETE.
+select set_config('request.jwt.claims','{"sub":"0a000000-0000-0000-0000-0000000000ed"}',false);
+set role authenticated;
+do $$ declare v int; begin
+  update public.apps set notes='editor-edit' where id='a9900000-0000-0000-0000-0000000000a1';
+  get diagnostics v = row_count; assert v = 1, format('T24 editor UPDATE must still work (%s)', v);
+  delete from public.apps where id='a9900000-0000-0000-0000-0000000000a1';
+  get diagnostics v = row_count; assert v = 0, format('T24 editor deleted app (%s)', v);
+end $$;
+reset role;
+
+-- ── Test 25: reads (app inventory + detail) still valid after delete-hardening ──
+-- The /apps and /apps/[id] DAL reads continue to return RLS-scoped rows (no read regression).
+-- 25a: tenant member reads all 5 tenant apps (inventory) + single app/contract by id (detail).
+select set_config('request.jwt.claims','{"sub":"0a000000-0000-0000-0000-000000000001"}',false);
+set role authenticated;
+do $$ declare v int; begin
+  -- count the 5 seed apps by id (deterministic; earlier INSERT tests add apps to this tenant).
+  select count(*) into v from public.apps where id in (
+    'a9900000-0000-0000-0000-0000000000a1','a9900000-0000-0000-0000-0000000000a2',
+    'a9900000-0000-0000-0000-0000000000a0','a9900000-0000-0000-0000-0000000000af',
+    'a9900000-0000-0000-0000-0000000000bf');
+  assert v = 5, format('T25 owner inventory read should see all 5 seed apps, saw %s', v);
+  select count(*) into v from public.apps where id='a9900000-0000-0000-0000-0000000000a1';
+  assert v = 1, format('T25 owner detail read of App A1 should be 1, saw %s', v);
+  select count(*) into v from public.contracts where id='c0000000-0000-0000-0000-0000000000a1';
+  assert v = 1, format('T25 owner detail read of Contract A1 should be 1, saw %s', v);
+end $$;
+reset role;
+-- 25b: org-only manager still reads its related app by id (org-scoped detail).
+select set_config('request.jwt.claims','{"sub":"0a000000-0000-0000-0000-0000000000a1"}',false);
+set role authenticated;
+do $$ declare v int; begin
+  select count(*) into v from public.apps where id='a9900000-0000-0000-0000-0000000000a1';
+  assert v = 1, format('T25 org mgr A1 detail read of own-org App A1 should be 1, saw %s', v);
 end $$;
 reset role;
 

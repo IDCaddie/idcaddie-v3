@@ -34,10 +34,11 @@ Severity: P0 (critical) · P1 (high) · P2 (medium) · P3 (low). Status uses the
 |----|-----|-----------|-------------|
 | RISK-C01 | P0 | PR #1 (`0002`/`0003`, tests T7/T22+23) | Cross-tenant org-pointer leak — a member could point a resource's owning-org at a foreign-tenant org and that org's members read/edited it. Closed by tenant-bound reads + `enforce_owning_org_tenant`; original exploit replayed and blocked. |
 | RISK-C02 | P1 | PR #1 (`0002`, test T16) | Tenant-admin self-promotion to `owner` / owner demotion. Closed by owner/admin membership policy split. |
-| RISK-C03 | P1 | PR #2 | RLS regressions could merge unnoticed. Closed by `test-rls.sh` + `rls-tests.yml` (full migration chain + 66 assertions on every PR). |
+| RISK-C03 | P1 | PR #2 | RLS regressions could merge unnoticed. Closed by `test-rls.sh` + `rls-tests.yml` (full migration chain + 82 assertions on every PR). |
 | RISK-C04 | P2 | PR #3 | Dangerous/disordered migrations could merge. Closed by `check-migration-safety.sh` + `migration-safety.yml`. |
 | RISK-C05 | P2 | PR #4 | Documentation/risk drift invisible to reviewers. Mitigated by `check-docs-updated.sh` + `review-discipline.yml` + this register. |
 | RISK-C06 | P1 | PR #6 | **Auth/session not built** (was RISK-005). Closed by the auth skeleton: `@supabase/ssr` user-scoped server client, `src/proxy.ts` session refresh + route guard, login/logout, protected route group. `check-auth-safety.sh` proves no service-role/no client-side role storage. *Caveat:* not yet exercised against hosted Supabase Auth (tracked by RISK-001). |
+| RISK-C07 | P2 | PR #16 | **Normal authenticated hard-delete of core evidence rows.** `0001`/`0002` `FOR ALL` manage policies silently granted `DELETE` on `organizations`/`apps`/`contracts`/`app_contracts`/`people`/`app_users`, so an editor/owner/admin/org-manager could destroy customer evidence before any archive UI or audit existed. Closed by `0004` (split into `INSERT`+`UPDATE`, no `DELETE` policy); proven by tests T17/T24/T25 (delete → 0 rows; reads/updates preserved). *Honest caveat:* archive/soft-delete UI is **not built** — a future audited admin break-glass path is deferred ([06](./06_BUILD_SEQUENCE.md)). |
 
 ## How to use
 - Opening a risk: add a row to **Active** with a real mitigation and a concrete "what closes it".

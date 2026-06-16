@@ -21,13 +21,19 @@ Before building UI, prove these pass against local Supabase.
 9. service-role job can write license_evaluations.
 10. browser anon/authenticated client cannot read integration secrets.
 
-## Org-scoped policies — IMPLEMENTED in migrations 0002 + 0003
+## Org-scoped policies — IMPLEMENTED in migrations 0002 + 0003 (+ 0004 delete-hardening)
 
 Cases 1–8 plus the org/cross-tenant/escalation matrix are enforced by
 `supabase/migrations/0002_org_scoped_rls.sql` and `0003_org_access_union.sql`,
-covered by the runnable suite `supabase/tests/org_rls_test.sql` (T1–T23). The suite
-has been executed against Postgres 16 with a Supabase-style `auth` shim — all
+covered by the runnable suite `supabase/tests/org_rls_test.sql` (T1–T25, 82 assertions). The
+suite has been executed against Postgres 16 with a Supabase-style `auth` shim — all
 assertions pass (`ALL ORG-RLS ASSERTIONS PASSED`).
+
+**Destructive-delete hardening (T17/T24/T25, migration `0004`):** core evidence tables
+(`organizations`/`apps`/`contracts`/`app_contracts`/`people`/`app_users`) have **no `DELETE`
+policy** — `FOR ALL` manage policies were split into `INSERT`+`UPDATE`. T17 = org-manager delete
+denied; T24 = owner/admin/editor delete denied (editor `UPDATE` still works, rows survive);
+T25 = `/apps` + `/apps/[id]` reads still valid.
 
 ### Access model: stewardship (write) vs. related-org (read)
 - **WRITE / steward (single-org):** apps `responsible_org_id`, contracts `procurement_org_id` (or tenant editor+).
