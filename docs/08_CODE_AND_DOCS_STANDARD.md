@@ -5,7 +5,7 @@ and the living-docs policy. Reviewer enforcement: [07_P0_REVIEW_CHECKLIST](./07_
 
 ## Code standard
 **Bias:** boring, deterministic, small. The best code is code not written
-([17 ponytail pass below](#ponytail-pass-before-any-pr)).
+(see the [ponytail pass below](#ponytail-pass-before-any-pr)).
 
 - Small, focused modules; explicit inputs/outputs; no god files; no hidden side effects.
 - Validate at trust boundaries (Zod on external/user input). Inside the boundary, trust the types.

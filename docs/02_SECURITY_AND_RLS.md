@@ -48,8 +48,9 @@ by agency A3 is readable by A3 (via `paying_org_id`) though A3 isn't the procure
 
 ## 4. Audit immutability
 `audit_logs` is append-only, enforced two ways: (a) no `UPDATE`/`DELETE` RLS policy for
-normal roles, and (b) a `BEFORE UPDATE OR DELETE` trigger (`reject_audit_mutation`) that
-raises for **every** role — including `BYPASSRLS` `service_role` — covering plain
+normal roles, and (b) a `BEFORE UPDATE OR DELETE` trigger `audit_logs_no_mutation`
+(function `reject_audit_mutation`) that raises unconditionally for **every** role —
+including `BYPASSRLS` `service_role` — covering plain
 DML, writable CTEs, upserts, and `MERGE`. Inserts come only from trusted server paths
 (service-role / SECURITY DEFINER). Deletes are blocked even for retention (see gap below).
 

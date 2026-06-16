@@ -13,10 +13,18 @@ from PRs verified via `git log` / `gh pr list`.
   `scripts/check-docs-updated.sh` + `pr-review-summary.sh`, `.docs-not-needed.template.md`,
   `.github/workflows/review-discipline.yml`. Reconciled (linked, not duplicated) the existing
   design/legacy/migration docs.
+- **Bug fixed:** `check-docs-updated.sh` referenced a non-existent doc numbering
+  (`12`/`13`/`03_DATABASE_AND_RLS`/`10_BUILD_SEQUENCE`), so its risk/changelog detections never
+  matched the real `04`/`05`/`03`/`06` files — repointed to the canonical set.
+- **CI hardening (fail-closed):** the docs-drift gate now runs with `REQUIRE_BASE=1` in
+  `review-discipline.yml` and the workflow fetches the base branch (`fetch-depth: 0` + explicit
+  fetch), so a missing merge-base FAILs loudly instead of silently passing. Local runs stay graceful.
 - **Why:** make the repo self-explaining, self-checking, and not dependent on Sam's memory.
-- **Security impact:** none to runtime; adds a P0 review framework ([07](./07_P0_REVIEW_CHECKLIST.md)) and docs-drift CI.
-- **Tests run:** `check-migration-safety.sh` (+selftest), `check-docs-updated.sh`,
-  `pr-review-summary.sh`, `test-rls.sh`. *(See PR body / local-check output for results.)*
+- **Security impact:** none to runtime; adds a P0 review framework ([07](./07_P0_REVIEW_CHECKLIST.md)) and a fail-closed docs-drift gate.
+- **Tests run (local, verified):** `check-migration-safety.sh selftest` 6/6 + check passed;
+  `test-rls.sh` → `ALL ORG-RLS ASSERTIONS PASSED` (exit 0, no container leftovers);
+  `check-docs-updated.sh` 0 failures/0 warnings (and exits 2 on a missing required base);
+  `pr-review-summary.sh` categorized the diff; `npm run lint` clean.
 - **Docs updated:** this whole PR is docs/process.
 - **Follow-ups:** none blocking; future PRs must keep [04](./04_RISK_REGISTER.md) and this file current.
 

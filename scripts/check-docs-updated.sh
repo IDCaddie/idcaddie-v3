@@ -10,13 +10,30 @@
 #
 # Bash 3.2 compatible. Usage:
 #   bash scripts/check-docs-updated.sh [base-ref]   # default base-ref: origin/main
+#
+# REQUIRE_BASE=1 (set by CI): if the merge-base with base-ref cannot be computed,
+# FAIL loudly instead of silently skipping the drift checks. Locally it stays
+# graceful (untracked-only) for developer convenience.
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO"
 
 BASE_REF="${1:-origin/main}"
+REQUIRE_BASE="${REQUIRE_BASE:-0}"
 base="$(git merge-base "$BASE_REF" HEAD 2>/dev/null || true)"
+
+if [ -z "$base" ]; then
+  msg="cannot compute merge-base with '${BASE_REF}' (ref missing or no common history)."
+  if [ "$REQUIRE_BASE" = "1" ]; then
+    echo "FATAL: ${msg}" >&2
+    echo "       Refusing to silently skip docs-drift checks. Fetch the base branch first" >&2
+    echo "       (e.g. 'git fetch origin <branch>') so the full diff can be computed." >&2
+    exit 2
+  fi
+  echo "check-docs-updated: ${msg}"
+  echo "  (local convenience mode — checking untracked files only; set REQUIRE_BASE=1 to enforce.)"
+fi
 
 # Changed = committed-on-branch (vs merge-base) UNION still-untracked files, so the
 # check is useful both in CI (committed) and locally before committing.

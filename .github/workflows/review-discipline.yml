@@ -2,11 +2,15 @@ name: Review discipline
 
 # Reviewer-aid checks: docs-drift gate + migration safety + a diff summary.
 # Kept separate from rls-tests.yml (Docker) so it stays fast and never weakens it.
-# Needs full history to compute the merge-base with origin/main.
+# fetch-depth: 0 + an explicit fetch of the base branch guarantee a real
+# merge-base; REQUIRE_BASE=1 makes the docs gate FAIL (not skip) if it's missing.
 
 on:
   pull_request:
   workflow_dispatch:
+
+env:
+  BASE_BRANCH: ${{ github.base_ref || 'main' }}
 
 jobs:
   review-discipline:
@@ -15,9 +19,13 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      - name: Ensure base branch is available for merge-base
+        run: git fetch --no-tags origin "$BASE_BRANCH"
       - name: PR review summary
-        run: bash scripts/pr-review-summary.sh origin/${{ github.base_ref }}
+        run: bash scripts/pr-review-summary.sh "origin/$BASE_BRANCH"
       - name: Migration safety
         run: bash scripts/check-migration-safety.sh
-      - name: Docs-drift gate
-        run: bash scripts/check-docs-updated.sh origin/${{ github.base_ref }}
+      - name: Docs-drift gate (must not fail open)
+        env:
+          REQUIRE_BASE: "1"
+        run: bash scripts/check-docs-updated.sh "origin/$BASE_BRANCH"
