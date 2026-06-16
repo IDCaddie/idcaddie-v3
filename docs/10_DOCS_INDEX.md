@@ -18,9 +18,11 @@ Used consistently across all docs. Never blur these.
 | `deprecated` | old approach kept only for history |
 | `legacy-production` | the current Firebase system still serving users |
 
-Today: migrations are `implemented` + `verified-local` + `ci-enforced`, **not** `staged`/
-`production-applied`. The auth/session skeleton is `implemented` (not hosted-exercised).
-Firebase is `legacy-production`. v3 product UI is `planned`.
+Today: migrations (`0001`–`0008`) are `implemented` + `verified-local` + `ci-enforced`, **not** `staged`/
+`production-applied`. The auth/session skeleton is `implemented` (not hosted-exercised). Firebase is
+`legacy-production`. v3 has **read-only** product UI `implemented` (apps inventory + detail, contracts
+list + detail, linked app↔contract panels, app-user roster + match status, account summary — PRs
+#13/#14/#19/#20/#21/#23/#24); **write UI, hosted apply, UAR, imports/exports are `planned`/`deferred`**.
 
 ## Canonical docs (this set)
 | Doc | Canonical for | Reader | Status |

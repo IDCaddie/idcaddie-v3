@@ -3,8 +3,9 @@
 **Canonical source for: build order and "what not to build yet".** Each stage maps to legacy→v3
 capability parity and the OMC cutover gate in [11_LEGACY_PARITY_AND_OMC_CHECKLIST](./11_LEGACY_PARITY_AND_OMC_CHECKLIST.md#6-updated-roadmap-next-prs-to-parity).
 Each stage is gated on
-the previous. Status uses the [taxonomy](./10_DOCS_INDEX.md#status-taxonomy). Stage 1 is
-`implemented`/`verified-local`/`ci-enforced`; everything below is `planned` or `deferred`.
+the previous. Status uses the [taxonomy](./10_DOCS_INDEX.md#status-taxonomy). Stages 1–3 are
+`implemented`/`verified-local`/`ci-enforced`; Stages 4–6 ship **read-only** surfaces (`implemented`,
+`verified-local`) with **writes deferred**; Stages 7+ are `planned`/`deferred`. Nothing is hosted-applied.
 
 Global "done" for every stage: code + tests + docs updated, `04_RISK_REGISTER` and
 `05_ENGINEERING_CHANGELOG` updated, [07_P0_REVIEW_CHECKLIST](./07_P0_REVIEW_CHECKLIST.md)
@@ -15,12 +16,14 @@ passed, CI green.
 | 1 | Clean-app operating system (docs/CI/foundation) | `implemented` |
 | 2 | Auth/session skeleton | `implemented` (PR #6) |
 | 3 | Tenant/org context (read-only) | `implemented` (PR #9) |
-| 4 | Read-only app inventory | `planned` |
-| 5 | Contracts | `planned` |
-| 6 | People / app users | `planned` |
-| 7 | License rules / evaluations | `planned` |
-| 8 | Files / invoices | `planned` |
-| 9 | Audit log UI | `planned` |
+| 4 / 4b | Read-only app inventory + detail | `implemented` / `verified-local` (PR #13/#14) |
+| 5 | Contracts (read-only list + detail) | `partial` — read-only `implemented` (PR #19); writes **design only** (PR #25, doc 13) |
+| 5b | Linked app↔contract panels (read-only) | `implemented` (PR #20) |
+| 6a–6d | App-user roster + match status + account summary (read-only) | `implemented` / `verified-local` (PR #21/#23/#24); `people` reads + app-user writes still `planned` |
+| 6b | Identity / matching read-scope design | `design` only (PR #22; match-status slice built PR #23) |
+| 7 | License rules / evaluations | `deferred` (default-deny) |
+| 8 | Files / invoices | `deferred` (default-deny) |
+| 9 | Audit-on-write + audit log UI | `planned` (write audit = future `SECURITY DEFINER` trigger, doc 13) |
 | 10 | Reports / exports | `deferred` |
 | 11 | Import flows | `deferred` |
 | 12 | Integrations / connectors | `deferred` |
