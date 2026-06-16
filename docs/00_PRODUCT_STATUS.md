@@ -50,6 +50,7 @@ PR #6 (this branch, auth/session skeleton) is **not yet merged**.
 | Tenant/org context resolution (read-only; memberships → active tenant + org list, RLS-scoped) | `implemented` (PR #9); `verified-local` (build + unit tests); **not** exercised against hosted Supabase |
 | Tenant switching UI / user provisioning / invites | `planned` (not built; deterministic first tenant chosen — RISK-012) |
 | Local/demo data fixture (synthetic; never hosted-applied) | `implemented` (PR #10 — `supabase/fixtures/local_demo.sql` via `scripts/seed-local-demo.sh`); local-only |
+| Typed DB types + read-only data access layer (server-only) | `implemented` (PR #11 — generated `database.types.ts`, typed server client, `src/lib/data/apps.ts`); `verified-local` (typed build) |
 | Product UI / app workflows | `planned` (auth shell only; no inventory/contracts/etc.) |
 | Child-table org scoping (`app_users`, `files`, `invoices`, `license_*`, `app_contracts`) | `deferred` (still tenant-scoped) |
 | `resource_org_links` relationship table + org hierarchy | `deferred` |

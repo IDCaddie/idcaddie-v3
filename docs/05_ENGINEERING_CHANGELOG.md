@@ -7,6 +7,33 @@ from PRs verified via `git log` / `gh pr list`.
 
 ---
 
+### PR #11 — Add typed data access layer · 2026-06-16
+- **Category:** app / data layer.
+- **What:** generated `src/lib/database.types.ts` (the `Database` type) from the migrations;
+  typed the server client (`createServerClient<Database>` in `src/lib/supabase/server.ts`); added a
+  server-only, read-only DAL (`src/lib/data/apps.ts` — `listAppsForCurrentUser()` returning a typed
+  `AppSummary` DTO with a structured `DataResult`). Added `scripts/gen-types-local.sh` to regenerate
+  the types locally.
+- **Type strategy:** types are **generated** (not hand-written) by `gen-types-local.sh`, which spins up
+  its **own throwaway Postgres** (like `test-rls.sh`), applies the migrations, and runs
+  `supabase gen types typescript --db-url <local>` — hosted-proof (no `--linked`/`--project-id`, no
+  `supabase link`/`db push`, refuses remote args, no secrets). Committed so the build needs no generation step.
+- **Hosted Supabase impact:** **none** — generation is local-only; no hosted apply.
+- **Service-role impact:** **none** — the DAL uses the anon user-scoped server client; `check-auth-safety.sh` clean.
+- **Migration impact:** **none** — no schema change (`check-migration-safety.sh` only scans `supabase/migrations/`).
+- **Security/RLS impact:** RLS remains the authority. The DAL is server-only (imports `next/headers`
+  via the server client; importing it client-side fails the build), read-only, and passes **no**
+  caller-supplied `tenant_id` as an auth input — visibility is RLS-scoped.
+- **Tests run (local, verified):** `gen-types-local.sh` → 1123-line types, clean teardown; `npm test`
+  5/5; `npm run lint`/`build` exit 0 (build compiles against the typed client — proof the types are right);
+  `check-auth-safety.sh`, `check-migration-safety.sh`, `check-docs-updated.sh` pass; `test-rls.sh`
+  → `ALL ORG-RLS ASSERTIONS PASSED`.
+- **Docs updated:** `00`, `01`, `06`, `09`, `README_START_HERE`, `04` (RISK-011 narrowed).
+- **Follow-ups:** a CI types-drift check (regenerate + `git diff --exit-code`) keeps RISK-011 open;
+  contracts/orgs DAL helpers follow the same shape when their screens land; first product UI is still not built.
+
+---
+
 ### PR #10 — Add local/demo tenant fixture · 2026-06-16
 - **Category:** dev tooling / fixtures (local-only).
 - **What:** `supabase/fixtures/local_demo.sql` — a synthetic Demo Tenant + 4 organizations

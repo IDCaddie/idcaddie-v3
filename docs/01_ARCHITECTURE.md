@@ -29,8 +29,10 @@ root layout. They run as **Vercel platform telemetry** — anonymous page views 
 ```
 src/app/                 root layout · login/ · logout/ (route handler) · (authenticated)/ group
 src/proxy.ts             Next.js 16 Proxy (renamed Middleware): session refresh + route guard
-src/lib/supabase/        env · client (browser) · server (user-scoped) · proxy (session helper)
+src/lib/supabase/        env · client (browser) · server (user-scoped, typed with Database) · proxy (session helper)
 src/lib/auth/            session (current user) · tenant-context (RLS-scoped resolver) · tenant-context-derive (pure logic + tests)
+src/lib/data/            server-only, read-only DAL (apps.ts) — typed DTOs over the user-scoped client
+src/lib/database.types.ts generated Supabase types (via scripts/gen-types-local.sh; do not hand-edit)
 supabase/migrations/     0001 core schema · 0002 org-scoped RLS · 0003 related-org read   (append-only)
 supabase/tests/          org_rls_test.sql (66 assertions) · rls_test_plan.md
 scripts/                 test-rls.sh · check-migration-safety.sh · check-docs-updated.sh · pr-review-summary.sh · check-auth-safety.sh
@@ -69,7 +71,8 @@ Rejected-pattern evidence: [current-security-risk-map.md](./current-security-ris
 
 ## Server/client boundary
 - **Client:** render only; calls server actions / route handlers; holds no secrets; never the service-role key. *(No interactive client components yet; `src/lib/supabase/client.ts` is the browser-client seam for future use.)* — partly `implemented`.
-- **Server (Next.js, user-scoped):** `src/lib/supabase/server.ts` builds a Supabase client bound to the request's auth cookies (anon key only); all reads/writes flow through RLS. The login Server Action and `getSessionUser()` use it. — `implemented`.
+- **Server (Next.js, user-scoped):** `src/lib/supabase/server.ts` builds a Supabase client bound to the request's auth cookies (anon key only), **typed with the generated `Database`**; all reads/writes flow through RLS. The login Server Action, `getSessionUser()`, and the `src/lib/data/` DAL use it. — `implemented`.
+- **Data access layer (`src/lib/data/`):** server-only (imports `next/headers` transitively), **read-only** typed helpers (e.g. `listAppsForCurrentUser()`) returning column-subset DTOs. They take **no** `tenant_id` from the caller — RLS scopes visibility. Never import them from Client Components. — `implemented` (apps; contracts/orgs follow the same shape when their screens land).
 - **Proxy (`src/proxy.ts`):** in Next.js 16, Middleware is renamed **Proxy** (`node_modules/next/dist/docs/.../16-proxy.md`). It refreshes the session and redirects unauthenticated requests off protected routes. It does **not** read app data or decide tenant/org access. — `implemented`.
 - **Trusted server jobs (service-role):** isolated; only for operations RLS can't express (audit writes, license evaluation, future imports). Never reachable from the browser. — `deferred` (no such code exists yet).
 

@@ -54,7 +54,8 @@ passed, CI green.
 
 ### Stage 4 — Read-only app inventory (next)
 - **Goal:** first real screen — list `apps` the user may read.
-- **Prereq:** Stage 3 ✅. **P0 risks:** client-side filtering; leaking deferred child-table data.
+- **Prereq:** Stage 3 ✅. The typed read-only DAL is ready (PR #11 — `src/lib/data/apps.ts` `listAppsForCurrentUser()`); the screen consumes it, adds no new queries, and does no client-side filtering.
+- **P0 risks:** client-side filtering; leaking deferred child-table data.
 - **Tests:** org-only user sees only related apps; tenant viewer sees all tenant apps.
 - **Local data:** `supabase/fixtures/local_demo.sql` (via `scripts/seed-local-demo.sh`) provides a Demo
   Tenant with orgs/memberships/apps/contracts to develop and demo against — local-only, see [03](./03_DATABASE_AND_MIGRATIONS.md#localdemo-fixture-not-a-migration).
