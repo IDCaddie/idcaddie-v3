@@ -23,6 +23,8 @@ Severity: P0 (critical) · P1 (high) · P2 (medium) · P3 (low). Status uses the
 
 | RISK-014 | P2 | open | **Connected-agent automation could cause unintended repo/runtime changes.** Claude/Vercel/GitHub/Supabase agents can branch, edit, and open PRs; an over-broad action could push to `main`, auto-merge, alter secrets, run a hosted Supabase migration, change DNS, or promote production. | Branch-only writes; CI gates on every PR (`review-discipline` + `rls-tests` + `migration-safety`); **no auto-merge**; no hosted Supabase writes (local-only, separate runbook PR); no service-role keys; **human approval before merge**. Policy: [09 · Connected agent permissions](./09_AGENT_HANDOFF.md#connected-agent-permissions). | Branch protection on `main` requiring review + green CI (enforced setting), kept aligned with the documented policy. |
 
+| RISK-015 | P3 | open | **Local/demo fixture misuse.** `supabase/fixtures/local_demo.sql` writes synthetic rows (incl. `auth.users`) and, if ever applied to hosted Supabase, would inject fake tenants/users/data into a real environment. | Lives outside `supabase/migrations/` (never in the apply path); `seed-local-demo.sh` is hosted-proof (own throwaway container, refuses remote/`--linked`, no Supabase CLI, no service-role, no secrets); strong LOCAL-ONLY header; all-synthetic data; `auth.users` inserts only work against a local shim. | Inherent local-tool risk; mitigations make accidental hosted application very unlikely. Revisit if a hosted seed/runbook is ever introduced. |
+
 ## Closed risks (verified)
 | ID | Sev | Closed by | What it was |
 |----|-----|-----------|-------------|

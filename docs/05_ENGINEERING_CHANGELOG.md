@@ -7,6 +7,30 @@ from PRs verified via `git log` / `gh pr list`.
 
 ---
 
+### PR #10 — Add local/demo tenant fixture · 2026-06-16
+- **Category:** dev tooling / fixtures (local-only).
+- **What:** `supabase/fixtures/local_demo.sql` — a synthetic Demo Tenant + 4 organizations
+  (Corporate/Marketing/IT/Procurement), 2 demo users (a tenant owner + an org-only user) with
+  tenant/org memberships, 3 sample apps (Slack/Google Workspace/Salesforce) and 2 contracts with
+  owning-org FKs + app↔contract links. `scripts/seed-local-demo.sh` loads it into a **throwaway
+  local Postgres** (own Docker container, like `test-rls.sh`), applies it twice to prove idempotency,
+  prints a summary, and tears down (`--keep` leaves a local DB on `127.0.0.1:55432`).
+- **Why:** predictable, repeatable local data for tenant/org context and the upcoming Stage 4 inventory.
+- **Hosted Supabase impact:** **none.** The script has no remote code path — it only ever uses its
+  own container, refuses remote/`--linked` args, calls no Supabase CLI, runs no `db push`. The fixture
+  lives outside `supabase/migrations/` (never in the apply path) and inserts `auth.users` (local shim only).
+- **Service-role impact:** **none** — no service-role key; the seed runs as the local container's `postgres` superuser (not app code; `src/` unchanged).
+- **Migration impact:** **none** — a fixture, not a migration (`check-migration-safety.sh` only scans `supabase/migrations/`).
+- **Security impact:** all-synthetic data; no real customer names, no PII, no secrets. RLS untouched.
+- **Tests run (local, verified):** `seed-local-demo.sh` → 1 tenant / 4 orgs / 1 tenant-membership /
+  2 org-memberships / 3 apps / 2 contracts / 2 links, idempotent, clean teardown; refusal guards exit 2;
+  `npm test` 5/5; `npm run lint`/`build` exit 0; `check-auth-safety.sh`, `check-migration-safety.sh`,
+  `check-docs-updated.sh` pass; `test-rls.sh` → `ALL ORG-RLS ASSERTIONS PASSED`.
+- **Docs updated:** `03` (fixture section), `00`, `06`, `09`, `README_START_HERE`, `04` (RISK-015).
+- **Follow-ups:** none; consume the fixture when Stage 4 inventory lands.
+
+---
+
 ### PR #9 — Add tenant and org context resolution · 2026-06-16
 - **Category:** app / auth.
 - **What:** `resolveTenantContext()` in `src/lib/auth/tenant-context.ts` reads the signed-in user's

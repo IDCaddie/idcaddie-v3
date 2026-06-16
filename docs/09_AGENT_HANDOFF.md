@@ -21,6 +21,7 @@ components, no custom events). Legacy Firebase is still production. Don't trust 
 - **Never edit a merged migration** (`0001`–`0003`) — fix forward with `000N_*.sql`.
 - **Never build UI ahead of its build-sequence prerequisites** ([06](./06_BUILD_SEQUENCE.md)).
 - **Never expand telemetry** — no custom events, no PII/tenant/customer/business data in analytics, no new instrumentation, until a production privacy review ([04 · RISK-013](./04_RISK_REGISTER.md)).
+- **Never hosted-apply the local fixture.** `supabase/fixtures/local_demo.sql` is local-only synthetic data; run it only via `bash scripts/seed-local-demo.sh` (throwaway container). Never add it to `supabase/migrations/`, never `supabase db push`, never point it at the linked project ([04 · RISK-015](./04_RISK_REGISTER.md)).
 - **Never claim something is verified** without command output.
 
 ## Always, every PR
