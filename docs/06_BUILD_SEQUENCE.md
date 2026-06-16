@@ -54,14 +54,17 @@ passed, CI green.
   configured yet", no crash, nothing created.
 - **No migration** (existing RLS already permits these reads). **Not built:** tenant switching, provisioning.
 
-### Stage 4 — Read-only app inventory (next)
-- **Goal:** first real screen — list `apps` the user may read.
-- **Prereq:** Stage 3 ✅. The typed read-only DAL is ready (PR #11 — `src/lib/data/apps.ts` `listAppsForCurrentUser()`); the screen consumes it, adds no new queries, and does no client-side filtering.
-- **P0 risks:** client-side filtering; leaking deferred child-table data.
-- **Tests:** org-only user sees only related apps; tenant viewer sees all tenant apps.
-- **Local data:** `supabase/fixtures/local_demo.sql` (via `scripts/seed-local-demo.sh`) provides a Demo
-  Tenant with orgs/memberships/apps/contracts to develop and demo against — local-only, see [03](./03_DATABASE_AND_MIGRATIONS.md#localdemo-fixture-not-a-migration).
-- **Don't build yet:** edit/create. **Done:** read-only list, RLS-scoped, no client filtering.
+### Stage 4 — Read-only app inventory ✅ (PR #13)
+- **Goal:** first real screen — list `apps` the user may read. **Done.**
+- **Built:** `src/app/(authenticated)/apps/page.tsx` — server-rendered, consumes `listAppsForCurrentUser()`
+  (PR #11 DAL), shows name/vendor/category/status, with safe empty + generic error states and no
+  create/edit/delete. A link to it from the protected shell. No new queries, no client-side filtering.
+- **Verified (RLS query against the seeded fixture):** tenant owner sees all 3 demo apps; the org-only
+  Marketing user sees only the 2 apps related to their org (RLS `0003` org-union read); a non-member sees 0.
+- **Don't build yet:** edit/create, app detail, contracts UI, imports/exports.
+
+### Stage 4b — Read-only app detail (next)
+- **Goal:** drill-down for one app (read-only), then Stage 5 contracts. Same DAL pattern; no writes.
 
 ### Stage 5 — Contracts · Stage 6 — People/app users · Stage 7 — License rules/evaluations · Stage 8 — Files/invoices
 - **Goal:** the source-of-truth surfaces, read first then writes (steward-only).
