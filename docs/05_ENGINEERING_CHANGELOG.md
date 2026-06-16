@@ -7,6 +7,37 @@ from PRs verified via `git log` / `gh pr list`.
 
 ---
 
+### PR #17 — Add same-tenant child integrity constraints · 2026-06-16
+- **Category:** database / integrity hardening (no product UI).
+- **What:** `0005_same_tenant_child_integrity.sql` — prevent cross-tenant child/link corruption at the
+  constraint layer. Add `UNIQUE (id, tenant_id)` on 7 referenced parents (`apps`, `contracts`, `people`, `organizations`,
+  `app_users`, `license_rules`, `files`) and 14 composite same-tenant FKs `(parent_ref, tenant_id) →
+  parent(id, tenant_id)` on the child/link tables (`app_contracts`, `app_users`,
+  `app_user_identity_matches`, `identity_accounts`, `license_rules`, `license_evaluations`, `invoices`).
+- **Current integrity risk (closed — RISK-C08):** before this, a child row could claim `tenant_id = B`
+  while pointing at a tenant-A parent; RLS hid it on read but the corrupt write succeeded.
+- **What stayed deferred:** org-scoped child-table **reads** (RISK-002) and org-hierarchy
+  **traversal/inheritance** (RISK-004) — this PR is write-integrity only (it makes `organizations.parent_org_id`
+  stay in-tenant but adds no hierarchy visibility), not new read surfaces or product UI. `identity_accounts`
+  gets a child FK (to `people`) but no `UNIQUE` (it is never a tenant-scoped parent).
+- **Completeness:** an adversarial review caught two initially-omitted child references —
+  `identity_accounts.person_id` and `organizations.parent_org_id` — both now covered (T26 proves each fails cross-tenant).
+- **Migration impact:** new forward migration only (`0001`–`0004` untouched); **constraints only** — no
+  table/column/RLS change, no data change. `MATCH SIMPLE` keeps nullable links valid; `ON DELETE NO ACTION`
+  adds no cascade (PR #16 hard-delete protection intact).
+- **Generated types impact:** **yes, verified** — composite FKs add FK Relationships metadata to
+  `src/lib/database.types.ts` (+98 lines, Relationships-only; no Row/Insert/Update/column change). Regenerated
+  via `gen-types-local.sh` and **included**.
+- **RLS/test impact:** added **T26** (10 cross-tenant link inserts each rejected with `foreign_key_violation`;
+  valid same-tenant + nullable links insert). RLS reads (T1/T25), hard-delete denial (T17/T24), audit
+  immutability (T6) all still pass. 82 → **83 assertions**, T1–**T26**. Added license_rules/evaluations/files/invoices truncate entries.
+- **Product / security / service-role / hosted impact:** none beyond stricter invalid-write prevention; `/apps`+`/apps/[id]` build/read unchanged; no service-role; hosted Supabase untouched.
+- **Tests run (local, verified):** `test-rls.sh` → `ALL ORG-RLS ASSERTIONS PASSED` (0001–0005); `npm test` 5/5;
+  `npm run lint`/`tsc --noEmit`/`build` exit 0; `check-migration-safety.sh`, `check-auth-safety.sh`, `check-docs-updated.sh` pass.
+- **Docs updated:** `02` (§5b + threat T17 + non-negotiable), `03` (0005), `00`, `04` (RISK-C08 + RISK-002 scope note), `06`, `07`, `09`, `rls_test_plan.md`, `src/lib/database.types.ts`.
+
+---
+
 ### PR #16 — Harden destructive delete policies · 2026-06-16
 - **Category:** database / RLS hardening (no product UI).
 - **What:** `0004_destructive_delete_hardening.sql` — remove normal authenticated **hard-delete** from

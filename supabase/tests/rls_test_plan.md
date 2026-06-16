@@ -25,7 +25,7 @@ Before building UI, prove these pass against local Supabase.
 
 Cases 1–8 plus the org/cross-tenant/escalation matrix are enforced by
 `supabase/migrations/0002_org_scoped_rls.sql` and `0003_org_access_union.sql`,
-covered by the runnable suite `supabase/tests/org_rls_test.sql` (T1–T25, 82 assertions). The
+covered by the runnable suite `supabase/tests/org_rls_test.sql` (T1–T26, 83 assertions). The
 suite has been executed against Postgres 16 with a Supabase-style `auth` shim — all
 assertions pass (`ALL ORG-RLS ASSERTIONS PASSED`).
 
@@ -34,6 +34,12 @@ assertions pass (`ALL ORG-RLS ASSERTIONS PASSED`).
 policy** — `FOR ALL` manage policies were split into `INSERT`+`UPDATE`. T17 = org-manager delete
 denied; T24 = owner/admin/editor delete denied (editor `UPDATE` still works, rows survive);
 T25 = `/apps` + `/apps/[id]` reads still valid.
+
+**Same-tenant child integrity (T26, migration `0005`):** composite `(parent_ref, tenant_id) →
+parent(id, tenant_id)` FKs on `app_contracts`/`app_users`/`app_user_identity_matches`/`identity_accounts`/`license_rules`/
+`license_evaluations`/`invoices`. T26 = 10 cross-tenant link inserts each rejected with
+`foreign_key_violation`; valid same-tenant links + nullable (MATCH SIMPLE) links still insert.
+This is write-integrity only — org-scoped child-table reads remain deferred (RISK-002).
 
 ### Access model: stewardship (write) vs. related-org (read)
 - **WRITE / steward (single-org):** apps `responsible_org_id`, contracts `procurement_org_id` (or tenant editor+).

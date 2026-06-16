@@ -16,6 +16,7 @@ links them rather than restating:
 | `0002_org_scoped_rls.sql` | Org-scoped RLS: org helpers, steward-write policies, audit append-only trigger, `enforce_owning_org_tenant`, tenant-admin self-promotion fix. | PR #1 |
 | `0003_org_access_union.sql` | Related-org **read** model (union of owning-org columns); broadened integrity trigger to all access org FKs. | PR #1 |
 | `0004_destructive_delete_hardening.sql` | Remove normal authenticated **hard-delete** from core evidence tables (`organizations`/`apps`/`contracts`/`app_contracts`/`people`/`app_users`): drop broad `FOR ALL` manage policies, recreate as `INSERT` + `UPDATE` only (no `DELETE`). RLS-only (no schema change). | PR #16 |
+| `0005_same_tenant_child_integrity.sql` | **Same-tenant relational integrity:** `UNIQUE (id, tenant_id)` on 7 parents + composite same-tenant FKs on child/link tables (`app_contracts`/`app_users`/`app_user_identity_matches`/`identity_accounts`/`organizations`/`license_rules`/`license_evaluations`/`invoices`) so a child can't reference a cross-tenant parent. Constraints only (adds FK Relationships to generated types). | PR #17 |
 
 ## Workflow (summary — full rules in [migration-workflow.md](./migration-workflow.md))
 1. **Local first.** Never develop against hosted Supabase; never use service-role keys for normal dev.
