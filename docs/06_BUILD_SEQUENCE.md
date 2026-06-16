@@ -77,11 +77,17 @@ passed, CI green.
 - **Goal:** read-only contract visibility from the `contracts` table only. **Read-only slice done; writes + linked surfaces deferred.**
 - **Built:** `src/app/(authenticated)/contracts/page.tsx` + `contracts/[id]/page.tsx` + typed DAL `src/lib/data/contracts.ts` (`listContractsForCurrentUser`, `getContractDetailForCurrentUser`). Direct `contracts` columns only; `[id]` is a lookup key (RLS decides; hidden → `not_found`). `/contracts` linked from the shell.
 - **Verified (RLS spot-check):** tenant owner sees both demo contracts; org-only users see only their related contract (procurement/paying org union, `0003`); unrelated org-only + non-member → `not_found`.
-- **Intentionally NOT built:** create/edit/delete/archive, import/export, file upload, invoices, **linked-apps table / app-contract linking** — `app_contracts` is tenant-only and invoices/files default-deny; surfacing them needs org-scoped read policies first (RISK-002, **open**). OMC/Flywheel contracts cutover stays **blocked**.
+- **Intentionally NOT built (this slice):** create/edit/delete/archive, import/export, file upload, invoices. **OMC/Flywheel contracts cutover stays blocked.**
+
+### Stage 5b — Read-only linked apps ↔ contracts 🟡 (PR #20)
+- **Goal:** show linked apps on a contract and linked contracts on an app, **read-only**, after making `app_contracts` org-scoped for read. **Done.**
+- **Built:** migration `0006` (one org-scoped `SELECT` policy on `app_contracts` — read a link iff you can read the linked app OR contract; no DELETE), DAL `src/lib/data/links.ts`, "Linked apps" on `/contracts/[id]` + "Linked contracts" on `/apps/[id]`. No linking/unlinking/editing.
+- **Verified:** **T28** + live spot-check — org-only users read only links tied to apps/contracts they can read; cross-tenant + non-member read none.
+- **Still NOT surfaced:** `people`/`app_users` (tenant-only), `invoices`/`files`/`license_*`/`identity_*` (default-deny). RISK-002 **narrowed, not closed**.
 
 ### Stage 5 (writes) · Stage 6 — People/app users · Stage 7 — License rules/evaluations · Stage 8 — Files/invoices
 - **Goal:** the source-of-truth surfaces, read first then writes (steward-only).
-- **P0 risks:** writes outside RLS; child tables **not org-scoped for reads** — `people`/`app_users`/`app_contracts` are **tenant-only**, and `identity_accounts`/`app_user_identity_matches`/`license_rules`/`license_evaluations`/`files`/`invoices` are **default-deny** (no read policy). Add org-scoped read policies + tests **before** any per-org surface ships (RISK-002; canonical map [02 §8](./02_SECURITY_AND_RLS.md), pinned by T27). Also: destructive edits without audit.
+- **P0 risks:** writes outside RLS; child tables **not org-scoped for reads** — `people`/`app_users` are **tenant-only**, and `identity_accounts`/`app_user_identity_matches`/`license_rules`/`license_evaluations`/`files`/`invoices` are **default-deny** (no read policy). (`app_contracts` is now org-scoped read — `0006`/PR #20.) Add org-scoped read policies + tests **before** any further per-org surface ships (RISK-002; canonical map [02 §8](./02_SECURITY_AND_RLS.md)). Also: destructive edits without audit.
 - **Delete guardrail (PR #16 / `0004`):** core evidence tables have **no hard-delete** policy — write surfaces add `INSERT`/`UPDATE` only; never re-add `FOR ALL`/`DELETE`. **Hard delete + archive/soft-delete UI are deferred** to a future audited admin/break-glass path (not built — RISK-C07).
 - **Integrity guardrail (PR #17 / `0005`):** child/link writes that reference a cross-tenant parent fail at the DB (composite same-tenant FKs). New child tables must add the same `(parent_ref, tenant_id) → parent(id, tenant_id)` FK. Org-scoped child-table **reads** are still deferred (RISK-002).
 - **Tests:** steward write allowed, non-steward denied, related-org read works; audit row written on change.

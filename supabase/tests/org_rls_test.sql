@@ -38,6 +38,7 @@ insert into auth.users (id, email) values
   ('0a000000-0000-0000-0000-0000000000c1','agency_u@a.test'),
   ('0a000000-0000-0000-0000-0000000000e0','member_x@a.test'),
   ('0a000000-0000-0000-0000-0000000000ed','editor_a@a.test'),
+  ('0a000000-0000-0000-0000-0000000000ff','nobody@a.test'),
   ('0b000000-0000-0000-0000-000000000001','owner_b@b.test');
 
 insert into public.profiles (id, email) values
@@ -50,6 +51,7 @@ insert into public.profiles (id, email) values
   ('0a000000-0000-0000-0000-0000000000c1','agency_u@a.test'),
   ('0a000000-0000-0000-0000-0000000000e0','member_x@a.test'),
   ('0a000000-0000-0000-0000-0000000000ed','editor_a@a.test'),
+  ('0a000000-0000-0000-0000-0000000000ff','nobody@a.test'),
   ('0b000000-0000-0000-0000-000000000001','owner_b@b.test');
 
 insert into public.tenants (id, name, slug) values
@@ -780,19 +782,96 @@ do $$ declare v int; begin
 end $$;
 reset role;
 
--- 27b: TENANT-READ-NOT-ORG-SCOPED tables (people/app_users/app_contracts) are is_tenant_member-gated,
--- so an ORG-ONLY user (mgr_a1, no tenant membership) reads ZERO from them — they are NOT org-scoped and
+-- 27b: TENANT-READ-NOT-ORG-SCOPED tables (people/app_users) are is_tenant_member-gated, so an
+-- ORG-ONLY user (mgr_a1, no tenant membership) reads ZERO from them — they are NOT org-scoped and
 -- must not be surfaced to org-only users until org-scoped read policies exist (RISK-002).
+-- NOTE: app_contracts is NO LONGER in this list — PR #20 / 0006 made it org-scoped for READ; its
+-- org-only read behavior is proven in T28 below.
 select set_config('request.jwt.claims','{"sub":"0a000000-0000-0000-0000-0000000000a1"}',false); -- mgr_a1 (org-only, manages Org A1)
 set role authenticated;
 do $$ declare v int; begin
   select count(*) into v from public.people;        assert v = 0, format('T27 org-only mgr_a1 saw %s people (not org-scoped)', v);
   select count(*) into v from public.app_users;     assert v = 0, format('T27 org-only mgr_a1 saw %s app_users (not org-scoped)', v);
-  select count(*) into v from public.app_contracts; assert v = 0, format('T27 org-only mgr_a1 saw %s app_contracts (not org-scoped)', v);
   select count(*) into v from public.files;         assert v = 0, format('T27 org-only mgr_a1 saw %s files (default-deny)', v);
   select count(*) into v from public.invoices;      assert v = 0, format('T27 org-only mgr_a1 saw %s invoices (default-deny)', v);
   -- positive control: mgr_a1 CAN read its own-org App A1 (proves a valid org session, not always-0)
   select count(*) into v from public.apps where id='a9900000-0000-0000-0000-0000000000a1'; assert v = 1, format('T27 org-only mgr_a1 should read own-org App A1, saw %s', v);
+end $$;
+reset role;
+
+-- ── Test 28: org-scoped READ for app_contracts (migration 0006, PR #20) ──────────────────────
+-- app_contracts gains ONE org-scoped SELECT policy: an org-only user may read a link row iff they
+-- can already read the linked APP or the linked CONTRACT under their related-org RLS. Existing
+-- tenant-member read + editor insert/update are unchanged; NO delete policy added.
+-- Links (privileged seed; L1 already in fixtures): tenant A.
+--   L1 = App A1 (resp OrgA1)      + Contract A1 (proc OrgA1)         -> mgr_a1 via BOTH; agency_u NEITHER
+--   L2 = App A-pay (paying OrgA3) + Contract A-central (paying OrgA3)-> agency_u via BOTH; mgr_a1 NEITHER
+--   L3 = App A1 (resp OrgA1)      + Contract A-central (paying OrgA3)-> mgr_a1 via APP side; agency_u via CONTRACT side
+reset role;
+insert into public.app_contracts (app_id, contract_id, tenant_id) values
+  ('a9900000-0000-0000-0000-0000000000af','c0000000-0000-0000-0000-0000000000cc','11111111-1111-1111-1111-111111111111'),  -- L2
+  ('a9900000-0000-0000-0000-0000000000a1','c0000000-0000-0000-0000-0000000000cc','11111111-1111-1111-1111-111111111111');  -- L3
+
+-- 28a: tenant owner reads ALL 3 tenant links (via the existing tenant-member policy).
+select set_config('request.jwt.claims','{"sub":"0a000000-0000-0000-0000-000000000001"}',false); -- owner_a
+set role authenticated;
+do $$ declare v int; begin
+  select count(*) into v from public.app_contracts where tenant_id='11111111-1111-1111-1111-111111111111';
+  assert v = 3, format('T28 owner_a should read all 3 tenant app_contract links, saw %s', v);
+end $$;
+reset role;
+
+-- 28b: org-only mgr_a1 (Org A1) reads ONLY links tied to apps/contracts it can read: L1 (both sides)
+-- + L3 (app side, App A1). NOT L2 (related to neither App A-pay nor Contract A-central).
+select set_config('request.jwt.claims','{"sub":"0a000000-0000-0000-0000-0000000000a1"}',false); -- mgr_a1
+set role authenticated;
+do $$ declare v int; begin
+  select count(*) into v from public.app_contracts; assert v = 2, format('T28 mgr_a1 should read 2 related links, saw %s', v);
+  select count(*) into v from public.app_contracts where app_id='a9900000-0000-0000-0000-0000000000a1' and contract_id='c0000000-0000-0000-0000-0000000000a1'; assert v = 1, format('T28 mgr_a1 should read L1 (App A1+Contract A1), saw %s', v);
+  select count(*) into v from public.app_contracts where app_id='a9900000-0000-0000-0000-0000000000a1' and contract_id='c0000000-0000-0000-0000-0000000000cc'; assert v = 1, format('T28 mgr_a1 should read L3 via App A1 side, saw %s', v);
+  select count(*) into v from public.app_contracts where app_id='a9900000-0000-0000-0000-0000000000af' and contract_id='c0000000-0000-0000-0000-0000000000cc'; assert v = 0, format('T28 mgr_a1 must NOT read unrelated L2, saw %s', v);
+end $$;
+reset role;
+
+-- 28c: org-only agency_u (Org A3) reads ONLY its related links: L2 (both sides) + L3 (contract side,
+-- Contract A-central). NOT L1 (related to neither App A1 nor Contract A1). Proves the CONTRACT-side branch.
+select set_config('request.jwt.claims','{"sub":"0a000000-0000-0000-0000-0000000000c1"}',false); -- agency_u
+set role authenticated;
+do $$ declare v int; begin
+  select count(*) into v from public.app_contracts; assert v = 2, format('T28 agency_u should read 2 related links, saw %s', v);
+  select count(*) into v from public.app_contracts where app_id='a9900000-0000-0000-0000-0000000000af' and contract_id='c0000000-0000-0000-0000-0000000000cc'; assert v = 1, format('T28 agency_u should read L2, saw %s', v);
+  select count(*) into v from public.app_contracts where app_id='a9900000-0000-0000-0000-0000000000a1' and contract_id='c0000000-0000-0000-0000-0000000000cc'; assert v = 1, format('T28 agency_u should read L3 via Contract A-central side, saw %s', v);
+  select count(*) into v from public.app_contracts where app_id='a9900000-0000-0000-0000-0000000000a1' and contract_id='c0000000-0000-0000-0000-0000000000a1'; assert v = 0, format('T28 agency_u must NOT read unrelated L1, saw %s', v);
+end $$;
+reset role;
+
+-- 28d: owner_b (other tenant) and nobody (no membership of any kind) read ZERO links — no cross-tenant
+-- leak, and the new policy grants nothing to a pure non-member. (member_x is NOT used here — the T16
+-- admin-add-member test promotes it to a tenant editor, so it is a member by now.)
+select set_config('request.jwt.claims','{"sub":"0b000000-0000-0000-0000-000000000001"}',false); -- owner_b (tenant B)
+set role authenticated;
+do $$ declare v int; begin
+  select count(*) into v from public.app_contracts; assert v = 0, format('T28 owner_b (tenant B) must read 0 tenant-A links, saw %s', v);
+end $$;
+reset role;
+select set_config('request.jwt.claims','{"sub":"0a000000-0000-0000-0000-0000000000ff"}',false); -- nobody (no membership)
+set role authenticated;
+do $$ declare v int; begin
+  select count(*) into v from public.app_contracts; assert v = 0, format('T28 nobody (non-member) must read 0 links, saw %s', v);
+end $$;
+reset role;
+
+-- 28e: app_contracts is READ-only org-scoped — the OTHER child/link tables are unchanged. An org-only
+-- user still reads ZERO from the default-deny tables (no broadening leaked out of this migration).
+select set_config('request.jwt.claims','{"sub":"0a000000-0000-0000-0000-0000000000a1"}',false); -- mgr_a1
+set role authenticated;
+do $$ declare v int; begin
+  select count(*) into v from public.app_users;            assert v = 0, format('T28 mgr_a1 app_users still tenant-only, saw %s', v);
+  select count(*) into v from public.identity_accounts;    assert v = 0, format('T28 mgr_a1 identity_accounts still default-deny, saw %s', v);
+  select count(*) into v from public.license_rules;        assert v = 0, format('T28 mgr_a1 license_rules still default-deny, saw %s', v);
+  select count(*) into v from public.license_evaluations;  assert v = 0, format('T28 mgr_a1 license_evaluations still default-deny, saw %s', v);
+  select count(*) into v from public.invoices;             assert v = 0, format('T28 mgr_a1 invoices still default-deny, saw %s', v);
+  select count(*) into v from public.files;                assert v = 0, format('T28 mgr_a1 files still default-deny, saw %s', v);
 end $$;
 reset role;
 

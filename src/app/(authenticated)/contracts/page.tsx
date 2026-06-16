@@ -6,8 +6,9 @@ export const metadata = { title: "Contracts · ID Caddie" };
 // Read-only contracts list (build-sequence Stage 5 — read-only slice). Renders only what the
 // user-scoped server DAL returns; RLS is the authorization boundary (tenant members + related
 // procurement/paying org). No create/edit/delete, no import/export, no file upload, no invoices,
-// no linked-apps table (app_contracts is tenant-only — RISK-002). Server-rendered; no client
-// filtering. Dynamic via cookies() in the server client (like /apps).
+// no linked-apps column here (the list stays minimal; linked apps appear read-only on the detail
+// page via 0006 org-scoped app_contracts read). Server-rendered; no client filtering. Dynamic via
+// cookies() in the server client (like /apps).
 export default async function ContractsPage() {
   const result = await listContractsForCurrentUser();
 

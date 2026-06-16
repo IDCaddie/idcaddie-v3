@@ -1,12 +1,15 @@
 import Link from "next/link";
 import { getAppDetailForCurrentUser } from "@/lib/data/apps";
+import { listContractsLinkedToApp } from "@/lib/data/links";
 
 export const metadata = { title: "App · ID Caddie" };
 
 // Read-only app detail (build-sequence Stage 4b). The [id] route param is ONLY a lookup key —
 // RLS decides whether the signed-in user may read the row, so an id for another tenant's app
-// returns the same "not found" as a non-existent id (no enumeration). No create/edit/delete, no
-// users/contracts/invoices/files, no client filtering. Server-rendered.
+// returns the same "not found" as a non-existent id (no enumeration). Linked contracts are
+// read-only via RLS-backed app_contracts (org-scoped read, 0006 / PR #20) — only contracts the
+// user may read are shown. No create/edit/delete, no app users/invoices/files, no client
+// filtering. Server-rendered.
 function Field({ label, value }: { label: string; value: string }) {
   return (
     <div>
@@ -23,6 +26,7 @@ export default async function AppDetailPage({
 }) {
   const { id } = await params;
   const result = await getAppDetailForCurrentUser(id);
+  const linkedContracts = result.ok ? await listContractsLinkedToApp(id) : null;
 
   return (
     <main className="flex flex-1 flex-col gap-6 p-8">
@@ -72,8 +76,39 @@ export default async function AppDetailPage({
             </div>
           </section>
 
+          <section className="space-y-2 text-sm">
+            <h2 className="font-medium">Linked contracts</h2>
+            <p className="text-xs text-zinc-500">
+              Contracts linked to this app that you may read (RLS-scoped). Read-only — no
+              linking/unlinking here.
+            </p>
+            {!linkedContracts || !linkedContracts.ok ? (
+              <p className="text-zinc-600 dark:text-zinc-400">
+                Could not load linked contracts right now.
+              </p>
+            ) : linkedContracts.data.length === 0 ? (
+              <p className="text-zinc-600 dark:text-zinc-400">
+                No linked contracts you can access.
+              </p>
+            ) : (
+              <ul className="list-inside list-disc">
+                {linkedContracts.data.map((contract) => (
+                  <li key={contract.id}>
+                    <Link href={`/contracts/${contract.id}`} className="underline">
+                      {contract.contractName}
+                    </Link>
+                    {contract.vendorName ? (
+                      <span className="text-zinc-500"> — {contract.vendorName}</span>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+
           <p className="text-xs text-zinc-500">
-            App users, linked contracts, invoices, files, and license rules are not shown yet.
+            App users, invoices, files, and license rules are not shown yet (tenant-only or
+            default-deny — RISK-002).
           </p>
         </>
       )}

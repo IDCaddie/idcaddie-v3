@@ -7,6 +7,20 @@ from PRs verified via `git log` / `gh pr list`.
 
 ---
 
+### PR #20 — Add org-scoped read access for app-contract links · 2026-06-16
+- **Category:** RLS narrowing + read-only product surface. Forward migration `0006` (one SELECT policy) + read-only UI.
+- **What:** unblocks read-only **linked apps / linked contracts** by first making `app_contracts` org-scoped for **read**, then using it.
+- **Migration `0006_org_scoped_app_contracts_read.sql`:** adds ONE permissive `SELECT` policy `org members read related app_contracts` — an org-only user may read a link row iff they can already read the linked **app OR contract** under their existing related-org RLS (the `EXISTS` subqueries reuse `apps`/`contracts` RLS, granting nothing beyond "you can read one side"; `0005` same-tenant FKs keep it tenant-bound). **SELECT only** — the tenant-member read and editor `INSERT`/`UPDATE` (`0004`) are untouched; **no `DELETE`** added. No other table changed.
+- **Tests:** **T28** (16 assertions): tenant owner reads all tenant links; org-only `mgr_a1` reads only L1+L3 (app-side), not unrelated L2; org-only `agency_u` reads only L2+L3 (contract-side), not L1; `owner_b` (other tenant) and a new `nobody` fixture (pure non-member) read **0**; and the default-deny/tenant-only tables (`app_users`/`identity_accounts`/`license_*`/`invoices`/`files`) still read **0** for an org-only user (no broadening leaked). Updated **T27** (app_contracts dropped from its tenant-only assertion). **98 → 114 assertions**, T1–**T28**.
+- **Generated types:** `database.types.ts` **unchanged** — a policy is not schema; `gen-types-local.sh` reproduces it byte-identically.
+- **Read-only UI:** `/contracts/[id]` gains a "Linked apps" section, `/apps/[id]` gains a "Linked contracts" section, via a new typed DAL `src/lib/data/links.ts` (`listAppsLinkedToContract`, `listContractsLinkedToApp`). Two RLS-filtered steps (read visible link rows → read those apps/contracts) so only readable rows render. **No linking/unlinking/editing.**
+- **RISK-002:** **narrowed, NOT closed** — only `app_contracts` read is now org-scoped. `people`/`app_users` stay tenant-only; `identity_accounts`/`app_user_identity_matches`/`license_*`/`files`/`invoices` stay default-deny.
+- **Security / service-role / hosted impact:** no service-role, no hosted apply, no `db push`/`--linked`. The new policy is read-only and tenant-bound (proven no cross-tenant leak via T28 + a live spot-check). No write surface, no invoice/file/license reads.
+- **OMC/Flywheel:** cutover remains **blocked**.
+- **Tests run (local, verified):** `test-rls.sh` → `ALL ORG-RLS ASSERTIONS PASSED` (0001–0006, 114 assertions); `npm test` 5/5; lint/tsc/build clean (`ƒ /contracts/[id]`, `ƒ /apps/[id]`); `check-migration-safety` pass; `gen-types-local.sh` → no diff.
+
+---
+
 ### PR #19 — Add read-only contracts surfaces · 2026-06-16
 - **Category:** product surface — **read-only** (`/contracts` + `/contracts/[id]`). No migration, no schema change.
 - **What:** the next safe read surface, mirroring `/apps`. New typed server-only DAL `src/lib/data/contracts.ts` (`listContractsForCurrentUser`, `getContractDetailForCurrentUser`) returning explicit DTOs; new server-rendered routes `src/app/(authenticated)/contracts/page.tsx` and `contracts/[id]/page.tsx`; a `/contracts` link + badge on the authenticated home.

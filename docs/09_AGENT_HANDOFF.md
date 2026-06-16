@@ -83,21 +83,20 @@ production, hosted Supabase, secrets, or DNS without human review.
 Rationale and the automation risk: [04 · RISK-014](./04_RISK_REGISTER.md). Reviewer enforcement: [07 · Connected agent PRs](./07_P0_REVIEW_CHECKLIST.md#connected-agent-permissions). Discipline for vendor/bot PRs: [08](./08_CODE_AND_DOCS_STANDARD.md#vendor-and-bot-agent-prs).
 
 ## Current next recommended task
-**Read-only contracts is DONE — PR #19** (`/contracts` + `/contracts/[id]`, typed DAL `src/lib/data/contracts.ts`,
-related-org RLS, direct `contracts` columns only). Linked apps / invoices / files were intentionally NOT
-surfaced (`app_contracts` tenant-only; invoices/files default-deny — RISK-002 open).
+**Read-only linked apps↔contracts is DONE — PR #20** (`0006` org-scoped `SELECT` on `app_contracts`;
+"Linked apps" on `/contracts/[id]`, "Linked contracts" on `/apps/[id]`; DAL `src/lib/data/links.ts`;
+proven by T28). RISK-002 **narrowed, not closed** — only `app_contracts` read is org-scoped now.
 
-Next safe step — pick one, do NOT surface child/link tables until their read scope is fixed:
-- **(a) Org-scoped child-table read policies (RISK-002):** add + test org-scoped `SELECT` policies for `app_contracts`
-  (and later `app_users`), which would *unblock* a linked-apps panel on contract/app detail. This is the real
-  unblock for "linked" surfaces — until then keep them deferred.
-- **(b) Contracts steward writes:** `INSERT`/`UPDATE` only, **never `DELETE`/`FOR ALL`** (PR #16 / `0004`), steward-org gated, audited.
+Next safe step — pick one, do NOT surface the remaining child tables until their read scope is fixed:
+- **(a) Contracts steward writes:** `INSERT`/`UPDATE` only, **never `DELETE`/`FOR ALL`** (PR #16 / `0004`), steward-org gated, audited.
+- **(b) Org-scoped read for `app_users` (RISK-002):** the same pattern as `0006` (read an app_user iff you can read its app) would unblock a per-app users roster. Add policy + tests first.
 
-Do NOT surface `app_contracts`/`invoices`/`files`/`license_*` reads without org-scoped policies + tests first.
-(Stages 4 + 4b app inventory/detail done — PR #13/#14; Stage 5 contracts read-only slice — PR #19.)
+Still NOT safe to surface: `people`/`app_users` (tenant-only), `invoices`/`files`/`license_*`/`identity_*` (default-deny).
+Do NOT surface those reads without org-scoped policies + tests first.
+(Stages 4/4b apps — PR #13/#14; Stage 5 contracts read-only — PR #19; Stage 5b linked apps↔contracts — PR #20.)
 
 ## Current open risks to respect
-`not-hosted-applied`; child tables **not org-scoped for reads** — tenant-only (`people`/`app_users`/`app_contracts`) or default-deny (`identity_accounts`/`app_user_identity_matches`/`license_*`/`files`/`invoices`); see read map [02 §8](./02_SECURITY_AND_RLS.md), pinned by T27 (RISK-002); no tenant switching /
+`not-hosted-applied`; child tables **not org-scoped for reads** — tenant-only (`people`/`app_users`) or default-deny (`identity_accounts`/`app_user_identity_matches`/`license_*`/`files`/`invoices`); `app_contracts` is now org-scoped read (`0006`/PR #20); see read map [02 §8](./02_SECURITY_AND_RLS.md) (RISK-002, narrowed not closed); no tenant switching /
 user provisioning yet (RISK-012); no credential vault; imports/exports destructive-in-legacy
 (don't port — legacy deletes "outdated" users, `onFileLinkedToApp.js:290`); v3 must not miss legacy
 paid-client (OMC/Flywheel) capabilities (RISK-016). Full list:
