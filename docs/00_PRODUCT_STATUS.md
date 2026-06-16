@@ -33,9 +33,10 @@ wired yet. No product UI exists. Nothing is **applied to any hosted Supabase env
 | #2 | `bfffb84` | `scripts/test-rls.sh` + `.github/workflows/rls-tests.yml` — applies all migrations to a throwaway Postgres and runs the RLS suite on every PR. |
 | #3 | `ee59c6c` | Migration discipline: `migration-workflow.md`, `migration-checklist.md`, `scripts/check-migration-safety.sh`, `.github/workflows/migration-safety.yml`. |
 | #4 | `b245209` | Clean-app operating system: canonical docs `00`–`10`, PR template, docs-drift + reviewer-aid CI (`review-discipline.yml`), `check-docs-updated.sh` / `pr-review-summary.sh`. |
+| #5 | `a86fb37` | Vercel Web Analytics integration (`@vercel/analytics` in the root layout). Automated PR; not part of the v3 build sequence. |
 
 Migration `0001` (core schema) predates the numbered PRs (rebuild starter pack).
-PR #5 (this branch, auth/session skeleton) is **not yet merged**.
+PR #6 (this branch, auth/session skeleton) is **not yet merged**.
 
 ## Status of the foundation
 | Item | Status |
@@ -44,7 +45,7 @@ PR #5 (this branch, auth/session skeleton) is **not yet merged**.
 | RLS model (tenant isolation, steward writes, related-org reads, audit immutability, no admin self-promotion) | `implemented`, `verified-local` (66 assertions in `org_rls_test.sql`), `ci-enforced` (PR #2) |
 | Migration safety (numbering, unsafe keywords) | `ci-enforced` (PR #3) |
 | Migrations applied to hosted Supabase (staging/prod) | **not done** — `not-hosted-applied` |
-| Auth/session skeleton (login, server session via Proxy, protected route group, no service-role) | `implemented` (PR #5); `verified-local` (build + `check-auth-safety.sh`); **not** exercised against hosted Supabase Auth |
+| Auth/session skeleton (login, server session via Proxy, protected route group, no service-role) | `implemented` (PR #6); `verified-local` (build + `check-auth-safety.sh`); **not** exercised against hosted Supabase Auth |
 | Tenant/org context resolution (memberships → scoped reads) | `planned` (next; placeholder stub only — `src/lib/auth/tenant-context.ts`) |
 | Product UI / app workflows | `planned` (auth shell only; no inventory/contracts/etc.) |
 | Child-table org scoping (`app_users`, `files`, `invoices`, `license_*`, `app_contracts`) | `deferred` (still tenant-scoped) |

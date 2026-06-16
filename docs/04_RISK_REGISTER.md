@@ -28,7 +28,7 @@ Severity: P0 (critical) · P1 (high) · P2 (medium) · P3 (low). Status uses the
 | RISK-C03 | P1 | PR #2 | RLS regressions could merge unnoticed. Closed by `test-rls.sh` + `rls-tests.yml` (full migration chain + 66 assertions on every PR). |
 | RISK-C04 | P2 | PR #3 | Dangerous/disordered migrations could merge. Closed by `check-migration-safety.sh` + `migration-safety.yml`. |
 | RISK-C05 | P2 | PR #4 | Documentation/risk drift invisible to reviewers. Mitigated by `check-docs-updated.sh` + `review-discipline.yml` + this register. |
-| RISK-C06 | P1 | PR #5 | **Auth/session not built** (was RISK-005). Closed by the auth skeleton: `@supabase/ssr` user-scoped server client, `src/proxy.ts` session refresh + route guard, login/logout, protected route group. `check-auth-safety.sh` proves no service-role/no client-side role storage. *Caveat:* not yet exercised against hosted Supabase Auth (tracked by RISK-001). |
+| RISK-C06 | P1 | PR #6 | **Auth/session not built** (was RISK-005). Closed by the auth skeleton: `@supabase/ssr` user-scoped server client, `src/proxy.ts` session refresh + route guard, login/logout, protected route group. `check-auth-safety.sh` proves no service-role/no client-side role storage. *Caveat:* not yet exercised against hosted Supabase Auth (tracked by RISK-001). |
 
 ## How to use
 - Opening a risk: add a row to **Active** with a real mitigation and a concrete "what closes it".

@@ -7,7 +7,7 @@ from PRs verified via `git log` / `gh pr list`.
 
 ---
 
-### PR #5 — Add auth session skeleton · 2026-06-15
+### PR #6 — Add auth session skeleton · 2026-06-15
 - **Category:** app / auth / security.
 - **What:** `@supabase/ssr` clients — `src/lib/supabase/{env,client,server,proxy}.ts` (browser +
   user-scoped server, anon key only); `src/proxy.ts` (Next.js 16 **Proxy** — the renamed
@@ -28,6 +28,17 @@ from PRs verified via `git log` / `gh pr list`.
   → `ALL ORG-RLS ASSERTIONS PASSED`; `check-docs-updated.sh` / `pr-review-summary.sh` pass.
 - **Docs updated:** `00`, `01`, `06`, `04` (closed RISK-005→C06, opened RISK-012), `09`, `README_START_HERE`.
 - **Follow-ups:** not exercised against hosted Supabase Auth (RISK-001); Stage 3 tenant/org context next.
+
+---
+
+### PR #5 — Add Vercel Web Analytics integration · `a86fb37`
+- **Category:** infra / analytics (automated PR, not part of the v3 build sequence).
+- **What:** added `@vercel/analytics` and `<Analytics />` to the root layout (`src/app/layout.tsx`).
+- **Why:** Vercel deployment analytics. Authored by the Vercel automation, not the build plan.
+- **Security impact:** none to auth/RLS — client-side analytics only; no service-role, no data access.
+- **Tests run:** none recorded on the automated PR; `npm run build` stays green with it present (verified in PR #6).
+- **Docs updated:** none at merge time; back-filled here and in [00](./00_PRODUCT_STATUS.md) by PR #6 for an honest record.
+- **Follow-ups:** none.
 
 ---
 

@@ -11,7 +11,7 @@ passed, CI green.
 | # | Stage | Status |
 |---|-------|--------|
 | 1 | Clean-app operating system (docs/CI/foundation) | `implemented` |
-| 2 | Auth/session skeleton | `implemented` (PR #5) |
+| 2 | Auth/session skeleton | `implemented` (PR #6) |
 | 3 | Tenant/org context (read-only) | `planned` (next) |
 | 4 | Read-only app inventory | `planned` |
 | 5 | Contracts | `planned` |
@@ -31,7 +31,7 @@ passed, CI green.
 - **Goal:** repo is self-explaining, self-checking, RLS-tested. **Done:** docs 00–10, RLS
   suite + safety + docs-drift CI all green.
 
-### Stage 2 — Auth/session skeleton ✅ (PR #5)
+### Stage 2 — Auth/session skeleton ✅ (PR #6)
 - **Goal:** Supabase Auth login + server-side session + route protection. No business data. **Done.**
 - **Built:** `@supabase/ssr` browser + user-scoped server clients (anon key only); `src/proxy.ts`
   (Next.js 16 Proxy) for session refresh + protected-route redirect; `login/` (email+password

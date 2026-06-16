@@ -42,11 +42,12 @@ re-verify from `git log`, `gh pr list`, `ls supabase/migrations`, and the source
 memberships server-side from the membership tables and expose a read-only context, replacing
 the `src/lib/auth/tenant-context.ts` placeholder. Prove one RLS-scoped read end-to-end. No
 writes, no product UI. P0 watch: context from membership rows (not client input or JWT claims);
-no service-role; do not weaken RLS. (Stage 2 auth skeleton is done — PR #5.)
+no service-role; do not weaken RLS. (Stage 2 auth skeleton is done — PR #6.)
 
 ## Current open risks to respect
-`not-hosted-applied`; child tables tenant-scoped (org scoping deferred); no auth yet; no
-credential vault; imports/exports destructive-in-legacy (don't port). Full list:
+`not-hosted-applied`; child tables tenant-scoped (org scoping deferred); no tenant/org
+context resolution yet (RISK-012); no credential vault; imports/exports destructive-in-legacy
+(don't port). Full list:
 [04_RISK_REGISTER](./04_RISK_REGISTER.md).
 
 ## How to summarize at the end of a PR
