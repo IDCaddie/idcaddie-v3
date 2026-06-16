@@ -16,6 +16,7 @@ checked against is [02_SECURITY_AND_RLS.md](./02_SECURITY_AND_RLS.md).
 - ❌ A tenant-owned table without `tenant_id` + RLS.
 - ❌ An org FK used for access without tenant-binding (in `enforce_owning_org_tenant` **and** the policy).
 - ❌ A merged migration edited (not fixed forward).
+- ❌ Telemetry/analytics carrying tenant IDs, app/contract names, user emails, spend data, tokens, secrets, or audit payloads.
 
 ## Section-by-section
 For each: ask the **questions**, watch the **red flags**, demand the **proof**, then give a **verdict** (pass / changes / block).
@@ -37,6 +38,7 @@ For each: ask the **questions**, watch the **red flags**, demand the **proof**, 
 | **Background jobs** | service-role isolated? idempotent? | job writes audit-mutating SQL | scoped, idempotent, tested |
 | **Integrations** | Dry-run? scoped tokens? no destructive deactivation w/o approval? | broad token; auto-deactivate | vault-backed creds; dry-run logs |
 | **Frontend filtering** | Is any security enforced client-side? | `.filter()` standing in for a policy | RLS proves the boundary, not the client |
+| **Telemetry / analytics** | Does this add analytics/performance tracking? Does it collect customer identifiers or business data? Custom events? Production-facing? Documented in risk + changelog? | telemetry carrying tenant IDs, app/contract names, user emails, spend data, tokens, secrets, or audit payloads; custom `track()` events; used as a product/billing/audit source of truth | platform telemetry only (bare components), no custom events, no PII/customer data; risk + changelog updated (e.g. RISK-013) |
 | **Tests/CI** | New auth tests (positive + negative)? CI green? | behavior change with no test | `test-rls.sh` + assertions |
 | **Docs/risk/changelog** | Docs updated? Risk register touched? Changelog entry? | code change, no doc change, no justification | `check-docs-updated.sh` pass or valid `.docs-not-needed.md` |
 

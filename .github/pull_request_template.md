@@ -51,6 +51,7 @@ Canonical review framework: docs/07_P0_REVIEW_CHECKLIST.md · Standards: docs/08
 - [ ] I did **not** rely on frontend filtering for authorization
 - [ ] I considered tenant isolation
 - [ ] I considered org / resource isolation
+- [ ] I considered telemetry/privacy impact if this PR adds analytics, performance tracking, or instrumentation
 - [ ] I updated docs, or added a valid `.docs-not-needed.md`
 - [ ] I updated the risk register if risk changed
 - [ ] I updated the engineering changelog

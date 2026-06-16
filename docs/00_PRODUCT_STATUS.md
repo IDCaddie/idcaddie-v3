@@ -52,6 +52,17 @@ PR #6 (this branch, auth/session skeleton) is **not yet merged**.
 | `resource_org_links` relationship table + org hierarchy | `deferred` |
 | Imports/exports, integrations/connectors, credential vault | `deferred` |
 | Legacy Firebase | `legacy-production` (still serving customers) |
+| Vercel Web Analytics + Speed Insights (platform telemetry) | `implemented` (PR #5, PR #7); platform-only, see below |
+
+## Platform telemetry (Vercel)
+Vercel **Web Analytics** (`@vercel/analytics`, PR #5) and **Speed Insights**
+(`@vercel/speed-insights`, PR #7) are integrated in the root layout. They are **platform
+performance/traffic telemetry only** — page views and Core Web Vitals.
+- They are **not** product analytics, audit logs, authorization, billing, customer reporting, or compliance evidence, and must never be used as a source of truth for any of those.
+- **No custom tracking events** are implemented (the bare `<Analytics />` / `<SpeedInsights />` components only).
+- No PII / tenant IDs / user emails / app or contract names / spend data / tokens / credentials are sent.
+- **No production or custom-domain traffic is intentionally pointed at v3 yet**; legacy Firebase remains production.
+- Architecture: [01 · Platform telemetry](./01_ARCHITECTURE.md#platform-telemetry-vercel). Open privacy review: [04 · RISK-013](./04_RISK_REGISTER.md).
 
 ## What is NOT verified
 - Nothing has run against hosted Supabase. The shim used by `test-rls.sh` mimics

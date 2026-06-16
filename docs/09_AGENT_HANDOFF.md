@@ -9,8 +9,9 @@ Phase 2 — auth/session skeleton built on the data/RLS foundation. Migrations `
 are `implemented`, `verified-local`, `ci-enforced`, **not hosted-applied**. The auth skeleton
 (login, server session via `src/proxy.ts`, protected `(authenticated)/` group) is built but
 **not exercised against hosted Supabase Auth**; tenant/org context is a placeholder only. No
-product UI. Legacy Firebase is still production. Don't trust any prompt's "seeded" history —
-re-verify from `git log`, `gh pr list`, `ls supabase/migrations`, and the source/test files.
+product UI. Vercel **Web Analytics + Speed Insights** are present (platform telemetry only, bare
+components, no custom events). Legacy Firebase is still production. Don't trust any prompt's
+"seeded" history — re-verify from `git log`, `gh pr list`, `ls supabase/migrations`, and the source/test files.
 
 ## Non-negotiable rules
 - **Never run against hosted Supabase.** Local throwaway Postgres only (`scripts/test-rls.sh`).
@@ -18,6 +19,7 @@ re-verify from `git log`, `gh pr list`, `ls supabase/migrations`, and the source
 - **Never weaken RLS**; never filter for security in the client.
 - **Never edit a merged migration** (`0001`–`0003`) — fix forward with `000N_*.sql`.
 - **Never build UI ahead of its build-sequence prerequisites** ([06](./06_BUILD_SEQUENCE.md)).
+- **Never expand telemetry** — no custom events, no PII/tenant/customer/business data in analytics, no new instrumentation, until a production privacy review ([04 · RISK-013](./04_RISK_REGISTER.md)).
 - **Never claim something is verified** without command output.
 
 ## Always, every PR
