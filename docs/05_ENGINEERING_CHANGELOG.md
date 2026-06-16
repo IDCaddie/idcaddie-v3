@@ -7,6 +7,23 @@ from PRs verified via `git log` / `gh pr list`.
 
 ---
 
+### PR #22 — Document identity matching read-scope design · 2026-06-16
+- **Category:** security design / guardrail — **docs only. No migration, no schema/types change, no UI, no policy, no new test assertions.**
+- **What:** a precise, evidence-based design for how identity / account / matching data may be safely **read** in future PRs, before any implementation. New doc [12_IDENTITY_MATCHING_READ_SCOPE](./12_IDENTITY_MATCHING_READ_SCOPE.md).
+- **Decision (recommended safe model):** scope every identity/match view from the **app / app_user side** the user can already read — never from the `people` or `identity_accounts` side.
+  - `people` stays **tenant-only** (a full HR directory; no honest owning-org column → not org-scopable). App-user views show the app_user's own `display_name`/`email`, never join to `people`.
+  - `identity_accounts` stays **default-deny** (anchors to `person_id`, not to an app → no app-side path → org-scoping it would be a tenant-wide IdP leak).
+  - The **only** future org-scoped identity read is `app_user_identity_matches`, gated on a **readable `app_user`** (one `SELECT` policy mirroring `0007`, with explicit tenant-bind; SELECT-only, no DELETE; writes via service-role/definer). It exposes match *status* (matched/unmatched, `match_method`, `confidence`), not person PII; `person_id` stays an opaque id.
+  - "Managed vs orphaned" (needs `people`/`identity` status) should use a **`security_invoker` view** (caller RLS scopes it) by default; a `SECURITY DEFINER` function is allowed only when a tenant-only column is required, and then it **must re-derive the caller's scope explicitly** — the doc warns that a definer bypasses RLS.
+  - The doc lists the **exact future policy shape** (§5) and the **exact tests** a future PR must pass **before any UI** (§7).
+- **Adversarial review hardening:** an agent empirically validated the recommended §5 policy on a throwaway DB (correctly app-anchored, no people/identity leak, planted-corrupt-row denied) and caught a real gap in the §4 status-view guidance — a naive `SECURITY DEFINER` function ignores caller RLS and returned status for **all** tenant app_users (5) to an org-only user who should see 2. Fixed: §4 now defaults to a `security_invoker` view (empirically returns only the readable rows), warns about the definer trap, and §7.7 now requires an **exact readable-app_user-only count** (not just "no person columns"). Also corrected a §8 citation (29a is the owner baseline; org-only proof is 29b–29d).
+- **Tests:** **none added** — the current guardrails are **already proven** by **T27 27a** (tenant owner reads 0 `identity_accounts`/`app_user_identity_matches`), **T27 27b**/**T29 29f** (org-only user reads 0 `people`/`identity_accounts`/`app_user_identity_matches`), and **T29 29a–29g** (`app_users`/`app_contracts` org-read). Doc 12 §8 + `rls_test_plan` map the guardrail to these instead of duplicating assertions. **136 assertions, T1–T29 (unchanged).**
+- **Honest status:** identity matching **not implemented**; unmanaged-account/UAR/stale report **not implemented**; `identity_accounts` read **not implemented**; `people` org-read **not implemented**. RISK-002 **open** (narrowed only for `app_contracts`/`app_users`). RISK-016 / OMC parity **open**. OMC/Flywheel cutover **blocked**.
+- **Impact:** no migration, no `database.types.ts` change, no service-role, no hosted apply, no product routes. Pure design + docs.
+- **Tests run (local, verified):** `npm test` 5/5; lint/tsc/build clean; `test-rls.sh` → `ALL ORG-RLS ASSERTIONS PASSED` (136, unchanged); `check-*`/`gen-types-local.sh` → no diff.
+
+---
+
 ### PR #21 — Add org-scoped read access for app users · 2026-06-16
 - **Category:** RLS narrowing + read-only product surface. Forward migration `0007` (one SELECT policy) + read-only roster UI.
 - **What:** unblocks a read-only **per-app user roster** by first making `app_users` org-scoped for **read**, then showing it on `/apps/[id]`.

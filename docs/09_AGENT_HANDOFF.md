@@ -83,18 +83,17 @@ production, hosted Supabase, secrets, or DNS without human review.
 Rationale and the automation risk: [04 · RISK-014](./04_RISK_REGISTER.md). Reviewer enforcement: [07 · Connected agent PRs](./07_P0_REVIEW_CHECKLIST.md#connected-agent-permissions). Discipline for vendor/bot PRs: [08](./08_CODE_AND_DOCS_STANDARD.md#vendor-and-bot-agent-prs).
 
 ## Current next recommended task
-**Read-only app-user roster is DONE — PR #21** (`0007` org-scoped `SELECT` on `app_users`; "App users"
-section on `/apps/[id]`; DAL `src/lib/data/app-users.ts`; proven by T29). RISK-002 **narrowed, not
-closed** — `app_contracts` (PR #20) and `app_users` (PR #21) reads are org-scoped; `people` + the
-default-deny tables remain.
+**Identity/matching read-scope DESIGN is DONE — PR #22** (docs only — [12_IDENTITY_MATCHING_READ_SCOPE](./12_IDENTITY_MATCHING_READ_SCOPE.md)).
+Nothing was built/policy-changed; the design decides the safe future read model. RISK-002 still **narrowed, not closed**.
 
-Next safe step — pick one, do NOT surface the remaining child tables until their read scope is fixed:
+Next safe step — pick one; obey doc 12 for anything identity-related:
 - **(a) Contracts steward writes:** `INSERT`/`UPDATE` only, **never `DELETE`/`FOR ALL`** (PR #16 / `0004`), steward-org gated, audited.
-- **(b) Org-scoped read for `people` (RISK-002):** unlike apps/app_contracts/app_users, `people` has no single owning-app/contract — scoping needs a real design (which org "owns" a person?). Design before policy. Until then `people` stays tenant-only.
+- **(b) Matched/unmatched per app_user (follow [doc 12](./12_IDENTITY_MATCHING_READ_SCOPE.md)):** add ONE org-scoped `SELECT` on `app_user_identity_matches` gated on a **readable `app_user`** (mirror `0007`, explicit tenant-bind, SELECT-only, no DELETE; doc 12 §5). Land doc 12 §7 tests **before** any UI. Show match *status*, not person PII.
 
-Still NOT safe to surface: `people` (tenant-only), `invoices`/`files`/`license_*`/`identity_*` (default-deny).
-No identity matching / license eval / provisioning yet. Do NOT surface those reads without org-scoped policies + tests first.
-(Stages 4/4b apps — PR #13/#14; Stage 5 contracts — PR #19; Stage 5b linked panels — PR #20; Stage 6a app-user roster — PR #21.)
+Do NOT org-scope `people` or `identity_accounts` — no app anchor; org-scoping them leaks the tenant-wide HR/IdP directory (doc 12 §4/§6). `people` stays **tenant-only**; `identity_accounts` stays **default-deny**.
+Still NOT safe to surface: `people`, `identity_accounts`, `app_user_identity_matches`, `invoices`/`files`/`license_*`.
+No identity matching / UAR / license eval / provisioning exists yet.
+(Stages 4/4b apps — PR #13/#14; Stage 5 contracts — PR #19; Stage 5b linked panels — PR #20; Stage 6a app-user roster — PR #21; Stage 6b identity read-scope design — PR #22.)
 
 ## Current open risks to respect
 `not-hosted-applied`; child tables **not org-scoped for reads** — tenant-only (`people`) or default-deny (`identity_accounts`/`app_user_identity_matches`/`license_*`/`files`/`invoices`); `app_contracts` (`0006`/PR #20) + `app_users` (`0007`/PR #21) are now org-scoped read; see read map [02 §8](./02_SECURITY_AND_RLS.md) (RISK-002, narrowed not closed); no tenant switching /
