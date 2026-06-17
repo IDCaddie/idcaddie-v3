@@ -1,10 +1,9 @@
 "use server";
 
-// Contract write SERVER ACTIONS — the `"use server"` RPC boundary a FUTURE contract create/edit UI
-// will call. They are intentionally thin wrappers over the user-scoped server DAL
-// (src/lib/data/contracts.ts), where validation + server-side tenant resolution + the RLS-gated write
-// live. NOT wired to any UI yet: no form, no page/route added (an actions.ts file does not create a
-// route), no user-visible behavior changed.
+// Contract write SERVER ACTIONS — the `"use server"` RPC boundary the contract create/edit UI calls
+// (PR #31: `contract-form.tsx` on `/contracts/new` + `/contracts/[id]/edit`). They are intentionally
+// thin wrappers over the user-scoped server DAL (src/lib/data/contracts.ts), where validation +
+// server-side tenant resolution + the RLS-gated write live.
 //
 // Guarantees inherited from the DAL: user-scoped anon client only (NEVER service-role), tenant_id
 // resolved server-side (never caller-supplied), RLS (0004) is the authorization boundary, and

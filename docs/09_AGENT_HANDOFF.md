@@ -5,17 +5,20 @@ Read this + [00_PRODUCT_STATUS](./00_PRODUCT_STATUS.md) before doing anything. R
 also live in `AGENTS.md` / `claude/CLAUDE.md`.
 
 ## Current repo state (verify before trusting — see [00](./00_PRODUCT_STATUS.md))
-Read-only governance foundation + contract write design + **contract audit-on-write** + **contract write path** (PRs through #29 merged;
-**#30 adds the contract write PATH** — server-side DAL `createContractForCurrentUser`/`updateContractForCurrentUser` + `"use server"`
-actions on the user-scoped anon client, gated by the existing RLS, with `tenant_id` resolved server-side and audit inherited from `0010`).
+Read-only governance foundation + the **contract write workflow** (PRs through #30 merged;
+**#31 adds the contract create/edit UI** — `/contracts/new` + `/contracts/[id]/edit`, posting to the PR #30
+`createContractAction`/`updateContractAction` on the user-scoped anon client, RLS-gated, `tenant_id` server-resolved,
+audit inherited from `0010`; **Partial** legacy parity — supported v3 columns only, [15](./15_LEGACY_CONTRACT_FORM_INSPECTION.md)).
 Migrations `0001`–`0010` are `implemented`, `verified-local`, `ci-enforced`, **not hosted-applied**
-(`org_rls_test.sql` = 177 assertions, T1–T32; 36 vitest tests). Auth/session skeleton, read-only
-tenant/org context, and a typed read-only DAL are built. **Read-only product surfaces ship:** `/apps`
+(`org_rls_test.sql` = 177 assertions, T1–T32; 44 vitest tests). Auth/session skeleton, read-only
+tenant/org context, and a typed DAL are built. **Product surfaces ship:** `/apps`
 + `/apps/[id]` (with app-user roster, match-status column, account-summary card), `/contracts` +
-`/contracts/[id]`, and linked app↔contract panels — all RLS-scoped, **no write UI**, **not** exercised
+`/contracts/[id]`, and linked app↔contract panels — read-only, RLS-scoped — **plus** the contract
+**create/edit** write surface (`/contracts/new`, `/contracts/[id]/edit`). **Not** exercised
 against hosted Supabase. **Design-only:** identity matching read-scope (doc 12; match-status slice
-built). **Contract steward write** (doc 13): the write RLS authority (`0004`), **audit-on-write** (`0010`, PR #29), and now the
-**server-side write path** (DAL + actions, PR #30) all exist — but the create/edit **UI** and **legacy parity** do **not**. No tenant switching, no provisioning, no write UI, no UAR, no hosted apply.
+built). **Contract steward write** (doc 13): RLS authority (`0004`) + audit (`0010`, PR #29) + write path (PR #30) +
+create/edit UI (PR #31) all exist; **legacy parity is Partial** (gaps in [15]). No contract delete/archive, no link/unlink,
+no files/AI; no tenant switching, no provisioning, no UAR, no hosted apply.
 Vercel **Web Analytics + Speed Insights** are present (platform telemetry only, bare components). Legacy
 Firebase is still production; OMC cutover + new paid-customer onboarding **blocked**. Don't trust any
 prompt's "seeded" history — re-verify from `git log`, `gh pr list`, `ls supabase/migrations`, and the source/test files.
@@ -95,21 +98,22 @@ approved + documented there), and **cutover is blocked on workflow parity, not b
 workflow, inspect the running legacy app for exact fields/labels/filters/exports (doc 14 §9 — `needs legacy inspection`; do not invent).
 
 **Contract audit-on-write is DONE — PR #29** (`0010`; DB-side `SECURITY DEFINER` `AFTER INSERT/UPDATE` trigger; T31/T32).
-**Contract write PATH is DONE — PR #30** (server-side DAL `createContractForCurrentUser`/`updateContractForCurrentUser` +
-`"use server"` actions on the **anon** client, gated by the existing RLS, `tenant_id` resolved server-side, audit inherited from `0010`;
-`contract-write.test.ts` 24 cases; no new SQL — RLS stays 177).
-**The recommended next step is the contract create/edit UI** — and it **must match the legacy contract-form workflow**
-(doc 14 §3/§9, fields/actions/filters = `needs legacy inspection` first; inspect the running legacy app before claiming **Same**):
+**Contract write PATH is DONE — PR #30** (server-side DAL + `"use server"` actions, anon client, RLS-gated, `tenant_id` server-resolved, audit inherited).
+**Contract create/edit UI is DONE — PR #31** (`/contracts/new` + `/contracts/[id]/edit` posting to the #30 actions; RLS is the boundary, not client role checks;
+`contract-form-shared.test.ts` 8 cases; **Partial** legacy parity — supported v3 columns only, [15](./15_LEGACY_CONTRACT_FORM_INSPECTION.md); no new SQL — RLS stays 177).
+**The recommended next step is to close the contract-form parity gaps consciously, then the next legacy write workflow** —
+every parity-bound step must inspect the running legacy app first (doc 14 §9 — `needs legacy inspection`; do not invent):
 1. ~~**Contract audit-on-write**~~ — **DONE (PR #29, `0010`).** Invisible backend; no user-visible workflow changed.
-2. ~~**Contract write path**~~ — **DONE (PR #30).** Server actions + DAL on the anon client; RLS is the boundary; `paying_org_id` never grants write; no `DELETE`/`FOR ALL`; no service-role; audit inherited (no audit route added). Invisible backend; no user-visible workflow changed.
-3. **Contract create/edit UI** ← **next** — the form posting to `createContractAction`/`updateContractAction` (PR #30); RLS is the boundary (no client-side authz filtering); a denied write surfaces a generic "could not save / not allowed" (no enumeration); no delete/archive button. Must match the legacy contract-form workflow (doc 14 §3/§9). **Inspect exact legacy fields/labels/filters first.**
+2. ~~**Contract write path**~~ — **DONE (PR #30).** Server actions + DAL on the anon client; RLS is the boundary; `paying_org_id` never grants write; no `DELETE`/`FOR ALL`; no service-role; audit inherited.
+3. ~~**Contract create/edit UI**~~ — **DONE (PR #31).** First user-visible write workflow; RLS-gated; generic denial (no enumeration); no delete/archive button. **Partial** parity — gaps tracked in [15]/[14].
+4. **Close parity gaps** ← **next** — only after a conscious product decision: add v3 columns + form fields for the legacy fields v3 lacks (`category`, `procurementDate`, `notes`, `poNumber`, `autoRenew`, `monthToMonth`, `commodity_*`) — each needs a **forward migration** + `gen-types-local.sh`; and the PDF-upload/AI + file attachments (needs `files` read/write + storage — RISK-002). Until then contract parity stays **Partial**, not Same. Then the next legacy write workflow (app-contract link/unlink — doc 14 §8).
 Alternative tracks (lower priority): the first reviewed **hosted-Supabase apply** (RISK-001); or an identity surface —
 - **Richer "managed vs orphaned" status** (needs a tenant-only column): build it via a **`security_invoker` view** (caller RLS scopes it) — or a `SECURITY DEFINER` fn that re-derives scope — returning only a status enum; **NEVER** read `people`/`identity_accounts` rows into an org surface. Follow doc 12 §4 (the definer trap) + §7.7 (exact readable-only count test).
 
 Do NOT org-scope `people` or `identity_accounts` — no app anchor; org-scoping them leaks the tenant-wide HR/IdP directory (doc 12 §4/§6). `people` stays **tenant-only**; `identity_accounts` stays **default-deny**.
 Any account-intelligence work derives ONLY from visible `app_users` + visible matches (PR #24 pattern) — never read `people`/`identity` into an org surface, and do NOT relabel "unmatched/stale candidate" as "orphaned/deactivated/managed/UAR".
 Still NOT safe to surface: `people`, `identity_accounts`, `invoices`/`files`/`license_*`. No identity matching algorithm / merge / UAR / orphaned status / provisioning exists yet.
-(Stages 4/4b apps — PR #13/#14; Stage 5 contracts — PR #19; Stage 5b linked panels — PR #20; Stage 6a app-user roster — PR #21; Stage 6b identity read-scope design — PR #22; Stage 6c match status — PR #23; Stage 6d account summary — PR #24; Stage 5b contract write design — PR #25; truth pass — PR #26; `0009` app_contracts tenant-bind — PR #27; legacy UX/workflow parity map — PR #28; contract audit-on-write `0010` — PR #29; contract write path/DAL + server actions — PR #30.)
+(Stages 4/4b apps — PR #13/#14; Stage 5 contracts — PR #19; Stage 5b linked panels — PR #20; Stage 6a app-user roster — PR #21; Stage 6b identity read-scope design — PR #22; Stage 6c match status — PR #23; Stage 6d account summary — PR #24; Stage 5b contract write design — PR #25; truth pass — PR #26; `0009` app_contracts tenant-bind — PR #27; legacy UX/workflow parity map — PR #28; contract audit-on-write `0010` — PR #29; contract write path/DAL + server actions — PR #30; contract create/edit UI — PR #31.)
 
 ## Current open risks to respect
 `not-hosted-applied`; child tables **not org-scoped for reads** — tenant-only (`people`) or default-deny (`identity_accounts`/`license_*`/`files`/`invoices`); `app_contracts` (`0006`) + `app_users` (`0007`) + `app_user_identity_matches` (`0008`) are now org-scoped read; see read map [02 §8](./02_SECURITY_AND_RLS.md) (RISK-002, narrowed not closed); no tenant switching /

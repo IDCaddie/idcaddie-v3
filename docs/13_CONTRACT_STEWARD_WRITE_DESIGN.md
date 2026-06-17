@@ -1,9 +1,10 @@
 # 13 · Contract Steward Write Design
 
-**Canonical source for: how contract *writes* (create / edit) will work — before any write UI lands.**
-This is a **design + guardrail** doc. **Update (PR #30):** the write **RLS authority** (`0004`), the
-**audit-on-write** trigger (`0010`), and now the **server-side write path** (DAL + `"use server"` actions)
-all exist; **only the create/edit UI still does not** (and contract create/edit *parity* is still missing).
+**Canonical source for: how contract *writes* (create / edit) work.**
+This is a **design + guardrail** doc. **Update (PR #31):** the write **RLS authority** (`0004`), the
+**audit-on-write** trigger (`0010`), the **server-side write path** (DAL + `"use server"` actions, PR #30),
+**and now the create/edit UI** (`/contracts/new` + `/contracts/[id]/edit`, PR #31) all exist. Contract
+create/edit legacy parity is **Partial, not Same** — v3 supports only its own columns ([15_LEGACY_CONTRACT_FORM_INSPECTION](./15_LEGACY_CONTRACT_FORM_INSPECTION.md)).
 RLS authority model: [02_SECURITY_AND_RLS](./02_SECURITY_AND_RLS.md)
 (§3 read-vs-write split, §4 audit immutability, §4a audit-on-write, §4b no-hard-delete, §5 tenant-integrity trigger). Risks: RISK-002 (open),
 RISK-016 / OMC parity (open). OMC/Flywheel cutover remains **blocked**.
@@ -15,9 +16,10 @@ RISK-016 / OMC parity (open). OMC/Flywheel cutover remains **blocked**.
 > (`has_org_role_in_tenant(procurement_org_id, …, ['manager'])`), **0** `DELETE`/`ALL` policies, and the
 > `enforce_owning_org_tenant` trigger covering `procurement_org_id` + `paying_org_id`. **This already
 > matches the recommended model below.** So the design gap is **not** the policy. **As of PR #29 the
-> *audit-on-write* trigger also exists** (`0010` — §4 below), **and as of PR #30 the *application write path*
-> exists** (server-side DAL + `"use server"` actions on the anon client — §4 below). The remaining gap is the
-> *create/edit UI* (and its legacy parity) — that does not exist yet.
+> *audit-on-write* trigger also exists** (`0010` — §4 below), **as of PR #30 the *application write path*
+> exists** (server-side DAL + `"use server"` actions on the anon client — §4 below), **and as of PR #31 the
+> *create/edit UI* exists** (`/contracts/new` + `/contracts/[id]/edit` posting to those actions — §8). The
+> remaining gap is **legacy parity**: the UI covers only v3's own columns (**Partial**, not Same — [15](./15_LEGACY_CONTRACT_FORM_INSPECTION.md)).
 
 ## 1. What contract writes will be allowed
 - **Create (INSERT) a contract** and **edit (UPDATE) a contract's own fields** (name, vendor, dates,
@@ -134,13 +136,21 @@ Much is **already proven** by `org_rls_test.sql`; map to it and add only what's 
 | Server action uses anon client, **no service-role** | **done — PR #30** (DAL + actions use `@/lib/supabase/server` anon client; `check-auth-safety.sh` scans `src/` for `service_role`/`SUPABASE_SERVICE_ROLE` — CI-enforced) |
 | App write path **shapes input + resolves tenant_id server-side** (never caller-supplied) | **done — PR #30** (`contract-write.test.ts`: required field, empty→null, date/uuid/number checks, PATCH semantics, caller `tenant_id`/`id` never carried; `resolveWriteContextTenantId`) |
 
-## 8. UI behavior (future)
-- Server-rendered forms posting to a server action; the action calls the anon DAL write. A failed RLS
-  write surfaces a generic "you don't have permission / could not save" — **no enumeration**, no leak of
-  whether the row exists in another tenant.
-- Edit/create controls are shown optimistically but **authorization is RLS** — never hide/show as the
-  security boundary, and never trust a client-sent `tenant_id`/`procurement_org_id` for authority.
-- No delete/archive button until the archive design (§9) lands. No `app_contracts` link/unlink controls.
+## 8. UI behavior (implemented — PR #31)
+The create/edit UI now exists and follows this design exactly:
+- `/contracts/new` + `/contracts/[id]/edit` — a Client-Component form (`contract-form.tsx`) posting to the
+  PR #30 `createContractAction`/`updateContractAction`. A failed RLS write surfaces a generic "you don't
+  have permission to save this, or it no longer exists" — **no enumeration**, no leak of whether the row
+  exists in another tenant; `invalid_input` shows inline field issues.
+- Edit/create controls are shown to any viewer for usability, but **authorization is RLS** — v3 does **NOT**
+  port legacy's client-side `user.role` gate; a client-sent `tenant_id` is never accepted (resolved
+  server-side), and `procurement_org_id`/`paying_org_id` are picked from an **RLS-scoped** org `<select>`
+  (`listOrganizationsForCurrentUser`).
+- **No delete/archive button**; **no `app_contracts` link/unlink**; no files/AI/gantt (§9).
+- **Partial parity (honest):** the form covers only v3's columns; legacy `category`/`procurementDate`/
+  `notes`/`poNumber`/`autoRenew`/`monthToMonth`/`commodity_*`/`validated` + PDF-upload/AI have no v3
+  column/surface and are not built; legacy edited inline, v3 uses a dedicated `/edit` route. See
+  [15_LEGACY_CONTRACT_FORM_INSPECTION](./15_LEGACY_CONTRACT_FORM_INSPECTION.md).
 
 ## 9. Explicitly out of scope (this PR and the first write PR)
 - Contract **archive / soft-delete** (separate future design).
@@ -153,8 +163,8 @@ Much is **already proven** by `org_rls_test.sql`; map to it and add only what's 
 - Contract write **RLS authority**: **already implemented** (`0002`/`0004`) — matches §2.
 - **Audit-on-write**: **implemented** (PR #29 — `0010` `SECURITY DEFINER` `AFTER INSERT/UPDATE` trigger; §4; proven by T31/T32). The write path inherits auditing — no service-role audit route.
 - Contract write **server-action / DAL (path)**: **implemented** (PR #30 — §4; anon client, RLS-gated, tenant_id server-resolved, audit inherited; `contract-write.test.ts` + RLS T9/T14/T20/T21/T31/T32).
-- Contract write **UI**: **not implemented.** Contract create/edit **parity still missing**.
+- Contract write **UI**: **implemented** (PR #31 — `/contracts/new` + `/contracts/[id]/edit`; §8; `contract-form-shared.test.ts`). Contract create/edit **legacy parity is Partial, not Same** — supported v3 columns only ([15](./15_LEGACY_CONTRACT_FORM_INSPECTION.md)).
 - Contract **archive / soft-delete**: **not implemented** (separate design).
 - `app_contracts` writes: **not implemented.** Hard delete: **blocked** (`0004`) — stays blocked.
-- **Next step:** the contract create/edit **UI** posting to the PR #30 actions, matching the legacy workflow ([14 §3/§9](./14_LEGACY_UX_WORKFLOW_PARITY_MAP.md)) — inspect exact legacy fields/buttons/filters first.
+- **Next step:** close the **Partial-parity gaps** consciously — add v3 columns + form fields for the legacy fields v3 lacks (each a forward migration + types regen) and the PDF/AI + file surface (RISK-002) — or build the next legacy write workflow ([14 §8](./14_LEGACY_UX_WORKFLOW_PARITY_MAP.md)).
 - RISK-002: **open.** RISK-016 / OMC parity: **open.** OMC/Flywheel cutover: **blocked.** New paid-customer onboarding: **blocked.**

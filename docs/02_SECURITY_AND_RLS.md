@@ -161,7 +161,7 @@ policy — unreadable by any normal `authenticated` user; only service-role / `S
 | Table | Class | Who can `SELECT` today | Safe to surface in UI? |
 |---|---|---|---|
 | `apps` | core | tenant members **+ related-org** (responsible/paying/procurement, union) | ✅ shipped (`/apps`) |
-| `contracts` | core | tenant members **+ related-org** (procurement/paying) | scoped read OK; UI not built |
+| `contracts` | core | tenant members **+ related-org** (procurement/paying) | scoped read + create/edit UI (PR #31, RLS-gated, audited; Partial parity) |
 | `organizations` | core | tenant members **+ own org** (`is_org_member`) | ✅ scoped |
 | `tenants` | root | tenant members + org participants (`is_tenant_participant`) | n/a |
 | `tenant_memberships` | membership | tenant members | admin surface only |
