@@ -775,12 +775,15 @@ do $$ declare v int; begin
   -- proven in T30 below; identity_accounts stays default-deny (asserted above).
   select count(*) into v from public.license_rules;             assert v = 0, format('T27 owner_a saw %s license_rules (default-deny)', v);
   select count(*) into v from public.license_evaluations;       assert v = 0, format('T27 owner_a saw %s license_evaluations (default-deny)', v);
-  select count(*) into v from public.files;                     assert v = 0, format('T27 owner_a saw %s files (default-deny)', v);
+  -- NOTE: `files` is NO LONGER default-deny — PR #35 / 0013 added a tenant-member SELECT policy, so a
+  -- tenant member now reads their tenant's files (proven below + in T34). identity_accounts / invoices
+  -- / license_* stay default-deny (asserted here).
   select count(*) into v from public.invoices;                  assert v = 0, format('T27 owner_a saw %s invoices (default-deny)', v);
   -- positive control: the SAME owner DOES read the tenant-readable child tables (so the 0s above are policy, not empty tables)
   select count(*) into v from public.people        where tenant_id='11111111-1111-1111-1111-111111111111'; assert v >= 1, format('T27 owner_a should read tenant people, saw %s', v);
   select count(*) into v from public.app_users     where tenant_id='11111111-1111-1111-1111-111111111111'; assert v >= 1, format('T27 owner_a should read tenant app_users, saw %s', v);
   select count(*) into v from public.app_contracts where tenant_id='11111111-1111-1111-1111-111111111111'; assert v >= 1, format('T27 owner_a should read tenant app_contracts, saw %s', v);
+  select count(*) into v from public.files         where tenant_id='11111111-1111-1111-1111-111111111111'; assert v >= 1, format('T27 owner_a should read tenant files (0013 tenant-member read), saw %s', v);
 end $$;
 reset role;
 
@@ -793,7 +796,7 @@ select set_config('request.jwt.claims','{"sub":"0a000000-0000-0000-0000-00000000
 set role authenticated;
 do $$ declare v int; begin
   select count(*) into v from public.people;        assert v = 0, format('T27 org-only mgr_a1 saw %s people (not org-scoped)', v);
-  select count(*) into v from public.files;         assert v = 0, format('T27 org-only mgr_a1 saw %s files (default-deny)', v);
+  select count(*) into v from public.files;         assert v = 0, format('T27 org-only mgr_a1 saw %s files (tenant-member read; org-only excluded — 0013)', v);
   select count(*) into v from public.invoices;      assert v = 0, format('T27 org-only mgr_a1 saw %s invoices (default-deny)', v);
   -- positive control: mgr_a1 CAN read its own-org App A1 (proves a valid org session, not always-0)
   select count(*) into v from public.apps where id='a9900000-0000-0000-0000-0000000000a1'; assert v = 1, format('T27 org-only mgr_a1 should read own-org App A1, saw %s', v);
@@ -872,7 +875,7 @@ do $$ declare v int; begin
   select count(*) into v from public.license_rules;        assert v = 0, format('T28 mgr_a1 license_rules still default-deny, saw %s', v);
   select count(*) into v from public.license_evaluations;  assert v = 0, format('T28 mgr_a1 license_evaluations still default-deny, saw %s', v);
   select count(*) into v from public.invoices;             assert v = 0, format('T28 mgr_a1 invoices still default-deny, saw %s', v);
-  select count(*) into v from public.files;                assert v = 0, format('T28 mgr_a1 files still default-deny, saw %s', v);
+  select count(*) into v from public.files;                assert v = 0, format('T28 mgr_a1 files: tenant-member read, org-only sees 0 (0013), saw %s', v);
 end $$;
 reset role;
 
@@ -985,7 +988,7 @@ do $$ declare v int; begin
   select count(*) into v from public.license_rules;           assert v = 0, format('T29 mgr_a1 license_rules still default-deny, saw %s', v);
   select count(*) into v from public.license_evaluations;     assert v = 0, format('T29 mgr_a1 license_evaluations still default-deny, saw %s', v);
   select count(*) into v from public.invoices;                assert v = 0, format('T29 mgr_a1 invoices still default-deny, saw %s', v);
-  select count(*) into v from public.files;                   assert v = 0, format('T29 mgr_a1 files still default-deny, saw %s', v);
+  select count(*) into v from public.files;                   assert v = 0, format('T29 mgr_a1 files: tenant-member read, org-only sees 0 (0013), saw %s', v);
 end $$;
 reset role;
 
@@ -1322,26 +1325,199 @@ insert into public.files (id, tenant_id, storage_path, original_filename, byte_s
   ('13000000-0000-0000-0000-0000000000c6','11111111-1111-1111-1111-111111111111','x/c6.pdf','c6.pdf',
    1024, repeat('a',64), 'passed');
 
--- 33d: CATALOG — `files` stays DEFAULT-DENY / not surfaced: 0012 added NO policy, so 0 DELETE,
--- 0 FOR ALL, and 0 policies total; RLS is still enabled (0 policies ⇒ deny-all, not allow-all).
+-- 33d: CATALOG — after `0013`, `files` is SELECT+INSERT-policied (no longer zero-policy), but keeps
+-- the safe shape: 0 UPDATE (scan/extraction status transitions are a future worker, not a user
+-- UPDATE), 0 DELETE, 0 FOR ALL; RLS still enabled. (The T33 "0 policies" check from `0012` is
+-- intentionally superseded here — `0013` is the file RLS step.)
 do $$ declare v int; begin
+  select count(*) into v from pg_policies where schemaname='public' and tablename='files' and cmd='SELECT';
+  assert v = 1, format('T33 files must have a SELECT policy after 0013, saw %s', v);
+  select count(*) into v from pg_policies where schemaname='public' and tablename='files' and cmd='INSERT';
+  assert v = 1, format('T33 files must have an INSERT policy after 0013, saw %s', v);
+  select count(*) into v from pg_policies where schemaname='public' and tablename='files' and cmd='UPDATE';
+  assert v = 0, format('T33 files must have 0 UPDATE policies (status updates deferred), saw %s', v);
   select count(*) into v from pg_policies where schemaname='public' and tablename='files' and cmd='DELETE';
   assert v = 0, format('T33 files must have 0 DELETE policies, saw %s', v);
   select count(*) into v from pg_policies where schemaname='public' and tablename='files' and cmd='ALL';
   assert v = 0, format('T33 files must have 0 FOR ALL policies, saw %s', v);
-  select count(*) into v from pg_policies where schemaname='public' and tablename='files';
-  assert v = 0, format('T33 files must remain default-deny (0 policies), saw %s', v);
   select count(*) into v from pg_class where relname='files' and relnamespace='public'::regnamespace and relrowsecurity;
-  assert v = 1, 'T33 files must keep RLS enabled (0 policies ⇒ deny-all)';
+  assert v = 1, 'T33 files must keep RLS enabled';
 end $$;
 
--- 33e: BEHAVIORAL default-deny — a tenant member reads 0 `files` even though tenant-A file rows now
--- exist (so the 0 is the policy, not an empty table). Reinforces "not surfaced".
+-- 33e: BEHAVIORAL — after `0013` a tenant member READS their tenant's files (the SELECT policy), so
+-- the tenant-A file rows inserted above are now visible to owner_a (tenant A). Cross-tenant isolation
+-- + write authority + delete/update absence are pinned in T34.
 select set_config('request.jwt.claims','{"sub":"0a000000-0000-0000-0000-000000000001"}',false); -- owner_a (tenant A)
 set role authenticated;
 do $$ declare v int; begin
+  select count(*) into v from public.files where id='13000000-0000-0000-0000-0000000000f1';
+  assert v = 1, format('T33 tenant member must read their own tenant file after 0013, saw %s', v);
+end $$;
+reset role;
+
+-- ── Test 34: files RLS policies (migration 0013) ─────────────────────────────
+-- 0013 adds the FIRST `files` policies: SELECT = tenant-member-only; INSERT = the 0004 contract-write
+-- authority (tenant editor+ OR procurement-org manager of the linked contract; `paying_org_id` grants
+-- NO write; `uploaded_by = auth.uid()`). NO UPDATE / DELETE / FOR ALL. `files` is policied but still
+-- not surfaced in the app (no DAL/route/UI). RISK-002 narrows for `files` READ, stays OPEN overall.
+reset role;
+-- Fixtures: a tenant-B contract (for the tenant-B positive INSERT + the cross-tenant attach test) and
+-- a tenant-B file (for the cross-tenant READ test; privileged insert bypasses RLS).
+insert into public.contracts (id, tenant_id, contract_name, procurement_org_id) values
+  ('c0000000-0000-0000-0000-0000000000b1','22222222-2222-2222-2222-222222222222','Contract B1','2b2b2b2b-0000-0000-0000-000000000001');
+insert into public.files (id, tenant_id, storage_path, original_filename, contract_id, uploaded_by) values
+  ('13000000-0000-0000-0000-0000000000b9','22222222-2222-2222-2222-222222222222','b/b9.pdf','b9.pdf',
+   'c0000000-0000-0000-0000-0000000000b1','0b000000-0000-0000-0000-000000000001');
+
+-- 34a: SELECT isolation — a tenant member reads ONLY their tenant's files; cross-tenant, non-member,
+-- and org-only (no tenant membership) all read 0 (file read is tenant-member-only for now).
+select set_config('request.jwt.claims','{"sub":"0a000000-0000-0000-0000-000000000001"}',false); -- owner_a (tenant A)
+set role authenticated;
+do $$ declare v int; begin
+  select count(*) into v from public.files where tenant_id='11111111-1111-1111-1111-111111111111';
+  assert v >= 1, format('T34 owner_a should read tenant-A files, saw %s', v);
+  select count(*) into v from public.files where id='13000000-0000-0000-0000-0000000000b9';
+  assert v = 0, format('T34 owner_a must NOT read a tenant-B file, saw %s', v);
+end $$;
+reset role;
+select set_config('request.jwt.claims','{"sub":"0b000000-0000-0000-0000-000000000001"}',false); -- owner_b (tenant B)
+set role authenticated;
+do $$ declare v int; begin
+  select count(*) into v from public.files where id='13000000-0000-0000-0000-0000000000b9';
+  assert v = 1, format('T34 owner_b should read their tenant-B file, saw %s', v);
+  select count(*) into v from public.files where tenant_id='11111111-1111-1111-1111-111111111111';
+  assert v = 0, format('T34 owner_b must NOT read tenant-A files, saw %s', v);
+end $$;
+reset role;
+select set_config('request.jwt.claims','{"sub":"0a000000-0000-0000-0000-0000000000ff"}',false); -- nobody (no membership)
+set role authenticated;
+do $$ declare v int; begin
   select count(*) into v from public.files;
-  assert v = 0, format('T33 files is not surfaced — a tenant member must read 0 files, saw %s', v);
+  assert v = 0, format('T34 a non-member must read 0 files, saw %s', v);
+end $$;
+reset role;
+select set_config('request.jwt.claims','{"sub":"0a000000-0000-0000-0000-0000000000a1"}',false); -- mgr_a1 (org-only, no tenant membership)
+set role authenticated;
+do $$ declare v int; begin
+  select count(*) into v from public.files;
+  assert v = 0, format('T34 an org-only user reads 0 files (file read is tenant-member-only; org-scoped read deferred), saw %s', v);
+end $$;
+reset role;
+
+-- 34b: INSERT authority = contract-write authority (0004). A denied INSERT raises insufficient_privilege
+-- (RLS WITH CHECK). Tenant editor allowed; org procurement-manager of the contract allowed; tenant
+-- viewer / cross-org manager / paying-org manager DENIED; uploaded_by spoof DENIED; cross-tenant attach
+-- rejected by the 0012 FK.
+select set_config('request.jwt.claims','{"sub":"0a000000-0000-0000-0000-0000000000ed"}',false); -- editor_a (tenant editor)
+set role authenticated;
+do $$ declare v int; begin
+  insert into public.files (id, tenant_id, storage_path, original_filename, contract_id, uploaded_by) values
+    ('13000000-0000-0000-0000-0000000000e1','11111111-1111-1111-1111-111111111111','t/e1.pdf','e1.pdf',
+     'c0000000-0000-0000-0000-0000000000a1','0a000000-0000-0000-0000-0000000000ed');
+  get diagnostics v = row_count;
+  assert v = 1, format('T34 tenant editor should insert a file for a tenant contract (%s rows)', v);
+end $$;
+do $$ declare ok boolean := false; begin  -- uploaded_by spoof (uploaded_by != caller) → denied
+  begin
+    insert into public.files (id, tenant_id, storage_path, original_filename, contract_id, uploaded_by) values
+      ('13000000-0000-0000-0000-0000000000e2','11111111-1111-1111-1111-111111111111','t/e2.pdf','e2.pdf',
+       'c0000000-0000-0000-0000-0000000000a1','0a000000-0000-0000-0000-000000000001'); -- uploaded_by = owner_a, not self
+    ok := false;
+  exception when insufficient_privilege then ok := true; end;
+  assert ok, 'T34 uploaded_by spoofing (uploaded_by != auth.uid()) must be rejected';
+end $$;
+-- cross-tenant attach: even a tenant editor cannot attach a tenant-B contract (0012 composite FK).
+do $$ declare ok boolean := false; begin
+  begin
+    insert into public.files (id, tenant_id, storage_path, original_filename, contract_id, uploaded_by) values
+      ('13000000-0000-0000-0000-0000000000e3','11111111-1111-1111-1111-111111111111','t/e3.pdf','e3.pdf',
+       'c0000000-0000-0000-0000-0000000000b1','0a000000-0000-0000-0000-0000000000ed'); -- tenant A file, tenant-B contract
+    ok := false;
+  exception when foreign_key_violation then ok := true; end;
+  assert ok, 'T34 cross-tenant contract attachment must be rejected by the same-tenant FK';
+end $$;
+reset role;
+-- mgr_a1 (procurement-org manager of OrgA1 = Contract A1's procurement org) → allowed.
+select set_config('request.jwt.claims','{"sub":"0a000000-0000-0000-0000-0000000000a1"}',false);
+set role authenticated;
+do $$ declare v int; begin
+  insert into public.files (id, tenant_id, storage_path, original_filename, contract_id, uploaded_by) values
+    ('13000000-0000-0000-0000-0000000000a7','11111111-1111-1111-1111-111111111111','t/a7.pdf','a7.pdf',
+     'c0000000-0000-0000-0000-0000000000a1','0a000000-0000-0000-0000-0000000000a1');
+  get diagnostics v = row_count;
+  assert v = 1, format('T34 procurement-org manager should insert a file for their contract (%s rows)', v);
+end $$;
+reset role;
+-- viewer_a (tenant viewer) → DENIED (no editor role, not an org manager).
+select set_config('request.jwt.claims','{"sub":"0a000000-0000-0000-0000-000000000002"}',false);
+set role authenticated;
+do $$ declare ok boolean := false; begin
+  begin
+    insert into public.files (id, tenant_id, storage_path, original_filename, contract_id, uploaded_by) values
+      ('13000000-0000-0000-0000-0000000000d2','11111111-1111-1111-1111-111111111111','t/d2.pdf','d2.pdf',
+       'c0000000-0000-0000-0000-0000000000a1','0a000000-0000-0000-0000-000000000002');
+    ok := false;
+  exception when insufficient_privilege then ok := true; end;
+  assert ok, 'T34 tenant viewer must NOT insert a file (no contract-write authority)';
+end $$;
+reset role;
+-- mgr_a2 (manages OrgA2, NOT Contract A1's org OrgA1) → DENIED (cross-org).
+select set_config('request.jwt.claims','{"sub":"0a000000-0000-0000-0000-0000000000a3"}',false);
+set role authenticated;
+do $$ declare ok boolean := false; begin
+  begin
+    insert into public.files (id, tenant_id, storage_path, original_filename, contract_id, uploaded_by) values
+      ('13000000-0000-0000-0000-0000000000a8','11111111-1111-1111-1111-111111111111','t/a8.pdf','a8.pdf',
+       'c0000000-0000-0000-0000-0000000000a1','0a000000-0000-0000-0000-0000000000a3');
+    ok := false;
+  exception when insufficient_privilege then ok := true; end;
+  assert ok, 'T34 a manager of a DIFFERENT org must NOT insert a file for this contract';
+end $$;
+reset role;
+-- agency_u (manages OrgA3 = the PAYING org of Contract A-central, NOT its procurement org) → DENIED.
+-- This is the key paying-org write-denial check: paying never grants file write.
+select set_config('request.jwt.claims','{"sub":"0a000000-0000-0000-0000-0000000000c1"}',false);
+set role authenticated;
+do $$ declare ok boolean := false; begin
+  begin
+    insert into public.files (id, tenant_id, storage_path, original_filename, contract_id, uploaded_by) values
+      ('13000000-0000-0000-0000-0000000000a9','11111111-1111-1111-1111-111111111111','t/a9.pdf','a9.pdf',
+       'c0000000-0000-0000-0000-0000000000cc','0a000000-0000-0000-0000-0000000000c1'); -- A-central: agency_u is the paying org
+    ok := false;
+  exception when insufficient_privilege then ok := true; end;
+  assert ok, 'T34 PAYING-ORG manager must NOT insert a file (paying_org_id grants no write)';
+end $$;
+reset role;
+-- owner_b (tenant-B owner) inserts a file for tenant-B Contract B1 → allowed (positive control in tenant B).
+select set_config('request.jwt.claims','{"sub":"0b000000-0000-0000-0000-000000000001"}',false);
+set role authenticated;
+do $$ declare v int; begin
+  insert into public.files (id, tenant_id, storage_path, original_filename, contract_id, uploaded_by) values
+    ('13000000-0000-0000-0000-0000000000ba','22222222-2222-2222-2222-222222222222','t/ba.pdf','ba.pdf',
+     'c0000000-0000-0000-0000-0000000000b1','0b000000-0000-0000-0000-000000000001');
+  get diagnostics v = row_count;
+  assert v = 1, format('T34 tenant-B owner should insert a file for a tenant-B contract (%s rows)', v);
+end $$;
+reset role;
+
+-- 34c: DELETE is denied for everyone (no DELETE policy) — even a tenant owner; the row survives.
+select set_config('request.jwt.claims','{"sub":"0a000000-0000-0000-0000-000000000001"}',false); -- owner_a
+set role authenticated;
+do $$ declare v int; begin
+  delete from public.files where id='13000000-0000-0000-0000-0000000000e1';
+  get diagnostics v = row_count;
+  assert v = 0, format('T34 no DELETE policy — a tenant owner must not delete a file (%s rows)', v);
+  assert (select count(*) from public.files where id='13000000-0000-0000-0000-0000000000e1') = 1, 'T34 the file must survive the delete attempt';
+end $$;
+reset role;
+-- 34d: UPDATE is denied (no UPDATE policy) — even a tenant editor cannot change a file's status
+-- (scan/extraction transitions are deferred to a future worker, not a user UPDATE).
+select set_config('request.jwt.claims','{"sub":"0a000000-0000-0000-0000-0000000000ed"}',false); -- editor_a
+set role authenticated;
+do $$ declare v int; begin
+  update public.files set scan_status='passed' where id='13000000-0000-0000-0000-0000000000e1';
+  get diagnostics v = row_count;
+  assert v = 0, format('T34 no UPDATE policy — a tenant editor must not update a file status (%s rows)', v);
 end $$;
 reset role;
 

@@ -13,7 +13,7 @@ RISK-016 / OMC parity (open). OMC/Flywheel cutover remains **blocked**.
 
 > **Verified finding (not a guess):** the contract write **RLS authority already exists** — it was
 > shipped in `0002` and split into `INSERT`/`UPDATE` (no `DELETE`) by `0004`. A live `pg_policies`
-> dump on a fresh `0001`–`0012` DB confirms exactly: `editors insert/update contracts`
+> dump on a fresh `0001`–`0013` DB confirms exactly: `editors insert/update contracts`
 > (`has_tenant_role` owner/admin/editor) **+** `org managers insert/update org contracts`
 > (`has_org_role_in_tenant(procurement_org_id, …, ['manager'])`), **0** `DELETE`/`ALL` policies, and the
 > `enforce_owning_org_tenant` trigger covering `procurement_org_id` + `paying_org_id`. **This already
@@ -68,7 +68,7 @@ The RLS *authority* exists, the audit trigger exists, **and the write path now e
   wired to any UI** (no route/page added). `tenant_id` is resolved server-side (`resolveTenantContext` →
   `resolveWriteContextTenantId`) and never taken from the caller; update never sets `tenant_id`. A
   denied/missing row collapses to a generic `not_allowed` (no enumeration). Verified by `contract-write.test.ts`
-  + the existing RLS suite (§7); no new SQL (RLS unchanged by that PR; current suite 186).
+  + the existing RLS suite (§7); no new SQL (RLS unchanged by that PR).
 - **Server action / route handler uses the user-scoped anon server client** (`@/lib/supabase/server`) —
   the same client the read DALs use. RLS enforces who may write; the app **never** uses a service-role /
   admin client in the request path, and **never** filters for authorization on the client.

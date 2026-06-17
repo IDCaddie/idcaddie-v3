@@ -1115,6 +1115,10 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      can_write_contract: {
+        Args: { target_contract_id: string; target_tenant_id: string }
+        Returns: boolean
+      }
       dearmor: { Args: { "": string }; Returns: string }
       gen_random_uuid: { Args: never; Returns: string }
       gen_salt: { Args: { "": string }; Returns: string }
