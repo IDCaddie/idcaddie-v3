@@ -1,20 +1,21 @@
 # 13 · Contract Steward Write Design
 
 **Canonical source for: how contract *writes* (create / edit) will work — before any write UI lands.**
-This is a **design + guardrail** doc. **No contract write UI, no write route/DAL, no audit-on-write, and
-no migration are implemented by this PR.** RLS authority model: [02_SECURITY_AND_RLS](./02_SECURITY_AND_RLS.md)
-(§3 read-vs-write split, §4b no-hard-delete, §5 tenant-integrity trigger). Risks: RISK-002 (open),
+This is a **design + guardrail** doc. **Update (PR #29):** the write **RLS authority** and the
+**audit-on-write** trigger now both exist; **the write UI and the write route/DAL still do not.**
+RLS authority model: [02_SECURITY_AND_RLS](./02_SECURITY_AND_RLS.md)
+(§3 read-vs-write split, §4 audit immutability, §4a audit-on-write, §4b no-hard-delete, §5 tenant-integrity trigger). Risks: RISK-002 (open),
 RISK-016 / OMC parity (open). OMC/Flywheel cutover remains **blocked**.
 
 > **Verified finding (not a guess):** the contract write **RLS authority already exists** — it was
 > shipped in `0002` and split into `INSERT`/`UPDATE` (no `DELETE`) by `0004`. A live `pg_policies`
-> dump on a fresh `0001`–`0009` DB confirms exactly: `editors insert/update contracts`
+> dump on a fresh `0001`–`0010` DB confirms exactly: `editors insert/update contracts`
 > (`has_tenant_role` owner/admin/editor) **+** `org managers insert/update org contracts`
 > (`has_org_role_in_tenant(procurement_org_id, …, ['manager'])`), **0** `DELETE`/`ALL` policies, and the
 > `enforce_owning_org_tenant` trigger covering `procurement_org_id` + `paying_org_id`. **This already
-> matches the recommended model below.** So the design gap is **not** the policy — it is the
-> *application write path* (server action + input validation), *audit-on-write*, and *UI*. None of those
-> exist yet.
+> matches the recommended model below.** So the design gap is **not** the policy. **As of PR #29 the
+> *audit-on-write* trigger also exists** (`0010` — §4 below). The remaining gap is the *application write
+> path* (server action + input validation) and the *UI* — neither exists yet.
 
 ## 1. What contract writes will be allowed
 - **Create (INSERT) a contract** and **edit (UPDATE) a contract's own fields** (name, vendor, dates,
@@ -52,9 +53,9 @@ procurement — [02 §3](./02_SECURITY_AND_RLS.md)):
 - **`procurement_org_id` is the write anchor.** It is the single accountable owning org for edits;
   `paying_org_id` and any other related org are read signals, not write grants.
 
-## 4. The application write PATH + audit (the part that is NOT built — the real subject of this doc)
-The RLS *authority* exists; a future implementation PR must add the *path* and *audit*, **gated by that
-existing RLS** (never bypassing it):
+## 4. The application write PATH + audit (audit DONE in `0010`; the write PATH is still the open part)
+The RLS *authority* exists **and the audit trigger now exists**; the remaining work is the *write path*,
+**gated by that existing RLS** (never bypassing it):
 - **Server action / route handler uses the user-scoped anon server client** (`@/lib/supabase/server`) —
   the same client the read DALs use. RLS enforces who may write; the app **never** uses a service-role /
   admin client in the request path, and **never** filters for authorization on the client.
@@ -62,13 +63,16 @@ existing RLS** (never bypassing it):
   validation is **not** authorization; RLS is. Do not infer a tenant_id from the client; the row's
   `tenant_id` must come from the actor's resolved tenant context, and the trigger + `WITH CHECK` reject
   anything cross-tenant.
-- **Audit on write:** `audit_logs` is **append-only** (`reject_audit_mutation`, `0002`) and has **no
-  `authenticated` INSERT policy**, so the anon app client **cannot** write it directly. Therefore the
-  audit row must be written **DB-side** — a `SECURITY DEFINER` `AFTER INSERT/UPDATE` trigger on
-  `contracts` (capturing `actor = auth.uid()`, action, resource id) — **not** by introducing a
-  service-role client in the app route. That trigger is a **future migration** (deferred; this PR adds
-  none). Until it exists, a write PR must state plainly that the change is unaudited, or land the trigger
-  first.
+- **Audit on write — DONE (`0010`, PR #29):** `audit_logs` is **append-only** (`reject_audit_mutation`,
+  `0002`) and has **no `authenticated` INSERT policy**, so the anon app client **cannot** write it
+  directly. So the audit row is written **DB-side** by the `SECURITY DEFINER` `AFTER INSERT OR UPDATE`
+  trigger `contracts_audit_on_write` (function `public.audit_contract_write`) — capturing
+  `actor = auth.uid()` (the caller, **not** the owner/service-role), `action` =
+  `contract.created`/`contract.updated`, `resource_id` = `NEW.id`, and a curated non-sensitive
+  `after_json` allowlist — **not** a service-role app route. Because it is **AFTER**, only DB-accepted
+  writes audit; RLS-denied / integrity-rejected writes do not. See [02 §4a](./02_SECURITY_AND_RLS.md);
+  proven by `org_rls_test.sql` **T31/T32**. **A write-path PR therefore inherits auditing for free** — it
+  must NOT add a service-role audit route, and must NOT weaken/duplicate this trigger.
 - **No new privilege:** the write path adds no policy, no `FOR ALL`, no `DELETE`, no service-role.
 
 ## 5. Preserving the no-hard-delete posture (`0004`)
@@ -116,8 +120,8 @@ Much is **already proven** by `org_rls_test.sql`; map to it and add only what's 
 | **Cross-tenant `paying_org_id`** rejected | **already proven — T22** |
 | **Hard delete denied** on contracts | **already proven — T17/T24** |
 | `app_contracts`/`app_users`/match-status reads still pass | **already proven — T28/T29/T30** |
-| **Audit event created** on insert/update | **new** — only if the §4 audit trigger lands in that PR; assert an `audit_logs` row appears |
-| **No `FOR ALL` / no `DELETE`** policy on `contracts` | **new guard** — assert `pg_policies` has 0 `DELETE`/`ALL` for `contracts` |
+| **Audit event created** on insert/update, exactly once, actor = the writer | **already proven — T31** (`0010` audit trigger; allowed INSERT/UPDATE audit once; denied/failed writes never audit) |
+| **No `FOR ALL` / no `DELETE`** policy on `contracts`; `audit_logs` no direct write | **already proven — T32** (catalog: contracts 0 `DELETE`/0 `ALL`; `audit_logs` no INSERT/UPDATE/DELETE/ALL policy; trigger is `AFTER`, function is `SECURITY DEFINER`) |
 | Server action uses anon client, **no service-role** | `check-auth-safety.sh` (grep for service-role in `src/app`) — already CI-enforced |
 
 ## 8. UI behavior (future)
@@ -137,9 +141,9 @@ Much is **already proven** by `org_rls_test.sql`; map to it and add only what's 
 
 ## 10. Honest status (do not overclaim)
 - Contract write **RLS authority**: **already implemented** (`0002`/`0004`) — matches §2.
-- Contract write **UI / server-action / DAL**: **not implemented.**
-- **Audit-on-write**: **not implemented** (needs the §4 `SECURITY DEFINER` trigger — a future migration).
+- **Audit-on-write**: **implemented** (PR #29 — `0010` `SECURITY DEFINER` `AFTER INSERT/UPDATE` trigger; §4; proven by T31/T32). A write-path PR inherits auditing — no service-role audit route.
+- Contract write **UI / server-action / DAL**: **not implemented.** Contract create/edit **parity still missing**.
 - Contract **archive / soft-delete**: **not implemented** (separate design).
 - `app_contracts` writes: **not implemented.** Hard delete: **blocked** (`0004`) — stays blocked.
-- This PR: **docs only** — no migration, no RLS change, no UI, no audit, no `database.types.ts` change.
-- RISK-002: **open.** RISK-016 / OMC parity: **open.** OMC/Flywheel cutover: **blocked.**
+- **Next step:** the contract write **path** (server action on the anon client, gated by the existing RLS, land §7 tests first), then the contract create/edit **UI** matching the legacy workflow ([14 §3](./14_LEGACY_UX_WORKFLOW_PARITY_MAP.md)).
+- RISK-002: **open.** RISK-016 / OMC parity: **open.** OMC/Flywheel cutover: **blocked.** New paid-customer onboarding: **blocked.**

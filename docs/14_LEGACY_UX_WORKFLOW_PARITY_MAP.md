@@ -73,7 +73,7 @@ made. **Do not invent them.** Parity status: `Same` · `Better-approved` · `Par
 | `admin/company/`, `admin/recompute/` | Admin / settings (company profile, domain allowlist, API keys, recompute) | needs legacy inspection | needs inspection | n/a | n/a | none | RLS; hashed API keys | **Not-started** | admin/settings surfaces | **Yes** (if admins use it) | [11] admin row |
 | `samlAuth.ts`, `oidcAuth.ts` | SSO (SAML / OIDC / SAML IdP) | needs legacy inspection | SSO sign-in | n/a | n/a | none (email/pw only) | server-session model | **Not-started** | SSO/OIDC/SAML | **Yes** (if customer requires SSO) | [11] auth row |
 | `extension/content.js`, `extension/auth.js` | Vendor/app enrichment Chrome extension (hashed email detection) | needs legacy inspection | n/a | n/a | n/a | none | n/a | **Removed-approved (pending)** — deferred / maybe-DELETE, **privacy review first** | confirm removal approval | No (if approved-removed) | [11] enrichment row — candidate for **intentional removal** |
-| `company/groups/`, `permissionSync.js` | Tenant/company/group management | needs legacy inspection | needs inspection | n/a | n/a | tenants + organizations + memberships + RLS; context resolved (PR #1/#9) | row-level isolation (153 RLS assertions) vs per-project | **Partial** (`verified` backend; no admin UI) | tenant/group **management UI** + tenant switching | **Yes** (if admins manage groups in-app) | [11] tenant-model row |
+| `company/groups/`, `permissionSync.js` | Tenant/company/group management | needs legacy inspection | needs inspection | n/a | n/a | tenants + organizations + memberships + RLS; context resolved (PR #1/#9) | row-level isolation (177 RLS assertions) vs per-project | **Partial** (`verified` backend; no admin UI) | tenant/group **management UI** + tenant switching | **Yes** (if admins manage groups in-app) | [11] tenant-model row |
 | `appScraping/scrapers/*`, `scim/index.js` | Connectors / integrations (53+ OAuth scrapers, SCIM) | needs legacy inspection | connect / configure | n/a | n/a | none | connector behind a vault; encrypted creds, service-role-only (RISK-007) | **Not-started** | the connector framework | **Yes** (data freshness depends on it) | [11] connectors row |
 | `processFileWithAI.js`, `handleDocumentAICompletion.js` | AI contract/invoice extraction | needs legacy inspection | n/a | n/a | n/a | none | provider boundary; no secrets in app tables | **Not-started** | AI extraction | No (Stage ≥12, deferred — confirm) | [11] AI row |
 
@@ -92,7 +92,7 @@ made. **Do not invent them.** Parity status: `Same` · `Better-approved` · `Par
 1. **OMC/Flywheel cutover is BLOCKED** until **every** `P0/P1` legacy workflow (the "Cutover blocker = Yes" rows above) is **Same**, **Better-approved**, or **Removed-approved**.
 2. **New paid-customer onboarding is BLOCKED** until at least the same workflow gate is satisfied **for that customer's profile** (the subset of workflows that customer actually uses) — *and* the backend is hosted-applied and verified (RISK-001).
 3. **Any deviation from legacy must be explicitly approved and documented** here (as `Better-approved` or `Removed-approved`) before it ships in a cutover-bound build.
-4. **No cutover on backend readiness alone.** RLS passing (153 assertions), migrations applied, types generated — none of that is a cutover signal. The signal is **workflow parity**, owner-signed.
+4. **No cutover on backend readiness alone.** RLS passing (177 assertions), migrations applied, types generated, **contract audit-on-write live (`0010`)** — none of that is a cutover signal. The signal is **workflow parity**, owner-signed.
 5. **No cutover on RLS passing alone.** Security is necessary, not sufficient.
 
 ## 6. PR review rule (new — also in [07_P0_REVIEW_CHECKLIST](./07_P0_REVIEW_CHECKLIST.md))
@@ -115,8 +115,8 @@ anti-pattern to achieve "sameness" — the experience is preserved, the implemen
 
 ## 8. Next implementation order (re-ranked around parity)
 0. **This parity map** (PR #28) — the contract that gates everything below.
-1. **Contract audit-on-write** — DB-side `SECURITY DEFINER` trigger ([13 §4](./13_CONTRACT_STEWARD_WRITE_DESIGN.md)); invisible backend improvement, land before any write UI.
-2. **Contract create/edit parity** — match the legacy contract form workflow (fields/actions = `needs legacy inspection` first); steward-only writes; [13 §7] tests before UI.
+1. ~~**Contract audit-on-write**~~ — ✅ **DONE (PR #29, `0010`)** — DB-side `SECURITY DEFINER` trigger ([13 §4](./13_CONTRACT_STEWARD_WRITE_DESIGN.md)); invisible backend improvement (no user-visible workflow change), landed before any write UI. Every accepted contract write is now audited.
+2. **Contract create/edit parity** ← **next** — match the legacy contract form workflow (fields/actions = `needs legacy inspection` first); steward-only writes (write authority + audit already exist); [13 §7] tests before UI.
 3. **App-contract link/unlink parity** — the legacy linking + cost-allocation workflow.
 4. **App-user import/update parity** — the legacy import, rebuilt **non-destructive** (Better-approved): preview + upsert + soft-delete + audit, never blind delete.
 5. **UAR parity** — the legacy unmanaged-account report (app-side scoped; doc 12 §4).

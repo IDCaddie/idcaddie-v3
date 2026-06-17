@@ -1,7 +1,7 @@
 # 00 · Product Status — ID Caddie v3
 
 **Canonical source for: current status.** First doc to read. Last verified against the
-repo on 2026-06-16 (PRs through #27 merged). Status words are defined in [10_DOCS_INDEX](./10_DOCS_INDEX.md#status-taxonomy).
+repo on 2026-06-16 (PRs through #28 merged; #29 adds contract **audit-on-write** `0010`). Status words are defined in [10_DOCS_INDEX](./10_DOCS_INDEX.md#status-taxonomy).
 
 ## What ID Caddie v3 is
 An enterprise SaaS-governance platform: the source of truth for *what apps a company
@@ -43,32 +43,38 @@ PR #22 — only the match-*status* slice is built) and the contract steward **wr
 ([13](./13_CONTRACT_STEWARD_WRITE_DESIGN.md), PR #25 — the write *RLS authority* already exists in `0004`,
 but the write path / UI / audit do **not**).
 
-**Not built:** anything applied to a **hosted Supabase environment**; contract write path/UI/audit; archive
-/ soft-delete; `app_contracts` writes; UAR / unmanaged-account report; identity matching *algorithm*;
+**Built (invisible backend):** contract **audit-on-write** — a DB-side `SECURITY DEFINER` `AFTER INSERT/UPDATE`
+trigger on `contracts` (`0010`, PR #29) that appends one append-only `audit_logs` row per accepted write,
+actor = `auth.uid()`. No policy/RLS/route/UI change; no user-visible effect.
+
+**Not built:** anything applied to a **hosted Supabase environment**; contract write path/UI (the *audit* now exists — the write
+*path* does not); archive / soft-delete; `app_contracts` writes; UAR / unmanaged-account report; identity matching *algorithm*;
 `people` org-read (stays tenant-only); `identity_accounts` read (default-deny); license rules/evaluation;
 spend/chargeback; files/invoices; people directory; provisioning; tenant switching; imports/exports;
 connectors. **OMC/Flywheel cutover and new paid-customer onboarding remain blocked.**
 
 ## Merged PRs
-**PRs #1–#25 are merged** (main @ `84140b6`). The full per-PR engineering log is the canonical
-source — see [05_ENGINEERING_CHANGELOG](./05_ENGINEERING_CHANGELOG.md); do not maintain a second
-PR table here (it drifts). Milestone summary:
+**PRs #1–#28 are merged** (main @ `4a58857`); **PR #29 (contract audit-on-write `0010`) is this PR.** The full
+per-PR engineering log is the canonical source — see [05_ENGINEERING_CHANGELOG](./05_ENGINEERING_CHANGELOG.md);
+do not maintain a second PR table here (it drifts). Milestone summary:
 - **Foundation / discipline:** RLS foundation + tests (#1/#2), migration discipline (#3), clean-app
   operating system + docs/CI (#4), app CI (#15).
 - **Auth + data layer:** auth/session skeleton (#6), tenant/org context (#9), demo fixture (#10), typed read-only DAL (#11).
 - **Security hardening (migrations):** destructive-delete hardening `0004` (#16), same-tenant integrity `0005` (#17),
-  child-table read truth-pass (#18), org-scoped reads `0006`/`0007`/`0008` for app_contracts/app_users/app_user_identity_matches (#20/#21/#23).
+  child-table read truth-pass (#18), org-scoped reads `0006`/`0007`/`0008` for app_contracts/app_users/app_user_identity_matches (#20/#21/#23),
+  `app_contracts` read tenant-bind `0009` (#27), contract **audit-on-write** `0010` (#29).
 - **Read-only surfaces:** app inventory (#13), app detail (#14), contracts list+detail (#19), linked panels (#20),
   app-user roster (#21), match status (#23), account summary (#24).
-- **Design docs (nothing built):** identity matching read-scope (#22), contract steward write design (#25).
+- **Design / parity docs (nothing user-facing built):** identity matching read-scope (#22), contract steward write design (#25), docs truth pass (#26), legacy UX/workflow parity map (#28).
 
 Migration `0001` (core schema) predates the numbered PRs (rebuild starter pack).
 
 ## Status of the foundation
 | Item | Status |
 |------|--------|
-| Migrations `0001`–`0009` (core schema, org RLS, related-org read, delete hardening, child integrity, org-scoped child reads + tenant-bind hardening) | `implemented`, `verified-local`, `ci-enforced`; `not-hosted-applied` |
-| RLS model (tenant isolation, steward writes, related-org reads, audit immutability, no admin self-promotion) | `implemented`, `verified-local` (153 assertions in `org_rls_test.sql`), `ci-enforced` (PR #2) |
+| Migrations `0001`–`0010` (core schema, org RLS, related-org read, delete hardening, child integrity, org-scoped child reads + tenant-bind hardening, contract audit-on-write) | `implemented`, `verified-local`, `ci-enforced`; `not-hosted-applied` |
+| RLS model (tenant isolation, steward writes, related-org reads, audit immutability, no admin self-promotion) | `implemented`, `verified-local` (177 assertions in `org_rls_test.sql`), `ci-enforced` (PR #2) |
+| Contract **audit-on-write** (DB-side `SECURITY DEFINER` `AFTER INSERT/UPDATE` trigger → append-only `audit_logs`, actor = `auth.uid()`) | `implemented` (PR #29 — `0010`); `verified-local` (T31/T32: allowed writes audit once with the correct actor; denied/failed writes never audit; no direct `authenticated` audit insert; contracts keep 0 DELETE / 0 FOR ALL). Invisible backend; **write path/UI still not built** |
 | No normal hard-delete of core evidence tables (`organizations`/`apps`/`contracts`/`app_contracts`/`people`/`app_users`) | `implemented` (PR #16 — `0004`; `FOR ALL` split into `INSERT`+`UPDATE`, no `DELETE`); `verified-local` (T17/T24/T25). Archive/soft-delete UI **not built** |
 | Same-tenant child integrity (cross-tenant child/link writes fail at the DB) | `implemented` (PR #17 — `0005`; composite `(parent_ref, tenant_id)` FKs); `verified-local` (T26). Org-scoped child-table **reads** still deferred (RISK-002) |
 | Migration safety (numbering, unsafe keywords) | `ci-enforced` (PR #3) |
@@ -89,7 +95,7 @@ Migration `0001` (core schema) predates the numbered PRs (rebuild starter pack).
 | Child-table read scope (canonical map: [02 §8](./02_SECURITY_AND_RLS.md), pinned by T27/T28/T29/T30) | `partial` — `app_contracts` (`0006`) + `app_users` (`0007`) + `app_user_identity_matches` (`0008`) now **org-scoped read**; **tenant-only** (`people`) + **default-deny** (`identity_accounts`/`license_*`/`files`/`invoices`) remain; org-only users read none of those. Org-scoped reads for the rest still `deferred` (RISK-002, narrowed not closed) |
 | Read-only app-user **match status** (`/apps/[id]` "Match" column) | **`partial` — read-only status only** (PR #23 — `0008` org-scoped `SELECT` on `app_user_identity_matches`, typed DAL `src/lib/data/app-user-matches.ts`). Shows matched/unmatched (+ optional method/confidence) for app_users you may read; **no `person_id`, no person name, no identity-account details, no PII**. `verified-local` (T30 + spot-check). **No matching algorithm / merge / UAR / orphaned status / provisioning.** `people` tenant-only + `identity_accounts` default-deny (unchanged). RISK-002 + RISK-016 open |
 | Read-only **account summary** (`/apps/[id]` "Account summary" card) | **`partial` — read-only, derived** (PR #24 — pure helper `src/lib/data/app-account-intelligence.ts`, unit-tested). Counts from **visible `app_users` + visible matches only**: visible/matched/unmatched/match-rate, status breakdown, stale candidates (>90d). **No migration / RLS change.** **NOT UAR** — no `people`/`identity_accounts`/license/files/invoices/PII; no orphaned/deactivated/managed label, no matching algorithm, no provisioning. RISK-002 + RISK-016 open |
-| Contract **write** path (create/edit) | **`design` only — nothing built** (PR #25 — [13_CONTRACT_STEWARD_WRITE_DESIGN](./13_CONTRACT_STEWARD_WRITE_DESIGN.md)). The write **RLS authority already exists** (`0002`/`0004` — tenant editor+ **or** procurement-org `manager`; `paying_org_id`=read-only; **no `DELETE`/`FOR ALL`**; tenant-bound by trigger). **Not built:** write UI, server-action/DAL write path, audit-on-write (a future `SECURITY DEFINER` trigger, never service-role). No archive/soft-delete, no `app_contracts` writes, no hard delete. RISK-002 + RISK-016 open; OMC cutover blocked |
+| Contract **write** path (create/edit) | **`design` + audit only — no write surface built.** Write **RLS authority** exists (`0002`/`0004` — tenant editor+ **or** procurement-org `manager`; `paying_org_id`=read-only; **no `DELETE`/`FOR ALL`**; tenant-bound by trigger) and **audit-on-write is now implemented** (PR #29 — `0010`; DB-side `SECURITY DEFINER` trigger, never service-role). **Still not built:** write UI, server-action/DAL write path. No archive/soft-delete, no `app_contracts` writes, no hard delete. Design: [13_CONTRACT_STEWARD_WRITE_DESIGN](./13_CONTRACT_STEWARD_WRITE_DESIGN.md). RISK-002 + RISK-016 open; OMC cutover blocked |
 | `resource_org_links` relationship table + org hierarchy | `deferred` |
 | Imports/exports, integrations/connectors, credential vault | `deferred` |
 | Legacy Firebase | `legacy-production` (still serving customers) |
@@ -132,7 +138,7 @@ One-line decisions; deep rationale in the linked canonical docs.
 - Do **not** build UI that bypasses RLS or filters data in the client for "security".
 - Do **not** use service-role keys outside trusted server/test paths.
 - Do **not** add connectors/credential handling until the encrypted-credential boundary is designed.
-- Do **not** edit a merged migration (`0001`–`0009`) — fix forward with a new migration.
+- Do **not** edit a merged migration (`0001`–`0010`) — fix forward with a new migration.
 - Do **not** cut OMC/Flywheel off legacy Firebase until all P0/P1 parity items are `verified` + signed off ([11](./11_LEGACY_PARITY_AND_OMC_CHECKLIST.md)).
 
 ## Can we…?
@@ -143,9 +149,9 @@ One-line decisions; deep rationale in the linked canonical docs.
 - **Safely keep building on this foundation?** Yes — *after* `scripts/check-docs-updated.sh`,
   `check-migration-safety.sh`, and `test-rls.sh` pass. The RLS model is tested and CI-enforced.
 
-## Next recommended PRs (the read-only surfaces above are done)
-1. **Contract audit-on-write** — a DB-side `SECURITY DEFINER` audit trigger (the write RLS authority already exists; `audit_logs` is append-only with no `authenticated` INSERT, so audit must be DB-side, never service-role). See [13_CONTRACT_STEWARD_WRITE_DESIGN](./13_CONTRACT_STEWARD_WRITE_DESIGN.md).
-2. **Contract write path + UI** — a server action on the anon client (never service-role), gated by the existing RLS, landing [13 §7](./13_CONTRACT_STEWARD_WRITE_DESIGN.md) tests **before** UI; audit first.
+## Next recommended PRs (the read-only surfaces above are done; contract audit-on-write `0010` is now done — PR #29)
+1. **Contract write path** — a server action on the anon client (never service-role; validation ≠ authz), gated by the **existing** RLS, landing [13 §7](./13_CONTRACT_STEWARD_WRITE_DESIGN.md) tests **before** UI. Audit-on-write (`0010`) already records every accepted write.
+2. **Contract create/edit UI** — last, after the write path + tests; must **match the legacy contract-form workflow** ([14 §3](./14_LEGACY_UX_WORKFLOW_PARITY_MAP.md), fields/actions = `needs legacy inspection` first).
 3. First reviewed **hosted-Supabase apply** (RISK-001 — still nothing applied to any hosted env).
 
 (These are `planned`. Each must follow [07_P0_REVIEW_CHECKLIST.md](./07_P0_REVIEW_CHECKLIST.md) and update [04](./04_RISK_REGISTER.md)/[05](./05_ENGINEERING_CHANGELOG.md). Detailed ordering: [09_AGENT_HANDOFF](./09_AGENT_HANDOFF.md).)
