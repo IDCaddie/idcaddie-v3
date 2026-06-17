@@ -12,9 +12,10 @@ risks ([04](./04_RISK_REGISTER.md) — **RISK-002 files/invoices default-deny: O
 **OMC/Flywheel cutover + new paid-customer onboarding remain BLOCKED. No hosted apply.**
 
 > **Status (do not overclaim):** PDF upload / AI extraction is **DESIGNED, NOT BUILT.** `files`,
-> Storage, and AI integration are **not surfaced**. A real implementation needs its own PR(s) with a
-> forward migration, RLS policies + tests, a Storage bucket, server-side validation, an extraction
-> worker, and a security review. This doc unblocks *planning*, not shipping.
+> Storage, and AI integration are **not surfaced**. **`0012` (PR #34) added the `files` metadata columns
+> (§4) — schema foundation only; the table is still default-deny / not surfaced.** The remaining steps
+> each need their own PR(s) with tests: RLS policies, a Storage bucket, server-side validation, an
+> extraction worker, the UI, and a security review. This doc unblocks *planning* + the schema; not shipping.
 
 ---
 
@@ -90,12 +91,12 @@ AI parsing, suggestion-not-autosave, RLS-gated writes, DB-side audit.
 - **Validation before the bytes are trusted:** extension allowlist (`.pdf` only at first), declared
   **MIME** (`application/pdf`), and **magic bytes** (`%PDF-` header) — all checked server-side; a
   **max size** cap (e.g. 25 MB, TBD). Reject anything else.
-- **Scan gate:** a `scan_status` (`pending` → `clean` / `infected` / `error`). **Extraction must not
-  run until `scan_status = clean`.** The actual scanner (ClamAV/queued service) is out of scope here —
-  the *status field + gate* is the design contract.
+- **Scan gate:** a `scan_status` (`pending` → `passed` / `failed` / `skipped`; column live in `0012`).
+  **Extraction must not run until `scan_status = passed`.** The actual scanner (ClamAV/queued service)
+  is out of scope here — the *status field + gate* is the design contract.
 - **No public preview** until signed-URL auth + a safe viewer are designed (§9).
 
-## 4. Database model (expected future migration — NOT implemented here)
+## 4. Database model (metadata columns ADDED in `0012` / PR #34; table still NOT surfaced)
 **Current `files` table (`0001`, RLS-enabled but DEFAULT-DENY — RISK-002):**
 `id uuid pk`, `tenant_id uuid not null → tenants`, `storage_path text not null`,
 `original_filename text not null`, `file_type text`, `document_type text`,
@@ -104,25 +105,29 @@ AI parsing, suggestion-not-autosave, RLS-gated writes, DB-side audit.
 **What's already enough:** tenant binding (`tenant_id` + cascade), `storage_path`, `original_filename`,
 `document_type` (can hold `'contract'`), `uploaded_by`, a coarse `processing_status`, `created_at`.
 
-**What a future forward migration would add (design — do not implement):**
+**Metadata columns — ADDED in `0012` (PR #34), additive + nullable/defaulted, table NOT surfaced:**
 | Column | Why |
 |---|---|
-| `contract_id uuid null → contracts` **(composite same-tenant FK** `(contract_id, tenant_id) → contracts(id, tenant_id)`, per the `0005` pattern) | link a file to its contract, tenant-bound at the DB (a `contract_files` link table is the alternative if many-to-many is needed) |
-| `file_kind text` (e.g. `contract_document`) | distinguish contract docs from other file kinds |
-| `storage_bucket text` | which bucket (future-proofing multiple buckets) |
-| `content_type text` | server-validated MIME (distinct from legacy free-text `file_type`) |
-| `byte_size bigint` | enforce/record the size cap |
-| `sha256 text` | integrity + dedupe + tamper detection |
-| `upload_status text` (`pending`/`stored`/`failed`) | upload lifecycle distinct from AI |
-| `scan_status text` (`pending`/`clean`/`infected`/`error`) | malware gate (§3) |
-| `extraction_status text` (`none`/`queued`/`running`/`succeeded`/`failed`) | extraction lifecycle |
+| `contract_id uuid null` — **composite same-tenant FK** `(contract_id, tenant_id) → contracts(id, tenant_id)` (the `0005` pattern, reusing `contracts_id_tenant_key`) | link a file to its contract, tenant-bound at the DB (a tenant-B file can never attach to a tenant-A contract). A `contract_files` link table remains the alternative if many-to-many is ever needed |
+| `storage_bucket text null` | which bucket (future-proofing multiple buckets) |
+| `content_type text null` | server-validated MIME (distinct from legacy free-text `file_type`) |
+| `byte_size bigint null` (`check is null or ≥ 0`) | enforce/record the size cap |
+| `sha256 text null` (`check is null or ~ '^[a-f0-9]{64}$'`) | integrity + dedupe + tamper detection |
+| `upload_status text not null default 'pending'` (`pending`/`uploaded`/`failed`) | upload lifecycle distinct from AI |
+| `scan_status text not null default 'pending'` (`pending`/`passed`/`failed`/`skipped`) | malware gate (§3) |
+| `extraction_status text not null default 'not_started'` (`not_started`/`queued`/`processing`/`completed`/`failed`) | extraction lifecycle |
 | `extraction_result_json jsonb null` | the **validated, allowlisted** suggestions (NOT raw model output; NOT full PDF text) |
 | `extraction_error text null` | a safe error label (no sensitive content) |
+| `updated_at timestamptz not null default now()` | last-modified; default-only (no moddatetime trigger — schema convention), bumped by the writer |
 
-**Constraints that must hold:** every column **tenant-bound**; the `contract_id` link is a composite
-same-tenant FK (no cross-tenant linkage); **no hard delete** (no `DELETE`/`FOR ALL` policy — archive is
-a separate future design); status columns use `check` constraints with explicit allowed values;
-`extraction_result_json` holds only the allowlisted field set (§7), never the raw response.
+**Not added (deliberate):** `file_kind` — the existing `document_type` column already distinguishes
+contract docs (`'contract'`); no need for a second discriminator yet.
+
+**Constraints (live in `0012`):** every column **tenant-bound**; the `contract_id` link is a composite
+same-tenant FK (no cross-tenant linkage); status columns use the `check` constraints above; **no hard
+delete / no RLS policy** added — `files` stays default-deny / not surfaced. `extraction_result_json` (by
+*future* design) must hold only the allowlisted field set (§7), never the raw response — `0012` only
+defines the column; the worker that fills it is future work.
 
 ## 5. RLS design (future policies — NOT implemented here; default-deny stays until tested)
 `files` stays **default-deny** until a future PR adds *tested* policies. Designed shape:
@@ -155,7 +160,7 @@ Safe flow:
 1. From `/contracts/new` or `/contracts/[id]/edit`, the user opens the **"Upload PDF for extraction"** panel.
 2. Upload creates a `files` metadata row in `upload_status='pending'` / `scan_status='pending'` (server-issued `file_id`, tenant-bound).
 3. The object is stored at the server-derived tenant path; the server validates extension + MIME + magic bytes + size.
-4. **Extraction runs only after `scan_status='clean'`** (and validation passed).
+4. **Extraction runs only after `scan_status='passed'`** (and validation passed).
 5. The extraction worker returns **structured suggestions** (validated, allowlisted — §7); they are shown to the user.
 6. The user **explicitly applies** chosen suggestions to the form (never silent; never overwrites a field the user already filled without confirmation).
 7. The user **saves through the existing PR #30 write action** — RLS authorizes, `0010` audits.
@@ -230,9 +235,10 @@ fields; the file upload does not itself create/finalize a contract.
 - No Storage bucket; no OCR; no malware scanner; no file preview/viewer.
 - No app-contract **link/unlink**; no **invoice** upload; no renewal **gantt**; no **archive/delete**.
 - No service-role app route; no RLS policy change; no migration; **no hosted apply.**
-- **Next steps (each its own PR, with tests):** (a) forward migration for the `files` columns (§4) +
-  `gen-types`; (b) RLS policies + the §5 tests (default-deny until green); (c) private Storage bucket +
-  server-side validation; (d) the extraction worker (out-of-request, tenant-re-deriving) + strict-schema
-  parsing; (e) the minimal UI (§9); (f) file/extraction audit. **RISK-002 + RISK-016 stay OPEN;
-  OMC/Flywheel cutover + new paid-customer onboarding stay BLOCKED** until the file surface is built,
-  tested, and reviewed.
+- **Next steps (each its own PR, with tests):** ~~(a) forward migration for the `files` columns (§4) +
+  `gen-types`~~ — **DONE (`0012` / PR #34)**; (b) RLS policies + the §5 tests (default-deny until green)
+  ← **next**; (c) private Storage bucket + server-side validation; (d) the extraction worker
+  (out-of-request, tenant-re-deriving) + strict-schema parsing; (e) the minimal UI (§9); (f)
+  file/extraction audit. **RISK-002 + RISK-016 stay OPEN; OMC/Flywheel cutover + new paid-customer
+  onboarding stay BLOCKED** until the file surface is built, tested, and reviewed. `0012` adds metadata
+  columns ONLY — `files` is still **not surfaced** (no upload/Storage/AI/UI/signed-URL/RLS).

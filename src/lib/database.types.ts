@@ -487,39 +487,79 @@ export type Database = {
       }
       files: {
         Row: {
+          byte_size: number | null
+          content_type: string | null
+          contract_id: string | null
           created_at: string
           document_type: string | null
+          extraction_error: string | null
+          extraction_result_json: Json | null
+          extraction_status: string
           file_type: string | null
           id: string
           original_filename: string
           processing_status: string
+          scan_status: string
+          sha256: string | null
+          storage_bucket: string | null
           storage_path: string
           tenant_id: string
+          updated_at: string
+          upload_status: string
           uploaded_by: string | null
         }
         Insert: {
+          byte_size?: number | null
+          content_type?: string | null
+          contract_id?: string | null
           created_at?: string
           document_type?: string | null
+          extraction_error?: string | null
+          extraction_result_json?: Json | null
+          extraction_status?: string
           file_type?: string | null
           id?: string
           original_filename: string
           processing_status?: string
+          scan_status?: string
+          sha256?: string | null
+          storage_bucket?: string | null
           storage_path: string
           tenant_id: string
+          updated_at?: string
+          upload_status?: string
           uploaded_by?: string | null
         }
         Update: {
+          byte_size?: number | null
+          content_type?: string | null
+          contract_id?: string | null
           created_at?: string
           document_type?: string | null
+          extraction_error?: string | null
+          extraction_result_json?: Json | null
+          extraction_status?: string
           file_type?: string | null
           id?: string
           original_filename?: string
           processing_status?: string
+          scan_status?: string
+          sha256?: string | null
+          storage_bucket?: string | null
           storage_path?: string
           tenant_id?: string
+          updated_at?: string
+          upload_status?: string
           uploaded_by?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "files_contract_same_tenant"
+            columns: ["contract_id", "tenant_id"]
+            isOneToOne: false
+            referencedRelation: "contracts"
+            referencedColumns: ["id", "tenant_id"]
+          },
           {
             foreignKeyName: "files_tenant_id_fkey"
             columns: ["tenant_id"]

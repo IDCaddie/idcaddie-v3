@@ -7,7 +7,7 @@ re-explaining RLS. Implemented in `supabase/migrations/0002_org_scoped_rls.sql`,
 `0008_org_scoped_app_user_identity_matches_read.sql`,
 `0009_harden_app_contracts_read_tenant_bind.sql`, and
 `0010_contracts_audit_on_write.sql`; proven by
-`supabase/tests/org_rls_test.sql` (177 assertions, T1–T32, `verified-local`, `ci-enforced` via
+`supabase/tests/org_rls_test.sql` (186 assertions, T1–T33, `verified-local`, `ci-enforced` via
 PR #2). Schema: [v3-data-model.md](./v3-data-model.md).
 Design rationale & legacy evidence: [v3-security-model.md](./v3-security-model.md),
 [current-security-risk-map.md](./current-security-risk-map.md).
@@ -152,7 +152,7 @@ Test labels map to the `-- Test N` blocks in `org_rls_test.sql` (32 scenarios; T
 T22+23 are combined blocks).
 
 ## 8. Read-scope inventory — what each table actually exposes (canonical)
-Derived from live `pg_policies` on a fresh `0001`–`0011` DB (the SQL, **not** prose) and proven by
+Derived from live `pg_policies` on a fresh `0001`–`0012` DB (the SQL, **not** prose) and proven by
 **T27**/**T28**. This is the single source of truth for read access; other docs link here. Three read classes
 decide whether a table is safe to surface: **tenant+org** (org-only users can read), **tenant-only**
 (tenant members read every tenant row; org-only users read nothing), and **default-deny** (no `SELECT`
@@ -175,7 +175,7 @@ policy — unreadable by any normal `authenticated` user; only service-role / `S
 | `app_user_identity_matches` | link | tenant members **+ related-org** — readable if you can read the linked **app_user** (`0008`) | ✅ read-only **match status** on `/apps/[id]` (PR #23); no PII, no edit |
 | `license_rules` | child | **default-deny** (no policy) | ❌ no read policy |
 | `license_evaluations` | child | **default-deny** (no policy) | ❌ no read policy |
-| `files` | child | **default-deny** (no policy) | ❌ no read policy |
+| `files` | child | **default-deny** (no policy; `0012` added metadata columns + a same-tenant `contract_id` FK but **no RLS policy** — still not surfaced, T33) | ❌ no read policy |
 | `invoices` | child | **default-deny** (no policy) | ❌ no read policy |
 
 > **`0005` is write-integrity only, not read authorization.** The same-tenant composite FKs (§5b)
