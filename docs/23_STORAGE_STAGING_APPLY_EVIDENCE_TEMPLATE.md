@@ -63,6 +63,7 @@ Run + check **before** touching staging. Every box must be checked (record the c
 - [ ] `scripts/test-rls.sh` passes (**RLS 205**, `0001`–`0013`)
 - [ ] `scripts/gen-types-local.sh` produces **no unexpected diff**
 - [ ] **Linked Supabase project confirmed = STAGING only** (visually verified ref + dashboard)
+- [ ] **Staging env vars wired** per [24_STAGING_ENVIRONMENT_VARIABLES_AND_WIRING_CHECKLIST](./24_STAGING_ENVIRONMENT_VARIABLES_AND_WIRING_CHECKLIST.md) (names set, no values pasted; no service-role on browser/request path; no production values)
 - [ ] **Production project NOT targeted** (and not reachable from this session)
 - [ ] **Rollback / disable plan reviewed** (how to drop the bucket/policies; see §6)
 - [ ] **Read [22_HOSTED_STORAGE_BUCKET_APPLY_RUNBOOK](./22_HOSTED_STORAGE_BUCKET_APPLY_RUNBOOK.md)**

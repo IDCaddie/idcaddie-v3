@@ -132,6 +132,7 @@ necessary but **not sufficient** — the binding gate is doc 17.
   [18](./18_OMC_CONFIRMATION_PASS.md); **tokens are never collected there.**
 - **Staging secrets are separate from production secrets.** Each environment has its own.
 - **Production secrets are never used in preview or staging.**
+- **The exact env-var inventory + the Vercel/Supabase staging wiring checklist (names + classifications only, no values) is [24_STAGING_ENVIRONMENT_VARIABLES_AND_WIRING_CHECKLIST](./24_STAGING_ENVIRONMENT_VARIABLES_AND_WIRING_CHECKLIST.md)** — v3 uses two public Supabase vars; the service-role key is deferred (never browser/`NEXT_PUBLIC_`); connector/vault vars are blocked (RISK-007).
 - **Secrets never appear in:** docs, commits, issue comments, PR bodies, terminal output, logs, screenshots,
   generated types, or database rows. (Secrets live only in the per-environment secret store / vault — never
   in the repo or an app-readable column.)
