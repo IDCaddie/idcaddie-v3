@@ -11,11 +11,13 @@ inspection ([15](./15_LEGACY_CONTRACT_FORM_INSPECTION.md)), security/RLS model (
 risks ([04](./04_RISK_REGISTER.md) — **RISK-002 files/invoices default-deny: OPEN**, RISK-016: OPEN).
 **OMC/Flywheel cutover + new paid-customer onboarding remain BLOCKED. No hosted apply.**
 
-> **Status (do not overclaim):** PDF upload / AI extraction is **DESIGNED, NOT BUILT.** `files`,
-> Storage, and AI integration are **not surfaced**. **`0012` (PR #34) added the `files` metadata columns
-> (§4) — schema foundation only; the table is still default-deny / not surfaced.** The remaining steps
-> each need their own PR(s) with tests: RLS policies, a Storage bucket, server-side validation, an
-> extraction worker, the UI, and a security review. This doc unblocks *planning* + the schema; not shipping.
+> **Status (do not overclaim):** PDF upload / AI extraction is **DESIGNED, NOT BUILT.** Storage and AI
+> integration are **not surfaced**. **`0012` (PR #34) added the `files` metadata columns (§4); `0013`
+> (PR #35) added the `files` RLS policies (§5) — both tested.** `files` now has an authorized-by-design
+> read+write model, but is **still not surfaced**: no Storage bucket, upload UI/route, signed URLs,
+> scan/AI worker, file preview, and **no app DAL touches `files`**. The remaining steps each need their
+> own PR(s) with tests: a private Storage bucket, server-side validation, an extraction worker, the UI,
+> a security review (and the deferred org-scoped read). This doc unblocks *planning* + schema/RLS; not shipping.
 
 ---
 
@@ -129,27 +131,27 @@ delete / no RLS policy** added — `files` stays default-deny / not surfaced. `e
 *future* design) must hold only the allowlisted field set (§7), never the raw response — `0012` only
 defines the column; the worker that fills it is future work.
 
-## 5. RLS design (future policies — NOT implemented here; default-deny stays until tested)
-`files` stays **default-deny** until a future PR adds *tested* policies. Designed shape:
-- **READ:** a tenant member may read `files` for their tenant (`is_tenant_member(tenant_id)`).
-  *Org-scoped* read of a contract-attached file (an org-only user reading a file iff they can read the
-  linked contract) is a **later, separate** broadening — start **tenant-member-only** to keep the blast
-  radius small (mirrors how `app_contracts`/`app_users` were tenant-only before `0006`/`0007`).
-- **WRITE (insert/update):** limited to the **same contract write authority** (`0004`):
-  - tenant **owner/admin/editor** (`has_tenant_role(tenant_id, ['owner','admin','editor'])`), **OR**
-  - **procurement-org manager** of the linked contract's `procurement_org_id`
-    (`has_org_role_in_tenant(procurement_org_id, tenant_id, ['manager'])`).
-  - **`paying_org_id` must NOT grant file write** (read ≠ write; mirrors the contract rule, [13 §3](./13_CONTRACT_STEWARD_WRITE_DESIGN.md)).
-- **File read and file write may differ** (read can be broader than write later); both **default-deny**
-  until each is tested. **No `FOR ALL`. No normal `authenticated` DELETE.**
-- A **same-tenant integrity** guard (the `0005` composite-FK pattern) so a file can never reference a
-  cross-tenant contract.
-- **Future RLS tests required (before any file surface ships):**
-  - tenant **editor** upload **allowed**; **procurement-org manager** upload **allowed**;
-  - **paying-org** reader **denied** upload; **unrelated org** member **denied** read *and* write;
-  - **cross-tenant** contract↔file linkage **rejected** (FK + policy);
-  - **non-member** sees nothing; **no DELETE** policy; **no `FOR ALL`**;
-  - (and, once org-scoped read is added) an org reader sees a file **iff** they can read the linked contract.
+## 5. RLS design — IMPLEMENTED in `0013` (PR #35), tested by T34
+The `files` RLS policies are now live (table still not surfaced — no DAL/route/UI):
+- **READ (`members read tenant files`):** a tenant member reads `files` in their tenant
+  (`is_tenant_member(tenant_id)`). *Org-scoped* read of a contract-attached file (an org-only user
+  reading a file iff they can read the linked contract) is a **later, separate** broadening — we start
+  **tenant-member-only** (mirrors how `app_contracts`/`app_users` were tenant-only before `0006`/`0007`).
+- **INSERT (`writers insert contract files`):** `uploaded_by = auth.uid() AND can_write_contract(contract_id, tenant_id)`
+  — the **same contract write authority as `0004`**, via the new `SECURITY DEFINER` helper:
+  - tenant **owner/admin/editor** (`has_tenant_role`), **OR**
+  - **procurement-org manager** of the linked contract's `procurement_org_id` (`has_org_role_in_tenant`).
+  - **`paying_org_id` grants NO file write** (read ≠ write — [13 §3](./13_CONTRACT_STEWARD_WRITE_DESIGN.md)); `uploaded_by` must be the caller (no spoofing).
+- **NO UPDATE policy** — scan/extraction status transitions are a future worker/service (§6/§8), not a
+  broad user UPDATE. **NO DELETE policy, NO `FOR ALL`.** The `0012` same-tenant FK blocks any
+  cross-tenant contract↔file linkage. **Deliberate asymmetry:** an org procurement-manager may INSERT a
+  file for their contract but cannot yet LIST files (read is tenant-member-only) — org-scoped read is
+  the next broadening.
+- **Tests (T34, RLS suite 186 → 205):** tenant editor + procurement-manager upload allowed;
+  **paying-org manager + tenant viewer + cross-org manager denied**; cross-tenant attach rejected (FK);
+  **uploaded_by spoof denied**; tenant-member read isolation (cross-tenant / non-member / org-only read
+  0); **DELETE + UPDATE denied**; catalog 0 DELETE / 0 FOR ALL with RLS on. (Once org-scoped read is
+  added, a future test will prove an org reader sees a file iff they can read the linked contract.)
 
 ## 6. Upload flow design (suggestion-first, save-through-RLS)
 **Create manually or upload first?** — Recommended: the contract create/edit form stays primary;
@@ -234,11 +236,13 @@ fields; the file upload does not itself create/finalize a contract.
 - **No PDF/AI implementation in this PR** (design only).
 - No Storage bucket; no OCR; no malware scanner; no file preview/viewer.
 - No app-contract **link/unlink**; no **invoice** upload; no renewal **gantt**; no **archive/delete**.
-- No service-role app route; no RLS policy change; no migration; **no hosted apply.**
+- **No service-role app route, ever; no AI auto-save; no hosted apply.** (The schema migration `0012`
+  and the RLS migration `0013` have landed in their own PRs — see Next steps; further steps are their own PRs.)
 - **Next steps (each its own PR, with tests):** ~~(a) forward migration for the `files` columns (§4) +
-  `gen-types`~~ — **DONE (`0012` / PR #34)**; (b) RLS policies + the §5 tests (default-deny until green)
-  ← **next**; (c) private Storage bucket + server-side validation; (d) the extraction worker
-  (out-of-request, tenant-re-deriving) + strict-schema parsing; (e) the minimal UI (§9); (f)
-  file/extraction audit. **RISK-002 + RISK-016 stay OPEN; OMC/Flywheel cutover + new paid-customer
-  onboarding stay BLOCKED** until the file surface is built, tested, and reviewed. `0012` adds metadata
-  columns ONLY — `files` is still **not surfaced** (no upload/Storage/AI/UI/signed-URL/RLS).
+  `gen-types`~~ — **DONE (`0012` / PR #34)**; ~~(b) RLS policies + the §5 tests~~ — **DONE (`0013` / PR #35
+  — tenant-member SELECT + contract-write-authority INSERT; no UPDATE/DELETE/FOR ALL; T34)**; (c) private
+  Storage bucket + server-side validation ← **next**; (d) the extraction worker (out-of-request,
+  tenant-re-deriving) + strict-schema parsing; (e) the minimal UI (§9); (f) file/extraction audit; plus
+  the deferred **org-scoped `files` read**. **RISK-002 + RISK-016 stay OPEN; OMC/Flywheel cutover + new
+  paid-customer onboarding stay BLOCKED** until the file surface is built, tested, and reviewed. `0012`/`0013` add
+  the schema + RLS authorization only — `files` is still **not surfaced** (no upload/Storage/signed-URL/scan/AI/UI; no app DAL).

@@ -7,7 +7,7 @@ re-explaining RLS. Implemented in `supabase/migrations/0002_org_scoped_rls.sql`,
 `0008_org_scoped_app_user_identity_matches_read.sql`,
 `0009_harden_app_contracts_read_tenant_bind.sql`, and
 `0010_contracts_audit_on_write.sql`; proven by
-`supabase/tests/org_rls_test.sql` (186 assertions, T1–T33, `verified-local`, `ci-enforced` via
+`supabase/tests/org_rls_test.sql` (205 assertions, T1–T34, `verified-local`, `ci-enforced` via
 PR #2). Schema: [v3-data-model.md](./v3-data-model.md).
 Design rationale & legacy evidence: [v3-security-model.md](./v3-security-model.md),
 [current-security-risk-map.md](./current-security-risk-map.md).
@@ -141,7 +141,7 @@ manage all membership rows; **admins** manage only non-`owner` rows and cannot w
 | 15 | Tenant **owner/admin/editor** hard-deletes a core evidence row | denied (0 rows); row survives; editor `UPDATE` still works | no `DELETE` policy (`0004`) | T24 |
 | 16 | App inventory/detail reads still valid after hardening | rows returned | SELECT policies untouched | T25 |
 | 17 | Child/link row references a parent in **another tenant** | write fails (foreign_key_violation); valid same-tenant + nullable links still insert | composite same-tenant FKs (`0005`) | T26 |
-| 18 | Org-only user reads the **tenant-only** child table `people`; any user reads a **default-deny** table (`identity_accounts`/`files`/`invoices`/`license_*`) | 0 rows | tenant-only `SELECT` is `is_tenant_member`-gated; default-deny has no policy | T27 |
+| 18 | Org-only user reads the **tenant-only** child tables `people`/`files` (tenant members read them; org-only reads 0); any user reads a **default-deny** table (`identity_accounts`/`invoices`/`license_*`) | 0 rows | tenant-only `SELECT` is `is_tenant_member`-gated (`files` since `0013`); default-deny has no policy | T27/T34 |
 | 19 | Org-only user reads an `app_contracts` link tied to an app/contract they **cannot** read (or a cross-tenant / non-member read); a planted FK-bypassed corrupt cross-tenant link | 0 rows; reads only links to a readable app **or** contract; corrupt link denied | `0006` org-scoped `SELECT` + `0009` explicit tenant-bind (reuses `apps`/`contracts` RLS; tenant-bound by `0005` + the explicit clause) | T28, T28h |
 | 20 | Org-only user reads `app_users` for an app they **cannot** read (or a cross-tenant / non-member read) | 0 rows; reads only users of apps they can read | `0007` org-scoped `SELECT` (reuses `apps` RLS; tenant-bound by `0005`) | T29 |
 | 21 | Org-only user reads `app_user_identity_matches` for an app_user they **cannot** read (or cross-tenant / non-member); a match read grants no `people`/`identity_accounts` read | 0 rows; reads only matches of readable app_users; `people`/`identity_accounts` stay 0 | `0008` org-scoped `SELECT` (reuses `app_users` RLS; explicit tenant-bind) | T30 |
@@ -152,7 +152,7 @@ Test labels map to the `-- Test N` blocks in `org_rls_test.sql` (32 scenarios; T
 T22+23 are combined blocks).
 
 ## 8. Read-scope inventory — what each table actually exposes (canonical)
-Derived from live `pg_policies` on a fresh `0001`–`0012` DB (the SQL, **not** prose) and proven by
+Derived from live `pg_policies` on a fresh `0001`–`0013` DB (the SQL, **not** prose) and proven by
 **T27**/**T28**. This is the single source of truth for read access; other docs link here. Three read classes
 decide whether a table is safe to surface: **tenant+org** (org-only users can read), **tenant-only**
 (tenant members read every tenant row; org-only users read nothing), and **default-deny** (no `SELECT`
@@ -175,7 +175,7 @@ policy — unreadable by any normal `authenticated` user; only service-role / `S
 | `app_user_identity_matches` | link | tenant members **+ related-org** — readable if you can read the linked **app_user** (`0008`) | ✅ read-only **match status** on `/apps/[id]` (PR #23); no PII, no edit |
 | `license_rules` | child | **default-deny** (no policy) | ❌ no read policy |
 | `license_evaluations` | child | **default-deny** (no policy) | ❌ no read policy |
-| `files` | child | **default-deny** (no policy; `0012` added metadata columns + a same-tenant `contract_id` FK but **no RLS policy** — still not surfaced, T33) | ❌ no read policy |
+| `files` | child | **tenant-member read** (`0013`: SELECT `is_tenant_member`; INSERT = contract-write authority [`can_write_contract`: tenant editor+ OR procurement-org manager; `paying_org` no write; `uploaded_by`=caller]; **no UPDATE/DELETE/FOR ALL**). Org-scoped read deferred; table still **not surfaced** in the app (no DAL/route/UI/Storage), T34 | tenant-member `SELECT` (org-scoped read later) |
 | `invoices` | child | **default-deny** (no policy) | ❌ no read policy |
 
 > **`0005` is write-integrity only, not read authorization.** The same-tenant composite FKs (§5b)
