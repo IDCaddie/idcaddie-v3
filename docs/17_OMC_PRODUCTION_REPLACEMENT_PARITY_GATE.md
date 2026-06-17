@@ -73,7 +73,7 @@ These are the categories that make cutover a NO today. None may be hand-waved.
 **Product surface:**
 - **Files not app-surfaced** — only the `files` metadata table + RLS (`0012`/`0013`) exist; no Storage bucket, upload, signed URLs, validation/scan gate, preview, or file/extraction audit.
 - **PDF/AI extraction not implemented** (design only — [16](./16_CONTRACT_PDF_AI_EXTRACTION_DESIGN.md)); legacy's DEFAULT contract-create path is upload-PDF.
-- **Imports/connectors not built** — no connector subsystem, no SCIM ingestion, no scheduled sync; **no credential vault (RISK-007)**; **no non-destructive upsert writer**; no CSV/userlist ingestion.
+- **Imports/connectors not built** — no connector subsystem, no SCIM ingestion, no scheduled sync; **no credential vault (RISK-007 — safe path DESIGNED in [19](./19_CONNECTOR_CREDENTIAL_VAULT_DESIGN.md), not implemented; vault is a prerequisite for ANY connector)**; **no non-destructive upsert writer**; no CSV/userlist ingestion.
 - **License rules / evaluations / ELU / waste not built**; **invoices not built** (no ingestion, no proration); **reporting/exports not built** (no CSV/PDF, no scheduled/emailed reports, no dashboards, no cost snapshots).
 - **IDC platform billing not built** — the monthly cron + billing surface that IS the ~$3.5k/mo revenue mechanism is absent.
 - **App-contract link/unlink + cost allocation missing** (read-only today).
@@ -325,7 +325,7 @@ Two interleaved tracks. **Track A** continues the security/file path already in 
 3. **Admin/core-platform:** password reset, user-management UI + writes, role-change UI, groups/org-membership admin UI, company/tenant settings, **audit-log viewer** + audit triggers for apps/files/users/memberships/invoices. *(B-admin; ~8–12)*
 4. **Apps parity:** inventory cost/metric columns + cards + filter/search/sort/**export**, app create/edit/archive, governance/attestation (if confirmed), custom-field/calc engine (if confirmed), sync-health. *(B-apps; ~10–14)*
 5. **App-contract link/unlink** + per-app cost-allocation %. *(B-apps)*
-6. **Connectors:** **credential vault FIRST (RISK-007)** → **non-destructive upsert writer** + diff/preview → CSV/userlist ingestion → Okta + Google + Slack + generic → inbound email/API → scheduler infra → connector dashboards + audit. *(B-connectors; ~10–16, OMC-scope-dependent)*
+6. **Connectors:** **credential vault FIRST** — implement [19_CONNECTOR_CREDENTIAL_VAULT_DESIGN](./19_CONNECTOR_CREDENTIAL_VAULT_DESIGN.md) (RISK-007; design done PR #38, implementation+tests still owed) → **non-destructive upsert writer** + diff/preview → CSV/userlist ingestion → Okta + Google + Slack + generic → inbound email/API → scheduler infra → connector dashboards + audit. *(B-connectors; ~10–16, OMC-scope-dependent)*
 7. **Imports preview/upsert** (non-destructive; shared by all connectors + manual upload). *(B-connectors)*
 8. **Licenses/spend:** license-rule schema extension + editor + per-user eval + ELU/waste + app rollup; **invoices** (schema add status+period, list/detail, AI ingestion, prorated cost rollup). *(B-licenses; ~15–21)*
 9. **People/identity:** org-scoped reads for people/identity_accounts → matching engine + rules + scheduled rebuild → People directory + Risks + Settings → real **UAR/Critical-Risk**. *(B-people; ~8–12)*
