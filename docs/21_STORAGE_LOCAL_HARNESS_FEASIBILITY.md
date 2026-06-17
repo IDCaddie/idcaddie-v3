@@ -89,8 +89,9 @@ and **no upload action ships until §6 passes there.**
 
 **(a) Hosted staging — the path of record (doc 20).** Create the private `contract-files` bucket + object
 policies in **staging** Supabase (the real storage-api), run the §6 verification through the Storage REST
-API, then production. This is authoritative because it exercises the exact storage-api version + semantics
-the customer runs. **No local migration; the bucket/policies are a hosted-applied Storage object, not a
+API, then production — following the step-by-step **[22_HOSTED_STORAGE_BUCKET_APPLY_RUNBOOK](./22_HOSTED_STORAGE_BUCKET_APPLY_RUNBOOK.md)**
+(which reproduces this §6 checklist as its acceptance gate). This is authoritative because it exercises the
+exact storage-api version + semantics the customer runs. **No local migration; the bucket/policies are a hosted-applied Storage object, not a
 `supabase/migrations/*.sql` file.**
 
 **(b) Optional future: a dedicated `supabase start` CI job (separate from `rls-tests.yml`).** If the team

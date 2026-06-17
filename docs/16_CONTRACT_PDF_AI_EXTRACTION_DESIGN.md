@@ -95,7 +95,7 @@ AI parsing, suggestion-not-autosave, RLS-gated writes, DB-side audit.
   local harness can't host/test (**empirically proven, PR #41 / [21](./21_STORAGE_LOCAL_HARNESS_FEASIBILITY.md)**:
   no `storage` schema in the plain-`postgres:16` harness; storage-api enforcement isn't pure SQL). It is created +
   policied + **verified via the hosted path** ([20](./20_STAGING_HOSTED_APPLY_AND_CUTOVER_DISCIPLINE.md); the
-  [21 §6](./21_STORAGE_LOCAL_HARNESS_FEASIBILITY.md) Storage object-policy checklist) — **no local `storage` shim.**
+  [21 §6](./21_STORAGE_LOCAL_HARNESS_FEASIBILITY.md) Storage object-policy checklist; the staging apply runbook is [22_HOSTED_STORAGE_BUCKET_APPLY_RUNBOOK](./22_HOSTED_STORAGE_BUCKET_APPLY_RUNBOOK.md)) — **no local `storage` shim.**
 - **Source of truth = the DB `files` row**, not the Storage object. The object is opaque bytes; all
   authorization, status, and metadata live in Postgres under RLS.
 - **Object path pattern (server-derived, not user-controlled) — IMPLEMENTED (`buildContractFileObjectPath`):**
