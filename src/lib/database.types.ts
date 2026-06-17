@@ -377,15 +377,21 @@ export type Database = {
       }
       contracts: {
         Row: {
+          auto_renew: boolean
           billing_frequency: string | null
+          category: string | null
           contract_name: string
           created_at: string
           currency: string | null
           end_date: string | null
           id: string
+          month_to_month: boolean
+          notes: string | null
           notice_deadline: string | null
           owner_user_id: string | null
           paying_org_id: string | null
+          po_number: string | null
+          procurement_date: string | null
           procurement_org_id: string | null
           renewal_date: string | null
           renewal_responsibility: string | null
@@ -397,15 +403,21 @@ export type Database = {
           vendor_name: string | null
         }
         Insert: {
+          auto_renew?: boolean
           billing_frequency?: string | null
+          category?: string | null
           contract_name: string
           created_at?: string
           currency?: string | null
           end_date?: string | null
           id?: string
+          month_to_month?: boolean
+          notes?: string | null
           notice_deadline?: string | null
           owner_user_id?: string | null
           paying_org_id?: string | null
+          po_number?: string | null
+          procurement_date?: string | null
           procurement_org_id?: string | null
           renewal_date?: string | null
           renewal_responsibility?: string | null
@@ -417,15 +429,21 @@ export type Database = {
           vendor_name?: string | null
         }
         Update: {
+          auto_renew?: boolean
           billing_frequency?: string | null
+          category?: string | null
           contract_name?: string
           created_at?: string
           currency?: string | null
           end_date?: string | null
           id?: string
+          month_to_month?: boolean
+          notes?: string | null
           notice_deadline?: string | null
           owner_user_id?: string | null
           paying_org_id?: string | null
+          po_number?: string | null
+          procurement_date?: string | null
           procurement_org_id?: string | null
           renewal_date?: string | null
           renewal_responsibility?: string | null

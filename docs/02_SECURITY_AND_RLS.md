@@ -152,7 +152,7 @@ Test labels map to the `-- Test N` blocks in `org_rls_test.sql` (32 scenarios; T
 T22+23 are combined blocks).
 
 ## 8. Read-scope inventory — what each table actually exposes (canonical)
-Derived from live `pg_policies` on a fresh `0001`–`0010` DB (the SQL, **not** prose) and proven by
+Derived from live `pg_policies` on a fresh `0001`–`0011` DB (the SQL, **not** prose) and proven by
 **T27**/**T28**. This is the single source of truth for read access; other docs link here. Three read classes
 decide whether a table is safe to surface: **tenant+org** (org-only users can read), **tenant-only**
 (tenant members read every tenant row; org-only users read nothing), and **default-deny** (no `SELECT`

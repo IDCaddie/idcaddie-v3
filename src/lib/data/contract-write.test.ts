@@ -121,29 +121,39 @@ describe("parseContractWriteInput · create", () => {
     if (!r.ok) expect(r.issues).toContain("total_cost is out of range");
   });
 
-  it("never carries caller-supplied tenant_id / id / owner_user_id into the columns", () => {
-    // Simulate an untyped/overreaching caller passing forbidden keys.
+  it("never carries caller-supplied tenant_id / id / owner_user_id / audit fields into the columns", () => {
+    // Simulate an untyped/overreaching caller passing forbidden keys (identity + audit).
     const hostile = {
       contractName: "C",
       tenant_id: "99999999-9999-9999-9999-999999999999",
       id: "88888888-8888-8888-8888-888888888888",
       owner_user_id: "77777777-7777-7777-7777-777777777777",
+      actor_user_id: "66666666-6666-6666-6666-666666666666",
+      action: "contract.created",
+      created_at: "2000-01-01",
     } as unknown as ContractWriteInput;
     const c = createColumns(hostile);
-    expect(Object.keys(c)).not.toContain("tenant_id");
-    expect(Object.keys(c)).not.toContain("id");
-    expect(Object.keys(c)).not.toContain("owner_user_id");
+    for (const forbidden of ["tenant_id", "id", "owner_user_id", "actor_user_id", "action", "created_at"]) {
+      expect(Object.keys(c)).not.toContain(forbidden);
+    }
+    // The output is EXACTLY the writable column set — only keys derived from known input fields.
     expect(c).toEqual({
       contract_name: "C",
       vendor_name: null,
       billing_frequency: null,
+      category: null,
+      notes: null,
+      po_number: null,
       start_date: null,
       end_date: null,
       renewal_date: null,
       notice_deadline: null,
+      procurement_date: null,
       procurement_org_id: null,
       paying_org_id: null,
       total_cost: null,
+      auto_renew: false,
+      month_to_month: false,
     });
   });
 
@@ -255,5 +265,60 @@ describe("resolveWriteContextTenantId", () => {
 
   it("no tenant and no org membership → null", () => {
     expect(resolveWriteContextTenantId(ctx({}))).toBeNull();
+  });
+});
+
+describe("parseContractWriteInput · PR #32 parity fields (0011)", () => {
+  it("create maps the new text/date fields; empty becomes null", () => {
+    const c = createColumns({
+      contractName: "C",
+      category: "Technology",
+      procurementDate: "2026-03-01",
+      notes: "hello",
+      poNumber: "PO-9",
+    });
+    expect(c.category).toBe("Technology");
+    expect(c.procurement_date).toBe("2026-03-01");
+    expect(c.notes).toBe("hello");
+    expect(c.po_number).toBe("PO-9");
+    // empty/blank nullable fields → null
+    const blank = createColumns({ contractName: "C", category: "", notes: "  ", poNumber: "", procurementDate: "" });
+    expect(blank.category).toBeNull();
+    expect(blank.notes).toBeNull();
+    expect(blank.po_number).toBeNull();
+    expect(blank.procurement_date).toBeNull();
+  });
+
+  it("booleans: create always sets them (default false); strict coercion never yields null", () => {
+    // not provided → false (NOT NULL columns must always have a value on create)
+    const def = createColumns({ contractName: "C" });
+    expect(def.auto_renew).toBe(false);
+    expect(def.month_to_month).toBe(false);
+    // provided true/false pass through
+    const on = createColumns({ contractName: "C", autoRenew: true, monthToMonth: true });
+    expect(on.auto_renew).toBe(true);
+    expect(on.month_to_month).toBe(true);
+    // a hostile non-boolean is coerced safely to false (never null, never a string)
+    const hostile = createColumns({ contractName: "C", autoRenew: "yes" as unknown as boolean });
+    expect(hostile.auto_renew).toBe(false);
+  });
+
+  it("invalid procurement_date is rejected like the other dates", () => {
+    const r = parseContractWriteInput({ contractName: "C", procurementDate: "03/01/2026" }, { mode: "create" });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.issues).toContain("procurement_date must be a date (YYYY-MM-DD)");
+  });
+
+  it("update (PATCH): only provided new fields are touched; a boolean toggle is a real change", () => {
+    // only a boolean provided → only that column is in the patch (a valid, non-empty update)
+    const onlyBool = updateColumns({ autoRenew: true });
+    expect(onlyBool).toEqual({ auto_renew: true });
+    // an absent new field is left untouched
+    const onlyNotes = updateColumns({ notes: "x" });
+    expect("category" in onlyNotes).toBe(false);
+    expect("auto_renew" in onlyNotes).toBe(false);
+    expect(onlyNotes.notes).toBe("x");
+    // explicitly clearing a nullable new field sets null
+    expect(updateColumns({ category: "" })).toEqual({ category: null });
   });
 });

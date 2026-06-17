@@ -7,10 +7,19 @@ import { createContractAction, updateContractAction } from "./actions";
 import type { OrgOption } from "@/lib/data/organizations";
 import {
   type ContractFormValues,
+  CATEGORY_OPTIONS,
   formToWriteInput,
   statusOptionsForValue,
   writeErrorMessage,
 } from "./contract-form-shared";
+
+// Split the form keys by value type so the change handlers are type-safe (string inputs vs checkboxes).
+type StringKeys = {
+  [K in keyof ContractFormValues]: ContractFormValues[K] extends string ? K : never;
+}[keyof ContractFormValues];
+type BoolKeys = {
+  [K in keyof ContractFormValues]: ContractFormValues[K] extends boolean ? K : never;
+}[keyof ContractFormValues];
 
 // Contract create/edit form (the first user-visible contract WRITE surface — PR #31). A Client
 // Component for controlled inputs (mirrors the legacy form's interactivity — docs/15), but it holds
@@ -64,8 +73,10 @@ export function ContractForm({
   const [pending, startTransition] = useTransition();
 
   const cancelHref = mode === "edit" && contractId ? `/contracts/${contractId}` : "/contracts";
-  const set = (key: keyof ContractFormValues) => (e: { target: { value: string } }) =>
+  const set = (key: StringKeys) => (e: { target: { value: string } }) =>
     setValues((p) => ({ ...p, [key]: e.target.value }));
+  const setBool = (key: BoolKeys) => (e: { target: { checked: boolean } }) =>
+    setValues((p) => ({ ...p, [key]: e.target.checked }));
 
   function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -137,14 +148,15 @@ export function ContractForm({
             ))}
           </select>
         </Field>
-        <Field label="Renewal responsibility" htmlFor="renewalResponsibility">
-          <input
-            id="renewalResponsibility"
-            name="renewalResponsibility"
-            value={values.renewalResponsibility}
-            onChange={set("renewalResponsibility")}
-            className={inputClass}
-          />
+        <Field label="Category" htmlFor="category">
+          <select id="category" name="category" value={values.category} onChange={set("category")} className={inputClass}>
+            <option value="">— None —</option>
+            {CATEGORY_OPTIONS.map((o) => (
+              <option key={o} value={o}>
+                {o}
+              </option>
+            ))}
+          </select>
         </Field>
       </div>
 
@@ -183,6 +195,36 @@ export function ContractForm({
         </Field>
       </div>
 
+      <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
+        <Field label="Procurement date" htmlFor="procurementDate" hint="Date procurement should review the contract (legacy field).">
+          <input id="procurementDate" name="procurementDate" type="date" value={values.procurementDate} onChange={set("procurementDate")} className={inputClass} />
+        </Field>
+        <Field label="PO number" htmlFor="poNumber">
+          <input id="poNumber" name="poNumber" value={values.poNumber} onChange={set("poNumber")} className={inputClass} />
+        </Field>
+      </div>
+
+      <Field label="Renewal responsibility" htmlFor="renewalResponsibility">
+        <input
+          id="renewalResponsibility"
+          name="renewalResponsibility"
+          value={values.renewalResponsibility}
+          onChange={set("renewalResponsibility")}
+          className={inputClass}
+        />
+      </Field>
+
+      <fieldset className="flex flex-wrap gap-6">
+        <label htmlFor="autoRenew" className="flex items-center gap-2 text-sm">
+          <input id="autoRenew" name="autoRenew" type="checkbox" checked={values.autoRenew} onChange={setBool("autoRenew")} />
+          Auto renew
+        </label>
+        <label htmlFor="monthToMonth" className="flex items-center gap-2 text-sm">
+          <input id="monthToMonth" name="monthToMonth" type="checkbox" checked={values.monthToMonth} onChange={setBool("monthToMonth")} />
+          Month-to-month
+        </label>
+      </fieldset>
+
       {/* ponytail: the org <select> lists only the caller's RLS-visible orgs. If a contract's current
           org is outside that set, the control shows unselected — but the controlled value is retained,
           so an untouched edit never changes it; and anyone who can actually save (a tenant member) sees
@@ -215,6 +257,17 @@ export function ContractForm({
           </select>
         </Field>
       </div>
+
+      <Field label="Notes" htmlFor="notes">
+        <textarea
+          id="notes"
+          name="notes"
+          rows={3}
+          value={values.notes}
+          onChange={set("notes")}
+          className={`${inputClass} resize-y`}
+        />
+      </Field>
 
       <div className="flex items-center gap-3 pt-2">
         <button

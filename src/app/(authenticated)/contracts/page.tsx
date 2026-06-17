@@ -64,6 +64,7 @@ export default async function ContractsPage() {
                   <th className="py-2 pr-4 font-medium">Name</th>
                   <th className="py-2 pr-4 font-medium">Vendor</th>
                   <th className="py-2 pr-4 font-medium">Status</th>
+                  <th className="py-2 pr-4 font-medium">Category</th>
                   <th className="py-2 pr-4 font-medium">Renewal</th>
                   <th className="py-2 pr-4 font-medium">End</th>
                 </tr>
@@ -86,6 +87,9 @@ export default async function ContractsPage() {
                       <span className="rounded-full border border-zinc-300 px-2 py-0.5 text-xs text-zinc-600 dark:border-zinc-700 dark:text-zinc-400">
                         {contract.status}
                       </span>
+                    </td>
+                    <td className="py-2 pr-4 text-zinc-600 dark:text-zinc-400">
+                      {contract.category ?? "—"}
                     </td>
                     <td className="py-2 pr-4 text-zinc-600 dark:text-zinc-400">
                       {contract.renewalDate ?? "—"}

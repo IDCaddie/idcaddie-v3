@@ -18,7 +18,7 @@ Used consistently across all docs. Never blur these.
 | `deprecated` | old approach kept only for history |
 | `legacy-production` | the current Firebase system still serving users |
 
-Today: migrations (`0001`–`0010`) are `implemented` + `verified-local` + `ci-enforced`, **not** `staged`/
+Today: migrations (`0001`–`0011`) are `implemented` + `verified-local` + `ci-enforced`, **not** `staged`/
 `production-applied`. The auth/session skeleton is `implemented` (not hosted-exercised). Firebase is
 `legacy-production`. v3 has **read-only** product UI `implemented` (apps inventory + detail, contracts
 list + detail, linked app↔contract panels, app-user roster + match status, account summary — PRs

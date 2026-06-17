@@ -86,7 +86,19 @@ export default async function ContractDetailPage({
               label="Renewal responsibility"
               value={result.data.renewalResponsibility ?? "—"}
             />
+            <Field label="Category" value={result.data.category ?? "—"} />
+            <Field label="Procurement date" value={result.data.procurementDate ?? "—"} />
+            <Field label="PO number" value={result.data.poNumber ?? "—"} />
+            <Field label="Auto renew" value={result.data.autoRenew ? "Yes" : "No"} />
+            <Field label="Month-to-month" value={result.data.monthToMonth ? "Yes" : "No"} />
           </section>
+
+          {result.data.notes ? (
+            <section className="space-y-1 text-sm">
+              <div className="text-zinc-500">Notes</div>
+              <p className="whitespace-pre-wrap font-medium">{result.data.notes}</p>
+            </section>
+          ) : null}
 
           <section className="space-y-2 text-sm">
             <h2 className="font-medium">Ownership (organization IDs)</h2>
