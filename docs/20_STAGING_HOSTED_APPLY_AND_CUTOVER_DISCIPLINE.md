@@ -104,10 +104,10 @@ apply as part of CI/merge automation.
 
 **All risky capabilities land in staging — verified — before production.** This explicitly includes:
 
-- Storage bucket
-- file upload
+- Storage bucket — the private `contract-files` bucket + its object-RLS are a Supabase `storage`-schema object the local harness can't host/test; **created + tested via THIS hosted path, not a local migration** (the PR #40 PDF validation/path core is a pure lib; the bucket is the hosted piece)
+- file upload (the upload action: user-scoped client + the `0013` insert authority; **no service-role**)
 - signed URLs
-- PDF validation / scan gate
+- PDF validation / scan gate (server-side validation core built PR #40 — `src/lib/files/pdf-validation.ts`)
 - AI extraction
 - the connector credential vault ([19](./19_CONNECTOR_CREDENTIAL_VAULT_DESIGN.md))
 - connectors (Okta/Google/Entra/Slack/SCIM/scrapers)
