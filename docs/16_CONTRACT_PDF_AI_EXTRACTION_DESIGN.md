@@ -11,13 +11,20 @@ inspection ([15](./15_LEGACY_CONTRACT_FORM_INSPECTION.md)), security/RLS model (
 risks ([04](./04_RISK_REGISTER.md) — **RISK-002 files/invoices default-deny: OPEN**, RISK-016: OPEN).
 **OMC/Flywheel cutover + new paid-customer onboarding remain BLOCKED. No hosted apply.**
 
-> **Status (do not overclaim):** PDF upload / AI extraction is **DESIGNED, NOT BUILT.** Storage and AI
+> **Status (do not overclaim):** PDF upload / AI extraction is **DESIGNED, mostly NOT BUILT.** Storage and AI
 > integration are **not surfaced**. **`0012` (PR #34) added the `files` metadata columns (§4); `0013`
-> (PR #35) added the `files` RLS policies (§5) — both tested.** `files` now has an authorized-by-design
-> read+write model, but is **still not surfaced**: no Storage bucket, upload UI/route, signed URLs,
-> scan/AI worker, file preview, and **no app DAL touches `files`**. The remaining steps each need their
-> own PR(s) with tests: a private Storage bucket, server-side validation, an extraction worker, the UI,
-> a security review (and the deferred org-scoped read). This doc unblocks *planning* + schema/RLS; not shipping.
+> (PR #35) added the `files` RLS policies (§5) — both tested. `PR #40` added the server-side PDF
+> **validation + server-derived storage-path helpers** (`src/lib/files/pdf-validation.ts`, pure + unit-tested
+> — §3) and canonicalized the private bucket name `contract-files`.** `files` now has an authorized-by-design
+> read+write model + a validation core, but is **still not surfaced**: **no Storage bucket created, no upload
+> action/UI/route, no signed URLs, no scan/AI worker, no file preview, and no app DAL touches `files`**. The
+> bucket itself + its Storage object-RLS live in the Supabase `storage` schema, which the local
+> migration/test harness (plain postgres:16 + `auth` shim) **cannot host or test** — so they are **not created
+> here** and are applied + tested via the hosted path ([20](./20_STAGING_HOSTED_APPLY_AND_CUTOVER_DISCIPLINE.md)).
+> The remaining steps each need their own PR(s) with tests: the hosted private Storage bucket + object policies,
+> the upload action (user-scoped client + the `0013` insert authority; **no service-role**), the signed-URL read
+> path, an extraction worker, the review/apply UI, a security review (and the deferred org-scoped read). This
+> doc unblocks *planning* + schema/RLS/validation; **not shipping** (cutover stays BLOCKED).
 
 ---
 
@@ -80,19 +87,25 @@ AI parsing, suggestion-not-autosave, RLS-gated writes, DB-side audit.
   and validate it) before writing any derived row. **No service-role on a normal user request route**,
   ever (this is the v3 invariant — `check-auth-safety.sh`).
 
-## 3. Storage model (design options — none created here)
-- **Bucket:** a single **private** Supabase Storage bucket for contract documents (e.g. `contracts`).
-  **No public bucket, no public URLs.** Reads are via **short-lived signed URLs** issued only after an
-  RLS authorization check; writes via signed upload URLs or a server-mediated upload, never a public PUT.
+## 3. Storage model (bucket NOT created; **validation + path helpers IMPLEMENTED PR #40**)
+- **Bucket (canonical name):** a single **private** Supabase Storage bucket **`contract-files`** for contract
+  documents. **No public bucket, no public URLs.** Reads are via **short-lived signed URLs** issued only after
+  an RLS authorization check; writes via a server-mediated upload (user-scoped client, never service-role,
+  never a public PUT). **The bucket itself is NOT created here** — it is a Supabase `storage`-schema object the
+  local harness can't host/test; it is created + policied via the hosted path ([20](./20_STAGING_HOSTED_APPLY_AND_CUTOVER_DISCIPLINE.md)).
 - **Source of truth = the DB `files` row**, not the Storage object. The object is opaque bytes; all
   authorization, status, and metadata live in Postgres under RLS.
-- **Object path pattern (server-derived, not user-controlled):**
+- **Object path pattern (server-derived, not user-controlled) — IMPLEMENTED (`buildContractFileObjectPath`):**
   `contracts/{tenant_id}/{file_id}.pdf` — `tenant_id` from resolved context, `file_id` a server-issued
-  UUID. The original filename is **never** in the path (stored as `original_filename` metadata only).
-  A Storage RLS policy / path convention then scopes objects to their tenant prefix as defense-in-depth.
-- **Validation before the bytes are trusted:** extension allowlist (`.pdf` only at first), declared
-  **MIME** (`application/pdf`), and **magic bytes** (`%PDF-` header) — all checked server-side; a
-  **max size** cap (e.g. 25 MB, TBD). Reject anything else.
+  UUID. **Both components must be server-issued UUIDs (a non-UUID/traversal value is rejected, so a
+  client-supplied tenant/path can never reach the path).** The original filename is **never** in the path
+  (sanitized + stored as `original_filename` display metadata only). A Storage RLS policy then scopes objects
+  to their tenant prefix as defense-in-depth (hosted-applied, not local — above).
+- **Validation before the bytes are trusted — IMPLEMENTED (`validateContractPdf`, `src/lib/files/pdf-validation.ts`,
+  pure + 16 unit tests):** non-empty → **max size** (`MAX_CONTRACT_FILE_BYTES` = 25 MiB) → extension (`.pdf`
+  only) → declared **MIME** (`application/pdf`) → **magic bytes** (`%PDF-` header) — all checked server-side
+  from the actual uploaded bytes (never a client-declared length/type). Reject anything else. **Not yet wired
+  to an upload action** (that needs the hosted bucket + object policies).
 - **Scan gate:** a `scan_status` (`pending` → `passed` / `failed` / `skipped`; column live in `0012`).
   **Extraction must not run until `scan_status = passed`.** The actual scanner (ClamAV/queued service)
   is out of scope here — the *status field + gate* is the design contract.
@@ -241,8 +254,10 @@ fields; the file upload does not itself create/finalize a contract.
 - **Next steps (each its own PR, with tests):** ~~(a) forward migration for the `files` columns (§4) +
   `gen-types`~~ — **DONE (`0012` / PR #34)**; ~~(b) RLS policies + the §5 tests~~ — **DONE (`0013` / PR #35
   — tenant-member SELECT + contract-write-authority INSERT; no UPDATE/DELETE/FOR ALL; T34)**; (c) private
-  Storage bucket + server-side validation ← **next**; (d) the extraction worker (out-of-request,
-  tenant-re-deriving) + strict-schema parsing; (e) the minimal UI (§9); (f) file/extraction audit; plus
-  the deferred **org-scoped `files` read**. **RISK-002 + RISK-016 stay OPEN; OMC/Flywheel cutover + new
+  Storage bucket + server-side validation — **server-side PDF validation + server-derived path helpers DONE
+  (`src/lib/files/pdf-validation.ts`, PR #40); the hosted private bucket + Storage object policies + the
+  upload action are the remaining `← next`** (hosted-gated — [20](./20_STAGING_HOSTED_APPLY_AND_CUTOVER_DISCIPLINE.md));
+  (d) the extraction worker (out-of-request, tenant-re-deriving) + strict-schema parsing; (e) the minimal UI
+  (§9); (f) file/extraction audit; plus the deferred **org-scoped `files` read**. **RISK-002 + RISK-016 stay OPEN; OMC/Flywheel cutover + new
   paid-customer onboarding stay BLOCKED** until the file surface is built, tested, and reviewed. `0012`/`0013` add
   the schema + RLS authorization only — `files` is still **not surfaced** (no upload/Storage/signed-URL/scan/AI/UI; no app DAL).

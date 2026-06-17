@@ -310,7 +310,7 @@ Any difference from legacy MUST be classified before cutover — `better-approve
 Two interleaved tracks. **Track A** continues the security/file path already in motion ([16](./16_CONTRACT_PDF_AI_EXTRACTION_DESIGN.md)); **Track B** is the broader replacement-parity build-out. Ranges are rough and depend on §9 confirmation; many B-items are themselves multi-PR. **Any hosted apply, staging/production deploy, or cutover step in either track follows the [20_STAGING_HOSTED_APPLY_AND_CUTOVER_DISCIPLINE](./20_STAGING_HOSTED_APPLY_AND_CUTOVER_DISCIPLINE.md) runbook** (staging-first, verify-after-apply, stop/rollback rules; RISK-001 open until a reviewed staging apply happens); connector credentials additionally follow [19](./19_CONNECTOR_CREDENTIAL_VAULT_DESIGN.md).
 
 **Track A — security / file path continuation (depends on the OPS gate for hosted use):**
-1. Private Supabase **Storage bucket** + server-side validation (extension/MIME/magic-byte/size + scan gate). *(A-storage)*
+1. Private Supabase **Storage bucket** + server-side validation (extension/MIME/magic-byte/size + scan gate). *(A-storage)* — **server-side validation + server-derived path helpers DONE (PR #40, `src/lib/files/pdf-validation.ts`); the hosted private `contract-files` bucket + Storage object policies + the upload action remain** (hosted-gated, [20](./20_STAGING_HOSTED_APPLY_AND_CUTOVER_DISCIPLINE.md); no service-role).
 2. **Upload server action** (upload-then-commit; writes the `files` row via the `0013` INSERT authority). *(A-storage)*
 3. **Signed-URL read path** + minimal file list/preview/download. *(A-storage)*
 4. **Extraction worker** (out-of-request, tenant-re-deriving; **no service-role app route**). *(A-extraction)*
