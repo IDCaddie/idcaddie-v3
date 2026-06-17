@@ -7,6 +7,17 @@ from PRs verified via `git log` / `gh pr list`.
 
 ---
 
+### PR #37 — Document OMC confirmation pass scaffolding · 2026-06-17
+- **Category:** parity governance — **docs/process-only.** No app code, route, migration, RLS, Storage, connector, package, or generated-type change. RLS stays **205**; migrations stay **0001–0013**; routes unchanged; RISK-002 + RISK-016 stay **open**; cutover stays **BLOCKED**.
+- **Creates [18_OMC_CONFIRMATION_PASS](./18_OMC_CONFIRMATION_PASS.md)** — the working process to confirm what OMC/Flywheel actually uses in the live app, so [17](./17_OMC_PRODUCTION_REPLACEMENT_PARITY_GATE.md)'s `probably`/`unknown` rows can be resolved from evidence. Sections: purpose; a confirmation status taxonomy (`confirmed-required`/`-not-used`/`-better-approved`/`-removed-approved`, `needs-demo`/`-screenshot`/`-data-sample`/`-owner-confirmation`/`-security-review`, `unconfirmed-blocker`); stakeholder/owner table; workshop agenda; a grouped questionnaire (core/admin/auth, apps, contracts, people/identity, licenses/spend, imports/connectors, exports/reports, files/PDF/AI, production cutover); a ~33-row workflow confirmation table mirroring doc 17 §4; an evidence checklist; a decision-log template; the required outputs; and non-goals.
+- **Doc 18 feeds doc 17; [17](./17_OMC_PRODUCTION_REPLACEMENT_PARITY_GATE.md) remains the binding go/no-go gate.** Running the pass does NOT make v3 ready and does NOT remove blockers by itself — a blocker only changes status when evidence + owner sign-off are recorded (doc 18 §8) AND the doc 17 row is updated.
+- **Unknown = blocker until confirmed.** Every workflow row starts `unconfirmed-blocker`/`needs-owner-confirmation`; a verbal "probably not used" is not enough for removal — removal needs a recorded owner + date + evidence.
+- **No secrets, ever.** The pass explicitly forbids collecting tokens/API keys/credentials (no Okta/Slack/Google/connector tokens); connector *existence* is confirmed verbally/visually, credential handling is a separate later security-reviewed step (vault — RISK-007). Sample exports/reports must be redacted.
+- **Updated doc 17** (opening, §2 requiredness semantics, §9 list) to reference doc 18 as the confirmation workflow; **updated** docs 00/06/09/10/11/14 to point at doc 18 and reaffirm: OMC is a production replacement (not a pilot); doc 17 is the binding gate; v3 is not production-replacement-ready; no risk closed.
+- **Tests run (local, verified):** `npm test` 51/51; lint clean; `tsc --noEmit` clean; `next build` clean (routes unchanged); `test-rls.sh` → 205 (`0001`–`0013`); `check-migration-safety`/`check-auth-safety`/`check-docs-updated` pass; `gen-types-local.sh` → no diff; no `* 2.*`/`* 3.*` strays. Docs-only diff.
+
+---
+
 ### PR #36 — Document OMC production replacement parity gate · 2026-06-17
 - **Category:** parity governance — **docs-only.** No migration, RLS, app code, route, package, or generated-type change. RLS stays **205**; migrations stay **0001–0013**; routes unchanged; RISK-002 + RISK-016 stay **open**.
 - **Creates [17_OMC_PRODUCTION_REPLACEMENT_PARITY_GATE](./17_OMC_PRODUCTION_REPLACEMENT_PARITY_GATE.md)** — the **canonical go/no-go gate** for replacing the live OMC/Flywheel production app with v3. If 11/14 and 17 disagree on cutover-readiness, **17 wins.** Sections: cutover principle, status taxonomy, hard blockers, the replacement parity matrix, the go/no-go checklist, the approved-difference process, the next-PR sequence, the honest estimate, and the standing rule for future agents.
