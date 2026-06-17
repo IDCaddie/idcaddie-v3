@@ -3,7 +3,7 @@
 **Canonical source for: build order and "what not to build yet".** Each stage maps to legacy→v3
 capability parity and the OMC cutover gate in [11_LEGACY_PARITY_AND_OMC_CHECKLIST](./11_LEGACY_PARITY_AND_OMC_CHECKLIST.md#6-updated-roadmap-next-prs-to-parity).
 
-> **The grounded, canonical replacement-PR sequence (Track A security/file path + Track B parity build-out) + the honest ~70–110-PR estimate now live in [17 §7/§8](./17_OMC_PRODUCTION_REPLACEMENT_PARITY_GATE.md).** OMC/Flywheel is a paying **production replacement, NOT a pilot** — build for full parity, no regressions; improvements only after replacement (17 §9). This doc is the staged build-order view; 17 §7 is the replacement plan of record.
+> **The grounded, canonical replacement-PR sequence (Track A security/file path + Track B parity build-out) + the honest ~70–110-PR estimate now live in [17 §7/§8](./17_OMC_PRODUCTION_REPLACEMENT_PARITY_GATE.md).** OMC/Flywheel is a paying **production replacement, NOT a pilot** — build for full parity, no regressions; improvements only after replacement (17 §9). **Before sizing/sequencing, run the OMC-confirmation pass via [18_OMC_CONFIRMATION_PASS](./18_OMC_CONFIRMATION_PASS.md)** (the questionnaire/workshop/decision-log that resolves doc 17's `probably`/`unknown` rows and narrows the estimate). This doc is the staged build-order view; 17 §7 is the replacement plan of record.
 Each stage is gated on
 the previous. Status uses the [taxonomy](./10_DOCS_INDEX.md#status-taxonomy). Stages 1–3 are
 `implemented`/`verified-local`/`ci-enforced`; Stages 4–6 ship **read-only** surfaces (`implemented`,

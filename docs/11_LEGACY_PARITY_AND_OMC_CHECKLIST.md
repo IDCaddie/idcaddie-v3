@@ -2,10 +2,11 @@
 
 > **The binding go/no-go cutover gate is now [17_OMC_PRODUCTION_REPLACEMENT_PARITY_GATE](./17_OMC_PRODUCTION_REPLACEMENT_PARITY_GATE.md)**
 > (the ~105-row grounded replacement matrix + the go/no-go checklist + the honest ~70–110-PR estimate).
-> This doc (11) is the **capability scorecard**; 17 is the **binding gate**. If they disagree on
-> cutover-readiness, **17 wins.** **OMC/Flywheel is a paying production-replacement customer (~$3.5k/mo),
-> NOT a pilot** — v3 must replace the live app with no missing/broken workflows; improvements come after
-> replacement.
+> This doc (11) is the **capability scorecard**; 17 is the **binding gate**; [18_OMC_CONFIRMATION_PASS](./18_OMC_CONFIRMATION_PASS.md)
+> is the **working confirmation process** (questionnaire/workshop/decision-log) that resolves doc 17's
+> `probably`/`unknown` rows from OMC evidence. If 11/18 disagree with 17 on cutover-readiness, **17 wins.**
+> **OMC/Flywheel is a paying production-replacement customer (~$3.5k/mo), NOT a pilot** — v3 must replace
+> the live app with no missing/broken workflows; improvements come after replacement.
 
 **Canonical source for: what v3 must preserve from the legacy Firebase app before moving the
 paying client off it, and the go/no-go to cut over.** This is a product-control doc — it tracks

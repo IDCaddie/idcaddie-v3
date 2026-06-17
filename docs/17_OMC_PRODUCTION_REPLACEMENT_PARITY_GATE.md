@@ -4,7 +4,10 @@
 production app with v3.** This doc is the authoritative cutover gate. [11](./11_LEGACY_PARITY_AND_OMC_CHECKLIST.md)
 is the capability scorecard and [14](./14_LEGACY_UX_WORKFLOW_PARITY_MAP.md) is the per-workflow UX
 contract + doctrine; **this doc decides whether cutover may happen at all.** If 11/14 and 17 ever
-disagree on cutover-readiness, **17 wins.**
+disagree on cutover-readiness, **17 wins.** [18_OMC_CONFIRMATION_PASS](./18_OMC_CONFIRMATION_PASS.md)
+is the **working confirmation process** that feeds this gate (the questionnaire + workshop + decision
+log that resolves the `probably`/`unknown` rows in §4); **18 feeds 17 — it does not replace it, and
+running it does not make v3 ready.**
 
 > **Standing business rule (do not soften):**
 > - OMC/Flywheel is **NOT a pilot.** They are a **paying production customer (~$3.5k/month).**
@@ -51,7 +54,7 @@ Used by the matrix (§4). Never blur these.
 | `unknown-needs-OMC-confirmation` | Whether OMC actually uses this is unconfirmed; required-ness can't be set until OMC confirms. |
 | `not-used-by-OMC` | Confirmed (by OMC) that OMC does not use this legacy workflow. Not a blocker. |
 
-**`Required for OMC cutover?` column semantics:** `yes` = required; `no` = not required; **`probably`/`unknown` = treated as REQUIRED-for-cutover until OMC confirms otherwise** (consistent with §1.4 "silence is a blocker, not a pass"). Every `probably`/`unknown` must be resolved to `yes`/`no` via the §9 OMC-confirmation pass before a go/no-go decision (§5).
+**`Required for OMC cutover?` column semantics:** `yes` = required; `no` = not required; **`probably`/`unknown` = treated as REQUIRED-for-cutover until OMC confirms otherwise** (consistent with §1.4 "silence is a blocker, not a pass"). Every `probably`/`unknown` must be resolved to `yes`/`no` **through the [18_OMC_CONFIRMATION_PASS](./18_OMC_CONFIRMATION_PASS.md) workflow** (the §9 confirmation list is the question set; doc 18 is the working questionnaire + decision log) before a go/no-go decision (§5). A verbal "probably not used" is not enough — removal needs a recorded owner + evidence (doc 18 §2/§8).
 
 ---
 
@@ -376,9 +379,12 @@ treat the high end as the planning assumption (do not plan around the optimistic
 - **Do not claim readiness.** Cutover is a NO until every §5 box is true.
 - **Fill the matrix from the running app, not from prior docs** — `unknown-needs-legacy-inspection` and
   `unknown-needs-OMC-confirmation` rows must be resolved with real evidence/confirmation, never invented.
-- **Run the §9 OMC-confirmation list early** — it sizes the entire replacement (§8).
+- **Run the §9 OMC-confirmation list early** — it sizes the entire replacement (§8). Use
+  [18_OMC_CONFIRMATION_PASS](./18_OMC_CONFIRMATION_PASS.md) as the working questionnaire/workshop/decision
+  log; record confirmations there (with owner + date + evidence), then update the §4 rows + §5 checklist here.
 
 ### OMC confirmation list (resolve these to size + de-risk the cutover)
+> **Work these through [18_OMC_CONFIRMATION_PASS](./18_OMC_CONFIRMATION_PASS.md)** — it expands each into a grouped questionnaire (§5), a workflow confirmation table (§6), an evidence checklist (§7), and a decision log (§8). Do not collect secrets/tokens during the pass (doc 18 §10).
 1. **SAML SSO:** does OMC authenticate via SAML? (If yes → hard blocker; absent in v3.)
 2. **SCIM provisioning:** does OMC provision login accounts and/or rosters via an IdP SCIM connector?
 3. **Connected IdP feed:** is at least one IdP (Okta most likely) actually connected with matching rules? (If none → the People/identity/UAR area is data-empty and far lower risk; if yes → UAR/Critical-Risk/orphaned-spend are blockers.)
