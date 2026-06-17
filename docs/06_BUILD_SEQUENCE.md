@@ -24,13 +24,13 @@ passed, CI green.
 | 2 | Auth/session skeleton | `implemented` (PR #6) |
 | 3 | Tenant/org context (read-only) | `implemented` (PR #9) |
 | 4 / 4b | Read-only app inventory + detail | `implemented` / `verified-local` (PR #13/#14) |
-| 5 | Contracts (read-only list + detail) | `partial` — read-only `implemented` (PR #19); writes **design only** (PR #25, doc 13) |
+| 5 | Contracts (read-only list + detail) | `partial` — read-only `implemented` (PR #19); write **backend path** `implemented` (PR #30 — DAL + actions, no UI); create/edit **UI** still `planned` (doc 13) |
 | 5b | Linked app↔contract panels (read-only) | `implemented` (PR #20) |
 | 6a–6d | App-user roster + match status + account summary (read-only) | `implemented` / `verified-local` (PR #21/#23/#24); `people` reads + app-user writes still `planned` |
 | 6b | Identity / matching read-scope design | `design` only (PR #22; match-status slice built PR #23) |
 | 7 | License rules / evaluations | `deferred` (default-deny) |
 | 8 | Files / invoices | `deferred` (default-deny) |
-| 9 | Audit-on-write + audit log UI | `planned` (write audit = future `SECURITY DEFINER` trigger, doc 13) |
+| 9 | Audit-on-write + audit log UI | contract audit-on-write `implemented` (PR #29 — `0010` `SECURITY DEFINER` trigger); audit log **UI** still `planned` |
 | 10 | Reports / exports | `deferred` |
 | 11 | Import flows | `deferred` |
 | 12 | Integrations / connectors | `deferred` |
@@ -128,6 +128,13 @@ passed, CI green.
 - **Goal:** record every accepted contract `INSERT`/`UPDATE` **before** any write surface exists. A DB-side `SECURITY DEFINER` `AFTER INSERT OR UPDATE` trigger `contracts_audit_on_write` appends one append-only `audit_logs` row per accepted write (`actor = auth.uid()`, curated non-sensitive `after_json`). Required because `audit_logs` is append-only with **no `authenticated` INSERT** — so audit MUST be DB-side, **never** a service-role route.
 - **Invisible:** **no** policy/authz change (existing RLS still decides writes), **no** UI/route/workflow change, **no** `DELETE`/`FOR ALL`, **no** service-role, **no** `database.types.ts` change. `AFTER`, so denied/failed writes never audit.
 - **Verified:** `test-rls.sh` 153 → **177** (T31 audit-on-write, T32 catalog). [13 §4](./13_CONTRACT_STEWARD_WRITE_DESIGN.md), [02 §4a](./02_SECURITY_AND_RLS.md). RISK-002 + RISK-016 open; cutover stays **blocked**. **Next: the write path, then create/edit UI matching legacy.**
+
+### Stage 5b″ — Contract write PATH ✅ (PR #30 — backend write path, no UI)
+- **Goal:** the safe server-side contract create/update **path** the future create/edit UI will call — gated by the existing RLS, never bypassing it. **No migration, no RLS/policy change, no UI, no route, no service-role, no `database.types.ts` change.** RLS stays **177**.
+- **DAL (`src/lib/data/contracts.ts`):** `createContractForCurrentUser` / `updateContractForCurrentUser` on the **user-scoped anon server client** (the same client as reads). RLS (`0004`) authorizes; the app does only session/context resolution + input validation (validation ≠ authz). `tenant_id` is resolved **server-side** (`resolveTenantContext` → `resolveWriteContextTenantId`), **never** taken from the caller; update never sets `tenant_id`. Typed `ContractWriteResult`; a denied/missing row collapses to `not_allowed` (no enumeration).
+- **Pure helpers (`src/lib/data/contract-write.ts`, unit-tested):** `parseContractWriteInput` (required `contract_name`, empty→null, default-bearing columns omitted when empty, date/uuid/number checks, PATCH semantics), `resolveWriteContextTenantId`, `classifyContractWriteError`. **Server actions (`contracts/actions.ts`, `"use server"`):** thin wrappers, **not wired to UI** (no route added).
+- **Audit inherited:** an accepted write is audited by the `0010` `AFTER` trigger automatically — **no** audit code, **no** service-role audit route.
+- **Verified:** `npm test` 12 → **36** (`contract-write.test.ts`, 24 cases). No new SQL — the authority + audit + no-DELETE/no-FOR-ALL are already proven by `org_rls_test.sql` **T9/T14/T20/T21/T31/T32** ([13 §7](./13_CONTRACT_STEWARD_WRITE_DESIGN.md)). RISK-002 + RISK-016 open; cutover stays **blocked**. **Next: the create/edit UI matching the legacy contract-form workflow.**
 
 ### Stage 5 (writes) · Stage 6 — People · Stage 7 — License rules/evaluations · Stage 8 — Files/invoices
 - **Goal:** the source-of-truth surfaces, read first then writes (steward-only). **Contract write model: [13](./13_CONTRACT_STEWARD_WRITE_DESIGN.md).**
