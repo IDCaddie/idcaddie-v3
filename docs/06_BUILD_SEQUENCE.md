@@ -188,7 +188,7 @@ passed, CI green.
 - **Rule (pre-committed):** preview before write · upsert + soft-delete (no blind full-replace, no hard delete) · provenance + idempotency · row-level audit · duplicate detection. Ties to legacy findings ([current-security-risk-map.md](./current-security-risk-map.md)). **Done:** non-destructive, audited, tested import.
 
 ### Stage 12 — Integrations/connectors (deferred)
-- **Rule:** credentials encrypted + service-role-only (never app tables/browser/logs/exports); dry-run; scoped tokens; no destructive deactivation without approval. Gated on a credential-vault design (RISK-007). **Done:** one connector behind the vault, idempotent, tested.
+- **Rule:** credentials encrypted + isolated-secret-access (never app tables/browser/logs/exports/types/request-paths); dry-run; scoped tokens; no destructive deactivation without approval. **The credential-vault path is now DESIGNED** ([19_CONNECTOR_CREDENTIAL_VAULT_DESIGN](./19_CONNECTOR_CREDENTIAL_VAULT_DESIGN.md), PR #38 — design only; RISK-007 still open); connectors are gated on it being **implemented + tested + reviewed** first. **Done:** one connector behind the vault, idempotent, tested.
 
 ### Stage 13 — Org hierarchy / `resource_org_links` (deferred)
 - **Goal:** parent→child org inheritance and/or relationship-based access replacing column union (RISK-003/004). **Done:** migration + RLS + tests; column model superseded intentionally.

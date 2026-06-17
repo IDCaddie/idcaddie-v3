@@ -106,7 +106,7 @@ A single 3-hour workshop (or split across sessions). Drive it from doc 17 §4; r
 - **Do NOT collect production credentials.**
 - **Do NOT ask for Okta / Slack / Google / any connector tokens or API keys in this pass.** Connector
   *existence* is confirmed verbally/visually; credential handling is a separate, later, security-reviewed
-  step (the vault — RISK-007), never here.
+  step (the vault — RISK-007, designed in [19_CONNECTOR_CREDENTIAL_VAULT_DESIGN](./19_CONNECTOR_CREDENTIAL_VAULT_DESIGN.md), not yet implemented), never here.
 
 ---
 
@@ -157,7 +157,7 @@ question to `unconfirmed-blocker`.
 - Are monthly billing / cost reports used?
 
 ### Imports / connectors
-> Confirm which connectors **exist / are live** — verbal/visual only. **Do NOT request or record tokens, keys, or service-account JSON** (see §4/§10); credential handling is the separate later vault step (RISK-007).
+> Confirm which connectors **exist / are live** — verbal/visual only. **Do NOT request or record tokens, keys, or service-account JSON** (see §4/§10); credential handling is the separate later vault step (RISK-007, designed in [19_CONNECTOR_CREDENTIAL_VAULT_DESIGN](./19_CONNECTOR_CREDENTIAL_VAULT_DESIGN.md)).
 - Which connectors are active today?
   - Okta?  Google Workspace?  Microsoft Entra?  Slack?  Salesforce?  HubSpot?  Atlassian?  Zoom?  SCIM?
 - Which app scrapers are active?
