@@ -1,4 +1,13 @@
 import { createClient } from "@/lib/supabase/server";
+import { resolveTenantContext } from "@/lib/auth/tenant-context";
+import {
+  parseContractWriteInput,
+  resolveWriteContextTenantId,
+  classifyContractWriteError,
+  isUuid,
+  type ContractWriteInput,
+} from "./contract-write";
+import type { TablesInsert, TablesUpdate } from "@/lib/database.types";
 
 // Server-only, read-only data access for `contracts`. Same shape as `src/lib/data/apps.ts`.
 //
@@ -132,4 +141,96 @@ export async function listContractsForCurrentUser(): Promise<DataResult<Contract
       endDate: c.end_date,
     })),
   };
+}
+
+// ── Contract WRITE path (create / update) — gated entirely by RLS ───────────────────────────────
+//
+// These are the safe server-side write functions behind the future contract create/edit UI (which
+// does NOT exist yet). They use the SAME user-scoped anon server client as the reads — NEVER a
+// service-role / admin client — so Postgres RLS (0004: tenant editor+ OR procurement-org manager;
+// paying_org never grants write; no DELETE / FOR ALL) is the authorization boundary. The app does no
+// authorization itself beyond session/context resolution + input validation (docs/13 §4).
+//
+// tenant_id is resolved SERVER-SIDE from the actor's context and is NEVER taken from the caller
+// (ContractWriteInput has no tenant_id field). An accepted write is audited automatically by the 0010
+// AFTER INSERT/UPDATE trigger (contract.created / contract.updated, actor = the caller) — this code
+// does NOT (and must not) write audit_logs itself. A denied/failed write is never audited (the
+// trigger is AFTER ROW). Errors collapse to a generic "not allowed or not found" so the path cannot
+// enumerate other tenants' contracts.
+
+export type ContractWriteResult =
+  | { ok: true; id: string }
+  | { ok: false; error: "invalid_input"; issues: string[] }
+  | { ok: false; error: "not_authenticated" }
+  | { ok: false; error: "no_tenant" }
+  | { ok: false; error: "not_allowed" }
+  | { ok: false; error: "query_failed" };
+
+// Create a contract in the actor's resolved tenant. RLS decides whether the actor (tenant editor+, or
+// manager of the supplied procurement_org_id) may insert; the 0010 trigger audits an accepted insert.
+export async function createContractForCurrentUser(
+  input: ContractWriteInput,
+): Promise<ContractWriteResult> {
+  const parsed = parseContractWriteInput(input, { mode: "create" });
+  if (!parsed.ok) return { ok: false, error: "invalid_input", issues: parsed.issues };
+
+  const context = await resolveTenantContext();
+  if (!context) return { ok: false, error: "not_authenticated" };
+  // A failed context read returns a truthy errorContext (status='error') — treat it as a retryable
+  // server error, not "no tenant" (which would be a misleading permanent label for a transient read).
+  if (context.status === "error") return { ok: false, error: "query_failed" };
+  const tenantId = resolveWriteContextTenantId(context);
+  if (!tenantId) return { ok: false, error: "no_tenant" };
+
+  // parse(create) guarantees contract_name; split it out so the NOT NULL column is a plain string
+  // (no non-null assertion). tenant_id comes ONLY from the resolved context above.
+  const { contract_name, ...rest } = parsed.columns;
+  if (!contract_name) {
+    return { ok: false, error: "invalid_input", issues: ["contract_name is required"] };
+  }
+  const payload: TablesInsert<"contracts"> = { ...rest, contract_name, tenant_id: tenantId };
+
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("contracts")
+    .insert(payload)
+    .select("id")
+    .single();
+
+  if (error) {
+    console.error("[data/contracts] createContractForCurrentUser write rejected");
+    return { ok: false, error: classifyContractWriteError(error.code) };
+  }
+  return { ok: true, id: data.id };
+}
+
+// Update an existing contract's own fields (PATCH — only the provided fields change). tenant_id is
+// never set here, so the row's tenant is immutable via this path. RLS (USING the existing row +
+// WITH CHECK the resulting row) + the trigger decide; an accepted update is audited (contract.updated).
+// A row the actor may not update is invisible to the UPDATE (0 rows) → the same generic "not allowed
+// or not found" as a non-existent id (no enumeration).
+export async function updateContractForCurrentUser(
+  contractId: string,
+  input: ContractWriteInput,
+): Promise<ContractWriteResult> {
+  if (typeof contractId !== "string" || !isUuid(contractId)) {
+    return { ok: false, error: "invalid_input", issues: ["contractId must be a UUID"] };
+  }
+  const parsed = parseContractWriteInput(input, { mode: "update" });
+  if (!parsed.ok) return { ok: false, error: "invalid_input", issues: parsed.issues };
+
+  const payload: TablesUpdate<"contracts"> = parsed.columns;
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("contracts")
+    .update(payload)
+    .eq("id", contractId)
+    .select("id");
+
+  if (error) {
+    console.error("[data/contracts] updateContractForCurrentUser write rejected");
+    return { ok: false, error: classifyContractWriteError(error.code) };
+  }
+  if (!data || data.length === 0) return { ok: false, error: "not_allowed" };
+  return { ok: true, id: data[0].id };
 }
