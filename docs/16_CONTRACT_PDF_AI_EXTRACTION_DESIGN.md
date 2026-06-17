@@ -92,7 +92,10 @@ AI parsing, suggestion-not-autosave, RLS-gated writes, DB-side audit.
   documents. **No public bucket, no public URLs.** Reads are via **short-lived signed URLs** issued only after
   an RLS authorization check; writes via a server-mediated upload (user-scoped client, never service-role,
   never a public PUT). **The bucket itself is NOT created here** — it is a Supabase `storage`-schema object the
-  local harness can't host/test; it is created + policied via the hosted path ([20](./20_STAGING_HOSTED_APPLY_AND_CUTOVER_DISCIPLINE.md)).
+  local harness can't host/test (**empirically proven, PR #41 / [21](./21_STORAGE_LOCAL_HARNESS_FEASIBILITY.md)**:
+  no `storage` schema in the plain-`postgres:16` harness; storage-api enforcement isn't pure SQL). It is created +
+  policied + **verified via the hosted path** ([20](./20_STAGING_HOSTED_APPLY_AND_CUTOVER_DISCIPLINE.md); the
+  [21 §6](./21_STORAGE_LOCAL_HARNESS_FEASIBILITY.md) Storage object-policy checklist) — **no local `storage` shim.**
 - **Source of truth = the DB `files` row**, not the Storage object. The object is opaque bytes; all
   authorization, status, and metadata live in Postgres under RLS.
 - **Object path pattern (server-derived, not user-controlled) — IMPLEMENTED (`buildContractFileObjectPath`):**
