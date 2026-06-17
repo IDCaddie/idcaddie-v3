@@ -50,10 +50,19 @@ export default async function ContractDetailPage({
       ) : (
         <>
           <header className="space-y-1">
-            <h1 className="text-xl font-semibold">{result.data.contractName}</h1>
+            <div className="flex items-center justify-between gap-4">
+              <h1 className="text-xl font-semibold">{result.data.contractName}</h1>
+              <Link
+                href={`/contracts/${result.data.id}/edit`}
+                className="rounded border border-zinc-300 px-3 py-1.5 text-sm dark:border-zinc-700"
+              >
+                Edit
+              </Link>
+            </div>
             <p className="text-sm text-zinc-600 dark:text-zinc-400">
-              Read-only contract detail. Visibility is enforced by Postgres RLS. No editing here yet;
-              linked apps, invoices, and files are deferred.
+              Contract detail. Visibility is enforced by Postgres RLS. You can edit the supported
+              fields (RLS decides whether a save is allowed); linked apps, invoices, files, deletion,
+              and PDF/AI extraction are not built here.
             </p>
           </header>
 

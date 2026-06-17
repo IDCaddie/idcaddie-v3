@@ -1,7 +1,7 @@
 # 00 · Product Status — ID Caddie v3
 
 **Canonical source for: current status.** First doc to read. Last verified against the
-repo on 2026-06-16 (PRs through #29 merged; #30 adds the contract **write path** — server-side DAL + `"use server"` actions, no UI). Status words are defined in [10_DOCS_INDEX](./10_DOCS_INDEX.md#status-taxonomy).
+repo on 2026-06-16 (PRs through #30 merged; #31 adds the contract **create/edit UI** — `/contracts/new` + `/contracts/[id]/edit`, **Partial** legacy parity). Status words are defined in [10_DOCS_INDEX](./10_DOCS_INDEX.md#status-taxonomy).
 
 ## What ID Caddie v3 is
 An enterprise SaaS-governance platform: the source of truth for *what apps a company
@@ -30,34 +30,36 @@ is intentionally approved**. The per-workflow parity contract and the hard cutov
 workflow parity, not on backend/RLS readiness alone.**
 
 ## Current phase
-**Read-only governance foundation + contract write design.** The secure data/RLS foundation,
-the auth/session skeleton, and read-only tenant/org context resolution are complete, and a set of
-**read-only product surfaces** now ship on top of them (all RLS-scoped, no writes):
+**Read-only governance foundation + first contract WRITE workflow.** The secure data/RLS foundation,
+the auth/session skeleton, and read-only tenant/org context resolution are complete, a set of
+**read-only product surfaces** ship on top of them, and the **first user-visible write workflow** —
+contract create/edit — now exists (RLS-gated, audited):
 - `/apps` inventory (PR #13) and `/apps/[id]` app detail (PR #14)
 - `/contracts` list and `/contracts/[id]` detail (PR #19)
 - linked app↔contract panels on detail pages (PR #20)
 - `/apps/[id]` app-user roster (PR #21), match-status column (PR #23), and account-summary card (PR #24)
+- **`/contracts/new` + `/contracts/[id]/edit` contract create/edit (PR #31 — first write UI; Partial parity)**
+
+**Built (contract write workflow):** the contract **write path** — server-side DAL
+(`createContractForCurrentUser`/`updateContractForCurrentUser`) + `"use server"` actions (PR #30) on the
+**user-scoped anon client**, gated by the existing RLS, `tenant_id` resolved server-side, audit inherited
+from `0010` (PR #29's DB-side `SECURITY DEFINER` `AFTER INSERT/UPDATE` trigger, actor = `auth.uid()`) — and
+now the **create/edit UI** (PR #31): `/contracts/new` + `/contracts/[id]/edit`, posting to those actions.
+**Partial** legacy parity — supported v3 columns only ([15](./15_LEGACY_CONTRACT_FORM_INSPECTION.md)).
 
 **Design-only (docs, nothing built):** identity matching read-scope ([12](./12_IDENTITY_MATCHING_READ_SCOPE.md),
-PR #22 — only the match-*status* slice is built) and the contract steward **write** path
-([13](./13_CONTRACT_STEWARD_WRITE_DESIGN.md) — the write *RLS authority* (`0004`), *audit* (`0010`), and now the
-*server-side write path* (DAL + actions, PR #30) exist, but the create/edit **UI** does **not**).
+PR #22 — only the match-*status* slice is built).
 
-**Built (invisible backend):** contract **audit-on-write** — a DB-side `SECURITY DEFINER` `AFTER INSERT/UPDATE`
-trigger on `contracts` (`0010`, PR #29) that appends one append-only `audit_logs` row per accepted write,
-actor = `auth.uid()`; and the contract **write path** — server-side DAL (`createContractForCurrentUser`/
-`updateContractForCurrentUser`) + `"use server"` actions (PR #30) on the **user-scoped anon client**, gated by
-the existing RLS, with `tenant_id` resolved server-side and audit inherited from `0010`. No policy/RLS/route/UI
-change; no user-visible effect.
-
-**Not built:** anything applied to a **hosted Supabase environment**; contract create/edit **UI** (the write *path*
-+ *audit* now exist — the UI and legacy parity do not); archive / soft-delete; `app_contracts` writes; UAR / unmanaged-account report; identity matching *algorithm*;
+**Not built:** anything applied to a **hosted Supabase environment**; the legacy contract fields v3 has no
+column for (`category`, `procurementDate`, `notes`, `poNumber`, `autoRenew`, `monthToMonth`, `commodity_*`,
+`validated`) and the PDF-upload/AI-extraction tab (so contract parity is **Partial**, not Same); contract
+**delete**/archive / soft-delete; `app_contracts` writes (link/unlink); UAR / unmanaged-account report; identity matching *algorithm*;
 `people` org-read (stays tenant-only); `identity_accounts` read (default-deny); license rules/evaluation;
 spend/chargeback; files/invoices; people directory; provisioning; tenant switching; imports/exports;
 connectors. **OMC/Flywheel cutover and new paid-customer onboarding remain blocked.**
 
 ## Merged PRs
-**PRs #1–#29 are merged** (main @ `30a073f`); **PR #30 (contract write path — DAL + server actions) is this PR.** The full
+**PRs #1–#30 are merged** (main @ `a32d172`); **PR #31 (contract create/edit UI — `/contracts/new` + `/contracts/[id]/edit`) is this PR.** The full
 per-PR engineering log is the canonical source — see [05_ENGINEERING_CHANGELOG](./05_ENGINEERING_CHANGELOG.md);
 do not maintain a second PR table here (it drifts). Milestone summary:
 - **Foundation / discipline:** RLS foundation + tests (#1/#2), migration discipline (#3), clean-app
@@ -68,8 +70,8 @@ do not maintain a second PR table here (it drifts). Milestone summary:
   `app_contracts` read tenant-bind `0009` (#27), contract **audit-on-write** `0010` (#29).
 - **Read-only surfaces:** app inventory (#13), app detail (#14), contracts list+detail (#19), linked panels (#20),
   app-user roster (#21), match status (#23), account summary (#24).
-- **Write path (backend only, no UI):** contract write server actions + DAL (#30) — RLS-gated, audit inherited from `0010`.
-- **Design / parity docs (nothing user-facing built):** identity matching read-scope (#22), contract steward write design (#25), docs truth pass (#26), legacy UX/workflow parity map (#28).
+- **Contract writes:** write server actions + DAL (#30, backend, RLS-gated, audit inherited from `0010`); **create/edit UI** `/contracts/new` + `/contracts/[id]/edit` (#31 — first write workflow; **Partial** legacy parity).
+- **Design / parity docs (nothing user-facing built):** identity matching read-scope (#22), contract steward write design (#25), docs truth pass (#26), legacy UX/workflow parity map (#28), legacy contract-form inspection (#31 — [15](./15_LEGACY_CONTRACT_FORM_INSPECTION.md)).
 
 Migration `0001` (core schema) predates the numbered PRs (rebuild starter pack).
 
@@ -78,7 +80,7 @@ Migration `0001` (core schema) predates the numbered PRs (rebuild starter pack).
 |------|--------|
 | Migrations `0001`–`0010` (core schema, org RLS, related-org read, delete hardening, child integrity, org-scoped child reads + tenant-bind hardening, contract audit-on-write) | `implemented`, `verified-local`, `ci-enforced`; `not-hosted-applied` |
 | RLS model (tenant isolation, steward writes, related-org reads, audit immutability, no admin self-promotion) | `implemented`, `verified-local` (177 assertions in `org_rls_test.sql`), `ci-enforced` (PR #2) |
-| Contract **audit-on-write** (DB-side `SECURITY DEFINER` `AFTER INSERT/UPDATE` trigger → append-only `audit_logs`, actor = `auth.uid()`) | `implemented` (PR #29 — `0010`); `verified-local` (T31/T32: allowed writes audit once with the correct actor; denied/failed writes never audit; no direct `authenticated` audit insert; contracts keep 0 DELETE / 0 FOR ALL). Invisible backend; **write path/UI still not built** |
+| Contract **audit-on-write** (DB-side `SECURITY DEFINER` `AFTER INSERT/UPDATE` trigger → append-only `audit_logs`, actor = `auth.uid()`) | `implemented` (PR #29 — `0010`); `verified-local` (T31/T32: allowed writes audit once with the correct actor; denied/failed writes never audit; no direct `authenticated` audit insert; contracts keep 0 DELETE / 0 FOR ALL). Invisible backend; the write **path** (PR #30) and **create/edit UI** (PR #31) now exist and inherit this audit |
 | No normal hard-delete of core evidence tables (`organizations`/`apps`/`contracts`/`app_contracts`/`people`/`app_users`) | `implemented` (PR #16 — `0004`; `FOR ALL` split into `INSERT`+`UPDATE`, no `DELETE`); `verified-local` (T17/T24/T25). Archive/soft-delete UI **not built** |
 | Same-tenant child integrity (cross-tenant child/link writes fail at the DB) | `implemented` (PR #17 — `0005`; composite `(parent_ref, tenant_id)` FKs); `verified-local` (T26). Org-scoped child-table **reads** still deferred (RISK-002) |
 | Migration safety (numbering, unsafe keywords) | `ci-enforced` (PR #3) |
@@ -93,13 +95,13 @@ Migration `0001` (core schema) predates the numbered PRs (rebuild starter pack).
 | Read-only contracts list + detail (`/contracts`, `/contracts/[id]`) | **`partial` — read-only only** (PR #19 — server-rendered, typed DAL `src/lib/data/contracts.ts`, route id lookup-only, related-org RLS). Direct `contracts` columns; **linked apps now shown read-only (PR #20)**; invoices/files still NOT shown (default-deny — RISK-002). No create/edit/delete/import/export. `verified-local` (RLS spot-check: owner sees both tenant contracts; related-org user sees only its related; unrelated org-only + non-member → not_found) |
 | Read-only linked apps ↔ contracts panels (`/contracts/[id]`, `/apps/[id]`) | **`partial` — read-only only** (PR #20 — `0006` org-scoped `SELECT` on `app_contracts`, typed DAL `src/lib/data/links.ts`). Shows only links to apps/contracts the user may read; **no linking/unlinking/editing**. `verified-local` (T28 + spot-check: org-only users see only related links; cross-tenant + non-member → none) |
 | App CI (lint · vitest · `tsc --noEmit` · `next build`) + deterministic build (system fonts, no remote font fetch) | `implemented` + `ci-enforced` (PR #15 — `.github/workflows/app-ci.yml`); metadata/README hygiene fixed |
-| Invoices · files · license surfaces · app-contract linking *writes* · contract create/edit **UI** | `deferred` (default-deny tables or write surfaces — not built; RISK-002 open for reads). Contract write *backend path* (DAL + actions) shipped PR #30 — see the "Contract **write** path" row below; the create/edit **UI** is still deferred |
-| Product **write** workflows (create/edit/people directory/reports/imports/exports) | `planned` / `deferred` — **read-only** apps, app detail, contracts, contract detail, linked panels, app-user roster, match status, and account summary already ship (see rows above); no write UI yet |
+| Invoices · files · license surfaces · app-contract linking *writes* · contract **delete/archive** | `deferred` (default-deny tables or write surfaces — not built; RISK-002 open for reads). Contract create/edit **UI** shipped PR #31 (see the "Contract **write**" row below); delete/archive, links, files stay deferred |
+| Product **write** workflows | **first write workflow shipped** — contract create/edit UI (PR #31, Partial parity); people directory / reports / imports / exports still `planned`/`deferred`. Other product surfaces (apps, app detail, linked panels, app-user roster, match status, account summary) remain **read-only** |
 | Read-only app-user roster (`/apps/[id]` "App users") | **`partial` — read-only only** (PR #21 — `0007` org-scoped `SELECT` on `app_users`, typed DAL `src/lib/data/app-users.ts`). Direct `app_users` columns only; org-only users see only users of apps they may read. **No** matching/provisioning/utilization/edit. `verified-local` (T29 + spot-check: org-only users see only related apps' users; cross-tenant + non-member → none) |
 | Child-table read scope (canonical map: [02 §8](./02_SECURITY_AND_RLS.md), pinned by T27/T28/T29/T30) | `partial` — `app_contracts` (`0006`) + `app_users` (`0007`) + `app_user_identity_matches` (`0008`) now **org-scoped read**; **tenant-only** (`people`) + **default-deny** (`identity_accounts`/`license_*`/`files`/`invoices`) remain; org-only users read none of those. Org-scoped reads for the rest still `deferred` (RISK-002, narrowed not closed) |
 | Read-only app-user **match status** (`/apps/[id]` "Match" column) | **`partial` — read-only status only** (PR #23 — `0008` org-scoped `SELECT` on `app_user_identity_matches`, typed DAL `src/lib/data/app-user-matches.ts`). Shows matched/unmatched (+ optional method/confidence) for app_users you may read; **no `person_id`, no person name, no identity-account details, no PII**. `verified-local` (T30 + spot-check). **No matching algorithm / merge / UAR / orphaned status / provisioning.** `people` tenant-only + `identity_accounts` default-deny (unchanged). RISK-002 + RISK-016 open |
 | Read-only **account summary** (`/apps/[id]` "Account summary" card) | **`partial` — read-only, derived** (PR #24 — pure helper `src/lib/data/app-account-intelligence.ts`, unit-tested). Counts from **visible `app_users` + visible matches only**: visible/matched/unmatched/match-rate, status breakdown, stale candidates (>90d). **No migration / RLS change.** **NOT UAR** — no `people`/`identity_accounts`/license/files/invoices/PII; no orphaned/deactivated/managed label, no matching algorithm, no provisioning. RISK-002 + RISK-016 open |
-| Contract **write** path (create/edit) | **`partial` — backend write PATH built, no UI.** Write **RLS authority** (`0002`/`0004` — tenant editor+ **or** procurement-org `manager`; `paying_org_id`=read-only; **no `DELETE`/`FOR ALL`**; tenant-bound by trigger) + **audit-on-write** (`0010`, PR #29) + now the **server-side write path** (PR #30 — DAL `createContractForCurrentUser`/`updateContractForCurrentUser` + `"use server"` actions on the user-scoped anon client; `tenant_id` resolved server-side; never service-role; audit inherited). `verified-local` (`contract-write.test.ts` 24 cases + RLS T9/T14/T20/T21/T31/T32; no new SQL — RLS stays 177). **Still not built:** contract create/edit **UI** and **legacy parity**. No archive/soft-delete, no `app_contracts` writes, no hard delete. Design: [13_CONTRACT_STEWARD_WRITE_DESIGN](./13_CONTRACT_STEWARD_WRITE_DESIGN.md). RISK-002 + RISK-016 open; OMC cutover blocked |
+| Contract **write** (create/edit) | **`partial` — backend path + create/edit UI built; Partial legacy parity.** Write **RLS authority** (`0002`/`0004` — tenant editor+ **or** procurement-org `manager`; `paying_org_id`=read-only; **no `DELETE`/`FOR ALL`**; tenant-bound by trigger) + **audit-on-write** (`0010`, PR #29) + **server-side write path** (PR #30 — DAL + `"use server"` actions, anon client, `tenant_id` server-resolved, audit inherited) + **create/edit UI** (PR #31 — `/contracts/new` + `/contracts/[id]/edit`, posts to the #30 actions; RLS is the boundary, not client-side role checks; denied save → generic, no enumeration). `verified-local` (`contract-write.test.ts` 24 + `contract-form-shared.test.ts` 8 + RLS T9/T14/T20/T21/T31/T32; no new SQL — RLS stays 177). **Partial parity** — v3 supports only its own columns; legacy `category`/`procurementDate`/`notes`/`poNumber`/`autoRenew`/`monthToMonth`/`commodity_*`/`validated` + PDF/AI upload have no v3 column/surface ([15](./15_LEGACY_CONTRACT_FORM_INSPECTION.md)). No delete/archive/soft-delete, no `app_contracts` writes, no files. Design: [13](./13_CONTRACT_STEWARD_WRITE_DESIGN.md). RISK-002 + RISK-016 open; OMC cutover blocked |
 | `resource_org_links` relationship table + org hierarchy | `deferred` |
 | Imports/exports, integrations/connectors, credential vault | `deferred` |
 | Legacy Firebase | `legacy-production` (still serving customers) |
@@ -153,8 +155,9 @@ One-line decisions; deep rationale in the linked canonical docs.
 - **Safely keep building on this foundation?** Yes — *after* `scripts/check-docs-updated.sh`,
   `check-migration-safety.sh`, and `test-rls.sh` pass. The RLS model is tested and CI-enforced.
 
-## Next recommended PRs (the read-only surfaces + contract audit `0010` (#29) + contract write path (#30) are done)
-1. **Contract create/edit UI** — the create/edit form posting to the existing `createContractAction`/`updateContractAction` (PR #30); RLS is the boundary (no client-side authz filtering), a denied write surfaces a generic "could not save / not allowed" (no enumeration). Must **match the legacy contract-form workflow** ([14 §3/§9](./14_LEGACY_UX_WORKFLOW_PARITY_MAP.md)) — inspect exact legacy fields/buttons/filters first (`needs legacy inspection`).
-2. First reviewed **hosted-Supabase apply** (RISK-001 — still nothing applied to any hosted env).
+## Next recommended PRs (read-only surfaces + contract audit `0010` (#29) + write path (#30) + create/edit UI (#31) are done)
+1. **Close the contract-form parity gaps** — only after deciding each consciously: add v3 columns + form fields for the legacy fields v3 lacks (`category`, `procurementDate`, `notes`, `poNumber`, `autoRenew`, `monthToMonth`) **if** product wants them (each needs a forward migration + types regen), and the PDF-upload/AI-extraction + file attachments (needs `files` read/write + storage — RISK-002). Until then contract parity stays **Partial**, not Same ([15](./15_LEGACY_CONTRACT_FORM_INSPECTION.md)).
+2. **App-contract link/unlink** and the next legacy write workflows ([14 §8](./14_LEGACY_UX_WORKFLOW_PARITY_MAP.md)).
+3. First reviewed **hosted-Supabase apply** (RISK-001 — still nothing applied to any hosted env).
 
 (These are `planned`. Each must follow [07_P0_REVIEW_CHECKLIST.md](./07_P0_REVIEW_CHECKLIST.md) and update [04](./04_RISK_REGISTER.md)/[05](./05_ENGINEERING_CHANGELOG.md). Detailed ordering: [09_AGENT_HANDOFF](./09_AGENT_HANDOFF.md).)

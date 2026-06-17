@@ -20,11 +20,19 @@ export default async function ContractsPage() {
             ← Back
           </Link>
         </div>
-        <h1 className="text-xl font-semibold">Contracts</h1>
+        <div className="flex items-center justify-between gap-4">
+          <h1 className="text-xl font-semibold">Contracts</h1>
+          <Link
+            href="/contracts/new"
+            className="rounded bg-zinc-900 px-3 py-1.5 text-sm text-white dark:bg-white dark:text-zinc-900"
+          >
+            New contract
+          </Link>
+        </div>
         <p className="text-sm text-zinc-600 dark:text-zinc-400">
-          Read-only list of the contracts you may see. Visibility is enforced by Postgres RLS — this
-          page lists exactly what your tenant/related-org access allows. No editing here yet; linked
-          apps, invoices, and files are deferred.
+          The contracts you may see — visibility is enforced by Postgres RLS. You can create and edit
+          contracts (RLS decides whether a save is allowed); linked apps, invoices, files, deletion,
+          and PDF/AI extraction are not built here.
         </p>
       </header>
 

@@ -77,7 +77,7 @@ Rejected-pattern evidence: [current-security-risk-map.md](./current-security-ris
 - **Trusted server jobs (service-role):** isolated; only for operations RLS can't express (audit writes, license evaluation, future imports). Never reachable from the browser. — `deferred` (no such code exists yet).
 
 ## Current vs target
-- **Current:** Postgres schema + RLS (tested locally + CI) + an auth/session skeleton + read-only tenant/org context resolution (`src/lib/auth/tenant-context.ts`) + **read-only product surfaces** (apps, app detail, contracts, contract detail, linked panels, app-user roster, match status, account summary), all RLS-scoped. No tenant switching, **no write UI**, nothing hosted-applied.
+- **Current:** Postgres schema + RLS (tested locally + CI) + an auth/session skeleton + read-only tenant/org context resolution (`src/lib/auth/tenant-context.ts`) + **read-only product surfaces** (apps, app detail, contracts, contract detail, linked panels, app-user roster, match status, account summary), all RLS-scoped, **plus the first write surface: contract create/edit** (`/contracts/new`, `/contracts/[id]/edit` — PR #31, RLS-gated, audited, Partial parity). No tenant switching, no other write UI, nothing hosted-applied.
 - **Target (incremental, see [06](./06_BUILD_SEQUENCE.md)):** auth/session → tenant/org context → read-only inventory → contracts/people → writes → files/imports → connectors.
 
 ## What must exist before UI reads data
@@ -89,7 +89,7 @@ lets the app *use* the foundation correctly. It reads only the user's own member
 user-scoped server client (never service-role, never client-side filtering, never JWT claims).
 
 ## Intentionally missing today
-Write UI / product workflows · tenant switching · user provisioning/invites · imports/exports · connectors/credentials ·
+Other write UI / product workflows (contract create/edit ships — PR #31; rest pending) · tenant switching · user provisioning/invites · imports/exports · connectors/credentials ·
 org-hierarchy traversal · remaining child-table org scoping (`people` stays tenant-only; `identity_accounts`/`license_*`/`files`/`invoices` default-deny) ·
-contract write path/UI/audit · archive/soft-delete · hosted deployment. All tracked in
+contract-form parity gaps (legacy fields with no v3 column; PDF/AI/files) · archive/soft-delete · hosted deployment. All tracked in
 [04_RISK_REGISTER.md](./04_RISK_REGISTER.md) and sequenced in [06_BUILD_SEQUENCE.md](./06_BUILD_SEQUENCE.md).
