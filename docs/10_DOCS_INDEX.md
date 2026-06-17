@@ -45,6 +45,7 @@ apply, UAR, imports/exports are `planned`/`deferred`**.
 | [13_CONTRACT_STEWARD_WRITE_DESIGN](./13_CONTRACT_STEWARD_WRITE_DESIGN.md) | contract write design + guardrails (RLS authority `0004`; **audit `0010` (#29) + write path (#30) + create/edit UI (#31)** all built; legacy parity **Partial**) | security reviewers, implementers | living |
 | [14_LEGACY_UX_WORKFLOW_PARITY_MAP](./14_LEGACY_UX_WORKFLOW_PARITY_MAP.md) | the **legacy→v3 parity contract** ("same product, better backend") + the per-workflow cutover gate | product owner, reviewers, implementers | living (update every parity-bound PR) |
 | [15_LEGACY_CONTRACT_FORM_INSPECTION](./15_LEGACY_CONTRACT_FORM_INSPECTION.md) | **inspection note** — the legacy contract create/edit workflow + exact field mapping + not-ported anti-patterns (evidence for PR #31's Partial parity) | reviewers, future implementer | reference |
+| [16_CONTRACT_PDF_AI_EXTRACTION_DESIGN](./16_CONTRACT_PDF_AI_EXTRACTION_DESIGN.md) | **design + security plan** — contract PDF upload + AI extraction (PR #33, design-only): trust boundaries, tenant-bound Storage + signed URLs, future `files` schema/RLS + tests, AI suggestions-not-autosave, legacy anti-patterns not ported | security reviewers, future implementer | design (update when built) |
 
 ## Existing docs (reconciled — linked, not duplicated)
 | Doc | Canonical for | Note |
