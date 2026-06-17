@@ -90,6 +90,8 @@ made. **Do not invent them.** Parity status: `Same` · `Better-approved` · `Par
 | `/contracts/[id]` | Contract detail + linked apps panel + **Edit** link | `contracts/[id]/page.tsx` | **Partial** | org names not shown; no invoices/files; no gantt | related-org RLS read; linked-apps via `0006`/`0009` | **blocker** until gantt + child surfaces parity |
 
 ## 5. Release / cutover gate (hard rules)
+> **The binding, itemized go/no-go checklist now lives in [17 §5](./17_OMC_PRODUCTION_REPLACEMENT_PARITY_GATE.md)** (with the ~105-row grounded replacement matrix in 17 §4). This doc's gate is the doctrine; **17 is the binding gate — if they disagree on readiness, 17 wins.** **OMC is a production replacement, NOT a pilot.**
+
 1. **OMC/Flywheel cutover is BLOCKED** until **every** `P0/P1` legacy workflow (the "Cutover blocker = Yes" rows above) is **Same**, **Better-approved**, or **Removed-approved**.
 2. **New paid-customer onboarding is BLOCKED** until at least the same workflow gate is satisfied **for that customer's profile** (the subset of workflows that customer actually uses) — *and* the backend is hosted-applied and verified (RISK-001).
 3. **Any deviation from legacy must be explicitly approved and documented** here (as `Better-approved` or `Removed-approved`) before it ships in a cutover-bound build.

@@ -7,6 +7,18 @@ from PRs verified via `git log` / `gh pr list`.
 
 ---
 
+### PR #36 — Document OMC production replacement parity gate · 2026-06-17
+- **Category:** parity governance — **docs-only.** No migration, RLS, app code, route, package, or generated-type change. RLS stays **205**; migrations stay **0001–0013**; routes unchanged; RISK-002 + RISK-016 stay **open**.
+- **Creates [17_OMC_PRODUCTION_REPLACEMENT_PARITY_GATE](./17_OMC_PRODUCTION_REPLACEMENT_PARITY_GATE.md)** — the **canonical go/no-go gate** for replacing the live OMC/Flywheel production app with v3. If 11/14 and 17 disagree on cutover-readiness, **17 wins.** Sections: cutover principle, status taxonomy, hard blockers, the replacement parity matrix, the go/no-go checklist, the approved-difference process, the next-PR sequence, the honest estimate, and the standing rule for future agents.
+- **Reframes OMC as a production replacement, not a pilot:** paying ~$3.5k/mo customer; v3 must replace the live app with no missing/broken workflows; improvements only after replacement via planned rollouts.
+- **Grounded in a real legacy inspection** (not prior docs): read `…/IDCaddie_Repo-main` (`frontend-v2/src/app/(authenticated)/`, `webapp/functions/src/*`) across ~40 routes + the Cloud-Function subsystems (appScraping/scim/billing/reports/storage/email/scheduled/logging). The matrix has ~105 grounded workflow rows; the blocker list + OMC-confirmation list are evidence-based.
+- **Honest estimate:** the prior rough ~20–35 PR figure is optimistic for full parity; the grounded inspection puts a from-#35 full replacement at **~70–110 PRs** (the actual number depends on the §9 OMC-confirmation pass — narrow OMC usage could compress toward ~25–40). **Not "a few PRs away."**
+- **No risk closed.** RISK-002/RISK-016 stay open; the gate also tracks RISK-001 (no hosted apply), RISK-007 (no credential vault), RISK-012, RISK-009, RISK-013. **OMC/Flywheel cutover + new paid-customer onboarding stay BLOCKED; v3 is not production-replacement-ready.**
+- **Updated:** docs 00/04/06/09/10/11/14 to point at doc 17 as the canonical replacement gate and reframe OMC as production-replacement (not pilot).
+- **Tests run (local, verified):** `npm test` 51/51; lint clean; `tsc --noEmit` clean; `next build` clean (routes unchanged); `test-rls.sh` → 205 (`0001`–`0013`); `check-migration-safety`/`check-auth-safety`/`check-docs-updated` pass; `gen-types-local.sh` → no diff; no `* 2.*`/`* 3.*` strays. Docs-only diff.
+
+---
+
 ### PR #35 — Add files RLS policies + tests · 2026-06-17
 - **Category:** RLS / security — migration + SQL tests + docs. The §5 step of [16](./16_CONTRACT_PDF_AI_EXTRACTION_DESIGN.md): the first **tested** `files` RLS policies, so the table is no longer zero-policy. **No Storage bucket, upload route, signed URLs, scan/AI/OCR, Edge Function/worker, service-role, UI, or app DAL/route — `files` is still NOT surfaced.** No table/column change; the only generated-type change is the new policy helper function. RLS `org_rls_test.sql` **186 → 205**.
 - **Migration `0013_files_rls_policies.sql` (forward-only, policies only):**
