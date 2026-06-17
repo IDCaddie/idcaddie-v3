@@ -121,8 +121,13 @@ passed, CI green.
 ### Stage 5b — Contract steward write DESIGN 📐 (PR #25, design only — nothing built)
 - **Goal:** decide the safe contract **write** model **before** any create/edit UI. Recorded in [13_CONTRACT_STEWARD_WRITE_DESIGN](./13_CONTRACT_STEWARD_WRITE_DESIGN.md). **No migration, no RLS change, no UI, no audit, no write path.**
 - **Verified finding:** the write **RLS authority already exists** (`0002`/`0004`): INSERT/UPDATE for tenant owner/admin/editor **or** procurement-org `manager`; **`paying_org_id` = read only** (read ≠ write); **no `DELETE`/`FOR ALL`**; tenant-bound by the `enforce_owning_org_tenant` trigger. Matches the recommended steward model.
-- **What a write PR must add (gated by that RLS):** a server-action write path on the **anon user-scoped client** (never service-role; validation is not authorization); **audit-on-write** via a DB-side `SECURITY DEFINER` trigger (because `audit_logs` is append-only with no `authenticated` INSERT path — *not* a service-role route; a future migration); and UI (RLS is the boundary, no client-side authz filtering). Land doc 13 §7 tests **before** UI. `paying_org_id` must never grant write.
+- **What a write PR must add (gated by that RLS):** a server-action write path on the **anon user-scoped client** (never service-role; validation is not authorization); and UI (RLS is the boundary, no client-side authz filtering). Land doc 13 §7 tests **before** UI. `paying_org_id` must never grant write.
 - **Out of scope:** contract archive/soft-delete (separate design), `app_contracts` link writes, files/invoices/license. OMC/Flywheel cutover stays **blocked**.
+
+### Stage 5b′ — Contract audit-on-write ✅ (PR #29, `0010` — invisible backend)
+- **Goal:** record every accepted contract `INSERT`/`UPDATE` **before** any write surface exists. A DB-side `SECURITY DEFINER` `AFTER INSERT OR UPDATE` trigger `contracts_audit_on_write` appends one append-only `audit_logs` row per accepted write (`actor = auth.uid()`, curated non-sensitive `after_json`). Required because `audit_logs` is append-only with **no `authenticated` INSERT** — so audit MUST be DB-side, **never** a service-role route.
+- **Invisible:** **no** policy/authz change (existing RLS still decides writes), **no** UI/route/workflow change, **no** `DELETE`/`FOR ALL`, **no** service-role, **no** `database.types.ts` change. `AFTER`, so denied/failed writes never audit.
+- **Verified:** `test-rls.sh` 153 → **177** (T31 audit-on-write, T32 catalog). [13 §4](./13_CONTRACT_STEWARD_WRITE_DESIGN.md), [02 §4a](./02_SECURITY_AND_RLS.md). RISK-002 + RISK-016 open; cutover stays **blocked**. **Next: the write path, then create/edit UI matching legacy.**
 
 ### Stage 5 (writes) · Stage 6 — People · Stage 7 — License rules/evaluations · Stage 8 — Files/invoices
 - **Goal:** the source-of-truth surfaces, read first then writes (steward-only). **Contract write model: [13](./13_CONTRACT_STEWARD_WRITE_DESIGN.md).**

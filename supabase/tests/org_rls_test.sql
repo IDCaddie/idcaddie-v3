@@ -1120,4 +1120,139 @@ end $$;
 reset role;
 delete from public.app_user_identity_matches where id='15000000-0000-0000-0000-0000000000ee';  -- clean up (superuser)
 
+-- ── Test 31: contract audit-on-write (migration 0010) ────────────────────────
+-- The AFTER INSERT/UPDATE trigger on contracts appends one audit_logs row per ACCEPTED
+-- write, capturing actor = auth.uid() from the caller's JWT (even though the function is
+-- SECURITY DEFINER). It does NOT change who may write — existing RLS (0004) still decides.
+-- Proven below: allowed writes audit exactly once with the correct actor; denied/no-op and
+-- failed writes do NOT audit; paying-org read never becomes write. The audit insert never
+-- goes through a direct `authenticated` path (T6/T8 already prove that is blocked).
+
+-- 31a: tenant editor INSERT → exactly ONE 'contract.created' row; actor = editor (NOT null,
+-- not a fixed admin, not service_role — it is the writing user's JWT sub).
+select set_config('request.jwt.claims','{"sub":"0a000000-0000-0000-0000-0000000000ed"}',false); -- editor_a (tenant editor)
+set role authenticated;
+insert into public.contracts (id, tenant_id, contract_name) values
+  ('c0000000-0000-0000-0000-0000000000d1','11111111-1111-1111-1111-111111111111','Contract Audit Editor');
+reset role;
+do $$ declare v int; a uuid; act text; res text; tn uuid; begin
+  select count(*) into v from public.audit_logs where resource_id='c0000000-0000-0000-0000-0000000000d1';
+  assert v = 1, format('T31 editor INSERT must write exactly 1 audit row, saw %s', v);
+  select actor_user_id, action, resource_type, tenant_id into a, act, res, tn
+    from public.audit_logs where resource_id='c0000000-0000-0000-0000-0000000000d1';
+  assert act = 'contract.created', format('T31 INSERT action should be contract.created, got %s', act);
+  assert res = 'contract', format('T31 audit resource_type should be contract, got %s', res);
+  assert tn = '11111111-1111-1111-1111-111111111111', format('T31 audit tenant must be NEW.tenant_id, got %s', tn);
+  assert a is not null, 'T31 audit actor must NOT be null';
+  assert a = '0a000000-0000-0000-0000-0000000000ed', format('T31 audit actor must be the writing editor (auth.uid from JWT), got %s', a);
+end $$;
+
+-- 31b: org procurement-manager INSERT (Org A1 contract) also audits once — and the actor is a
+-- DIFFERENT user than 31a, proving the actor is read live from the JWT, not hardcoded.
+select set_config('request.jwt.claims','{"sub":"0a000000-0000-0000-0000-0000000000a1"}',false); -- mgr_a1 (manager of Org A1)
+set role authenticated;
+insert into public.contracts (id, tenant_id, contract_name, procurement_org_id) values
+  ('c0000000-0000-0000-0000-0000000000d2','11111111-1111-1111-1111-111111111111','Contract Audit Mgr','1a1a1a1a-0000-0000-0000-000000000001');
+reset role;
+do $$ declare v int; a uuid; begin
+  select count(*) into v from public.audit_logs where resource_id='c0000000-0000-0000-0000-0000000000d2' and action='contract.created';
+  assert v = 1, format('T31 org-manager INSERT must write exactly 1 created audit row, saw %s', v);
+  select actor_user_id into a from public.audit_logs where resource_id='c0000000-0000-0000-0000-0000000000d2' and action='contract.created';
+  assert a = '0a000000-0000-0000-0000-0000000000a1', format('T31 audit actor must be the writing org-manager, got %s', a);
+end $$;
+
+-- 31c: an allowed UPDATE writes exactly one 'contract.updated' row (and does not duplicate the create row).
+select set_config('request.jwt.claims','{"sub":"0a000000-0000-0000-0000-0000000000a1"}',false); -- mgr_a1
+set role authenticated;
+do $$ declare v int; begin
+  update public.contracts set status='renewed' where id='c0000000-0000-0000-0000-0000000000d2';
+  get diagnostics v = row_count; assert v = 1, format('T31 mgr_a1 should update its own-org contract (%s rows)', v);
+end $$;
+reset role;
+do $$ declare v int; a uuid; begin
+  select count(*) into v from public.audit_logs where resource_id='c0000000-0000-0000-0000-0000000000d2' and action='contract.updated';
+  assert v = 1, format('T31 allowed UPDATE must write exactly 1 updated audit row, saw %s', v);
+  select count(*) into v from public.audit_logs where resource_id='c0000000-0000-0000-0000-0000000000d2' and action='contract.created';
+  assert v = 1, format('T31 UPDATE must not duplicate the create row (created still 1, saw %s)', v);
+  select actor_user_id into a from public.audit_logs where resource_id='c0000000-0000-0000-0000-0000000000d2' and action='contract.updated';
+  assert a = '0a000000-0000-0000-0000-0000000000a1', format('T31 update audit actor must be the writer, got %s', a);
+end $$;
+
+-- 31d: paying-org READ does not become WRITE. agency_u relates to Contract A-central ONLY via
+-- paying_org_id (it can read it, T20), but cannot UPDATE it (steward = Central Proc) and cannot
+-- INSERT a contract into an org it does not manage. Neither denied write audits anything.
+select set_config('request.jwt.claims','{"sub":"0a000000-0000-0000-0000-0000000000c1"}',false); -- agency_u (Org A3, paying-related reader)
+set role authenticated;
+do $$ declare v int; begin
+  update public.contracts set status='hijacked' where id='c0000000-0000-0000-0000-0000000000cc'; -- Contract A-central
+  get diagnostics v = row_count; assert v = 0, format('T31 paying-org reader must NOT update a non-steward contract (%s rows)', v);
+  begin
+    insert into public.contracts (id, tenant_id, contract_name, procurement_org_id) values
+      ('c0000000-0000-0000-0000-0000000000d3','11111111-1111-1111-1111-111111111111','Contract Audit Agency','1a1a1a1a-0000-0000-0000-0000000000cc'); -- Central Proc (agency_u not a manager)
+  exception when insufficient_privilege or check_violation then null; -- denied: for this INSERT the BEFORE enforce_owning_org_tenant trigger sees Central Proc as RLS-hidden to agency_u → NULL org → check_violation (before the contract-write WITH CHECK is reached); either way the write is rejected and never audited — expected
+  end;
+end $$;
+reset role;
+do $$ declare v int; begin
+  select count(*) into v from public.audit_logs where resource_id='c0000000-0000-0000-0000-0000000000cc' and action='contract.updated';
+  assert v = 0, format('T31 denied UPDATE must NOT audit (A-central updated rows=%s)', v);
+  select count(*) into v from public.audit_logs where resource_id='c0000000-0000-0000-0000-0000000000d3';
+  assert v = 0, format('T31 denied INSERT must NOT audit (saw %s rows for d3)', v);
+end $$;
+
+-- 31e: an unrelated org member (mgr_a2, Org A2) cannot UPDATE an Org A1 contract → 0 rows, and the
+-- denied update adds NO audit row (the d2 'updated' count stays at the single row from 31c).
+select set_config('request.jwt.claims','{"sub":"0a000000-0000-0000-0000-0000000000a3"}',false); -- mgr_a2 (Org A2)
+set role authenticated;
+do $$ declare v int; begin
+  update public.contracts set status='hijacked' where id='c0000000-0000-0000-0000-0000000000d2'; -- Org A1 contract (31b)
+  get diagnostics v = row_count; assert v = 0, format('T31 unrelated org member must NOT update Org A1 contract (%s rows)', v);
+end $$;
+reset role;
+do $$ declare v int; begin
+  select count(*) into v from public.audit_logs where resource_id='c0000000-0000-0000-0000-0000000000d2' and action='contract.updated';
+  assert v = 1, format('T31 denied cross-org UPDATE must NOT add an audit row (updated still 1, saw %s)', v);
+end $$;
+
+-- 31f: a write REJECTED by enforce_owning_org_tenant (cross-tenant org pointer) raises BEFORE the
+-- AFTER trigger fires → the failed write is NOT audited.
+select set_config('request.jwt.claims','{"sub":"0a000000-0000-0000-0000-000000000001"}',false); -- owner_a (tenant editor)
+set role authenticated;
+do $$ declare ok boolean := false; begin
+  begin
+    insert into public.contracts (id, tenant_id, contract_name, procurement_org_id) values
+      ('c0000000-0000-0000-0000-0000000000df','11111111-1111-1111-1111-111111111111','Contract Audit XT','2b2b2b2b-0000-0000-0000-000000000001'); -- Org B1 (tenant B)
+    ok := false;
+  exception when check_violation then ok := true; end;
+  assert ok, 'T31 cross-tenant procurement_org_id must be rejected by the integrity trigger';
+end $$;
+reset role;
+do $$ declare v int; begin
+  select count(*) into v from public.audit_logs where resource_id='c0000000-0000-0000-0000-0000000000df';
+  assert v = 0, format('T31 a rejected (failed) write must NOT audit, saw %s rows for df', v);
+end $$;
+
+-- ── Test 32: structural guarantees (policy catalog + trigger shape) ───────────
+-- Assert the security SHAPE straight from the catalog, not only behaviorally: contracts keeps NO
+-- destructive policy; audit_logs grants NO direct write; the audit trigger is the expected
+-- SECURITY DEFINER AFTER INSERT/UPDATE trigger.
+reset role;
+do $$ declare v int; begin
+  select count(*) into v from pg_policies where schemaname='public' and tablename='contracts' and cmd='DELETE';
+  assert v = 0, format('T32 contracts must have 0 DELETE policies, saw %s', v);
+  select count(*) into v from pg_policies where schemaname='public' and tablename='contracts' and cmd='ALL';
+  assert v = 0, format('T32 contracts must have 0 FOR ALL policies, saw %s', v);
+  -- audit_logs: no INSERT/UPDATE/DELETE/ALL policy → no `authenticated` direct-write path (append happens
+  -- only via the SECURITY DEFINER trigger); UPDATE/DELETE also blocked by reject_audit_mutation (T6).
+  select count(*) into v from pg_policies where schemaname='public' and tablename='audit_logs' and cmd in ('INSERT','UPDATE','DELETE','ALL');
+  assert v = 0, format('T32 audit_logs must have no INSERT/UPDATE/DELETE/ALL policy, saw %s', v);
+  select count(*) into v from pg_proc where proname='audit_contract_write' and prosecdef;
+  assert v = 1, format('T32 audit_contract_write must be SECURITY DEFINER, saw %s', v);
+  -- trigger exists, is per-ROW (bit 1; the fn dereferences NEW.*), AFTER (bit 2 unset), fires on INSERT (bit 4) and UPDATE (bit 16).
+  select count(*) into v from pg_trigger
+    where tgrelid='public.contracts'::regclass and tgname='contracts_audit_on_write'
+      and not tgisinternal and (tgtype & 1) <> 0 and (tgtype & 2) = 0 and (tgtype & 4) <> 0 and (tgtype & 16) <> 0;
+  assert v = 1, format('T32 contracts_audit_on_write must be an AFTER INSERT OR UPDATE FOR EACH ROW trigger, saw %s', v);
+end $$;
+
 do $$ begin raise notice 'ALL ORG-RLS ASSERTIONS PASSED'; end $$;

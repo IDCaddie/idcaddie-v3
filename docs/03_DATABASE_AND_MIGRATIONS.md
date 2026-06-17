@@ -21,6 +21,7 @@ links them rather than restating:
 | `0007_org_scoped_app_users_read.sql` | One `SELECT` policy making `app_users` **org-scoped for read** — read a row iff you can read the linked **app** (explicit tenant-bind, mirrors `0003`). SELECT-only, no `DELETE`. Proven by T29 (incl. T29h corrupt-row defense). | PR #21 |
 | `0008_org_scoped_app_user_identity_matches_read.sql` | One `SELECT` policy making `app_user_identity_matches` **org-scoped for read** — read a match iff you can read the linked **`app_user`** (explicit tenant-bind). Exposes match *status*, no PII. SELECT-only, no `DELETE`. Proven by T30. | PR #23 |
 | `0009_harden_app_contracts_read_tenant_bind.sql` | **Defense-in-depth:** replaces the `0006` org-scoped `SELECT` on `app_contracts` with one that pins `a.tenant_id`/`c.tenant_id = app_contracts.tenant_id` explicitly (matching `0007`/`0008`). **Valid-row behavior unchanged**; a planted FK-bypassed corrupt cross-tenant link is now denied. SELECT-only, no `DELETE`/`FOR ALL`; `0006` not edited. Proven by T28h. | PR #27 |
+| `0010_contracts_audit_on_write.sql` | **Contract audit-on-write:** a `SECURITY DEFINER` `AFTER INSERT OR UPDATE` trigger `contracts_audit_on_write` (function `public.audit_contract_write`) appends one append-only `audit_logs` row per **accepted** contract write — `action`=`contract.created`/`contract.updated`, `resource_id`=`NEW.id`, `actor_user_id`=`auth.uid()` (the caller, not the owner/service-role), curated non-sensitive metadata in `after_json`. **No policy/authz change** (existing RLS still decides writes); **no** DELETE / `FOR ALL`; **no** `authenticated` INSERT on `audit_logs`; **no** service-role. `AFTER`, so denied/failed writes never audit. Invisible backend (no schema column / generated-type change). Proven by T31/T32. | PR #29 |
 
 ## Workflow (summary — full rules in [migration-workflow.md](./migration-workflow.md))
 1. **Local first.** Never develop against hosted Supabase; never use service-role keys for normal dev.
@@ -87,4 +88,4 @@ Then add positive + negative tests to `supabase/tests/org_rls_test.sql`.
 - ❌ a `SELECT` policy without a tenant condition (directly or via helper).
 - ❌ frontend filtering used as a security boundary.
 - ❌ a service-role workaround to "get around" a too-strict RLS policy — fix the policy + test it.
-- ❌ editing any merged migration (`0001`–`0009`) — fix forward with a new `000N_*.sql`.
+- ❌ editing any merged migration (`0001`–`0010`) — fix forward with a new `000N_*.sql`.

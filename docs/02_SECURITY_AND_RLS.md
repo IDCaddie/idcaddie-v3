@@ -4,9 +4,10 @@
 re-explaining RLS. Implemented in `supabase/migrations/0002_org_scoped_rls.sql`,
 `0003_org_access_union.sql`, `0004_destructive_delete_hardening.sql`, and
 `0006_org_scoped_app_contracts_read.sql`, `0007_org_scoped_app_users_read.sql`, and
-`0008_org_scoped_app_user_identity_matches_read.sql`, and
-`0009_harden_app_contracts_read_tenant_bind.sql`; proven by
-`supabase/tests/org_rls_test.sql` (153 assertions, T1–T30, `verified-local`, `ci-enforced` via
+`0008_org_scoped_app_user_identity_matches_read.sql`,
+`0009_harden_app_contracts_read_tenant_bind.sql`, and
+`0010_contracts_audit_on_write.sql`; proven by
+`supabase/tests/org_rls_test.sql` (177 assertions, T1–T32, `verified-local`, `ci-enforced` via
 PR #2). Schema: [v3-data-model.md](./v3-data-model.md).
 Design rationale & legacy evidence: [v3-security-model.md](./v3-security-model.md),
 [current-security-risk-map.md](./current-security-risk-map.md).
@@ -57,6 +58,25 @@ normal roles, and (b) a `BEFORE UPDATE OR DELETE` trigger `audit_logs_no_mutatio
 including `BYPASSRLS` `service_role` — covering plain
 DML, writable CTEs, upserts, and `MERGE`. Inserts come only from trusted server paths
 (service-role / SECURITY DEFINER). Deletes are blocked even for retention (see gap below).
+
+### 4a. Audit-on-write (contracts) — DB-side, never service-role
+Because `audit_logs` has **no `authenticated` INSERT policy**, an audit row can only be
+appended by a trusted path. `0010` (PR #29) does this the safe way: a `SECURITY DEFINER`
+`AFTER INSERT OR UPDATE` trigger `contracts_audit_on_write` (function
+`public.audit_contract_write`, owned by the migration owner, `search_path = public`) appends
+**one** `audit_logs` row per **accepted** contract write — `action` = `contract.created` /
+`contract.updated`, `resource_type` = `contract`, `resource_id` = `NEW.id`, `tenant_id` =
+`NEW.tenant_id`, and `actor_user_id` = `auth.uid()`. SECURITY DEFINER changes only the
+executing *role* (so it may append to the append-only table); it does **not** change session
+GUCs, so `auth.uid()` still resolves to the **caller** (the writing user), never the owner or
+`service_role`. It is **AFTER**, so RLS-denied (0 rows) and integrity-rejected (raise) writes
+never reach it — failed writes are **not** audited. It changes **no** authorization: the
+existing write RLS (§3, §4b) still decides who may write; no DELETE / `FOR ALL` is added, and
+no `authenticated` INSERT is opened on `audit_logs`. This is the **only** sanctioned audit
+mechanism — a service-role app route is forbidden (it would also bypass tenant RLS everywhere).
+Proven by T31 (allowed writes audit once, correct dynamic actor; denied/failed writes do not
+audit) and T32 (catalog: contracts 0 DELETE / 0 `FOR ALL`; `audit_logs` no write policy; the
+function is SECURITY DEFINER; the trigger is `AFTER INSERT OR UPDATE`).
 
 ## 4b. No hard-delete of core evidence (destructive-delete hardening)
 `0004` removes normal authenticated **hard-delete** from the core business/evidence tables —
@@ -125,12 +145,14 @@ manage all membership rows; **admins** manage only non-`owner` rows and cannot w
 | 19 | Org-only user reads an `app_contracts` link tied to an app/contract they **cannot** read (or a cross-tenant / non-member read); a planted FK-bypassed corrupt cross-tenant link | 0 rows; reads only links to a readable app **or** contract; corrupt link denied | `0006` org-scoped `SELECT` + `0009` explicit tenant-bind (reuses `apps`/`contracts` RLS; tenant-bound by `0005` + the explicit clause) | T28, T28h |
 | 20 | Org-only user reads `app_users` for an app they **cannot** read (or a cross-tenant / non-member read) | 0 rows; reads only users of apps they can read | `0007` org-scoped `SELECT` (reuses `apps` RLS; tenant-bound by `0005`) | T29 |
 | 21 | Org-only user reads `app_user_identity_matches` for an app_user they **cannot** read (or cross-tenant / non-member); a match read grants no `people`/`identity_accounts` read | 0 rows; reads only matches of readable app_users; `people`/`identity_accounts` stay 0 | `0008` org-scoped `SELECT` (reuses `app_users` RLS; explicit tenant-bind) | T30 |
+| 22 | An **accepted** contract `INSERT`/`UPDATE` (by any allowed writer) leaves no trail; or the actor is forged/null/service-role | exactly **one** append-only `audit_logs` row per accepted write, `actor_user_id` = the writing user (`auth.uid()`), never null/owner/service-role | `0010` `SECURITY DEFINER` `AFTER` trigger `contracts_audit_on_write` (does not change write authz) | T31 |
+| 23 | A **denied** write (RLS 0 rows / unrelated-org) or a **failed** write (cross-tenant org pointer → raise) writes an audit row; or the trigger opens a direct audit-insert / DELETE / `FOR ALL` path | no audit row for denied/failed writes; contracts keep 0 DELETE / 0 `FOR ALL`; `audit_logs` keeps no `authenticated` write policy | `AFTER`-trigger semantics + unchanged policy catalog | T31, T32 |
 
-Test labels map to the `-- Test N` blocks in `org_rls_test.sql` (30 scenarios; T3+4 and
+Test labels map to the `-- Test N` blocks in `org_rls_test.sql` (32 scenarios; T3+4 and
 T22+23 are combined blocks).
 
 ## 8. Read-scope inventory — what each table actually exposes (canonical)
-Derived from live `pg_policies` on a fresh `0001`–`0006` DB (the SQL, **not** prose) and proven by
+Derived from live `pg_policies` on a fresh `0001`–`0010` DB (the SQL, **not** prose) and proven by
 **T27**/**T28**. This is the single source of truth for read access; other docs link here. Three read classes
 decide whether a table is safe to surface: **tenant+org** (org-only users can read), **tenant-only**
 (tenant members read every tenant row; org-only users read nothing), and **default-deny** (no `SELECT`
@@ -148,7 +170,7 @@ policy — unreadable by any normal `authenticated` user; only service-role / `S
 | `people` | core/child | **tenant members only — NOT org-scoped** | ❌ not until org-scoped (RISK-002) |
 | `app_users` | child | tenant members **+ related-org** — readable if you can read the linked **app** (`0007`) | ✅ read-only roster on `/apps/[id]` (PR #21); no edit/provision |
 | `app_contracts` | link | tenant members **+ related-org** — readable if you can read the linked **app OR contract** (`0006`) | ✅ read-only linked panels (PR #20); no link/unlink UI |
-| `audit_logs` | audit | tenant members (append-only; insert via trusted paths) | read-only viewer later |
+| `audit_logs` | audit | tenant members (append-only; insert only via trusted `SECURITY DEFINER` paths — e.g. contract audit-on-write `0010`; **no** `authenticated` INSERT) | read-only viewer later |
 | `identity_accounts` | child | **default-deny** (no policy) | ❌ no read policy |
 | `app_user_identity_matches` | link | tenant members **+ related-org** — readable if you can read the linked **app_user** (`0008`) | ✅ read-only **match status** on `/apps/[id]` (PR #23); no PII, no edit |
 | `license_rules` | child | **default-deny** (no policy) | ❌ no read policy |
