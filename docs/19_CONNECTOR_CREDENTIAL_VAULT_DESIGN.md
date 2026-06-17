@@ -270,7 +270,10 @@ These tests must exist (mirroring the `org_rls_test.sql` discipline) before cred
   never tokens/keys/credentials.** Confirming "OMC uses Okta + Google" is fine; collecting an Okta token is not,
   and is explicitly out of scope of the confirmation pass (doc 18 §4/§10).
 - **Credential collection waits** until this vault design is **implemented and reviewed** (the §8 tests green,
-  hosted-applied, verified). No real secret is collected before then.
+  hosted-applied, verified). No real secret is collected before then. The vault's **hosted apply +
+  staging-first rollout follows [20_STAGING_HOSTED_APPLY_AND_CUTOVER_DISCIPLINE](./20_STAGING_HOSTED_APPLY_AND_CUTOVER_DISCIPLINE.md)**
+  (staging Supabase apply + verification before production; per-environment secrets; stop/rollback rules) —
+  so vault implementation is gated by **both** this design (19) **and** the doc 20 apply discipline.
 - **[17_OMC_PRODUCTION_REPLACEMENT_PARITY_GATE](./17_OMC_PRODUCTION_REPLACEMENT_PARITY_GATE.md) cutover remains
   BLOCKED** until the connector workflows OMC actually uses are implemented, tested, hosted-applied, and verified
   — the vault is a **prerequisite** for any connector implementation (doc 17 §3/§4.6/§7 Track B).

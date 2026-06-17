@@ -307,7 +307,7 @@ Any difference from legacy MUST be classified before cutover — `better-approve
 
 ## 7. Next recommended PR sequence (from #35)
 
-Two interleaved tracks. **Track A** continues the security/file path already in motion ([16](./16_CONTRACT_PDF_AI_EXTRACTION_DESIGN.md)); **Track B** is the broader replacement-parity build-out. Ranges are rough and depend on §9 confirmation; many B-items are themselves multi-PR.
+Two interleaved tracks. **Track A** continues the security/file path already in motion ([16](./16_CONTRACT_PDF_AI_EXTRACTION_DESIGN.md)); **Track B** is the broader replacement-parity build-out. Ranges are rough and depend on §9 confirmation; many B-items are themselves multi-PR. **Any hosted apply, staging/production deploy, or cutover step in either track follows the [20_STAGING_HOSTED_APPLY_AND_CUTOVER_DISCIPLINE](./20_STAGING_HOSTED_APPLY_AND_CUTOVER_DISCIPLINE.md) runbook** (staging-first, verify-after-apply, stop/rollback rules; RISK-001 open until a reviewed staging apply happens); connector credentials additionally follow [19](./19_CONNECTOR_CREDENTIAL_VAULT_DESIGN.md).
 
 **Track A — security / file path continuation (depends on the OPS gate for hosted use):**
 1. Private Supabase **Storage bucket** + server-side validation (extension/MIME/magic-byte/size + scan gate). *(A-storage)*
