@@ -64,7 +64,7 @@ spend/chargeback; files/invoices; people directory; provisioning; tenant switchi
 connectors. **OMC/Flywheel cutover and new paid-customer onboarding remain blocked** — the full blocker list + the ~105-row replacement parity matrix are in [17_OMC_PRODUCTION_REPLACEMENT_PARITY_GATE](./17_OMC_PRODUCTION_REPLACEMENT_PARITY_GATE.md). **v3 is NOT production-replacement-ready;** a grounded legacy inspection (PR #36) puts full parity at **~70–110 PRs** from current state (pending OMC-confirmation of actual usage).
 
 ## Merged PRs
-**PRs #1–#44 are merged** (main @ `53562c3`); **PR #45 (staging schema & storage apply evidence — docs-only, creates doc 25; the hosted apply was attempted and correctly NOT executed — CLI found linked to PRODUCTION, staging unreachable, agent never runs hosted applies; **production NOT touched, nothing applied, RISK-001 stays OPEN**) is this PR.** The full
+**PRs #1–#44 are merged** (main @ `53562c3`); **PR #47 (staging schema & storage apply evidence — docs-only, creates doc 25; the hosted apply was attempted and correctly NOT executed — CLI found linked to PRODUCTION, staging unreachable, agent never runs hosted applies; **production NOT touched, nothing applied, RISK-001 stays OPEN**) is this PR.** The full
 per-PR engineering log is the canonical source — see [05_ENGINEERING_CHANGELOG](./05_ENGINEERING_CHANGELOG.md);
 do not maintain a second PR table here (it drifts). Milestone summary:
 - **Foundation / discipline:** RLS foundation + tests (#1/#2), migration discipline (#3), clean-app
