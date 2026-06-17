@@ -5,11 +5,10 @@ Read this + [00_PRODUCT_STATUS](./00_PRODUCT_STATUS.md) before doing anything. R
 also live in `AGENTS.md` / `claude/CLAUDE.md`.
 
 ## Current repo state (verify before trusting — see [00](./00_PRODUCT_STATUS.md))
-Read-only governance foundation + the **contract write workflow** (PRs through #31 merged;
-**#32 adds contract form parity fields** — migration `0011` adds `category`/`procurement_date`/`notes`/`po_number`/
-`auto_renew`/`month_to_month` to `contracts`, wired through the read DAL, the PR #30 write path, and the PR #31
-create/edit form. **Partial** legacy parity still — `commodity_*`/`validated`/PDF-AI/gantt remain not built,
-[15](./15_LEGACY_CONTRACT_FORM_INSPECTION.md)).
+Read-only governance foundation + the **contract write workflow** (PRs through #32 merged — create/edit UI + parity
+fields `0011`; **Partial** parity still, `commodity_*`/`validated`/gantt remain. **#33 adds the contract PDF/AI
+extraction DESIGN** — [16](./16_CONTRACT_PDF_AI_EXTRACTION_DESIGN.md), **design-only**: no upload, no Storage, no AI
+call, no `files` surface, no migration; PDF/AI extraction is **designed, not built**).
 Migrations `0001`–`0011` are `implemented`, `verified-local`, `ci-enforced`, **not hosted-applied**
 (`org_rls_test.sql` = 177 assertions, T1–T32; 51 vitest tests). Auth/session skeleton, read-only
 tenant/org context, and a typed DAL are built. **Product surfaces ship:** `/apps`
@@ -17,10 +16,11 @@ tenant/org context, and a typed DAL are built. **Product surfaces ship:** `/apps
 `/contracts/[id]`, and linked app↔contract panels — read-only, RLS-scoped — **plus** the contract
 **create/edit** write surface (`/contracts/new`, `/contracts/[id]/edit`). **Not** exercised
 against hosted Supabase. **Design-only:** identity matching read-scope (doc 12; match-status slice
-built). **Contract steward write** (doc 13): RLS authority (`0004`) + audit (`0010`, PR #29) + write path (PR #30) +
-create/edit UI (PR #31) + parity fields (`0011`, PR #32) all exist; **legacy parity is still Partial** (`commodity_*`/
-`validated`/PDF-AI/gantt — gaps in [15]). No contract delete/archive, no link/unlink, no files/AI; no tenant switching,
-no provisioning, no UAR, no hosted apply.
+built); **contract PDF/AI extraction** (doc 16 — **design only**, PR #33). **Contract steward write** (doc 13): RLS
+authority (`0004`) + audit (`0010`, PR #29) + write path (PR #30) + create/edit UI (PR #31) + parity fields (`0011`,
+PR #32) all exist; **legacy parity is still Partial** (`commodity_*`/`validated`/gantt — gaps in [15]; PDF/AI is
+**designed but not built** — [16]). No contract delete/archive, no link/unlink, no files/AI (default-deny — RISK-002);
+no tenant switching, no provisioning, no UAR, no hosted apply.
 Vercel **Web Analytics + Speed Insights** are present (platform telemetry only, bare components). Legacy
 Firebase is still production; OMC cutover + new paid-customer onboarding **blocked**. Don't trust any
 prompt's "seeded" history — re-verify from `git log`, `gh pr list`, `ls supabase/migrations`, and the source/test files.
@@ -102,22 +102,23 @@ workflow, inspect the running legacy app for exact fields/labels/filters/exports
 **Contract audit-on-write is DONE — PR #29** (`0010`; DB-side `SECURITY DEFINER` `AFTER INSERT/UPDATE` trigger; T31/T32).
 **Contract write PATH is DONE — PR #30** (server-side DAL + `"use server"` actions, anon client, RLS-gated, `tenant_id` server-resolved, audit inherited).
 **Contract create/edit UI is DONE — PR #31** (`/contracts/new` + `/contracts/[id]/edit` posting to the #30 actions; RLS is the boundary, not client role checks).
-**Contract form parity fields are DONE — PR #32** (`0011` adds `category`/`procurement_date`/`notes`/`po_number`/`auto_renew`/`month_to_month`,
-wired through read DAL + write path + form; +7 unit tests; no new SQL — RLS stays 177). **Partial** legacy parity still ([15](./15_LEGACY_CONTRACT_FORM_INSPECTION.md)).
-**The recommended next step is the remaining (higher-cost) parity gaps or the next legacy write workflow** —
+**Contract form parity fields are DONE — PR #32** (`0011` adds `category`/`procurement_date`/`notes`/`po_number`/`auto_renew`/`month_to_month`; +7 unit tests; RLS stays 177). **Partial** legacy parity still ([15](./15_LEGACY_CONTRACT_FORM_INSPECTION.md)).
+**Contract PDF/AI extraction is DESIGNED — PR #33** (security/design plan [16](./16_CONTRACT_PDF_AI_EXTRACTION_DESIGN.md); **nothing built** — no upload, Storage, AI call, `files` surface, or migration).
+**The recommended next step is to IMPLEMENT the PDF/AI design (multiple PRs, each with tests), then the remaining parity gaps** —
 every parity-bound step must inspect the running legacy app first (doc 14 §9 — `needs legacy inspection`; do not invent):
 1. ~~**Contract audit-on-write**~~ — **DONE (PR #29, `0010`).** Invisible backend; no user-visible workflow changed.
 2. ~~**Contract write path**~~ — **DONE (PR #30).** Server actions + DAL on the anon client; RLS is the boundary; `paying_org_id` never grants write; no `DELETE`/`FOR ALL`; no service-role; audit inherited.
 3. ~~**Contract create/edit UI**~~ — **DONE (PR #31).** First user-visible write workflow; RLS-gated; generic denial (no enumeration); no delete/archive button.
-4. ~~**Contract form parity fields**~~ — **DONE (PR #32, `0011`).** Added the schema-backed legacy fields (`category`/`procurement_date`/`notes`/`po_number`/`auto_renew`/`month_to_month`). `commodity_*`/`validated` deliberately not added (hidden / read-only in legacy — docs/15). **Partial** parity remains.
-5. **Remaining parity gaps** ← **next (higher cost / out of current scope)** — PDF-upload/AI + file attachments (needs `files` read/write + storage — RISK-002), the renewal **gantt**, and the legacy list-page inline-edit/bulk-delete. Each needs its own surface and a conscious product decision; inspect legacy first. Then the next legacy write workflow (app-contract link/unlink — doc 14 §8).
+4. ~~**Contract form parity fields**~~ — **DONE (PR #32, `0011`).** Added the schema-backed legacy fields. `commodity_*`/`validated` deliberately not added (hidden / read-only in legacy — docs/15).
+5. ~~**Contract PDF/AI extraction DESIGN**~~ — **DONE (PR #33, [16](./16_CONTRACT_PDF_AI_EXTRACTION_DESIGN.md)).** Design only — legacy anti-patterns documented (service-role Storage fn, no prompt-injection defense, wholesale AI fields, auto-overwrite); v3 plan = assistive upload → server-validated, tenant-bound, signed-URL Storage → AI **suggestions only**, strict-allowlist parsed by `parseContractWriteInput` → user reviews+applies → save via the PR #30 RLS-gated action.
+6. **Implement PDF/AI** ← **next** — per [16 §10](./16_CONTRACT_PDF_AI_EXTRACTION_DESIGN.md), in order, each its own PR with tests: `files` migration → RLS + tests (default-deny until green) → private Storage bucket + server-side validation/scan gate → extraction worker (**out-of-request, tenant-re-deriving; NO service-role app route**) with strict-allowlist parsing → minimal review-and-apply UI → DB-side file/extraction audit. **Suggestions only — no AI auto-save; PDF text + AI output are untrusted.** Then the renewal **gantt** / list-page inline-edit, and app-contract link/unlink (doc 14 §8).
 Alternative tracks (lower priority): the first reviewed **hosted-Supabase apply** (RISK-001); or an identity surface —
 - **Richer "managed vs orphaned" status** (needs a tenant-only column): build it via a **`security_invoker` view** (caller RLS scopes it) — or a `SECURITY DEFINER` fn that re-derives scope — returning only a status enum; **NEVER** read `people`/`identity_accounts` rows into an org surface. Follow doc 12 §4 (the definer trap) + §7.7 (exact readable-only count test).
 
 Do NOT org-scope `people` or `identity_accounts` — no app anchor; org-scoping them leaks the tenant-wide HR/IdP directory (doc 12 §4/§6). `people` stays **tenant-only**; `identity_accounts` stays **default-deny**.
 Any account-intelligence work derives ONLY from visible `app_users` + visible matches (PR #24 pattern) — never read `people`/`identity` into an org surface, and do NOT relabel "unmatched/stale candidate" as "orphaned/deactivated/managed/UAR".
 Still NOT safe to surface: `people`, `identity_accounts`, `invoices`/`files`/`license_*`. No identity matching algorithm / merge / UAR / orphaned status / provisioning exists yet.
-(Stages 4/4b apps — PR #13/#14; Stage 5 contracts — PR #19; Stage 5b linked panels — PR #20; Stage 6a app-user roster — PR #21; Stage 6b identity read-scope design — PR #22; Stage 6c match status — PR #23; Stage 6d account summary — PR #24; Stage 5b contract write design — PR #25; truth pass — PR #26; `0009` app_contracts tenant-bind — PR #27; legacy UX/workflow parity map — PR #28; contract audit-on-write `0010` — PR #29; contract write path/DAL + server actions — PR #30; contract create/edit UI — PR #31; contract form parity fields `0011` — PR #32.)
+(Stages 4/4b apps — PR #13/#14; Stage 5 contracts — PR #19; Stage 5b linked panels — PR #20; Stage 6a app-user roster — PR #21; Stage 6b identity read-scope design — PR #22; Stage 6c match status — PR #23; Stage 6d account summary — PR #24; Stage 5b contract write design — PR #25; truth pass — PR #26; `0009` app_contracts tenant-bind — PR #27; legacy UX/workflow parity map — PR #28; contract audit-on-write `0010` — PR #29; contract write path/DAL + server actions — PR #30; contract create/edit UI — PR #31; contract form parity fields `0011` — PR #32; contract PDF/AI extraction design — PR #33.)
 
 ## Current open risks to respect
 `not-hosted-applied`; child tables **not org-scoped for reads** — tenant-only (`people`) or default-deny (`identity_accounts`/`license_*`/`files`/`invoices`); `app_contracts` (`0006`) + `app_users` (`0007`) + `app_user_identity_matches` (`0008`) are now org-scoped read; see read map [02 §8](./02_SECURITY_AND_RLS.md) (RISK-002, narrowed not closed); no tenant switching /

@@ -15,8 +15,10 @@ do not invent UI — inspect legacy, preserve the workflow, mark every gap hones
 ## 1. Legacy CREATE workflow (`/contracts/create`)
 Two tabs:
 - **Upload PDF** (default) — upload a PDF → Firestore `files` doc + Storage + a `contracts` doc, then
-  Vertex/Document-AI extraction auto-fills fields. **Out of scope for v3** (no file storage, no AI;
-  `files` is default-deny — RISK-002). Not built.
+  Vertex/Document-AI extraction auto-fills fields. **Not built in v3** (no file storage, no AI; `files`
+  is default-deny — RISK-002) — now **DESIGNED** in [16_CONTRACT_PDF_AI_EXTRACTION_DESIGN](./16_CONTRACT_PDF_AI_EXTRACTION_DESIGN.md)
+  (PR #33), where the legacy anti-patterns (auto-overwrite, service-role fn, no prompt-injection defense)
+  are documented to NOT port.
 - **Create Blank** — a manual form. Fields, in order: **Contract Name** (required; default placeholder
   `New Contract - <date>`), **Status** (`Draft`/`Executed`/`Cancelled`/`Expired`, default `Draft`),
   **Category** (`Technology`/`Professional Services`/`Leases`/`Facilities`/`Chargebacks`),
@@ -66,7 +68,7 @@ v3 `contracts` columns (`0001`): `contract_name`, `vendor_name`, `status`, `star
 | `commodity_software` / `commodity_leases` (`select`; hidden via `showif … && false`) | — | ❌ **Not added** — hidden in legacy (not user-visible); deliberately out of scope ([0011] note) |
 | `validated` / "Validated" (read-only) | — | ❌ **Not added** — legacy read-only / system-managed; not part of a create/edit form |
 | `createdBy` / "Created By" (read-only) | — (v3: `created_at`) | ❌ not editable; v3 shows `created_at` on read |
-| Upload-PDF tab → AI extraction | — | ❌ **Not built** (no files/AI; RISK-002) |
+| Upload-PDF tab → AI extraction | — | ❌ **Not built** — now **DESIGNED** in [16_CONTRACT_PDF_AI_EXTRACTION_DESIGN](./16_CONTRACT_PDF_AI_EXTRACTION_DESIGN.md) (PR #33); no files/AI surface; RISK-002 |
 
 v3 columns surfaced in the form that the legacy form did **not** have (included so the form round-trips
 v3's existing read detail page, [02 §8]/PR #19): `vendor_name` ("Vendor"), `currency`,

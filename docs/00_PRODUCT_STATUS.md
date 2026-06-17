@@ -1,7 +1,7 @@
 # 00 · Product Status — ID Caddie v3
 
 **Canonical source for: current status.** First doc to read. Last verified against the
-repo on 2026-06-16 (PRs through #30 merged; #31 adds the contract **create/edit UI** — `/contracts/new` + `/contracts/[id]/edit`, **Partial** legacy parity). Status words are defined in [10_DOCS_INDEX](./10_DOCS_INDEX.md#status-taxonomy).
+repo on 2026-06-16 (PRs through #32 merged — contract create/edit UI + parity fields, **Partial** parity; #33 adds the contract **PDF/AI extraction DESIGN** — [16](./16_CONTRACT_PDF_AI_EXTRACTION_DESIGN.md), design-only, nothing built). Status words are defined in [10_DOCS_INDEX](./10_DOCS_INDEX.md#status-taxonomy).
 
 ## What ID Caddie v3 is
 An enterprise SaaS-governance platform: the source of truth for *what apps a company
@@ -48,18 +48,19 @@ now the **create/edit UI** (PR #31): `/contracts/new` + `/contracts/[id]/edit`, 
 **Partial** legacy parity — supported v3 columns only ([15](./15_LEGACY_CONTRACT_FORM_INSPECTION.md)).
 
 **Design-only (docs, nothing built):** identity matching read-scope ([12](./12_IDENTITY_MATCHING_READ_SCOPE.md),
-PR #22 — only the match-*status* slice is built).
+PR #22 — only the match-*status* slice is built); **contract PDF upload + AI extraction** ([16](./16_CONTRACT_PDF_AI_EXTRACTION_DESIGN.md),
+PR #33 — security/design plan only: no upload, no Storage, no AI call, no `files` surface, no migration).
 
 **Not built:** anything applied to a **hosted Supabase environment**; the legacy contract fields v3 still has no
-column/surface for (`commodity_*` [hidden in legacy], `validated` [read-only], PDF-upload/AI-extraction, **gantt**) —
-so contract parity is **Partial**, not Same, even after PR #32 added `category`/`procurement_date`/`notes`/
+column/surface for (`commodity_*` [hidden in legacy], `validated` [read-only], **gantt**) and **PDF-upload/AI-extraction**
+(now **DESIGNED — PR #33 / [16](./16_CONTRACT_PDF_AI_EXTRACTION_DESIGN.md) — but NOT built**) — so contract parity is **Partial**, not Same, even after PR #32 added `category`/`procurement_date`/`notes`/
 `po_number`/`auto_renew`/`month_to_month`; contract **delete**/archive / soft-delete; `app_contracts` writes (link/unlink); UAR / unmanaged-account report; identity matching *algorithm*;
 `people` org-read (stays tenant-only); `identity_accounts` read (default-deny); license rules/evaluation;
 spend/chargeback; files/invoices; people directory; provisioning; tenant switching; imports/exports;
 connectors. **OMC/Flywheel cutover and new paid-customer onboarding remain blocked.**
 
 ## Merged PRs
-**PRs #1–#31 are merged** (main @ `63b2434`); **PR #32 (contract form parity fields — `0011`) is this PR.** The full
+**PRs #1–#32 are merged** (main @ `e7f86af`); **PR #33 (contract PDF/AI extraction DESIGN — [16](./16_CONTRACT_PDF_AI_EXTRACTION_DESIGN.md), design-only) is this PR.** The full
 per-PR engineering log is the canonical source — see [05_ENGINEERING_CHANGELOG](./05_ENGINEERING_CHANGELOG.md);
 do not maintain a second PR table here (it drifts). Milestone summary:
 - **Foundation / discipline:** RLS foundation + tests (#1/#2), migration discipline (#3), clean-app
@@ -71,7 +72,7 @@ do not maintain a second PR table here (it drifts). Milestone summary:
 - **Read-only surfaces:** app inventory (#13), app detail (#14), contracts list+detail (#19), linked panels (#20),
   app-user roster (#21), match status (#23), account summary (#24).
 - **Contract writes:** write server actions + DAL (#30, backend, RLS-gated, audit inherited from `0010`); **create/edit UI** `/contracts/new` + `/contracts/[id]/edit` (#31 — first write workflow); **parity fields** category/procurement_date/notes/po_number/auto_renew/month_to_month (#32 — `0011`). **Partial** legacy parity throughout.
-- **Design / parity docs (nothing user-facing built):** identity matching read-scope (#22), contract steward write design (#25), docs truth pass (#26), legacy UX/workflow parity map (#28), legacy contract-form inspection (#31 — [15](./15_LEGACY_CONTRACT_FORM_INSPECTION.md)).
+- **Design / parity docs (nothing user-facing built):** identity matching read-scope (#22), contract steward write design (#25), docs truth pass (#26), legacy UX/workflow parity map (#28), legacy contract-form inspection (#31 — [15](./15_LEGACY_CONTRACT_FORM_INSPECTION.md)), contract PDF/AI extraction design (#33 — [16](./16_CONTRACT_PDF_AI_EXTRACTION_DESIGN.md)).
 
 Migration `0001` (core schema) predates the numbered PRs (rebuild starter pack).
 
@@ -155,9 +156,10 @@ One-line decisions; deep rationale in the linked canonical docs.
 - **Safely keep building on this foundation?** Yes — *after* `scripts/check-docs-updated.sh`,
   `check-migration-safety.sh`, and `test-rls.sh` pass. The RLS model is tested and CI-enforced.
 
-## Next recommended PRs (read-only surfaces + audit `0010` (#29) + write path (#30) + create/edit UI (#31) + parity fields `0011` (#32) are done)
-1. **Remaining contract-form parity gaps** — the schema-backed fields are now added (PR #32). What's left is higher-cost / out of current scope: PDF-upload/AI-extraction + file attachments (needs `files` read/write + storage — RISK-002), the renewal **gantt**, and the legacy list-page inline-edit/bulk-delete. `commodity_*`/`validated` are deliberately not built (docs/15). Contract parity stays **Partial**, not Same.
-2. **App-contract link/unlink** and the next legacy write workflows ([14 §8](./14_LEGACY_UX_WORKFLOW_PARITY_MAP.md)).
-3. First reviewed **hosted-Supabase apply** (RISK-001 — still nothing applied to any hosted env).
+## Next recommended PRs (read-only surfaces + audit `0010` (#29) + write path (#30) + create/edit UI (#31) + parity fields `0011` (#32) + PDF/AI **design** (#33) are done)
+1. **Implement contract PDF upload + AI extraction** per the [16](./16_CONTRACT_PDF_AI_EXTRACTION_DESIGN.md) plan — **multiple PRs, each with tests:** (a) `files` forward migration (§4) + `gen-types`; (b) RLS policies + the §5 tests (default-deny until green); (c) private Storage bucket + server-side validation (extension/MIME/magic-byte/size + scan gate); (d) extraction worker (out-of-request, tenant-re-deriving; **no service-role app route**) with strict-allowlist parsing through `parseContractWriteInput`; (e) minimal review-and-apply UI; (f) DB-side file/extraction audit. **Suggestions only — no AI auto-save.** RISK-002 stays open until built+tested.
+2. **Remaining contract-form parity gaps** — the renewal **gantt** and the legacy list-page inline-edit/bulk-delete. `commodity_*`/`validated` deliberately not built (docs/15). Parity stays **Partial**.
+3. **App-contract link/unlink** and the next legacy write workflows ([14 §8](./14_LEGACY_UX_WORKFLOW_PARITY_MAP.md)).
+4. First reviewed **hosted-Supabase apply** (RISK-001 — still nothing applied to any hosted env).
 
 (These are `planned`. Each must follow [07_P0_REVIEW_CHECKLIST.md](./07_P0_REVIEW_CHECKLIST.md) and update [04](./04_RISK_REGISTER.md)/[05](./05_ENGINEERING_CHANGELOG.md). Detailed ordering: [09_AGENT_HANDOFF](./09_AGENT_HANDOFF.md).)
