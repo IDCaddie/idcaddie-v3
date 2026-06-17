@@ -22,6 +22,10 @@ hosted staging before any contract PDF upload action can ship.**
 > - [23_STORAGE_STAGING_APPLY_EVIDENCE_TEMPLATE](./23_STORAGE_STAGING_APPLY_EVIDENCE_TEMPLATE.md) — the
 >   **required evidence log** for this execution. Copy it into a dated record and fill it in **while** running
 >   the steps below; the §6 verification results (with reviewer initials) MUST be captured there.
+> - **Execution status:** not yet run. The first attempt (PR #45,
+>   [25_STAGING_SCHEMA_AND_STORAGE_APPLY_EVIDENCE](./25_STAGING_SCHEMA_AND_STORAGE_APPLY_EVIDENCE.md)) was
+>   **correctly NOT executed** (the CLI was found linked to PRODUCTION; staging unreachable; an agent never
+>   runs a hosted apply) — **production untouched, nothing applied.** This runbook still awaits a human run.
 > - **Doc 17 remains the binding cutover gate; cutover stays BLOCKED.**
 
 This runbook **does not edit migrations `0001`–`0013`** and **does not put Storage policies into
