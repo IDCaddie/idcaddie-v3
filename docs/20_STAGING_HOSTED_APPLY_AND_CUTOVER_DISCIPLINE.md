@@ -104,7 +104,7 @@ apply as part of CI/merge automation.
 
 **All risky capabilities land in staging — verified — before production.** This explicitly includes:
 
-- Storage bucket — the private `contract-files` bucket + its object-RLS are a Supabase `storage`-schema object the local harness can't host/test; **created + tested via THIS hosted path, not a local migration** (the PR #40 PDF validation/path core is a pure lib; the bucket is the hosted piece)
+- Storage bucket — the private `contract-files` bucket + its object-RLS are a Supabase `storage`-schema object the local harness can't host/test (empirically proven, PR #41 / [21](./21_STORAGE_LOCAL_HARNESS_FEASIBILITY.md)); **created + verified via THIS hosted path, not a local migration / not a `storage` shim** — run the **[21 §6](./21_STORAGE_LOCAL_HARNESS_FEASIBILITY.md) Storage bucket/object-policy verification checklist** in staging before any upload action ships (the PR #40 PDF validation/path core is a pure lib; the bucket is the hosted piece)
 - file upload (the upload action: user-scoped client + the `0013` insert authority; **no service-role**)
 - signed URLs
 - PDF validation / scan gate (server-side validation core built PR #40 — `src/lib/files/pdf-validation.ts`)
