@@ -1,7 +1,7 @@
 # 00 · Product Status — ID Caddie v3
 
 **Canonical source for: current status.** First doc to read. Last verified against the
-repo on 2026-06-17 (PRs through #37 merged — doc 17 gate + doc 18 confirmation pass; #38 is **docs-only**: creates [19_CONNECTOR_CREDENTIAL_VAULT_DESIGN](./19_CONNECTOR_CREDENTIAL_VAULT_DESIGN.md), the safe future path for connector credentials — **design only; no vault/connector/encryption/secret is implemented; RISK-007 stays open**. **OMC is a paying production-replacement customer, NOT a pilot.** No migration/RLS/app/route change; RLS stays 205; cutover stays BLOCKED). Status words are defined in [10_DOCS_INDEX](./10_DOCS_INDEX.md#status-taxonomy).
+repo on 2026-06-17 (PRs through #38 merged — doc 17 gate + doc 18 confirmation pass + doc 19 vault design; #39 is **docs-only**: creates [20_STAGING_HOSTED_APPLY_AND_CUTOVER_DISCIPLINE](./20_STAGING_HOSTED_APPLY_AND_CUTOVER_DISCIPLINE.md), the runbook for hosted staging/apply/Vercel/cutover — **discipline only; nothing applied/deployed; no staging/prod/secrets created; RISK-001 stays open**. **OMC is a paying production-replacement customer, NOT a pilot.** No migration/RLS/app/route/secret change; RLS stays 205; cutover stays BLOCKED). Status words are defined in [10_DOCS_INDEX](./10_DOCS_INDEX.md#status-taxonomy).
 
 ## What ID Caddie v3 is
 An enterprise SaaS-governance platform: the source of truth for *what apps a company
@@ -64,7 +64,7 @@ spend/chargeback; files/invoices; people directory; provisioning; tenant switchi
 connectors. **OMC/Flywheel cutover and new paid-customer onboarding remain blocked** — the full blocker list + the ~105-row replacement parity matrix are in [17_OMC_PRODUCTION_REPLACEMENT_PARITY_GATE](./17_OMC_PRODUCTION_REPLACEMENT_PARITY_GATE.md). **v3 is NOT production-replacement-ready;** a grounded legacy inspection (PR #36) puts full parity at **~70–110 PRs** from current state (pending OMC-confirmation of actual usage).
 
 ## Merged PRs
-**PRs #1–#37 are merged** (main @ `8779414`); **PR #38 (connector credential vault design — docs-only, creates doc 19) is this PR.** The full
+**PRs #1–#38 are merged** (main @ `fa70045`); **PR #39 (staging + hosted apply & cutover discipline — docs-only, creates doc 20) is this PR.** The full
 per-PR engineering log is the canonical source — see [05_ENGINEERING_CHANGELOG](./05_ENGINEERING_CHANGELOG.md);
 do not maintain a second PR table here (it drifts). Milestone summary:
 - **Foundation / discipline:** RLS foundation + tests (#1/#2), migration discipline (#3), clean-app
@@ -80,6 +80,7 @@ do not maintain a second PR table here (it drifts). Milestone summary:
 - **Schema + RLS foundation (no surface):** `files` metadata foundation (#34 — `0012`; columns + same-tenant FK + CHECKs) + `files` RLS policies (#35 — `0013`; tenant-member SELECT + contract-write-authority INSERT, no UPDATE/DELETE/FOR ALL). Authorized-by-design + tested; `files` still **not surfaced** in the app.
 - **Replacement governance (docs):** OMC production replacement parity gate (#36 — [17](./17_OMC_PRODUCTION_REPLACEMENT_PARITY_GATE.md); the binding go/no-go gate, grounded ~105-row matrix, honest ~70–110-PR estimate; OMC = production replacement, not a pilot) + OMC confirmation pass scaffolding (#37 — [18](./18_OMC_CONFIRMATION_PASS.md); the working questionnaire/workshop/decision-log that feeds doc 17; no secrets collected).
 - **Security design (docs):** connector credential vault design (#38 — [19](./19_CONNECTOR_CREDENTIAL_VAULT_DESIGN.md); the safe future path for connector secrets — vault handle + redacted metadata, no service-role on request paths, related-org/payor get no credential authority, non-destructive sync). **Design only — no vault/connector/encryption/secret implemented; RISK-007 stays open.**
+- **Operational discipline (docs):** staging + hosted apply & cutover discipline (#39 — [20](./20_STAGING_HOSTED_APPLY_AND_CUTOVER_DISCIPLINE.md); the runbook for hosted staging/apply/Vercel/cutover — staging-first, verify-after-apply, per-env secrets, stop/rollback rules, 10 verification checklists). **Discipline only — nothing applied/deployed; no staging/prod/secrets created; RISK-001 stays open.**
 
 Migration `0001` (core schema) predates the numbered PRs (rebuild starter pack).
 
