@@ -56,6 +56,8 @@ object policy is **tenant-prefix defense-in-depth** on top of that.
 - [ ] The Supabase CLI is logged in to the **STAGING** project **only** — **never production**. The executor
       has visually confirmed the active project ref is the staging project (see §3 step 2). **If unsure, STOP.**
 - [ ] A **human approver** has signed off on running this specific staging apply (doc 20 §3/§9).
+- [ ] **Staging env vars are wired** per [24_STAGING_ENVIRONMENT_VARIABLES_AND_WIRING_CHECKLIST](./24_STAGING_ENVIRONMENT_VARIABLES_AND_WIRING_CHECKLIST.md)
+      (the staging Vercel deployment + staging Supabase project are configured; **no service-role on a browser/request path**; no production values).
 - [ ] An **OMC-shaped (synthetic) staging dataset** exists with ≥2 tenants + the role fixtures needed to
       exercise §6 (tenant editor, procurement-org manager, paying-org manager, viewer, a second tenant).
 - [ ] **No real customer secrets** are used; staging secrets are separate from production (doc 20 §6).
