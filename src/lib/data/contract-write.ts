@@ -39,6 +39,14 @@ export type ContractWriteInput = {
   renewalResponsibility?: string | null;
   procurementOrgId?: string | null;
   payingOrgId?: string | null;
+  // Legacy-parity fields added in PR #32 (schema-backed by 0011). Text/date are nullable;
+  // autoRenew/monthToMonth are NOT NULL boolean flags (default false).
+  category?: string | null;
+  procurementDate?: string | null;
+  notes?: string | null;
+  poNumber?: string | null;
+  autoRenew?: boolean;
+  monthToMonth?: boolean;
 };
 
 // Normalized DB column subset (snake_case) — a structural subset of TablesInsert<"contracts"> MINUS
@@ -59,6 +67,12 @@ export type ContractWriteColumns = {
   renewal_responsibility?: string;
   procurement_org_id?: string | null;
   paying_org_id?: string | null;
+  category?: string | null;
+  procurement_date?: string | null;
+  notes?: string | null;
+  po_number?: string | null;
+  auto_renew?: boolean;
+  month_to_month?: boolean;
 };
 
 export type ContractWriteParse =
@@ -104,13 +118,17 @@ export function parseContractWriteInput(
   if (isCreate || input.billingFrequency !== undefined) {
     columns.billing_frequency = trimOrNull(input.billingFrequency);
   }
+  if (isCreate || input.category !== undefined) columns.category = trimOrNull(input.category);
+  if (isCreate || input.notes !== undefined) columns.notes = trimOrNull(input.notes);
+  if (isCreate || input.poNumber !== undefined) columns.po_number = trimOrNull(input.poNumber);
 
   // Nullable date columns — empty becomes null; a non-empty value must be YYYY-MM-DD.
-  const dateFields: ReadonlyArray<[keyof ContractWriteInput, "start_date" | "end_date" | "renewal_date" | "notice_deadline"]> = [
+  const dateFields: ReadonlyArray<[keyof ContractWriteInput, "start_date" | "end_date" | "renewal_date" | "notice_deadline" | "procurement_date"]> = [
     ["startDate", "start_date"],
     ["endDate", "end_date"],
     ["renewalDate", "renewal_date"],
     ["noticeDeadline", "notice_deadline"],
+    ["procurementDate", "procurement_date"],
   ];
   for (const [inKey, colKey] of dateFields) {
     if (!isCreate && input[inKey] === undefined) continue;
@@ -159,6 +177,13 @@ export function parseContractWriteInput(
   if (currency !== null) columns.currency = currency;
   const renewalResponsibility = trimOrNull(input.renewalResponsibility);
   if (renewalResponsibility !== null) columns.renewal_responsibility = renewalResponsibility;
+
+  // Boolean flags (NOT NULL columns). On create always set (the form supplies a real boolean; default
+  // false); on update set only when the key is provided (PATCH). Strict `=== true` so any non-true
+  // value — including a hostile non-boolean — safely becomes false and the NOT NULL column is never
+  // written as null.
+  if (isCreate || input.autoRenew !== undefined) columns.auto_renew = input.autoRenew === true;
+  if (isCreate || input.monthToMonth !== undefined) columns.month_to_month = input.monthToMonth === true;
 
   if (issues.length > 0) return { ok: false, issues };
   if (!isCreate && Object.keys(columns).length === 0) {

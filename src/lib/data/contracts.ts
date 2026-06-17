@@ -28,6 +28,7 @@ export type ContractSummary = {
   contractName: string;
   vendorName: string | null;
   status: string;
+  category: string | null;
   renewalDate: string | null;
   endDate: string | null;
 };
@@ -57,6 +58,12 @@ export type ContractDetail = {
   renewalResponsibility: string | null;
   procurementOrgId: string | null;
   payingOrgId: string | null;
+  category: string | null;
+  procurementDate: string | null;
+  notes: string | null;
+  poNumber: string | null;
+  autoRenew: boolean;
+  monthToMonth: boolean;
   createdAt: string;
   updatedAt: string;
 };
@@ -78,7 +85,7 @@ export async function getContractDetailForCurrentUser(
   const { data, error } = await supabase
     .from("contracts")
     .select(
-      "id, contract_name, vendor_name, status, start_date, end_date, renewal_date, notice_deadline, total_cost, currency, billing_frequency, renewal_responsibility, procurement_org_id, paying_org_id, created_at, updated_at",
+      "id, contract_name, vendor_name, status, start_date, end_date, renewal_date, notice_deadline, total_cost, currency, billing_frequency, renewal_responsibility, procurement_org_id, paying_org_id, category, procurement_date, notes, po_number, auto_renew, month_to_month, created_at, updated_at",
     )
     .eq("id", contractId)
     .maybeSingle();
@@ -108,6 +115,12 @@ export async function getContractDetailForCurrentUser(
       renewalResponsibility: data.renewal_responsibility,
       procurementOrgId: data.procurement_org_id,
       payingOrgId: data.paying_org_id,
+      category: data.category,
+      procurementDate: data.procurement_date,
+      notes: data.notes,
+      poNumber: data.po_number,
+      autoRenew: data.auto_renew,
+      monthToMonth: data.month_to_month,
       createdAt: data.created_at,
       updatedAt: data.updated_at,
     },
@@ -122,7 +135,7 @@ export async function listContractsForCurrentUser(): Promise<DataResult<Contract
 
   const { data, error } = await supabase
     .from("contracts")
-    .select("id, contract_name, vendor_name, status, renewal_date, end_date")
+    .select("id, contract_name, vendor_name, status, category, renewal_date, end_date")
     .order("contract_name", { ascending: true });
 
   if (error) {
@@ -137,6 +150,7 @@ export async function listContractsForCurrentUser(): Promise<DataResult<Contract
       contractName: c.contract_name,
       vendorName: c.vendor_name,
       status: c.status,
+      category: c.category,
       renewalDate: c.renewal_date,
       endDate: c.end_date,
     })),

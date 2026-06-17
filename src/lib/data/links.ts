@@ -69,7 +69,7 @@ export async function listContractsLinkedToApp(
 
   const { data, error } = await supabase
     .from("contracts")
-    .select("id, contract_name, vendor_name, status, renewal_date, end_date")
+    .select("id, contract_name, vendor_name, status, category, renewal_date, end_date")
     .in("id", contractIds)
     .order("contract_name", { ascending: true });
   if (error) {
@@ -83,6 +83,7 @@ export async function listContractsLinkedToApp(
       contractName: c.contract_name,
       vendorName: c.vendor_name,
       status: c.status,
+      category: c.category,
       renewalDate: c.renewal_date,
       endDate: c.end_date,
     })),

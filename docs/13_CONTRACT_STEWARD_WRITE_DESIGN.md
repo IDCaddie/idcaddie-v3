@@ -1,17 +1,19 @@
 # 13 · Contract Steward Write Design
 
 **Canonical source for: how contract *writes* (create / edit) work.**
-This is a **design + guardrail** doc. **Update (PR #31):** the write **RLS authority** (`0004`), the
+This is a **design + guardrail** doc. **Update (PR #32):** the write **RLS authority** (`0004`), the
 **audit-on-write** trigger (`0010`), the **server-side write path** (DAL + `"use server"` actions, PR #30),
-**and now the create/edit UI** (`/contracts/new` + `/contracts/[id]/edit`, PR #31) all exist. Contract
-create/edit legacy parity is **Partial, not Same** — v3 supports only its own columns ([15_LEGACY_CONTRACT_FORM_INSPECTION](./15_LEGACY_CONTRACT_FORM_INSPECTION.md)).
+the **create/edit UI** (`/contracts/new` + `/contracts/[id]/edit`, PR #31), **and the schema-backed parity
+fields** (`0011` — category/procurement_date/notes/po_number/auto_renew/month_to_month, PR #32) all exist.
+Contract create/edit legacy parity is **still Partial, not Same** — `commodity_*`/`validated`/PDF-AI/gantt
+remain unbuilt ([15_LEGACY_CONTRACT_FORM_INSPECTION](./15_LEGACY_CONTRACT_FORM_INSPECTION.md)).
 RLS authority model: [02_SECURITY_AND_RLS](./02_SECURITY_AND_RLS.md)
 (§3 read-vs-write split, §4 audit immutability, §4a audit-on-write, §4b no-hard-delete, §5 tenant-integrity trigger). Risks: RISK-002 (open),
 RISK-016 / OMC parity (open). OMC/Flywheel cutover remains **blocked**.
 
 > **Verified finding (not a guess):** the contract write **RLS authority already exists** — it was
 > shipped in `0002` and split into `INSERT`/`UPDATE` (no `DELETE`) by `0004`. A live `pg_policies`
-> dump on a fresh `0001`–`0010` DB confirms exactly: `editors insert/update contracts`
+> dump on a fresh `0001`–`0011` DB confirms exactly: `editors insert/update contracts`
 > (`has_tenant_role` owner/admin/editor) **+** `org managers insert/update org contracts`
 > (`has_org_role_in_tenant(procurement_org_id, …, ['manager'])`), **0** `DELETE`/`ALL` policies, and the
 > `enforce_owning_org_tenant` trigger covering `procurement_org_id` + `paying_org_id`. **This already
@@ -147,9 +149,11 @@ The create/edit UI now exists and follows this design exactly:
   server-side), and `procurement_org_id`/`paying_org_id` are picked from an **RLS-scoped** org `<select>`
   (`listOrganizationsForCurrentUser`).
 - **No delete/archive button**; **no `app_contracts` link/unlink**; no files/AI/gantt (§9).
-- **Partial parity (honest):** the form covers only v3's columns; legacy `category`/`procurementDate`/
-  `notes`/`poNumber`/`autoRenew`/`monthToMonth`/`commodity_*`/`validated` + PDF-upload/AI have no v3
-  column/surface and are not built; legacy edited inline, v3 uses a dedicated `/edit` route. See
+- **Fields:** name/vendor/status/cost/currency/dates/renewal-responsibility/org (PR #31) **plus**
+  category/procurement_date/notes/po_number/auto_renew/month_to_month (PR #32, `0011`).
+- **Partial parity (honest):** still **not** Same — legacy `commodity_*` (hidden via `showif … && false`)
+  + `validated` (read-only) + PDF-upload/AI + **gantt** have no v3 column/surface and are not built;
+  legacy edited inline, v3 uses a dedicated `/edit` route. See
   [15_LEGACY_CONTRACT_FORM_INSPECTION](./15_LEGACY_CONTRACT_FORM_INSPECTION.md).
 
 ## 9. Explicitly out of scope (this PR and the first write PR)
@@ -163,8 +167,8 @@ The create/edit UI now exists and follows this design exactly:
 - Contract write **RLS authority**: **already implemented** (`0002`/`0004`) — matches §2.
 - **Audit-on-write**: **implemented** (PR #29 — `0010` `SECURITY DEFINER` `AFTER INSERT/UPDATE` trigger; §4; proven by T31/T32). The write path inherits auditing — no service-role audit route.
 - Contract write **server-action / DAL (path)**: **implemented** (PR #30 — §4; anon client, RLS-gated, tenant_id server-resolved, audit inherited; `contract-write.test.ts` + RLS T9/T14/T20/T21/T31/T32).
-- Contract write **UI**: **implemented** (PR #31 — `/contracts/new` + `/contracts/[id]/edit`; §8; `contract-form-shared.test.ts`). Contract create/edit **legacy parity is Partial, not Same** — supported v3 columns only ([15](./15_LEGACY_CONTRACT_FORM_INSPECTION.md)).
+- Contract write **UI**: **implemented** (PR #31 — `/contracts/new` + `/contracts/[id]/edit`; §8). **Parity fields**: **implemented** (PR #32 — `0011` adds category/procurement_date/notes/po_number/auto_renew/month_to_month). Contract create/edit **legacy parity is still Partial, not Same** — `commodity_*`/`validated`/PDF-AI/gantt remain ([15](./15_LEGACY_CONTRACT_FORM_INSPECTION.md)).
 - Contract **archive / soft-delete**: **not implemented** (separate design).
 - `app_contracts` writes: **not implemented.** Hard delete: **blocked** (`0004`) — stays blocked.
-- **Next step:** close the **Partial-parity gaps** consciously — add v3 columns + form fields for the legacy fields v3 lacks (each a forward migration + types regen) and the PDF/AI + file surface (RISK-002) — or build the next legacy write workflow ([14 §8](./14_LEGACY_UX_WORKFLOW_PARITY_MAP.md)).
+- **Next step:** the schema-backed gaps are now closed (PR #32, `0011`). What remains is higher-cost / separate surfaces — the PDF/AI + file surface (RISK-002), the renewal **gantt**, and the legacy list-page inline-edit/bulk-delete — or build the next legacy write workflow ([14 §8](./14_LEGACY_UX_WORKFLOW_PARITY_MAP.md)). `commodity_*`/`validated` stay deliberately not built.
 - RISK-002: **open.** RISK-016 / OMC parity: **open.** OMC/Flywheel cutover: **blocked.** New paid-customer onboarding: **blocked.**

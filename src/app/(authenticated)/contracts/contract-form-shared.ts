@@ -17,18 +17,36 @@ import type { ContractDetail, ContractWriteResult } from "@/lib/data/contracts";
 // value rather than silently changing it (statusOptionsForValue).
 export const STATUS_OPTIONS = ["Draft", "Executed", "Cancelled", "Expired"] as const;
 
-// The editable fields v3 supports (a subset of the legacy form — docs/15 §4). All strings (controlled
-// inputs); the PR #30 parser does the real normalization/validation.
+// Legacy category options (fieldDefinitions.js category.options — docs/15 §4), added in PR #32 with
+// the 0011 `category` column. Rendered as a <select>; blank = unset (nullable).
+export const CATEGORY_OPTIONS = [
+  "Technology",
+  "Professional Services",
+  "Leases",
+  "Facilities",
+  "Chargebacks",
+] as const;
+
+// The editable fields v3 supports (a subset of the legacy form — docs/15 §4). Text/date fields are
+// strings (controlled inputs); the PR #30 parser does the real normalization/validation. autoRenew /
+// monthToMonth are booleans (checkbox state). PR #32 added category/procurementDate/notes/poNumber/
+// autoRenew/monthToMonth.
 export type ContractFormValues = {
   contractName: string;
   vendorName: string;
   status: string;
+  category: string;
   totalCost: string;
   currency: string;
   startDate: string;
   renewalDate: string;
   endDate: string;
+  procurementDate: string;
+  poNumber: string;
   renewalResponsibility: string;
+  autoRenew: boolean;
+  monthToMonth: boolean;
+  notes: string;
   procurementOrgId: string;
   payingOrgId: string;
 };
@@ -41,12 +59,18 @@ export function emptyContractForm(): ContractFormValues {
     contractName: "",
     vendorName: "",
     status: "Draft",
+    category: "",
     totalCost: "",
     currency: "USD",
     startDate: "",
     renewalDate: "",
     endDate: "",
+    procurementDate: "",
+    poNumber: "",
     renewalResponsibility: "",
+    autoRenew: false,
+    monthToMonth: false,
+    notes: "",
     procurementOrgId: "",
     payingOrgId: "",
   };
@@ -59,12 +83,18 @@ export function contractDetailToForm(d: ContractDetail): ContractFormValues {
     contractName: d.contractName,
     vendorName: d.vendorName ?? "",
     status: d.status,
+    category: d.category ?? "",
     totalCost: d.totalCost === null ? "" : String(d.totalCost),
     currency: d.currency ?? "",
     startDate: d.startDate ?? "",
     renewalDate: d.renewalDate ?? "",
     endDate: d.endDate ?? "",
+    procurementDate: d.procurementDate ?? "",
+    poNumber: d.poNumber ?? "",
     renewalResponsibility: d.renewalResponsibility ?? "",
+    autoRenew: d.autoRenew,
+    monthToMonth: d.monthToMonth,
+    notes: d.notes ?? "",
     procurementOrgId: d.procurementOrgId ?? "",
     payingOrgId: d.payingOrgId ?? "",
   };
@@ -78,12 +108,18 @@ export function formToWriteInput(v: ContractFormValues): ContractWriteInput {
     contractName: v.contractName,
     vendorName: v.vendorName,
     status: v.status,
+    category: v.category,
     totalCost: v.totalCost,
     currency: v.currency,
     startDate: v.startDate,
     renewalDate: v.renewalDate,
     endDate: v.endDate,
+    procurementDate: v.procurementDate,
+    poNumber: v.poNumber,
     renewalResponsibility: v.renewalResponsibility,
+    autoRenew: v.autoRenew,
+    monthToMonth: v.monthToMonth,
+    notes: v.notes,
     procurementOrgId: v.procurementOrgId,
     payingOrgId: v.payingOrgId,
   };

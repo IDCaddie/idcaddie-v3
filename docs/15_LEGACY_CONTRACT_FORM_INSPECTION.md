@@ -57,14 +57,14 @@ v3 `contracts` columns (`0001`): `contract_name`, `vendor_name`, `status`, `star
 | `startDate` / "Start Date" | `start_date` | ✅ |
 | `expiryDate` / "Expiry Date" | `end_date` | ✅ (labeled "Expiry / end date") |
 | `renewalDate` / "Renewal Notice Date" | `renewal_date` | ✅ (legacy key `renewalDate`; v3 also has a distinct `notice_deadline` not surfaced in this form) |
-| `category` (Technology/Prof Services/Leases/Facilities/Chargebacks) | — | ❌ **Missing** — no `category` column on v3 `contracts` |
-| `procurementDate` / "Procurement Date" | — | ❌ **Missing** — no such column |
-| `notes` / "Notes" | — | ❌ **Missing** — no `notes` column on v3 `contracts` |
-| `poNumber` / "PO Number" | — | ❌ **Missing** |
-| `autoRenew` / "Auto Renew" (bool) | — | ❌ **Missing** |
-| `monthToMonth` / "Month-to-Month" (bool) | — | ❌ **Missing** |
-| `commodity_software` / `commodity_leases` (`select`; hidden via `showif … && false`) | — | ❌ **Missing** |
-| `validated` / "Validated" (read-only) | — | ❌ **Missing** |
+| `category` (Technology/Prof Services/Leases/Facilities/Chargebacks) | `category` (`0011`) | ✅ **added (PR #32)** — `<select>` of the legacy options |
+| `procurementDate` / "Procurement Date" | `procurement_date` (`0011`) | ✅ **added (PR #32)** |
+| `notes` / "Notes" | `notes` (`0011`) | ✅ **added (PR #32)** — textarea |
+| `poNumber` / "PO Number" | `po_number` (`0011`) | ✅ **added (PR #32)** |
+| `autoRenew` / "Auto Renew" (bool) | `auto_renew` (`0011`, NOT NULL default false) | ✅ **added (PR #32)** — checkbox |
+| `monthToMonth` / "Month-to-Month" (bool) | `month_to_month` (`0011`, NOT NULL default false) | ✅ **added (PR #32)** — checkbox |
+| `commodity_software` / `commodity_leases` (`select`; hidden via `showif … && false`) | — | ❌ **Not added** — hidden in legacy (not user-visible); deliberately out of scope ([0011] note) |
+| `validated` / "Validated" (read-only) | — | ❌ **Not added** — legacy read-only / system-managed; not part of a create/edit form |
 | `createdBy` / "Created By" (read-only) | — (v3: `created_at`) | ❌ not editable; v3 shows `created_at` on read |
 | Upload-PDF tab → AI extraction | — | ❌ **Not built** (no files/AI; RISK-002) |
 
@@ -74,12 +74,17 @@ v3's existing read detail page, [02 §8]/PR #19): `vendor_name` ("Vendor"), `cur
 never a write grant) via RLS-scoped org `<select>`s. v3's `notice_deadline` and `billing_frequency`
 columns are **not** in this form (kept aligned to the task's field set; editable later if parity needs).
 
-## 5. Parity verdict for PR #31
-**Partial, not Same.** v3 builds the supported subset (name/status/cost/dates + vendor/currency/
-renewal-responsibility/org) on `/contracts/new` + `/contracts/[id]/edit`, posting to the PR #30
-RLS-gated server actions (audit via `0010`). Missing legacy fields (`category`, `procurementDate`,
-`notes`, `poNumber`, `autoRenew`, `monthToMonth`, `commodity_*`, `validated`), the PDF-upload/AI tab,
-delete, groups, app-allocation, and file attachments are **not** built — each needs either a v3 schema
-column that does not exist yet or a separate surface (files/links — RISK-002). Legacy stays the source
-of truth; these gaps are tracked in [14](./14_LEGACY_UX_WORKFLOW_PARITY_MAP.md). **No parity claim of
-Same; OMC/Flywheel cutover stays blocked.**
+## 5. Parity verdict (PR #31 built the form; PR #32 closed the schema-backed field gaps)
+**Still Partial, not Same — but closer.** v3 builds the create/edit form on `/contracts/new` +
+`/contracts/[id]/edit`, posting to the PR #30 RLS-gated server actions (audit via `0010`).
+- **PR #31** shipped name/status/cost/dates + vendor/currency/renewal-responsibility/org.
+- **PR #32** added the safe, schema-backed legacy fields via migration `0011`: `category`,
+  `procurement_date`, `notes`, `po_number`, `auto_renew`, `month_to_month` (§4 table above).
+
+**Still NOT built** (so parity is **not** Same): legacy `commodity_*` (hidden in legacy via
+`showif … && false` — not user-visible) and `validated` (legacy read-only / system-managed) are
+deliberately omitted; the PDF-upload/AI-extraction tab, **delete**, groups, app-allocation, file
+attachments, and **gantt** need a separate surface or table that does not exist (files/links — RISK-002);
+the legacy list-page inline cell-edit + bulk-delete are also not built. Legacy stays the source of truth;
+these gaps are tracked in [14](./14_LEGACY_UX_WORKFLOW_PARITY_MAP.md). **No parity claim of Same;
+RISK-002 + RISK-016 open; OMC/Flywheel cutover + new paid-customer onboarding stay blocked.**
