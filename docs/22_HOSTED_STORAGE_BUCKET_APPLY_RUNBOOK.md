@@ -19,6 +19,9 @@ hosted staging before any contract PDF upload action can ship.**
 >   in §6 below).
 > - [16_CONTRACT_PDF_AI_EXTRACTION_DESIGN](./16_CONTRACT_PDF_AI_EXTRACTION_DESIGN.md) §3 — the storage model;
 >   [PR #40 `src/lib/files/pdf-validation.ts`] — the server-side validation + the server-derived path.
+> - [23_STORAGE_STAGING_APPLY_EVIDENCE_TEMPLATE](./23_STORAGE_STAGING_APPLY_EVIDENCE_TEMPLATE.md) — the
+>   **required evidence log** for this execution. Copy it into a dated record and fill it in **while** running
+>   the steps below; the §6 verification results (with reviewer initials) MUST be captured there.
 > - **Doc 17 remains the binding cutover gate; cutover stays BLOCKED.**
 
 This runbook **does not edit migrations `0001`–`0013`** and **does not put Storage policies into
@@ -148,7 +151,8 @@ create policy "contract_files read (own tenant)" on storage.objects
 
 ## 6. Verification checklist (run in STAGING via the Storage REST API — every box must pass)
 
-Reproduced from [21 §6](./21_STORAGE_LOCAL_HARNESS_FEASIBILITY.md). This is the acceptance gate.
+Reproduced from [21 §6](./21_STORAGE_LOCAL_HARNESS_FEASIBILITY.md). This is the acceptance gate. **Record each
+result — with evidence + an independent reviewer's initials — in the [23_STORAGE_STAGING_APPLY_EVIDENCE_TEMPLATE](./23_STORAGE_STAGING_APPLY_EVIDENCE_TEMPLATE.md) record** (executor claims alone are not sufficient).
 
 **Bucket setup**
 - [ ] Bucket `contract-files` exists and is **PRIVATE** (`public = false`).
