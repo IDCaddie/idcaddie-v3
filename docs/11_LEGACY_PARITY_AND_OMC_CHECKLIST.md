@@ -1,5 +1,12 @@
 # 11 · Legacy Capability Map & OMC Parity Checklist
 
+> **The binding go/no-go cutover gate is now [17_OMC_PRODUCTION_REPLACEMENT_PARITY_GATE](./17_OMC_PRODUCTION_REPLACEMENT_PARITY_GATE.md)**
+> (the ~105-row grounded replacement matrix + the go/no-go checklist + the honest ~70–110-PR estimate).
+> This doc (11) is the **capability scorecard**; 17 is the **binding gate**. If they disagree on
+> cutover-readiness, **17 wins.** **OMC/Flywheel is a paying production-replacement customer (~$3.5k/mo),
+> NOT a pilot** — v3 must replace the live app with no missing/broken workflows; improvements come after
+> replacement.
+
 **Canonical source for: what v3 must preserve from the legacy Firebase app before moving the
 paying client off it, and the go/no-go to cut over.** This is a product-control doc — it tracks
 *parity*, not implementation detail. Deep legacy evidence (routes, collections, functions, with
@@ -93,7 +100,10 @@ acceptance is **not** close. OMC cutover and new paid-customer onboarding remain
 **Hard rule: do not move OMC/Flywheel from Firebase to v3 until every P0 and P1 parity item below
 is `implemented`, `verified`, and signed off** (by the product owner + a security reviewer). Until
 then, legacy Firebase remains production and v3 ships incrementally behind it. Partial parity is not
-a cutover; a half-migrated OMC is worse than no migration.
+a cutover; a half-migrated OMC is worse than no migration. **The authoritative, itemized go/no-go
+checklist + the full replacement parity matrix are in [17 §4/§5](./17_OMC_PRODUCTION_REPLACEMENT_PARITY_GATE.md)
+— this is a production replacement (no missing/broken workflows), NOT a pilot. Cutover is currently
+BLOCKED and v3 is not production-replacement-ready.**
 
 ## 5. Gap list
 - **P0 (cutover blockers — core of why OMC pays):** app inventory (#1,2) · contracts + renewal dates

@@ -1,7 +1,7 @@
 # 00 · Product Status — ID Caddie v3
 
 **Canonical source for: current status.** First doc to read. Last verified against the
-repo on 2026-06-17 (PRs through #34 merged — `files` metadata foundation `0012`; #35 adds **`files` RLS policies** — migration `0013`: tenant-member SELECT + contract-write-authority INSERT, no UPDATE/DELETE/FOR ALL. `files` is now authorized-by-design + tested, but **still not surfaced** — no Storage/upload/signed-URL/scan/AI/UI). Status words are defined in [10_DOCS_INDEX](./10_DOCS_INDEX.md#status-taxonomy).
+repo on 2026-06-17 (PRs through #35 merged — `files` RLS policies `0013`; #36 is **docs-only**: creates [17_OMC_PRODUCTION_REPLACEMENT_PARITY_GATE](./17_OMC_PRODUCTION_REPLACEMENT_PARITY_GATE.md), the binding go/no-go gate for replacing the live OMC/Flywheel app — **OMC is a paying production-replacement customer, NOT a pilot**. No migration/RLS/app/route change; RLS stays 205; cutover stays BLOCKED). Status words are defined in [10_DOCS_INDEX](./10_DOCS_INDEX.md#status-taxonomy).
 
 ## What ID Caddie v3 is
 An enterprise SaaS-governance platform: the source of truth for *what apps a company
@@ -20,14 +20,18 @@ Evidence: [current-security-risk-map.md](./current-security-risk-map.md),
 foundation on Postgres with RLS as the authorization source of truth. We **preserve
 validated workflows, port no Firebase code**.
 
-## Parity doctrine — same product, better backend
-v3 is a **same-product-experience / better-backend replacement**, not a redesign. Users must feel
-*"this is the same ID Caddie I know."* The backend improves (real tenant isolation, RLS, append-only
-audit, non-destructive imports, same-tenant integrity, no hard deletes, better auth/session, safer
-exports, cleaner schema), but the **user-facing workflow preserves legacy behavior unless a difference
-is intentionally approved**. The per-workflow parity contract and the hard cutover gate live in
-[14_LEGACY_UX_WORKFLOW_PARITY_MAP](./14_LEGACY_UX_WORKFLOW_PARITY_MAP.md): **cutover is blocked on
-workflow parity, not on backend/RLS readiness alone.**
+## Parity doctrine — same product, better backend (OMC = production replacement, not a pilot)
+v3 is a **same-product-experience / better-backend replacement**, not a redesign. **OMC/Flywheel is a
+paying production customer (~$3.5k/mo); v3 must REPLACE the live app with no missing/broken workflows —
+this is not a pilot and not "pilot-ready."** Users must feel *"this is the same ID Caddie I know."* The
+backend improves (real tenant isolation, RLS, append-only audit, non-destructive imports, same-tenant
+integrity, no hard deletes, better auth/session, safer exports, cleaner schema), but the **user-facing
+workflow preserves legacy behavior unless a difference is intentionally approved**. Improvements come
+**after** replacement, via version-controlled planned rollouts. The per-workflow parity contract +
+doctrine live in [14_LEGACY_UX_WORKFLOW_PARITY_MAP](./14_LEGACY_UX_WORKFLOW_PARITY_MAP.md); the binding
+**go/no-go cutover gate** is [17_OMC_PRODUCTION_REPLACEMENT_PARITY_GATE](./17_OMC_PRODUCTION_REPLACEMENT_PARITY_GATE.md)
+(if 11/14 and 17 disagree on readiness, 17 wins): **cutover is blocked on workflow parity, not on
+backend/RLS readiness alone.**
 
 ## Current phase
 **Read-only governance foundation + first contract WRITE workflow.** The secure data/RLS foundation,
@@ -57,10 +61,10 @@ column/surface for (`commodity_*` [hidden in legacy], `validated` [read-only], *
 `po_number`/`auto_renew`/`month_to_month`; contract **delete**/archive / soft-delete; `app_contracts` writes (link/unlink); UAR / unmanaged-account report; identity matching *algorithm*;
 `people` org-read (stays tenant-only); `identity_accounts` read (default-deny); license rules/evaluation;
 spend/chargeback; files/invoices; people directory; provisioning; tenant switching; imports/exports;
-connectors. **OMC/Flywheel cutover and new paid-customer onboarding remain blocked.**
+connectors. **OMC/Flywheel cutover and new paid-customer onboarding remain blocked** — the full blocker list + the ~105-row replacement parity matrix are in [17_OMC_PRODUCTION_REPLACEMENT_PARITY_GATE](./17_OMC_PRODUCTION_REPLACEMENT_PARITY_GATE.md). **v3 is NOT production-replacement-ready;** a grounded legacy inspection (PR #36) puts full parity at **~70–110 PRs** from current state (pending OMC-confirmation of actual usage).
 
 ## Merged PRs
-**PRs #1–#34 are merged** (main @ `64003e5`); **PR #35 (files RLS policies — `0013`) is this PR.** The full
+**PRs #1–#35 are merged** (main @ `574014a`); **PR #36 (OMC production replacement parity gate — docs-only, creates doc 17) is this PR.** The full
 per-PR engineering log is the canonical source — see [05_ENGINEERING_CHANGELOG](./05_ENGINEERING_CHANGELOG.md);
 do not maintain a second PR table here (it drifts). Milestone summary:
 - **Foundation / discipline:** RLS foundation + tests (#1/#2), migration discipline (#3), clean-app
@@ -74,6 +78,7 @@ do not maintain a second PR table here (it drifts). Milestone summary:
 - **Contract writes:** write server actions + DAL (#30, backend, RLS-gated, audit inherited from `0010`); **create/edit UI** `/contracts/new` + `/contracts/[id]/edit` (#31 — first write workflow); **parity fields** category/procurement_date/notes/po_number/auto_renew/month_to_month (#32 — `0011`). **Partial** legacy parity throughout.
 - **Design / parity docs (nothing user-facing built):** identity matching read-scope (#22), contract steward write design (#25), docs truth pass (#26), legacy UX/workflow parity map (#28), legacy contract-form inspection (#31 — [15](./15_LEGACY_CONTRACT_FORM_INSPECTION.md)), contract PDF/AI extraction design (#33 — [16](./16_CONTRACT_PDF_AI_EXTRACTION_DESIGN.md)).
 - **Schema + RLS foundation (no surface):** `files` metadata foundation (#34 — `0012`; columns + same-tenant FK + CHECKs) + `files` RLS policies (#35 — `0013`; tenant-member SELECT + contract-write-authority INSERT, no UPDATE/DELETE/FOR ALL). Authorized-by-design + tested; `files` still **not surfaced** in the app.
+- **Replacement governance (docs):** OMC production replacement parity gate (#36 — [17](./17_OMC_PRODUCTION_REPLACEMENT_PARITY_GATE.md); the binding go/no-go gate, grounded ~105-row matrix, honest ~70–110-PR estimate; OMC = production replacement, not a pilot).
 
 Migration `0001` (core schema) predates the numbered PRs (rebuild starter pack).
 
@@ -157,8 +162,11 @@ One-line decisions; deep rationale in the linked canonical docs.
 - **Safely keep building on this foundation?** Yes — *after* `scripts/check-docs-updated.sh`,
   `check-migration-safety.sh`, and `test-rls.sh` pass. The RLS model is tested and CI-enforced.
 
-## Next recommended PRs (read-only surfaces + audit `0010` (#29) + write path (#30) + create/edit UI (#31) + parity fields `0011` (#32) + PDF/AI **design** (#33) + `files` metadata foundation `0012` (#34) + `files` RLS `0013` (#35) are done)
-1. **Implement contract PDF upload + AI extraction** per the [16](./16_CONTRACT_PDF_AI_EXTRACTION_DESIGN.md) plan — **multiple PRs, each with tests:** ~~(a) `files` forward migration (§4) + `gen-types`~~ — **DONE (`0012`, PR #34)**; ~~(b) `files` RLS policies + the §5 tests~~ — **DONE (`0013`, PR #35 — tenant-member SELECT + contract-write-authority INSERT; no UPDATE/DELETE/FOR ALL)**; (c) **private Storage bucket + server-side validation** (extension/MIME/magic-byte/size + scan gate) ← **next**; (d) extraction worker (out-of-request, tenant-re-deriving; **no service-role app route**) with strict-allowlist parsing through `parseContractWriteInput`; (e) minimal review-and-apply UI; (f) DB-side file/extraction audit; (also: org-scoped `files` read, the deferred read-broadening). **Suggestions only — no AI auto-save.** RISK-002 stays open until built+tested.
+## Next recommended PRs (audit `0010` (#29) → write path (#30) → create/edit UI (#31) → parity fields `0011` (#32) → PDF/AI **design** (#33) → `files` metadata `0012` (#34) → `files` RLS `0013` (#35) → OMC replacement gate doc 17 (#36) are done)
+> **The canonical, grounded next-PR sequence (Track A security/file path + Track B replacement-parity build-out) now lives in [17 §7](./17_OMC_PRODUCTION_REPLACEMENT_PARITY_GATE.md), with the honest ~70–110-PR estimate (§8) and the OMC-confirmation list (§9). Start there.** The items below are the near-term head of Track A.
+
+1. **Run the OMC-confirmation pass** ([17 §9](./17_OMC_PRODUCTION_REPLACEMENT_PARITY_GATE.md)) — it sizes the entire replacement; do it early.
+2. **Implement contract PDF upload + AI extraction** per the [16](./16_CONTRACT_PDF_AI_EXTRACTION_DESIGN.md) plan — **multiple PRs, each with tests:** ~~(a) `files` forward migration (§4) + `gen-types`~~ — **DONE (`0012`, PR #34)**; ~~(b) `files` RLS policies + the §5 tests~~ — **DONE (`0013`, PR #35 — tenant-member SELECT + contract-write-authority INSERT; no UPDATE/DELETE/FOR ALL)**; (c) **private Storage bucket + server-side validation** (extension/MIME/magic-byte/size + scan gate) ← **next**; (d) extraction worker (out-of-request, tenant-re-deriving; **no service-role app route**) with strict-allowlist parsing through `parseContractWriteInput`; (e) minimal review-and-apply UI; (f) DB-side file/extraction audit; (also: org-scoped `files` read, the deferred read-broadening). **Suggestions only — no AI auto-save.** RISK-002 stays open until built+tested.
 2. **Remaining contract-form parity gaps** — the renewal **gantt** and the legacy list-page inline-edit/bulk-delete. `commodity_*`/`validated` deliberately not built (docs/15). Parity stays **Partial**.
 3. **App-contract link/unlink** and the next legacy write workflows ([14 §8](./14_LEGACY_UX_WORKFLOW_PARITY_MAP.md)).
 4. First reviewed **hosted-Supabase apply** (RISK-001 — still nothing applied to any hosted env).
