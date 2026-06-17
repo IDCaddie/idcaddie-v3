@@ -1255,4 +1255,94 @@ do $$ declare v int; begin
   assert v = 1, format('T32 contracts_audit_on_write must be an AFTER INSERT OR UPDATE FOR EACH ROW trigger, saw %s', v);
 end $$;
 
+-- ── Test 33: files metadata foundation (migration 0012) ──────────────────────
+-- 0012 adds metadata columns to `files` for the FUTURE contract PDF/AI workflow (docs/16) WITHOUT
+-- surfacing the table. These assertions pin: (a) the same-tenant contract-attachment FK (cross-tenant
+-- rejected, same-tenant accepted), (b) the status/value CHECK constraints (tight, but not over-tight),
+-- and (c) that `files` stays DEFAULT-DENY / not surfaced — 0012 adds NO policy, so 0 DELETE, 0 FOR ALL,
+-- 0 policies total, and a tenant member reads 0 rows even when files exist (RISK-002 stays OPEN).
+reset role;
+
+-- 33a: a VALID same-tenant file attached to a tenant-A contract inserts (positive control); the status
+-- columns take their 0012 defaults; the composite (contract_id, tenant_id) matches a real tenant-A contract.
+insert into public.files (id, tenant_id, storage_path, original_filename, document_type, contract_id)
+  values ('13000000-0000-0000-0000-0000000000f1','11111111-1111-1111-1111-111111111111',
+          'contracts/11111111-1111-1111-1111-111111111111/13000000-0000-0000-0000-0000000000f1.pdf',
+          'contract_a1.pdf','contract','c0000000-0000-0000-0000-0000000000a1');
+do $$ declare us text; ss text; es text; begin
+  select upload_status, scan_status, extraction_status into us, ss, es
+    from public.files where id='13000000-0000-0000-0000-0000000000f1';
+  assert us = 'pending', format('T33 new file upload_status should default to pending, got %s', us);
+  assert ss = 'pending', format('T33 new file scan_status should default to pending, got %s', ss);
+  assert es = 'not_started', format('T33 new file extraction_status should default to not_started, got %s', es);
+end $$;
+
+-- 33b: a CROSS-TENANT contract attachment is rejected by the composite same-tenant FK, and each CHECK
+-- constraint rejects an out-of-range value. Counted so a missing/loosened constraint fails the run.
+do $$ declare n int := 0; begin
+  -- cross-tenant: a tenant-B file pointing at a tenant-A contract → composite (contract_id, tenant_id)
+  -- has no matching (id, tenant_id) pair in contracts → foreign_key_violation.
+  begin
+    insert into public.files (id, tenant_id, storage_path, original_filename, contract_id) values
+      ('13000000-0000-0000-0000-0000000000fb','22222222-2222-2222-2222-222222222222','x/fb.pdf','fb.pdf',
+       'c0000000-0000-0000-0000-0000000000a1');
+    raise exception 'T33 cross-tenant file→contract attachment was allowed';
+  exception when foreign_key_violation then n := n + 1; end;
+  begin -- invalid upload_status
+    insert into public.files (id, tenant_id, storage_path, original_filename, upload_status) values
+      ('13000000-0000-0000-0000-0000000000c1','11111111-1111-1111-1111-111111111111','x/c1.pdf','c1.pdf','bogus');
+    raise exception 'T33 invalid upload_status was allowed';
+  exception when check_violation then n := n + 1; end;
+  begin -- invalid scan_status (legacy-style value not in the v3 enum)
+    insert into public.files (id, tenant_id, storage_path, original_filename, scan_status) values
+      ('13000000-0000-0000-0000-0000000000c2','11111111-1111-1111-1111-111111111111','x/c2.pdf','c2.pdf','infected');
+    raise exception 'T33 invalid scan_status was allowed';
+  exception when check_violation then n := n + 1; end;
+  begin -- invalid extraction_status
+    insert into public.files (id, tenant_id, storage_path, original_filename, extraction_status) values
+      ('13000000-0000-0000-0000-0000000000c3','11111111-1111-1111-1111-111111111111','x/c3.pdf','c3.pdf','running');
+    raise exception 'T33 invalid extraction_status was allowed';
+  exception when check_violation then n := n + 1; end;
+  begin -- negative byte_size
+    insert into public.files (id, tenant_id, storage_path, original_filename, byte_size) values
+      ('13000000-0000-0000-0000-0000000000c4','11111111-1111-1111-1111-111111111111','x/c4.pdf','c4.pdf',-1);
+    raise exception 'T33 negative byte_size was allowed';
+  exception when check_violation then n := n + 1; end;
+  begin -- malformed sha256 (not 64 lowercase hex)
+    insert into public.files (id, tenant_id, storage_path, original_filename, sha256) values
+      ('13000000-0000-0000-0000-0000000000c5','11111111-1111-1111-1111-111111111111','x/c5.pdf','c5.pdf','NOTHEX');
+    raise exception 'T33 malformed sha256 was allowed';
+  exception when check_violation then n := n + 1; end;
+  assert n = 6, format('T33 expected 6 constraint rejections (1 cross-tenant FK + 5 CHECK), got %s', n);
+end $$;
+
+-- 33c: well-formed metadata is ACCEPTED (the checks are tight, not over-tight): a 64-hex sha256, a
+-- non-negative byte_size, and a valid scan_status. NULL metadata stays valid (nullable columns).
+insert into public.files (id, tenant_id, storage_path, original_filename, byte_size, sha256, scan_status) values
+  ('13000000-0000-0000-0000-0000000000c6','11111111-1111-1111-1111-111111111111','x/c6.pdf','c6.pdf',
+   1024, repeat('a',64), 'passed');
+
+-- 33d: CATALOG — `files` stays DEFAULT-DENY / not surfaced: 0012 added NO policy, so 0 DELETE,
+-- 0 FOR ALL, and 0 policies total; RLS is still enabled (0 policies ⇒ deny-all, not allow-all).
+do $$ declare v int; begin
+  select count(*) into v from pg_policies where schemaname='public' and tablename='files' and cmd='DELETE';
+  assert v = 0, format('T33 files must have 0 DELETE policies, saw %s', v);
+  select count(*) into v from pg_policies where schemaname='public' and tablename='files' and cmd='ALL';
+  assert v = 0, format('T33 files must have 0 FOR ALL policies, saw %s', v);
+  select count(*) into v from pg_policies where schemaname='public' and tablename='files';
+  assert v = 0, format('T33 files must remain default-deny (0 policies), saw %s', v);
+  select count(*) into v from pg_class where relname='files' and relnamespace='public'::regnamespace and relrowsecurity;
+  assert v = 1, 'T33 files must keep RLS enabled (0 policies ⇒ deny-all)';
+end $$;
+
+-- 33e: BEHAVIORAL default-deny — a tenant member reads 0 `files` even though tenant-A file rows now
+-- exist (so the 0 is the policy, not an empty table). Reinforces "not surfaced".
+select set_config('request.jwt.claims','{"sub":"0a000000-0000-0000-0000-000000000001"}',false); -- owner_a (tenant A)
+set role authenticated;
+do $$ declare v int; begin
+  select count(*) into v from public.files;
+  assert v = 0, format('T33 files is not surfaced — a tenant member must read 0 files, saw %s', v);
+end $$;
+reset role;
+
 do $$ begin raise notice 'ALL ORG-RLS ASSERTIONS PASSED'; end $$;
