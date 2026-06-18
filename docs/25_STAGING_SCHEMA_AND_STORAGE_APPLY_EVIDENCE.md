@@ -11,9 +11,11 @@
 >   discipline. **This PR is docs/evidence-only — it ran NO hosted command; it records the action.**
 > - **The private `contract-files` Storage bucket now EXISTS in staging:** `public = false`,
 >   `file_size_limit = 26214400` (= 25 MiB = `MAX_CONTRACT_FILE_BYTES`), `allowed_mime_types = application/pdf` (§0).
-> - **Storage object policies are now applied in staging (structural verification passed) — but the real
->   Storage REST API authorization verification is PENDING** (§0.2). The [21 §6](./21_STORAGE_LOCAL_HARNESS_FEASIBILITY.md)
->   verification is therefore **NOT complete**; **no upload action ships** until that live-authz verification is done + recorded.
+> - **Storage object policies are applied in staging AND the real Storage REST API authorization verification
+>   PASSED in hosted staging** (14/14, 2026-06-18 — §0.3; real Storage REST API calls with user-scoped JWTs,
+>   no service-role, no production touched). **RISK-001 still remains OPEN** — closure also needs the production
+>   apply + the [17 §5](./17_OMC_PRODUCTION_REPLACEMENT_PARITY_GATE.md) cutover checklist. **No upload action
+>   ships** until those remain steps are done; **upload is NOT automatically production-ready.**
 > - **No upload route/action/UI, no signed-URL flow, no AI extraction, no OCR, and no production change** were made.
 > - **Production (`dzbfxulvxchdemcettrx`) was NOT touched. No hosted command was run in this PR.**
 > - **RISK-001 remains OPEN** — the staging apply is **partial** (object policies + full verification + production
@@ -89,12 +91,12 @@ then the `storage.objects` policies applied to **staging only** (not a migration
 1. ✅ migration `0014` helpers — added + RLS-tested in PR #51 (T35; suite 222);
 2. ✅ `0014` applied to **staging** (remote migration list now `0001`–`0014`);
 3. ✅ `storage.objects` policies applied to **staging** (human, doc 22 §5) — **§0.2**;
-4. ⏳ the [21 §6](./21_STORAGE_LOCAL_HARNESS_FEASIBILITY.md) **real Storage REST API authorization verification** — **still PENDING**, to be recorded in a [23](./23_STORAGE_STAGING_APPLY_EVIDENCE_TEMPLATE.md) copy;
-5. ⏳ production apply (separate, later).
+4. ✅ the [21 §6](./21_STORAGE_LOCAL_HARNESS_FEASIBILITY.md) **real Storage REST API authorization verification** — **PASSED in hosted staging 2026-06-18 (14/14 — §0.3)**;
+5. ⏳ production apply (separate, later) — **still pending; RISK-001 stays OPEN; cutover BLOCKED**.
 
 ---
 
-## 0.2 Storage object policies applied in staging — structural verification passed (REST authz PENDING)
+## 0.2 Storage object policies applied in staging — structural verification passed (REST authz PASSED — §0.3)
 
 A human applied the `contract-files` `storage.objects` policies to **staging only** (doc 22 §5), from `main`
 @ `795a50e` (PR #51 merged), with the linked Supabase project confirmed as **staging** (`ycdpzduxugdsffjqyoai`,
@@ -123,9 +125,9 @@ A human applied the `contract-files` `storage.objects` policies to **staging onl
 - **Unsafe-policy count = 0:** no UPDATE policy, no DELETE policy, no `ALL`/`FOR ALL` policy, no `anon` role,
   no public policy. Only the two `authenticated` INSERT/SELECT policies above exist.
 
-**Real Storage REST API authorization verification PENDING** (doc 21 §6 / doc 23 §4 — not yet run; the apply
-above is *structural only*). The following must be proven through the live Storage REST API with user-scoped
-JWTs before any upload action ships:
+**Real Storage REST API authorization verification: PASSED in hosted staging 2026-06-18 — see §0.3** (the
+structural apply above is now backed by a live-authz run). The obligations below were all proven through the
+real Storage REST API with user-scoped JWTs:
 - tenant editor can upload only into their own tenant prefix;
 - procurement-org manager allowed **only** where contract-write authority exists;
 - paying-org manager **denied** upload;
@@ -137,27 +139,46 @@ JWTs before any upload action ships:
 - overwrite/`upsert`/move/copy/delete **denied**;
 - a signed URL is short-lived **and** single-object scoped.
 
-**RISK-001 remains OPEN** (structural apply ≠ real-authz verification); **production
-`dzbfxulvxchdemcettrx` untouched**; **upload is NOT ready**; **cutover remains BLOCKED**.
+**RISK-001 remains OPEN** (REST verification passed, but production apply + cutover checklist still pending);
+**production `dzbfxulvxchdemcettrx` untouched**; **upload is NOT automatically production-ready**; **cutover remains BLOCKED**.
 
 ---
 
-## 0.3 Real Storage REST API authorization verification — verifier built, **NOT YET RUN** (PENDING)
+## 0.3 Real Storage REST API authorization verification — **PASSED in hosted staging** (2026-06-18)
 
-A user-scoped REST verifier now exists — `scripts/verify-staging-storage-rest.mjs` + the runbook
-[26_STORAGE_REST_VERIFICATION_RUNBOOK](./26_STORAGE_REST_VERIFICATION_RUNBOOK.md) — that proves all of the
-obligations above through the **real Supabase Storage REST API** with synthetic-user JWTs (staging-only;
-anon key only, no service-role; refuses to run unless the linked ref + URL are staging `ycdpzduxugdsffjqyoai`).
+**Storage REST API authorization verification PASSED in hosted staging.** A human ran the verifier
+`node scripts/verify-staging-storage-rest.mjs` against the **staging** project `ycdpzduxugdsffjqyoai`
+(linked ref confirmed staging). **The verifier used real Supabase Storage REST API calls with user-scoped
+JWTs; no service-role key was used by the verifier; no production project was touched.** Result: **14/14
+REST checks passed** + the check-12 path-shape self-test passed. **No secrets, passwords, anon keys, or JWTs
+are recorded here** (the verifier prints none).
 
-**Status: the verifier has NOT been run; real Storage REST API authorization verification remains PENDING.**
-Record the per-check `[PASS]` evidence here (or in a [23](./23_STORAGE_STAGING_APPLY_EVIDENCE_TEMPLATE.md) copy)
-**only after** a human runs it green against staging (doc 26 §6) — no tokens/passwords/anon key in the record.
-Until then: **RISK-001 remains OPEN; production untouched; upload NOT ready; cutover remains BLOCKED.**
+| # | Check | Result |
+|---|---|---|
+| 1 | Tenant editor can upload under own tenant prefix | **PASS** |
+| 1b | Tenant editor cannot upload under another tenant prefix | **PASS** |
+| 2 | Procurement-org manager uploads only where contract-write authority exists | **PASS** |
+| 3 | Paying-org manager is denied upload | **PASS** |
+| 4 | Tenant viewer is denied upload | **PASS** |
+| 5 | Cross-org manager is denied upload | **PASS** |
+| 6 | Tenant A cannot read or list tenant B prefix | **PASS** |
+| 7 | Tenant B cannot read, list, or sign a tenant A object | **PASS** |
+| 8 | Anonymous/public GET is denied | **PASS** |
+| 9 | Overwrite/upsert is denied | **PASS** |
+| 10 | Move/copy/delete are denied | **PASS** |
+| 11 | Signed URL is single-object scoped with 60s `expiresIn` | **PASS** |
+| 12 | Object-path shape self-test (`contracts/{tenant_id}/{file_id}.pdf`) — client self-test | **PASS** |
+| 13 | Client-supplied / bad-UUID-shaped paths fail closed | **PASS** |
+| 14 | `files` table is the source of truth (upload with no `files` row denied) | **PASS** |
+| 15 | `scripts/test-rls.sh` → **222** (local; `0013`/`0014` unchanged) — run 2026-06-18 | **PASS (local)** |
 
-| # | Check | Result (fill after run) | Reviewer |
-|---|---|---|---|
-| 1–14 | the REST obligations (doc 26 §1) | _pending_ | |
-| 15 | `scripts/test-rls.sh` → 222 (local; `0013` unchanged) | _pending_ | |
+**What this does and does NOT mean.** The `contract-files` object policies are now **verified through the
+real Storage REST API in hosted staging** — RISK-001's criterion (2) is satisfied ([04](./04_RISK_REGISTER.md)).
+But **RISK-001 remains OPEN**: its closure also requires the **production apply** under doc 20 discipline and
+the [17 §5](./17_OMC_PRODUCTION_REPLACEMENT_PARITY_GATE.md) cutover checklist, neither of which is done.
+**Cutover remains BLOCKED. The upload implementation is NOT automatically production-ready** — no upload
+route/action/UI, signed-URL route, or AI extraction has shipped, and a separate production apply +
+verification is still required. **Production `dzbfxulvxchdemcettrx` untouched.**
 
 ---
 
