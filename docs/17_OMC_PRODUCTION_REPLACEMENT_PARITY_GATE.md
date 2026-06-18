@@ -63,8 +63,8 @@ Used by the matrix (§4). Never blur these.
 These are the categories that make cutover a NO today. None may be hand-waved.
 
 **Operations / data (gating everything):**
-- **No hosted Supabase apply** — all of `0001`–`0013` + RLS are `verified-local` only against an auth shim; never applied to hosted Supabase. First apply is unproven (**RISK-001**).
-- **No staging Supabase verification** and **no staging Vercel** wired to Supabase. Auth/session + tenant-context have never run against hosted Supabase Auth.
+- **Hosted Supabase apply — done only for the `contract-files` Storage path.** Migrations `0001`–`0014` + the `0015` `files` grant, the private bucket, and the 2 `authenticated` object policies are applied **and Storage REST authz is verified 14/14 in BOTH staging and production** ([25](./25_STAGING_SCHEMA_AND_STORAGE_APPLY_EVIDENCE.md)/[29](./29_PRODUCTION_STORAGE_APPLY_EVIDENCE.md)); **RISK-001 is materially reduced but remains OPEN.** STILL BLOCKING: the **full schema + `org_rls_test.sql` RLS suite has NOT been re-run against hosted Postgres/Auth** (only Storage object-RLS was REST-verified — and a shim-vs-hosted divergence was already found + fixed as `0015`), and there is **no deploy/promote CI and no rehearsed rollback/DR/backup-restore** on record.
+- **No staging Vercel verified against hosted Supabase Auth** — the env-var inventory exists ([24](./24_STAGING_ENVIRONMENT_VARIABLES_AND_WIRING_CHECKLIST.md)), but **auth/session + tenant-context have not been exercised + recorded against hosted Supabase Auth**.
 - **No OMC-shaped staging dataset.**
 - **No hosted-apply / rollback / DR / backup-restore runbook**, and no deploy/promote CI (the 4 CI workflows are PR-time gates only).
 - **No OMC data-migration plan** (Firestore + Storage → Postgres + Supabase Storage) for apps/contracts/people/app_users/files/invoices/billing + file bytes + AI history. Cutover as-is loses the historical corpus. (Never via `local_demo.sql` — **RISK-015**.)

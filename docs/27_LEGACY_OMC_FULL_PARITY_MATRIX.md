@@ -217,13 +217,13 @@ in the current branch.
 | Upload UI | — | `missing` | P0 | route + UI evidence | user-scoped |
 | Server-side upload action | — | `missing` | P0 | workflow test | user-scoped client, no service-role |
 | File metadata creation | `files` `0012`/`0013` | `partial` | P0 | RLS test (222) + surfaced path | source of truth |
-| User-scoped Storage upload | policy applied (staging) | `partial` | P0 | **doc 26 REST verify (pending)** | INSERT policy + files-row gate |
+| User-scoped Storage upload | policy applied (staging) | `partial` | P0 | **doc 26 REST verify — PASSED 14/14 staging+prod** | INSERT policy + files-row gate |
 | Download / view flow | — | `missing` | P0 | signed-URL route + REST verify | signed-URL only |
 | Short-lived signed-URL flow | — | `missing` | P0 | REST verify (single-object, TTL) | per-object, post-authz |
 | Delete / replace policy decision | no UPDATE/DELETE policy (by design) | `deprecated-approved` (pending signoff) | P1 | record the no-overwrite/no-delete decision + OMC signoff | no `FOR ALL` |
 | File audit trail | — | `missing` | P0 | Track L | append-only |
-| Cross-tenant denial verification | policy applied | `partial` | P0 | **doc 26 REST verify (pending)** | RLS + path-tenant binding |
-| Anonymous denial verification | policy applied | `partial` | P0 | **doc 26 REST verify (pending)** | private bucket, no anon policy |
+| Cross-tenant denial verification | policy applied | `partial` | P0 | **doc 26 REST verify — PASSED 14/14 staging+prod** | RLS + path-tenant binding |
+| Anonymous denial verification | policy applied | `partial` | P0 | **doc 26 REST verify — PASSED 14/14 staging+prod** | private bucket, no anon policy |
 
 ### Track I — AI extraction parity
 > **Rule: AI suggestions only. No silent overwrite.**
@@ -366,7 +366,7 @@ validation · (files) file byte validation · before/after report comparison · 
 | Staging dataset | synthetic fixtures (doc 26) | `partial` | P0 | OMC-shaped dataset | partial |
 | Vercel env wiring | [24] inventory | `partial` | P0 | wiring evidence | per-env |
 | Hosted Supabase migrations | `0001`–`0014` staged | `partial` | P0 | migration list (staging) | done staging, not prod |
-| Storage policy verification | structural applied; REST **pending** | `partial` | P0 | **doc 26 REST verify (pending)** | RISK-001 OPEN |
+| Storage policy verification | structural applied; REST **pending** | `partial` | P0 | **doc 26 REST verify — PASSED 14/14 staging+prod** | RISK-001 OPEN |
 | Backup / restore | `missing` | P0 | rehearsal evidence | — |
 | Rollback | runbook discipline [20] | `partial` | P0 | rehearsed rollback | documented |
 | Monitoring | `blocked-unknown-legacy-behavior` | P1 | confirm needs | — |
@@ -391,8 +391,8 @@ validation · (files) file byte validation · before/after report comparison · 
 - Contracts read/create/edit — `partial`
 - Contract form parity — `partial` (gaps in [15])
 - Files metadata / RLS foundation — `partial`
-- Storage structural staging apply — `partial` (REST verify pending)
-- Storage REST verification — **pending** (verifier [26] not yet run)
+- Storage structural staging apply — applied in staging **and production** ([25](./25_STAGING_SCHEMA_AND_STORAGE_APPLY_EVIDENCE.md)/[29](./29_PRODUCTION_STORAGE_APPLY_EVIDENCE.md))
+- Storage REST authorization verification — **PASSED 14/14 in staging and production** (verifier [26] run; user-scoped JWTs, no service-role); production synthetic cleanup recorded ([29 §6](./29_PRODUCTION_STORAGE_APPLY_EVIDENCE.md))
 - OMC parity gate docs — created ([17])
 - OMC confirmation pass scaffolding — created ([18])
 - Connector credential vault design — created ([19])
