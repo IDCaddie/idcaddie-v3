@@ -5,9 +5,17 @@ Storage bucket + `storage.objects` object policies to the PRODUCTION Supabase pr
 through the real Storage REST API in production.** This mirrors the staging apply ([22](./22_HOSTED_STORAGE_BUCKET_APPLY_RUNBOOK.md)/[26](./26_STORAGE_REST_VERIFICATION_RUNBOOK.md))
 but targets **production** (`dzbfxulvxchdemcettrx`) and is gated by the cutover authority ([17](./17_OMC_PRODUCTION_REPLACEMENT_PARITY_GATE.md)).
 
+> ## ✅ EXECUTED 2026-06-18 — evidence in [29_PRODUCTION_STORAGE_APPLY_EVIDENCE](./29_PRODUCTION_STORAGE_APPLY_EVIDENCE.md)
+> A **human** executed this runbook against production `dzbfxulvxchdemcettrx`: migrations `0001`–`0014` applied,
+> private `contract-files` bucket + 2 `authenticated` policies (0 unsafe), and the production REST verifier
+> passed **14/14** (a missing `public.files` `authenticated` grant was found + codified as migration `0015`).
+> **RISK-001 still OPEN** (only criterion 5, the doc 17 §5 cutover checklist, is unmet); **cutover still BLOCKED;
+> upload not automatically production-ready.** The banner/steps below describe the runbook as authored; the
+> agent ran nothing.
+
 > ## ⚠️ STATUS BANNER (do not remove)
-> - **Production apply is NOT executed by this PR.** This is a *runbook a human follows later* under explicit
->   approval — it applies nothing, mutates nothing, and runs no command.
+> - **Production apply is NOT executed by the docs PR.** This is a *runbook a human follows* under explicit
+>   approval — the docs PR applies nothing, mutates nothing, and runs no command.
 > - **No production mutation in this PR.** **No secrets are recorded** (this doc holds no key/password/JWT/anon
 >   key/connection-string/project secret; production values live in the dashboard / an approved secret manager).
 > - **RISK-001 remains OPEN until production apply, production verification, and the doc 17 cutover checklist
