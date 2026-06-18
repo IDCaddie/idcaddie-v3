@@ -115,6 +115,9 @@ here, and none may be hand-waved at cutover.**
 3. **Required-workflow parity build plan from doc 27** — a sequenced plan for the missing/partial *required*
    workflows (start with the files product surface that sits on the now-ready Storage boundary), each citing its
    doc 27 row(s) (boxes 1, 2). *(Per doc 09, future feature PRs must cite doc 27 rows with evidence.)*
+   **→ PREPARED (planning only): the ranked, buildable plan (9 implementation tracks, P0/P1/P2, P0 detail, and
+   the next 3 implementation PRs) is in [33_REQUIRED_WORKFLOW_PARITY_BUILD_PLAN](./33_REQUIRED_WORKFLOW_PARITY_BUILD_PLAN.md).
+   No feature built; build PRs follow once items #1/#2 are executed green.**
 
 Everything after that (data migration, rollback rehearsal, OMC signoff) follows §3 ranks 4–6.
 
