@@ -278,9 +278,9 @@ On STOP: halt, roll back the bucket/policies, record what happened, open a fix-f
 
 ## 8. After verified staging (do NOT auto-promote)
 
-- Record the §6 results + who ran/approved it (doc 20 §9 "After staging Supabase apply").
-- Soak; only then schedule the **production** execution of this runbook (a separate, separately-approved run)
-  per doc 20 §9 "Before production Supabase apply" + the doc 17 §5 go/no-go.
+- Record the §6 results + who ran/approved it (doc 20 §9 "After staging Supabase apply"). **Staging §6 PASSED 2026-06-18** ([25 §0.3](./25_STAGING_SCHEMA_AND_STORAGE_APPLY_EVIDENCE.md)).
+- Soak; only then schedule the **production** apply — its exact human-run steps are **[28_PRODUCTION_STORAGE_APPLY_RUNBOOK](./28_PRODUCTION_STORAGE_APPLY_RUNBOOK.md)** (a separate, separately-approved run)
+  per doc 20 §9 "Before production Supabase apply" + the doc 17 §5 go/no-go. **Not executed yet; cutover BLOCKED.**
 - The **upload action / route / UI, signed-URL read path, and AI/OCR are separate later PRs** — they may
   ship only after §6 passes in staging (and, for cutover, after doc 17 §5).
 
