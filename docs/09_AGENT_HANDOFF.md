@@ -12,8 +12,9 @@ fields `0011` + PDF/AI **design** [16] + `files` metadata foundation `0012`; **P
 editor+ OR procurement-org manager; **`paying_org` grants no write**); **no UPDATE/DELETE/FOR ALL**. `files` now has a
 **tested read+write authorization model** but is **still NOT surfaced** — no Storage, upload, signed URLs, scan/AI, UI,
 or app DAL touches `files`).
-Migrations `0001`–`0013` are `implemented`, `verified-local`, `ci-enforced`, **not hosted-applied**
-(`org_rls_test.sql` = 205 assertions, T1–T34; 67 vitest tests). Auth/session skeleton, read-only
+Migrations `0001`–`0013` are `implemented`, `verified-local`, `ci-enforced`, and now **`staged`** (applied to
+staging `ycdpzduxugdsffjqyoai` — PR #47/#48; **not** production-applied; Storage object policies + verification
+pending — RISK-001 partial/OPEN) (`org_rls_test.sql` = 205 assertions, T1–T34; 67 vitest tests). Auth/session skeleton, read-only
 tenant/org context, and a typed DAL are built. **Product surfaces ship:** `/apps`
 + `/apps/[id]` (with app-user roster, match-status column, account-summary card), `/contracts` +
 `/contracts/[id]`, and linked app↔contract panels — read-only, RLS-scoped — **plus** the contract
@@ -133,7 +134,7 @@ Still NOT safe to surface: `people`, `identity_accounts`, `invoices`/`files`/`li
 (Stages 4/4b apps — PR #13/#14; Stage 5 contracts — PR #19; Stage 5b linked panels — PR #20; Stage 6a app-user roster — PR #21; Stage 6b identity read-scope design — PR #22; Stage 6c match status — PR #23; Stage 6d account summary — PR #24; Stage 5b contract write design — PR #25; truth pass — PR #26; `0009` app_contracts tenant-bind — PR #27; legacy UX/workflow parity map — PR #28; contract audit-on-write `0010` — PR #29; contract write path/DAL + server actions — PR #30; contract create/edit UI — PR #31; contract form parity fields `0011` — PR #32; contract PDF/AI extraction design — PR #33; files metadata foundation `0012` — PR #34; files RLS policies `0013` — PR #35; OMC production replacement parity gate doc 17 — PR #36; OMC confirmation pass scaffolding doc 18 — PR #37; connector credential vault design doc 19 — PR #38; staging + hosted apply & cutover discipline doc 20 — PR #39; contract-file PDF validation foundation `src/lib/files/pdf-validation.ts` — PR #40.)
 
 ## Current open risks to respect
-`not-hosted-applied`; child tables **not org-scoped for reads** — tenant-only (`people`) or default-deny (`identity_accounts`/`license_*`/`files`/`invoices`); `app_contracts` (`0006`) + `app_users` (`0007`) + `app_user_identity_matches` (`0008`) are now org-scoped read; see read map [02 §8](./02_SECURITY_AND_RLS.md) (RISK-002, narrowed not closed); no tenant switching /
+**hosted apply PARTIAL** (`0001`–`0013` `staged` to staging `ycdpzduxugdsffjqyoai`; Storage object policies + verification + production still pending — RISK-001 OPEN, [04](./04_RISK_REGISTER.md)); child tables **not org-scoped for reads** — tenant-only (`people`) or default-deny (`identity_accounts`/`license_*`/`files`/`invoices`); `app_contracts` (`0006`) + `app_users` (`0007`) + `app_user_identity_matches` (`0008`) are now org-scoped read; see read map [02 §8](./02_SECURITY_AND_RLS.md) (RISK-002, narrowed not closed); no tenant switching /
 user provisioning yet (RISK-012); no credential vault; imports/exports destructive-in-legacy
 (don't port — legacy deletes "outdated" users, `onFileLinkedToApp.js:290`); v3 must not miss legacy
 paid-client (OMC/Flywheel) capabilities (RISK-016). Full list:

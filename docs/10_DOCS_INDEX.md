@@ -18,8 +18,10 @@ Used consistently across all docs. Never blur these.
 | `deprecated` | old approach kept only for history |
 | `legacy-production` | the current Firebase system still serving users |
 
-Today: migrations (`0001`–`0013`) are `implemented` + `verified-local` + `ci-enforced`, **not** `staged`/
-`production-applied`. The auth/session skeleton is `implemented` (not hosted-exercised). Firebase is
+Today: migrations (`0001`–`0013`) are `implemented` + `verified-local` + `ci-enforced`, and now **`staged`**
+(applied to the **staging** Supabase project `ycdpzduxugdsffjqyoai` — PR #47/#48; Storage object policies +
+verification still pending, [04 · RISK-001](./04_RISK_REGISTER.md)), but **not** `production-applied`. The
+auth/session skeleton is `implemented` (not hosted-exercised). Firebase is
 `legacy-production`. v3 has **read-only** product UI `implemented` (apps inventory + detail, contracts
 list + detail, linked app↔contract panels, app-user roster + match status, account summary — PRs
 #13/#14/#19/#20/#21/#23/#24) **plus the first write surface — contract create/edit** (`/contracts/new`,
