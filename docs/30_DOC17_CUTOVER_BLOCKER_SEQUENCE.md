@@ -91,7 +91,7 @@ Box numbers refer to doc 17 §5 (lines 277–293).
 | 1 | **Hosted staging auth/session/tenant-context verification** — run real hosted Supabase Auth via Vercel staging; re-run the full schema + RLS suite against hosted Postgres/Auth (not the shim) | 5, 6, 8 | hosted verification |
 | 2 | **OMC-shaped staging dataset + critical-workflow validation plan** — load an OMC-shaped dataset in staging; define + run the critical-flow validations | 7, 9 | hosted verification |
 | 3 | **Required-workflow parity build plan (from doc 27)** — sequence the missing/partial *required* workflows (files surface, imports/connectors+vault, license/invoices/reporting, billing, link/unlink, UAR/people, admin, audit UI) | 1, 2, 11, 12, 14 | product/code |
-| 4 | **OMC data-migration plan** — Firestore + Storage → Postgres + Supabase Storage (rows + bytes + history), with reconciliation; never via `local_demo.sql` | 16 | data migration |
+| 4 | **OMC data-migration plan** — Firestore + Storage → Postgres + Supabase Storage (rows + bytes + history), with reconciliation; never via `local_demo.sql`. **→ PREPARED (planning only): [34_OMC_LEGACY_DATA_MIGRATION_PLAN](./34_OMC_LEGACY_DATA_MIGRATION_PLAN.md)** (sources→targets, blocked-until-built, 8 phases, reconciliation incl. file byte/checksum, non-destructive rules, security, named tooling PRs, evidence). No migration built/run. | 16 | data migration |
 | 5 | **Rollback rehearsal plan** — DB + app rollback, deploy/promote CI, backup-restore, rehearsed in staging; post-cutover monitoring | 15 | operational |
 | 6 | **OMC acceptance / signoff plan** — §9 confirmation pass (doc 18) resolved; old-app freeze/cutover plan; OMC acceptance signoff | 3, 4, 16, 17 | customer/signoff |
 
