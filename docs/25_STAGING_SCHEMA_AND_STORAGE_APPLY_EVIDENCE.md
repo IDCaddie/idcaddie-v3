@@ -1,22 +1,75 @@
-# 25 · Staging Schema & Contract-Files Storage Apply — Evidence (2026-06-17)
+# 25 · Staging Schema & Contract-Files Storage Apply — Evidence (2026-06-17; updated post-PR #47)
 
 **Dated evidence record for the staging hosted-apply step**, filled from the
 [23_STORAGE_STAGING_APPLY_EVIDENCE_TEMPLATE](./23_STORAGE_STAGING_APPLY_EVIDENCE_TEMPLATE.md) template per the
 [22_HOSTED_STORAGE_BUCKET_APPLY_RUNBOOK](./22_HOSTED_STORAGE_BUCKET_APPLY_RUNBOOK.md) /
 [20_STAGING_HOSTED_APPLY_AND_CUTOVER_DISCIPLINE](./20_STAGING_HOSTED_APPLY_AND_CUTOVER_DISCIPLINE.md) discipline.
 
-> ## ⚠️ OUTCOME: HOSTED APPLY **NOT EXECUTED** (correctly blocked) — production NOT touched
-> - **Production (`dzbfxulvxchdemcettrx`) was NOT touched.** No hosted command was run against any project.
-> - The staging schema apply + `contract-files` bucket creation + staging verification **were NOT performed**
->   in this session — they are **pending a human execution** (see §3 blocker + §5 remediation).
-> - **This record contains no fabricated results.** Only what was actually verified (local, §2) is marked done;
->   every hosted step is marked **NOT EXECUTED**.
-> - **RISK-001 remains OPEN** (no hosted apply has happened). RISK-002/007/016 remain open. **Cutover stays BLOCKED.**
-> - No secrets/keys/passwords/JWTs/connection-strings are in this doc.
+> ## ✅ CURRENT STATE (recorded after PR #47 merged) — full detail in §0
+> - **Staging migrations `0001`–`0013` are now APPLIED** to the staging project `ycdpzduxugdsffjqyoai` — done by
+>   a **human** under the [20](./20_STAGING_HOSTED_APPLY_AND_CUTOVER_DISCIPLINE.md)/[22](./22_HOSTED_STORAGE_BUCKET_APPLY_RUNBOOK.md)
+>   discipline. **This PR is docs/evidence-only — it ran NO hosted command; it records the action.**
+> - **The private `contract-files` Storage bucket now EXISTS in staging:** `public = false`,
+>   `file_size_limit = 26214400` (= 25 MiB = `MAX_CONTRACT_FILE_BYTES`), `allowed_mime_types = application/pdf` (§0).
+> - **Storage object policies are NOT yet applied.** The [21 §6](./21_STORAGE_LOCAL_HARNESS_FEASIBILITY.md)
+>   object-policy verification is therefore **NOT complete**; **no upload action ships** until policies + verification are done.
+> - **No upload route/action/UI, no signed-URL flow, no AI extraction, no OCR, and no production change** were made.
+> - **Production (`dzbfxulvxchdemcettrx`) was NOT touched. No hosted command was run in this PR.**
+> - **RISK-001 remains OPEN** — the staging apply is **partial** (object policies + full verification + production
+>   still pending). RISK-002/007/016 remain open. **Cutover stays BLOCKED** ([17](./17_OMC_PRODUCTION_REPLACEMENT_PARITY_GATE.md) is the binding authority).
+> - **The next hosted mutation, if any, must be the reviewed Storage object policies ONLY — staging only, and
+>   only after explicit human approval** (doc 22 §4/§5). **STOP before production.**
+> - No secrets/keys/passwords/JWTs/connection-strings/env values in this doc.
+>
+> **§1–§6 below are the PR #47 agent session (historical): the agent correctly did NOT execute the apply. A
+> human subsequently executed the migration apply + bucket creation — §0 records that.**
 
 ---
 
-## 1. Execution metadata
+## 0. Post-PR #47 staging execution — recorded evidence
+
+A **human** executed the staging hosted apply + private-bucket creation **after PR #47 merged**, under the
+[20](./20_STAGING_HOSTED_APPLY_AND_CUTOVER_DISCIPLINE.md)/[22](./22_HOSTED_STORAGE_BUCKET_APPLY_RUNBOOK.md)
+discipline. **This PR records that action and applied/created/mutated nothing.**
+
+- **Migrations:** `0001`–`0013` are **applied** to the **staging** project **`ycdpzduxugdsffjqyoai`**
+  (production `dzbfxulvxchdemcettrx` **NOT touched**).
+- **Private `contract-files` bucket — verified staging values:**
+
+  | Property | Value | Note |
+  |---|---|---|
+  | `id` | `contract-files` | |
+  | `name` | `contract-files` | canonical (`CONTRACT_FILES_BUCKET`, `src/lib/files/pdf-validation.ts`) |
+  | `public` | **`false`** | **PRIVATE** — no public bucket, no public URL |
+  | `file_size_limit` | `26214400` | = 25 MiB = `MAX_CONTRACT_FILE_BYTES` (matches the validation design) |
+  | `allowed_mime_types` | `application/pdf` | PDF-only (matches `pdf-validation.ts` + [16 §3](./16_CONTRACT_PDF_AI_EXTRACTION_DESIGN.md)) |
+
+- **Storage object policies:** **NOT yet applied.** The bucket exists + is private, but the
+  [21 §6](./21_STORAGE_LOCAL_HARNESS_FEASIBILITY.md) / [23 §4](./23_STORAGE_STAGING_APPLY_EVIDENCE_TEMPLATE.md)
+  object-policy authorization checklist (cross-tenant denial, upload only via contract-write authority, no
+  UPDATE/DELETE/`FOR ALL`, no public access) is **NOT complete**.
+- **Not built / not shipped:** no upload route/action/UI, no signed-URL flow, no AI extraction, no OCR. `files`
+  stays **not surfaced** in the app.
+- **No production change.** This PR ran **no hosted Supabase mutation** (docs/evidence-only).
+
+**Next step (human, explicit approval required):** the **only** sanctioned next hosted mutation is the
+**reviewed Storage object policies** for `contract-files` (doc 22 §4/§5), applied to **staging only**, then
+verified per [21 §6](./21_STORAGE_LOCAL_HARNESS_FEASIBILITY.md) and recorded in a
+[23](./23_STORAGE_STAGING_APPLY_EVIDENCE_TEMPLATE.md) copy. **STOP before production.**
+
+**Risk note:** RISK-001's headline ("nothing applied to hosted Supabase") is now partially overtaken — staging
+migrations are applied — but **RISK-001 stays OPEN** until the object policies + full Storage verification +
+production apply are done and recorded (its [04](./04_RISK_REGISTER.md) closure criterion). RISK-002/007/016 open;
+cutover BLOCKED.
+
+---
+
+## 1. Execution metadata — PR #47 agent session (HISTORICAL; current state is §0)
+
+> The sections below (§1–§6) record the **PR #47 agent session**, in which the agent **correctly did NOT
+> execute** the hosted apply (CLI was linked to production, staging unreachable, no creds, agent-never-applies).
+> They are preserved for history. The actual staging apply + bucket creation happened **later, by a human** —
+> recorded in **§0** above.
 
 | Field | Value |
 |---|---|
