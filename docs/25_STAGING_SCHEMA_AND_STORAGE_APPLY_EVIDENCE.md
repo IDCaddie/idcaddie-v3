@@ -11,8 +11,9 @@
 >   discipline. **This PR is docs/evidence-only — it ran NO hosted command; it records the action.**
 > - **The private `contract-files` Storage bucket now EXISTS in staging:** `public = false`,
 >   `file_size_limit = 26214400` (= 25 MiB = `MAX_CONTRACT_FILE_BYTES`), `allowed_mime_types = application/pdf` (§0).
-> - **Storage object policies are NOT yet applied.** The [21 §6](./21_STORAGE_LOCAL_HARNESS_FEASIBILITY.md)
->   object-policy verification is therefore **NOT complete**; **no upload action ships** until policies + verification are done.
+> - **Storage object policies are now applied in staging (structural verification passed) — but the real
+>   Storage REST API authorization verification is PENDING** (§0.2). The [21 §6](./21_STORAGE_LOCAL_HARNESS_FEASIBILITY.md)
+>   verification is therefore **NOT complete**; **no upload action ships** until that live-authz verification is done + recorded.
 > - **No upload route/action/UI, no signed-URL flow, no AI extraction, no OCR, and no production change** were made.
 > - **Production (`dzbfxulvxchdemcettrx`) was NOT touched. No hosted command was run in this PR.**
 > - **RISK-001 remains OPEN** — the staging apply is **partial** (object policies + full verification + production
@@ -64,7 +65,11 @@ cutover BLOCKED.
 
 ---
 
-## 0.1 Pending: Storage object-policy apply (plan finalized; NOT applied; NOT verified)
+## 0.1 Storage object-policy apply (plan finalization — **SUPERSEDED by §0.2: now applied in staging**)
+
+> **Superseded.** This section captured the pre-apply gap (plan finalized, policies not yet applied). The
+> policies were **applied in staging** on 2026-06-17 — see **§0.2** for the apply evidence. The `= 0`
+> `pg_policies` count below describes the state *before* §0.2.
 
 **Current staging gap.** The private `contract-files` bucket exists (§0), but **NO `storage.objects` policies
 are applied** for it — `select count(*) from pg_policies where schemaname='storage' and tablename='objects'
@@ -80,15 +85,61 @@ associated metadata; **no UPDATE / no DELETE / no `FOR ALL` / no public / no cro
 (`can_write_contract_file` / `can_read_contract_file`) added first via a separate **tested migration `0014`**,
 then the `storage.objects` policies applied to **staging only** (not a migration — doc 21).
 
-**Progress / still pending (in order):**
-1. ✅ migration `0014` helpers — **added + RLS-tested in PR #51** (T35; suite 222); `verified-local` + `ci-enforced`, **not yet applied to staging**;
-2. ⏳ apply `0014` to **staging** with the normal migration apply (doc 20);
-3. ⏳ `storage.objects` policies applied to **staging** (human, doc 22 §5, explicit approval) — still `pg_policies … contract% = 0`;
-4. ⏳ the [21 §6](./21_STORAGE_LOCAL_HARNESS_FEASIBILITY.md) Storage authorization verification, recorded in a [23](./23_STORAGE_STAGING_APPLY_EVIDENCE_TEMPLATE.md) copy;
+**Progress (updated — see §0.2 for the apply evidence):**
+1. ✅ migration `0014` helpers — added + RLS-tested in PR #51 (T35; suite 222);
+2. ✅ `0014` applied to **staging** (remote migration list now `0001`–`0014`);
+3. ✅ `storage.objects` policies applied to **staging** (human, doc 22 §5) — **§0.2**;
+4. ⏳ the [21 §6](./21_STORAGE_LOCAL_HARNESS_FEASIBILITY.md) **real Storage REST API authorization verification** — **still PENDING**, to be recorded in a [23](./23_STORAGE_STAGING_APPLY_EVIDENCE_TEMPLATE.md) copy;
 5. ⏳ production apply (separate, later).
 
-**This PR applied/created/verified nothing** and **does not close RISK-001** or claim Storage authorization is
-verified. **No hosted command was run; production `dzbfxulvxchdemcettrx` untouched; cutover BLOCKED.**
+---
+
+## 0.2 Storage object policies applied in staging — structural verification passed (REST authz PENDING)
+
+A human applied the `contract-files` `storage.objects` policies to **staging only** (doc 22 §5), from `main`
+@ `795a50e` (PR #51 merged), with the linked Supabase project confirmed as **staging** (`ycdpzduxugdsffjqyoai`,
+`idcaddie-staging`). **No production change.**
+
+**Migrations aligned (staging):** local and remote both show `0001`–`0014`;
+`0014_contract_file_storage_auth_helpers.sql` is applied remotely.
+
+**Helper functions present in staging:**
+- `public.can_write_contract_file(target_file_id uuid, target_tenant_id uuid)`
+- `public.can_read_contract_file(target_file_id uuid, target_tenant_id uuid)`
+
+**Private bucket (re-confirmed):** `id` `contract-files` · `name` `contract-files` · `public = false` ·
+`file_size_limit = 26214400` (25 MiB) · `allowed_mime_types = {application/pdf}`.
+
+**`storage.objects` policies applied in staging:**
+
+| Policy name | cmd | roles |
+|---|---|---|
+| `contract_files insert (metadata + contract-write)` | INSERT | `{authenticated}` |
+| `contract_files select (readable metadata)` | SELECT | `{authenticated}` |
+
+**Structural policy verification PASSED** (the shape/safety checks, *not* live authorization):
+- Object-path regex is the corrected canonical shape `contracts/{uuid}/{uuid}.pdf` with both UUIDs in
+  8-4-4-4-12 **lowercase** hex.
+- **Unsafe-policy count = 0:** no UPDATE policy, no DELETE policy, no `ALL`/`FOR ALL` policy, no `anon` role,
+  no public policy. Only the two `authenticated` INSERT/SELECT policies above exist.
+
+**Real Storage REST API authorization verification PENDING** (doc 21 §6 / doc 23 §4 — not yet run; the apply
+above is *structural only*). The following must be proven through the live Storage REST API with user-scoped
+JWTs before any upload action ships:
+- tenant editor can upload only into their own tenant prefix;
+- procurement-org manager allowed **only** where contract-write authority exists;
+- paying-org manager **denied** upload;
+- tenant viewer **denied** upload;
+- cross-org manager **denied** upload;
+- tenant A cannot read/list tenant B prefix;
+- tenant B cannot read/list/sign a tenant A object;
+- anonymous/public GET **denied**;
+- overwrite/`upsert`/move/copy/delete **denied**;
+- a signed URL is short-lived **and** single-object scoped.
+
+**This PR (docs-only) records the apply; it ran no hosted command, mutated nothing, and verified no live
+authorization.** **RISK-001 remains OPEN** (structural apply ≠ real-authz verification); **production
+`dzbfxulvxchdemcettrx` untouched**; **upload is NOT ready**; **cutover remains BLOCKED**.
 
 ---
 

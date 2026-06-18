@@ -7,6 +7,16 @@ from PRs verified via `git log` / `gh pr list`.
 
 ---
 
+### PR #52 — Record staging Storage object-policy apply evidence · 2026-06-17
+- **Category:** ops evidence — **docs-only.** No app code, migration, test, generated-type, package, Supabase/Vercel config, or env change; **no hosted command run in this PR**; production untouched. Records a human-applied **staging-only** Storage object-policy apply (from `main` @ `795a50e`, PR #51 merged; linked project confirmed staging `ycdpzduxugdsffjqyoai` / `idcaddie-staging`).
+- **Storage object policies applied in staging** ([25 §0.2](./25_STAGING_SCHEMA_AND_STORAGE_APPLY_EVIDENCE.md)): remote migrations now `0001`–`0014` (incl. `0014` helpers `can_write_contract_file` / `can_read_contract_file`); the private `contract-files` bucket re-confirmed (`public=false`, `file_size_limit=26214400`/25 MiB, `allowed_mime_types={application/pdf}`); two `storage.objects` policies — `contract_files insert (metadata + contract-write)` (INSERT, `{authenticated}`) and `contract_files select (readable metadata)` (SELECT, `{authenticated}`).
+- **Structural policy verification passed:** object-path regex is the corrected canonical `contracts/{uuid}/{uuid}.pdf` (both UUIDs 8-4-4-4-12 lowercase hex); **unsafe-policy count = 0** (no UPDATE, no DELETE, no `ALL`/`FOR ALL`, no `anon`, no public).
+- **Real Storage REST API authorization verification PENDING** (doc 21 §6 / doc 23 §4 — not yet run): tenant-editor own-prefix upload; procurement-org manager allowed only where contract-write authority exists; paying-org manager denied; tenant viewer denied; cross-org manager denied; tenant A cannot read/list tenant B prefix; tenant B cannot read/list/sign a tenant A object; anonymous/public GET denied; overwrite/upsert/move/copy/delete denied; signed URL short-lived + single-object scoped.
+- **RISK-001 remains OPEN** (structural apply ≠ real-authz verification; criterion 1 satisfied, criterion 2 still pending — doc 04). **No production change. Upload is NOT ready. Storage authorization is NOT fully verified. Cutover remains BLOCKED.**
+- **Updated** docs 25 (§0.1 superseded + new §0.2; banner), 04 (RISK-001), 00 (staging status), 09 (handoff), 10 (index).
+
+---
+
 ### PR #51 — Add contract file Storage authorization helpers · 2026-06-17
 - **Category:** migration — adds **`0014_contract_file_storage_auth_helpers.sql` only**. **No `storage.objects` policy applied, no hosted Supabase command, no bucket/policy creation, no production touch, no upload route/action/UI, no signed-URL/AI/OCR, no app/package change.** Migrations now `0001`–`0014`; `0001`–`0013` stay staged, **`0014` is `verified-local` + `ci-enforced` but NOT yet staged**; cutover stays **BLOCKED**; **RISK-001 stays OPEN**; Storage authorization is **NOT verified**.
 - **Adds the two public-schema predicates docs/22 §5's staging `storage.objects` policies will call** (the helpers, not the policies):
