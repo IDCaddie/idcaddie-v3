@@ -64,7 +64,7 @@ spend/chargeback; files/invoices; people directory; provisioning; tenant switchi
 connectors. **OMC/Flywheel cutover and new paid-customer onboarding remain blocked** — the full blocker list + the ~105-row replacement parity matrix are in [17_OMC_PRODUCTION_REPLACEMENT_PARITY_GATE](./17_OMC_PRODUCTION_REPLACEMENT_PARITY_GATE.md). **v3 is NOT production-replacement-ready;** a grounded legacy inspection (PR #36) puts full parity at **~70–110 PRs** from current state (pending OMC-confirmation of actual usage).
 
 ## Merged PRs
-**PRs #1–#60 are merged** (main @ `188bc8b`); **PR #61 (document doc 17 cutover blocker sequence — docs-only, adds doc 30; ranks the remaining doc 17 §5 cutover blockers + the next 3 PRs. The `contract-files` Storage path is **complete but NOT sufficient for cutover** (1 of 17 boxes' boundary; 16 remain). **No production/staging command run; RISK-001 stays OPEN; cutover BLOCKED; not production-ready**) is this PR.** The full
+**PRs #1–#61 are merged** (main @ `fabddc9`); **PR #62 (prepare hosted staging Auth + tenant-context verification — adds `scripts/verify-staging-auth-tenant-context.mjs` + doc 31 for blocker-sequence item #1 (doc 17 §5 boxes 5/6/8). **PREPARED, not executed — no hosted verification run, no production touched, no secrets; RISK-001 stays OPEN; cutover BLOCKED; not production-ready; Storage completion is necessary but not sufficient**) is this PR.** The full
 per-PR engineering log is the canonical source — see [05_ENGINEERING_CHANGELOG](./05_ENGINEERING_CHANGELOG.md);
 do not maintain a second PR table here (it drifts). Milestone summary:
 - **Foundation / discipline:** RLS foundation + tests (#1/#2), migration discipline (#3), clean-app

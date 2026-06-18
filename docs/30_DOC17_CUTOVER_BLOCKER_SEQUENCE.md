@@ -105,7 +105,8 @@ here, and none may be hand-waved at cutover.**
 1. **Hosted staging Auth + RLS-suite verification** — wire Vercel staging to hosted Supabase Auth, exercise
    auth/session + tenant-context, and re-run the full `org_rls_test.sql` RLS suite against hosted Postgres/Auth
    (boxes 5, 6, 8). *(Closes the "is the schema/RLS actually correct on hosted, not just the shim?" gap that
-   the `0015` discovery proved is real.)*
+   the `0015` discovery proved is real.)* **→ PREPARED (not executed): the plan + verifier
+   `scripts/verify-staging-auth-tenant-context.mjs` are in [31_HOSTED_STAGING_AUTH_TENANT_CONTEXT_VERIFICATION](./31_HOSTED_STAGING_AUTH_TENANT_CONTEXT_VERIFICATION.md); a human runs it later in an approved staging window.**
 2. **OMC-shaped staging dataset + critical-workflow validation plan** — define the dataset shape and the
    critical-flow acceptance checks, loaded + validated in staging (boxes 7, 9).
 3. **Required-workflow parity build plan from doc 27** — a sequenced plan for the missing/partial *required*
