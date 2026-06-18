@@ -5,8 +5,11 @@ work through the REAL Supabase Storage REST API — with user-scoped JWTs, in ho
 `pg_policies` inspection.** The verifier is `scripts/verify-staging-storage-rest.mjs`.
 
 > ## ⚠️ STATUS BANNER (do not remove)
-> - **The verifier EXISTS but has NOT been run yet** → **real Storage REST API authorization verification is
->   PENDING.** Do not record passing evidence until a human has actually run it green and captured it (§6).
+> - **The verifier was RUN in hosted staging on 2026-06-18 → real Storage REST API authorization verification
+>   PASSED (14/14 + the check-12 path self-test; check 15 = local `test-rls.sh` 222).** Evidence recorded in
+>   [25 §0.3](./25_STAGING_SCHEMA_AND_STORAGE_APPLY_EVIDENCE.md). The verifier used real Supabase Storage REST
+>   API calls with user-scoped JWTs; **no service-role key was used; no production project was touched; no
+>   secrets/passwords/anon keys/JWTs were recorded.** Re-run any time policies change.
 > - **RISK-001 remains OPEN.** A green run is *necessary evidence*, not closure (closure also needs production
 >   apply + doc 17 §5 — see [04 · RISK-001](./04_RISK_REGISTER.md)). **Upload is NOT ready.**
 > - **Cutover remains BLOCKED** ([17](./17_OMC_PRODUCTION_REPLACEMENT_PARITY_GATE.md)).
