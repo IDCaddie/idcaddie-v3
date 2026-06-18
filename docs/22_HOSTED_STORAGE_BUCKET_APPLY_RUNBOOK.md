@@ -111,47 +111,106 @@ Execute **in order**, by a human, against **staging only**. Stop on any surprise
 
 ---
 
-## 5. Illustrative object-policy shape (ADAPT + VERIFY in staging — not applied here, not a migration)
+## 5. FINALIZED staging-only object-policy apply plan (reviewed; NOT applied here, NOT yet in staging)
 
-> **Illustrative only.** The executor finalizes the exact predicate against the real storage-api and
-> proves it via §6. This is **not** applied by this PR, **not** in `supabase/migrations/`, and **not**
-> locally tested (doc 21 — the local harness has no `storage` schema). It exists so the executor has a
-> concrete starting point, not a verified artifact.
+> **This is the exact reviewed plan to apply in STAGING ONLY by a human, after review** (and after the §0
+> bucket already exists). **It is NOT applied by this PR**, the `storage.objects` policies are **NOT in
+> `supabase/migrations/`** (doc 21 — the local harness has no `storage` schema; a storage-policy migration
+> would break `test-rls.sh`/`gen-types`), and Storage authorization is **NOT verified** until §6 passes.
+> **Do NOT treat this as proof — RISK-001 stays OPEN until §6 is recorded.** Pre-apply count is
+> **0** policies on `storage.objects` matching `contract%` (the gap this plan closes).
 
-The object path is `contracts/{tenant_id}/{file_id}.pdf`, so `(storage.foldername(name))[1] = 'contracts'`
-and `(storage.foldername(name))[2]` is the `tenant_id`. The policy binds writes to a tenant the caller has
-**contract-write authority** in (reusing the `0013`/`can_write_contract` model); per-contract precision lives
-in the `files`-row INSERT (the source of truth), with the Storage policy as tenant-prefix defense-in-depth:
+**Design = mirror the `0013` files-table authority, with the `files` row as the source of truth.** The
+object path is server-derived `contracts/{tenant_id}/{file_id}.pdf` (PR #40 `buildContractFileObjectPath`),
+so `(storage.foldername(name))[2]` is the `tenant_id` and `storage.filename(name)` is `{file_id}.pdf`.
+
+### Step A — helper functions (a SEPARATE future **tested migration `0014`**, NOT this PR, NOT staging-only)
+Two `SECURITY DEFINER` predicates (public-schema, so they **can** be a migration and be locally RLS-tested).
+They are `SECURITY DEFINER` to **bypass `files`-table RLS**: an org-only procurement manager may INSERT a
+`files` row under `0013` but **cannot SELECT it** (the deliberate `0013` asymmetry, docs/16 §5) — the definer
+lets the Storage policy still authorize them. `auth.uid()` still resolves to the caller; no recursion
+(`storage.objects` never references `public.files` policies); `search_path` pinned. **`paying_org` never
+grants write** (carried by `can_write_contract`).
 
 ```sql
--- ILLUSTRATIVE — finalize + verify in STAGING via §6; NOT a migration, NOT applied here.
--- INSERT: write only into the caller's own authorized tenant prefix of the private bucket.
-create policy "contract_files upload (own tenant, contract-write)" on storage.objects
+-- FUTURE migration 0014 (its own tested PR) — public-schema functions ONLY; NO storage.* here.
+create or replace function public.can_write_contract_file(target_file_id uuid, target_tenant_id uuid)
+returns boolean language sql stable security definer set search_path = public as $$
+  -- a files metadata row EXISTS for (file_id, tenant) AND the caller currently has contract-write
+  -- authority on its linked contract (tenant owner/admin/editor OR procurement-org manager; never paying_org).
+  select exists (
+    select 1 from public.files f
+    where f.id = target_file_id
+      and f.tenant_id = target_tenant_id
+      and public.can_write_contract(f.contract_id, f.tenant_id)
+  );
+$$;
+
+create or replace function public.can_read_contract_file(target_file_id uuid, target_tenant_id uuid)
+returns boolean language sql stable security definer set search_path = public as $$
+  -- a files metadata row EXISTS for (file_id, tenant) AND the caller can READ it (0013 files SELECT =
+  -- tenant member; org-scoped file read is deferred — docs/16 §5, RISK-002).
+  select exists (
+    select 1 from public.files f
+    where f.id = target_file_id
+      and f.tenant_id = target_tenant_id
+      and public.is_tenant_member(f.tenant_id)
+  );
+$$;
+```
+
+### Step B — `storage.objects` policies (STAGING ONLY, applied by a human; NOT a migration)
+```sql
+-- Applied to STAGING ONLY (doc 21: storage.* can't be a migration). Bucket `contract-files` is already
+-- PRIVATE (public=false, §0). The `name ~ '...'` shape guard fail-closes on any non-server-derived path so
+-- the ::uuid casts never error.
+
+-- INSERT (upload): allowed ONLY when the files metadata row exists AND the caller has contract-write authority.
+create policy "contract_files insert (metadata + contract-write)" on storage.objects
   for insert to authenticated
   with check (
     bucket_id = 'contract-files'
-    and (storage.foldername(name))[1] = 'contracts'
-    and public.has_tenant_role(((storage.foldername(name))[2])::uuid, array['owner','admin','editor'])
-    -- INCOMPLETE AS WRITTEN: this only encodes the tenant-editor branch. A procurement-org manager may
-    -- NOT be a tenant member, so this literal predicate would DENY them — yet §6 requires proving they
-    -- CAN upload for a contract they can write. Per-contract authority is carried by the 0013 files-row
-    -- INSERT (the source of truth), which the upload action performs FIRST. Before §6 can pass, the
-    -- executor must EITHER extend this predicate to also allow the org-manager case (e.g. an
-    -- OR public.has_org_role_in_tenant(...) branch keyed off the path's tenant prefix / the linked
-    -- contract) OR bind the object write to an existing files row for that tenant. Finalize + prove in §6.
+    and name ~ '^contracts/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.pdf$'
+    and public.can_write_contract_file(
+          (regexp_replace(storage.filename(name), '\.pdf$', ''))::uuid,   -- file_id from the path
+          ((storage.foldername(name))[2])::uuid)                          -- tenant_id from the path
   );
 
--- SELECT: read/list only within the caller's own tenant prefix (reads still go via signed URLs).
-create policy "contract_files read (own tenant)" on storage.objects
+-- SELECT (download/list): allowed ONLY when the caller can read the associated files metadata.
+create policy "contract_files select (readable metadata)" on storage.objects
   for select to authenticated
   using (
     bucket_id = 'contract-files'
-    and (storage.foldername(name))[1] = 'contracts'
-    and public.is_tenant_member(((storage.foldername(name))[2])::uuid)
+    and name ~ '^contracts/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.pdf$'
+    and public.can_read_contract_file(
+          (regexp_replace(storage.filename(name), '\.pdf$', ''))::uuid,
+          ((storage.foldername(name))[2])::uuid)
   );
 
--- NO UPDATE policy, NO DELETE policy, NO `FOR ALL` (mirrors 0013/T34). No anon/public policy.
+-- NO UPDATE policy. NO DELETE policy. NO `FOR ALL` policy. NO `anon`/public policy.
 ```
+
+### What this guarantees (and the §6 obligations it satisfies)
+- **Private bucket assumed** (`public=false`, §0); **no public/anon access** — both policies are
+  `to authenticated`, and there is **no `anon`/public policy**, so an unauthenticated GET/LIST is denied.
+- **INSERT only when files metadata exists + contract-write authority** — `can_write_contract_file` requires
+  a `files` row for `(file_id, tenant)` **and** `can_write_contract` on its contract. **No orphan objects**
+  (no matching `files` row ⇒ denied). Org-only procurement managers **can** upload (definer); **paying-org
+  manager, tenant viewer, and cross-org manager are DENIED** (`can_write_contract` excludes them).
+- **SELECT only when the caller can read the associated metadata** — `can_read_contract_file` requires the
+  `files` row + `is_tenant_member` (the `0013` files SELECT boundary; org-scoped read still deferred).
+- **No UPDATE / no DELETE / no `FOR ALL`** — overwrite / `upsert:true` / move / copy / delete have **no
+  matching policy ⇒ denied** (mirrors `0013`/T34).
+- **No cross-tenant access** — the path `tenant_id` is bound into the helper, which requires a `files` row in
+  **that** tenant the caller can write (INSERT) / is a member of (SELECT). Tenant B can neither write nor
+  read tenant A's prefix, nor overwrite/delete a tenant A object.
+- **The `files` table RLS (`0013`/T34) is unchanged** — the Storage policy is a parallel boundary keyed off
+  the same authority, not a replacement; `files` is still the source of truth.
+
+**Apply order:** Step A (migration `0014`, separate tested PR) **must land first** so the helpers exist, then
+Step B (staging-only, human, this runbook) → then **§6 verification** through the real storage-api → record in
+a [23](./23_STORAGE_STAGING_APPLY_EVIDENCE_TEMPLATE.md) copy. **Until §6 passes, no upload action ships and
+RISK-001 stays OPEN.**
 
 ---
 
