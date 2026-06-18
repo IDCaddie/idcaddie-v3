@@ -56,7 +56,7 @@ object policy is **tenant-prefix defense-in-depth** on top of that.
 ## 2. Preconditions (all must hold before starting)
 
 - [ ] Working tree is **clean** and on the **reviewed `main` commit** (PR #40 validation + PR #41 spike merged).
-- [ ] `npm test` 67/67, `scripts/test-rls.sh` **205** green locally (the file-row authority is already proven).
+- [ ] `npm test` 67/67, `scripts/test-rls.sh` **222** green locally (the file-row + Storage-helper authority is already proven).
 - [ ] The Supabase CLI is logged in to the **STAGING** project **only** — **never production**. The executor
       has visually confirmed the active project ref is the staging project (see §3 step 2). **If unsure, STOP.**
 - [ ] A **human approver** has signed off on running this specific staging apply (doc 20 §3/§9).
@@ -124,7 +124,8 @@ Execute **in order**, by a human, against **staging only**. Stop on any surprise
 object path is server-derived `contracts/{tenant_id}/{file_id}.pdf` (PR #40 `buildContractFileObjectPath`),
 so `(storage.foldername(name))[2]` is the `tenant_id` and `storage.filename(name)` is `{file_id}.pdf`.
 
-### Step A — helper functions (a SEPARATE future **tested migration `0014`**, NOT this PR, NOT staging-only)
+### Step A — helper functions (migration `0014` — **DONE in PR #51**, `verified-local`, not yet staged)
+> **Status:** `0014_contract_file_storage_auth_helpers.sql` was added + RLS-tested in **PR #51** (T35; suite **222**). It is `verified-local` + `ci-enforced`; it is **not yet applied to staging** (it rides the normal migration apply under doc 20). The SQL below is what `0014` contains.
 Two `SECURITY DEFINER` predicates (public-schema, so they **can** be a migration and be locally RLS-tested).
 They are `SECURITY DEFINER` to **bypass `files`-table RLS**: an org-only procurement manager may INSERT a
 `files` row under `0013` but **cannot SELECT it** (the deliberate `0013` asymmetry, docs/16 §5) — the definer
@@ -133,7 +134,7 @@ lets the Storage policy still authorize them. `auth.uid()` still resolves to the
 grants write** (carried by `can_write_contract`).
 
 ```sql
--- FUTURE migration 0014 (its own tested PR) — public-schema functions ONLY; NO storage.* here.
+-- migration 0014 (PR #51, verified-local) — public-schema functions ONLY; NO storage.* here.
 create or replace function public.can_write_contract_file(target_file_id uuid, target_tenant_id uuid)
 returns boolean language sql stable security definer set search_path = public as $$
   -- a files metadata row EXISTS for (file_id, tenant) AND the caller currently has contract-write
@@ -207,7 +208,7 @@ create policy "contract_files select (readable metadata)" on storage.objects
 - **The `files` table RLS (`0013`/T34) is unchanged** — the Storage policy is a parallel boundary keyed off
   the same authority, not a replacement; `files` is still the source of truth.
 
-**Apply order:** Step A (migration `0014`, separate tested PR) **must land first** so the helpers exist, then
+**Apply order:** Step A (migration `0014`, **done in PR #51**) **must be merged + applied to staging first** so the helpers exist, then
 Step B (staging-only, human, this runbook) → then **§6 verification** through the real storage-api → record in
 a [23](./23_STORAGE_STAGING_APPLY_EVIDENCE_TEMPLATE.md) copy. **Until §6 passes, no upload action ships and
 RISK-001 stays OPEN.**
@@ -248,7 +249,7 @@ result — with evidence + an independent reviewer's initials — in the [23_STO
 - [ ] The **`0013` files-table RLS is unchanged** + still green (Storage policy is an additional parallel
       boundary, not a replacement; the file metadata row remains the source of truth).
 - [ ] **No service-role on any app request/browser path** in the (future) upload action — user-scoped client only.
-- [ ] **Post-apply:** re-run `scripts/test-rls.sh` (still **205**, no drift) and record the staging
+- [ ] **Post-apply:** re-run `scripts/test-rls.sh` (still **222**, no drift) and record the staging
       verification per [20 §9](./20_STAGING_HOSTED_APPLY_AND_CUTOVER_DISCIPLINE.md).
 
 ---
@@ -260,7 +261,7 @@ result — with evidence + an independent reviewer's initials — in the [23_STO
 - Any **§6 box fails** (e.g. a public read works, a cross-tenant read/overwrite/delete succeeds, a
   paying-org/viewer upload succeeds, or an UPDATE/DELETE/`FOR ALL` is reachable).
 - Any **unexpected/duplicate migration** appears on staging (§3 step 3).
-- **Generated-type drift** or **`scripts/test-rls.sh` not 205** after apply.
+- **Generated-type drift** or **`scripts/test-rls.sh` not 222** after apply.
 - Any **secret** appears in logs/output/policy text; any **service-role** on a request path.
 - Any **data-destructive** behavior not explicitly approved + reversible.
 

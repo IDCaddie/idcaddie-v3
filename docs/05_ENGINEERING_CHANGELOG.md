@@ -7,6 +7,19 @@ from PRs verified via `git log` / `gh pr list`.
 
 ---
 
+### PR #51 — Add contract file Storage authorization helpers · 2026-06-17
+- **Category:** migration — adds **`0014_contract_file_storage_auth_helpers.sql` only**. **No `storage.objects` policy applied, no hosted Supabase command, no bucket/policy creation, no production touch, no upload route/action/UI, no signed-URL/AI/OCR, no app/package change.** Migrations now `0001`–`0014`; `0001`–`0013` stay staged, **`0014` is `verified-local` + `ci-enforced` but NOT yet staged**; cutover stays **BLOCKED**; **RISK-001 stays OPEN**; Storage authorization is **NOT verified**.
+- **Adds the two public-schema predicates docs/22 §5's staging `storage.objects` policies will call** (the helpers, not the policies):
+  - `public.can_write_contract_file(target_file_id uuid, target_tenant_id uuid)` → a `files` row exists for `(file_id, tenant_id)` **AND** `public.can_write_contract(f.contract_id, f.tenant_id)` is true (tenant owner/admin/editor OR procurement-org manager; **never `paying_org` beyond what `can_write_contract` already allows**).
+  - `public.can_read_contract_file(target_file_id uuid, target_tenant_id uuid)` → a `files` row exists **AND** `public.is_tenant_member(f.tenant_id)` is true.
+  - Both **`SECURITY DEFINER`, `stable`, `search_path = public`** — definer bypasses `files`-SELECT RLS so an org-only manager (write-not-read, the `0013` asymmetry) still authorizes; `auth.uid()` is the caller; no recursion (`storage.objects` is never referenced by `files` policies). Both **fail closed** on a missing/wrong `(file_id, tenant_id)`.
+- **RLS tests (T35, suite `205 → 222`)** prove: tenant owner/admin/editor pass write; procurement-org manager passes write when contract-write authority allows; **paying-org-only manager, tenant viewer, cross-org manager, and cross-tenant user are DENIED write**; tenant member (owner + viewer) passes read; org-only manager / cross-tenant / non-member are DENIED read; nonexistent file id and wrong tenant id **fail closed** for both helpers.
+- `database.types.ts` adds only the two functions (1283 → 1291). **`storage.objects` policies remain NOT applied** (`pg_policies … contract% = 0`); the next sanctioned hosted mutation is the reviewed Storage object-policy apply (staging only, explicit human approval, doc 22 §5) **after `0014` is merged + applied to staging** — an agent does not run it. Production `dzbfxulvxchdemcettrx` untouched.
+- **Updated** docs 00/01/02/03/04/09/14 (current-state counts → 222/T35, migration list → `0014`), docs 22/25 (helper migration now exists; object policies still pending), doc 04 RISK-001 (helpers landed, policies not applied — stays OPEN).
+- **Tests run (local, verified):** `npm test` 67/67; lint clean; `tsc --noEmit` clean; `next build` clean (routes unchanged, 10); `test-rls.sh` → **222** (`0001`–`0014`); `check-migration-safety`/`check-auth-safety`/`check-docs-updated` pass; `gen-types-local.sh` → only the two new functions; no `* 2.*`/`* 3.*` strays.
+
+---
+
 ### PR #50 — Finalize staging Storage object policy apply plan · 2026-06-17
 - **Category:** ops plan — **docs-only.** No hosted Supabase command run, no Storage policy applied, no production touch, no app/migration/test/generated-type/package/Supabase-config change, no upload UI. RLS stays **205**; migrations stay **0001–0013** in-repo; routes unchanged; `database.types.ts` unchanged (1283 lines); cutover stays **BLOCKED**; **RISK-001 stays OPEN**; Storage authorization is **NOT verified**.
 - **Finalized the exact reviewed `storage.objects` policy plan for the staging `contract-files` bucket** in [22 §5](./22_HOSTED_STORAGE_BUCKET_APPLY_RUNBOOK.md), mirroring the `0013` files-table authority with the `files` row as the source of truth:

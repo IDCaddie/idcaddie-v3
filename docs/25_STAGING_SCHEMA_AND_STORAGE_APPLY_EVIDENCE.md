@@ -80,11 +80,12 @@ associated metadata; **no UPDATE / no DELETE / no `FOR ALL` / no public / no cro
 (`can_write_contract_file` / `can_read_contract_file`) added first via a separate **tested migration `0014`**,
 then the `storage.objects` policies applied to **staging only** (not a migration — doc 21).
 
-**Still NOT done (pending, in order):**
-1. migration `0014` helpers (separate tested PR);
-2. `storage.objects` policies applied to **staging** (human, doc 22 §5, explicit approval);
-3. the [21 §6](./21_STORAGE_LOCAL_HARNESS_FEASIBILITY.md) Storage authorization verification, recorded in a [23](./23_STORAGE_STAGING_APPLY_EVIDENCE_TEMPLATE.md) copy;
-4. production apply (separate, later).
+**Progress / still pending (in order):**
+1. ✅ migration `0014` helpers — **added + RLS-tested in PR #51** (T35; suite 222); `verified-local` + `ci-enforced`, **not yet applied to staging**;
+2. ⏳ apply `0014` to **staging** with the normal migration apply (doc 20);
+3. ⏳ `storage.objects` policies applied to **staging** (human, doc 22 §5, explicit approval) — still `pg_policies … contract% = 0`;
+4. ⏳ the [21 §6](./21_STORAGE_LOCAL_HARNESS_FEASIBILITY.md) Storage authorization verification, recorded in a [23](./23_STORAGE_STAGING_APPLY_EVIDENCE_TEMPLATE.md) copy;
+5. ⏳ production apply (separate, later).
 
 **This PR applied/created/verified nothing** and **does not close RISK-001** or claim Storage authorization is
 verified. **No hosted command was run; production `dzbfxulvxchdemcettrx` untouched; cutover BLOCKED.**

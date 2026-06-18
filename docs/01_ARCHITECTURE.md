@@ -34,7 +34,7 @@ src/lib/auth/            session (current user) · tenant-context (RLS-scoped re
 src/lib/data/            server-only, read-only DAL (apps · contracts · links · app-users · app-user-matches · app-account-intelligence) — typed DTOs over the user-scoped client
 src/lib/database.types.ts generated Supabase types (via scripts/gen-types-local.sh; do not hand-edit)
 supabase/migrations/     0001 core schema · 0002 org RLS · 0003 related-org read · 0004 delete hardening · 0005 child integrity · 0006-0008 org-scoped child reads · 0009 app_contracts tenant-bind · 0010 contract audit-on-write   (append-only)
-supabase/tests/          org_rls_test.sql (205 assertions, T1-T34) · rls_test_plan.md
+supabase/tests/          org_rls_test.sql (222 assertions, T1-T35) · rls_test_plan.md
 scripts/                 test-rls.sh · check-migration-safety.sh · check-docs-updated.sh · pr-review-summary.sh · check-auth-safety.sh · gen-types-local.sh
 .github/workflows/       app-ci.yml (lint/test/tsc/build) · rls-tests.yml · migration-safety.yml · review-discipline.yml
 docs/                    canonical docs 00-13 (this set) + design/legacy docs (see 10_DOCS_INDEX)
