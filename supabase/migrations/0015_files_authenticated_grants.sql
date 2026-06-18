@@ -1,0 +1,21 @@
+-- 0015 · `public.files` table privileges for the `authenticated` role
+--
+-- WHY: RLS policies decide WHICH rows a caller may touch, but PostgreSQL still requires the role to hold the
+-- base table privilege for the command. The `0013` files policies grant SELECT (tenant member) + INSERT
+-- (contract-write authority) at the RLS layer, and the `contract-files` storage.objects policies (docs/22 §5)
+-- read `public.files` via SECURITY DEFINER helpers — but no migration ever granted `authenticated` the table
+-- privileges on `public.files` (table created in `0001`; metadata columns added in `0012`). Hosted Supabase
+-- did not grant them by default, so the
+-- PRODUCTION Storage REST verification initially failed (the files-row insert/select probe was denied at the
+-- privilege layer). The local `scripts/test-rls.sh` harness masked this by applying a broad blanket
+-- `grant ... on all tables ... to authenticated` itself, which is NOT part of the migration chain.
+--
+-- This migration codifies the EXACT privileges the request path needs, idempotently (GRANT is a no-op if
+-- already held). Scope is deliberately minimal and mirrors the `0013` policy surface:
+--   * SELECT + INSERT only — there is NO UPDATE/DELETE/`FOR ALL` policy on `files` (0013/T34), so no
+--     UPDATE/DELETE privilege is granted.
+--   * `authenticated` only — NOT `anon` (no anonymous read/write), NOT `service_role` (service-role bypasses
+--     RLS and is never on a request/browser path).
+-- RLS remains the authorization boundary; this only lifts the base-privilege gate so RLS can be reached.
+
+grant select, insert on public.files to authenticated;
