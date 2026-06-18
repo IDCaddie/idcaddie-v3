@@ -95,6 +95,13 @@ These are the categories that make cutover a NO today. None may be hand-waved.
 
 ## 4. Required replacement parity matrix
 
+> **The detailed, row-level expansion of this matrix is [27_LEGACY_OMC_FULL_PARITY_MATRIX](./27_LEGACY_OMC_FULL_PARITY_MATRIX.md)** —
+> 16 parity tracks (routes/screens, workflows, fields, lists, dashboard/metrics, reporting, imports/connectors,
+> files/Storage, AI, auth/roles, admin/settings, audit, billing/revenue, data migration, UX, operations) with
+> status / blocker level / required-evidence per row. **Full legacy parity is required by default; a missing
+> route/workflow/field/report/import/setting/billing/migration item is an OMC blocker unless `deprecated-approved`.**
+> Doc 27 is the line-item ledger that **this gate (§5) is satisfied**; it proves no parity and authorizes no cutover.
+
 One row per concrete legacy workflow (grounded in the legacy source). Columns:
 **Legacy area** · **Legacy evidence inspected** · **Current live expectation** · **v3 status** ·
 **Required for OMC cutover?** (yes/probably/unknown/no) · **Cutover blocker?** · **Approved difference?** ·
