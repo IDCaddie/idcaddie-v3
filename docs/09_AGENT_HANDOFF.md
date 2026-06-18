@@ -14,7 +14,7 @@ editor+ OR procurement-org manager; **`paying_org` grants no write**); **no UPDA
 or app DAL touches `files`).
 Migrations `0001`–`0013` are `implemented`, `verified-local`, `ci-enforced`, and now **`staged`** (applied to
 staging `ycdpzduxugdsffjqyoai` — PR #47/#48; **not** production-applied; Storage object policies + verification
-pending — RISK-001 partial/OPEN) (`org_rls_test.sql` = 205 assertions, T1–T34; 67 vitest tests). Auth/session skeleton, read-only
+pending — RISK-001 partial/OPEN). Migration `0014` (contract-file Storage auth helpers — PR #51) is `verified-local` + `ci-enforced` but **not yet staged** (`org_rls_test.sql` = 222 assertions, T1–T35; 67 vitest tests). Auth/session skeleton, read-only
 tenant/org context, and a typed DAL are built. **Product surfaces ship:** `/apps`
 + `/apps/[id]` (with app-user roster, match-status column, account-summary card), `/contracts` +
 `/contracts/[id]`, and linked app↔contract panels — read-only, RLS-scoped — **plus** the contract

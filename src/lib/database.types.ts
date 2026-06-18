@@ -1115,8 +1115,16 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      can_read_contract_file: {
+        Args: { target_file_id: string; target_tenant_id: string }
+        Returns: boolean
+      }
       can_write_contract: {
         Args: { target_contract_id: string; target_tenant_id: string }
+        Returns: boolean
+      }
+      can_write_contract_file: {
+        Args: { target_file_id: string; target_tenant_id: string }
         Returns: boolean
       }
       dearmor: { Args: { "": string }; Returns: string }

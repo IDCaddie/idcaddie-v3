@@ -1521,4 +1521,79 @@ do $$ declare v int; begin
 end $$;
 reset role;
 
+-- ── Test 35: contract-file Storage authorization helpers (0014) ──────────────
+-- can_write_contract_file / can_read_contract_file are the SECURITY DEFINER predicates the staging
+-- storage.objects policies call (docs/22 §5). Both require a matching files row for (file_id, tenant);
+-- write mirrors 0013 contract-write authority (never paying_org), read mirrors 0013 files SELECT
+-- (tenant member). Definer => an org-only manager who can WRITE but not SELECT the files row still passes
+-- the write helper. Fixtures inserted privileged (bypass files RLS) so the helper is what is under test.
+reset role;
+insert into public.files (id, tenant_id, storage_path, original_filename, contract_id, uploaded_by) values
+  ('15000000-0000-0000-0000-0000000000a1','11111111-1111-1111-1111-111111111111','contracts/a/a1.pdf','a1.pdf',
+   'c0000000-0000-0000-0000-0000000000a1', null),                       -- F_A1: tenant A, Contract A1 (proc OrgA1)
+  ('15000000-0000-0000-0000-0000000000cc','11111111-1111-1111-1111-111111111111','contracts/a/cc.pdf','cc.pdf',
+   'c0000000-0000-0000-0000-0000000000cc', null),                       -- F_CENTRAL: tenant A, Contract A-central (paying OrgA3)
+  ('15000000-0000-0000-0000-0000000000b1','22222222-2222-2222-2222-222222222222','contracts/b/b1.pdf','b1.pdf',
+   null, null);                                                         -- F_B: tenant B, no contract
+
+-- 35a: WRITE helper — tenant owner/admin/editor with contract-write authority PASS.
+select set_config('request.jwt.claims','{"sub":"0a000000-0000-0000-0000-000000000001"}',false); set role authenticated; -- owner_a
+do $$ begin assert public.can_write_contract_file('15000000-0000-0000-0000-0000000000a1','11111111-1111-1111-1111-111111111111'), 'T35 tenant owner with contract-write authority must pass write helper'; end $$;
+reset role;
+select set_config('request.jwt.claims','{"sub":"0a000000-0000-0000-0000-0000000000ad"}',false); set role authenticated; -- admin_a
+do $$ begin assert public.can_write_contract_file('15000000-0000-0000-0000-0000000000a1','11111111-1111-1111-1111-111111111111'), 'T35 tenant admin must pass write helper'; end $$;
+reset role;
+select set_config('request.jwt.claims','{"sub":"0a000000-0000-0000-0000-0000000000ed"}',false); set role authenticated; -- editor_a
+do $$ begin assert public.can_write_contract_file('15000000-0000-0000-0000-0000000000a1','11111111-1111-1111-1111-111111111111'), 'T35 tenant editor must pass write helper'; end $$;
+reset role;
+
+-- 35b: WRITE helper — procurement-org manager of the contract's org PASSES (org-only, not a tenant member).
+select set_config('request.jwt.claims','{"sub":"0a000000-0000-0000-0000-0000000000a1"}',false); set role authenticated; -- mgr_a1 (manages OrgA1 = A1's proc org)
+do $$ begin assert public.can_write_contract_file('15000000-0000-0000-0000-0000000000a1','11111111-1111-1111-1111-111111111111'), 'T35 procurement-org manager must pass write helper when contract-write authority allows'; end $$;
+reset role;
+
+-- 35c: WRITE helper DENIALS — paying-org-only manager, tenant viewer, cross-org manager, cross-tenant user.
+select set_config('request.jwt.claims','{"sub":"0a000000-0000-0000-0000-0000000000c1"}',false); set role authenticated; -- agency_u (manages OrgA3 = A-central's PAYING org only)
+do $$ begin assert not public.can_write_contract_file('15000000-0000-0000-0000-0000000000cc','11111111-1111-1111-1111-111111111111'), 'T35 paying-org-only manager must NOT pass write helper (read != write)'; end $$;
+reset role;
+select set_config('request.jwt.claims','{"sub":"0a000000-0000-0000-0000-000000000002"}',false); set role authenticated; -- viewer_a
+do $$ begin assert not public.can_write_contract_file('15000000-0000-0000-0000-0000000000a1','11111111-1111-1111-1111-111111111111'), 'T35 tenant viewer must NOT pass write helper'; end $$;
+reset role;
+select set_config('request.jwt.claims','{"sub":"0a000000-0000-0000-0000-0000000000a3"}',false); set role authenticated; -- mgr_a2 (manages OrgA2, not A1's org)
+do $$ begin assert not public.can_write_contract_file('15000000-0000-0000-0000-0000000000a1','11111111-1111-1111-1111-111111111111'), 'T35 cross-org manager must NOT pass write helper'; end $$;
+reset role;
+select set_config('request.jwt.claims','{"sub":"0b000000-0000-0000-0000-000000000001"}',false); set role authenticated; -- owner_b (tenant B)
+do $$ begin assert not public.can_write_contract_file('15000000-0000-0000-0000-0000000000a1','11111111-1111-1111-1111-111111111111'), 'T35 cross-tenant user must NOT pass write helper for a tenant-A file'; end $$;
+reset role;
+
+-- 35d: WRITE helper FAIL-CLOSED — nonexistent file id, and right file with wrong tenant id.
+select set_config('request.jwt.claims','{"sub":"0a000000-0000-0000-0000-0000000000ed"}',false); set role authenticated; -- editor_a
+do $$ begin assert not public.can_write_contract_file('15000000-0000-0000-0000-00000000dead','11111111-1111-1111-1111-111111111111'), 'T35 nonexistent file id must fail closed (write)'; end $$;
+do $$ begin assert not public.can_write_contract_file('15000000-0000-0000-0000-0000000000a1','22222222-2222-2222-2222-222222222222'), 'T35 wrong tenant id must fail closed (write)'; end $$;
+reset role;
+
+-- 35e: READ helper — a tenant member passes (owner and viewer both; read != write); org-only manager and
+-- cross-tenant/non-member do NOT.
+select set_config('request.jwt.claims','{"sub":"0a000000-0000-0000-0000-000000000001"}',false); set role authenticated; -- owner_a
+do $$ begin assert public.can_read_contract_file('15000000-0000-0000-0000-0000000000a1','11111111-1111-1111-1111-111111111111'), 'T35 tenant member (owner) must pass read helper'; end $$;
+reset role;
+select set_config('request.jwt.claims','{"sub":"0a000000-0000-0000-0000-000000000002"}',false); set role authenticated; -- viewer_a
+do $$ begin assert public.can_read_contract_file('15000000-0000-0000-0000-0000000000a1','11111111-1111-1111-1111-111111111111'), 'T35 tenant viewer (a member) must pass read helper'; end $$;
+reset role;
+select set_config('request.jwt.claims','{"sub":"0a000000-0000-0000-0000-0000000000a1"}',false); set role authenticated; -- mgr_a1 (org-only, NOT a tenant member)
+do $$ begin assert not public.can_read_contract_file('15000000-0000-0000-0000-0000000000a1','11111111-1111-1111-1111-111111111111'), 'T35 org-only manager (not a tenant member) must NOT pass read helper (the 0013 asymmetry)'; end $$;
+reset role;
+select set_config('request.jwt.claims','{"sub":"0b000000-0000-0000-0000-000000000001"}',false); set role authenticated; -- owner_b (tenant B)
+do $$ begin assert not public.can_read_contract_file('15000000-0000-0000-0000-0000000000a1','11111111-1111-1111-1111-111111111111'), 'T35 cross-tenant user must NOT pass read helper for a tenant-A file'; end $$;
+reset role;
+select set_config('request.jwt.claims','{"sub":"0a000000-0000-0000-0000-0000000000ff"}',false); set role authenticated; -- nobody (no membership)
+do $$ begin assert not public.can_read_contract_file('15000000-0000-0000-0000-0000000000a1','11111111-1111-1111-1111-111111111111'), 'T35 non-tenant user must NOT pass read helper'; end $$;
+reset role;
+
+-- 35f: READ helper FAIL-CLOSED — nonexistent file id, and right file with wrong tenant id.
+select set_config('request.jwt.claims','{"sub":"0a000000-0000-0000-0000-000000000001"}',false); set role authenticated; -- owner_a
+do $$ begin assert not public.can_read_contract_file('15000000-0000-0000-0000-00000000dead','11111111-1111-1111-1111-111111111111'), 'T35 nonexistent file id must fail closed (read)'; end $$;
+do $$ begin assert not public.can_read_contract_file('15000000-0000-0000-0000-0000000000a1','22222222-2222-2222-2222-222222222222'), 'T35 wrong tenant id must fail closed (read)'; end $$;
+reset role;
+
 do $$ begin raise notice 'ALL ORG-RLS ASSERTIONS PASSED'; end $$;
