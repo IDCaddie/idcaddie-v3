@@ -110,3 +110,45 @@ cutover by themselves; **cutover remains BLOCKED until the doc 17 cutover checkl
 on the full [27](./27_LEGACY_OMC_FULL_PARITY_MATRIX.md) parity matrix (mostly missing/blocked). **Upload is not
 automatically production-ready.** v3 is **not** OMC-replacement-complete. OMC/Flywheel is a paying production
 **replacement, not a pilot**.
+
+---
+
+## 6. Production synthetic cleanup — completed (2026-06-18)
+
+**Production synthetic cleanup completed** after the successful production Storage REST verification (§4). A
+**human** performed it against production `dzbfxulvxchdemcettrx`; **this PR records it and runs no production
+command.** **Synthetic Storage objects, Auth users, and business rows were removed.**
+
+**Cleanup verification result (counts of remaining synthetic data):**
+
+| Object | Remaining | Note |
+|---|---|---|
+| `storage.objects` (synthetic) | **0** | removed via the safe Storage path, **not** a direct `delete from storage.objects` |
+| `files` | **0** | removed |
+| `contracts` | **0** | removed |
+| `organizations` | **0** | removed |
+| `organization_memberships` | **0** | removed |
+| `tenant_memberships` | **0** | removed |
+| `profiles` | **0** | removed |
+| Auth users (synthetic) | **0** | removed from production Auth |
+| retained audit-anchor tenants | **2** | intentionally retained (see below) |
+| audit_logs for synthetic tenants | **3** | intentionally retained (append-only) |
+
+**Interpretation:**
+- **No synthetic Storage objects remain** — they were removed through the **safe Storage path** (server-mediated
+  remove), not a direct delete on `storage.objects`.
+- **No synthetic Auth users remain** — all 6 synthetic `@idcaddie-production.local` users were removed from
+  production Auth.
+- All synthetic **business rows** (`files`, `contracts`, `organizations`, `organization_memberships`,
+  `tenant_memberships`, `profiles`) were removed (count 0 each).
+- **Two synthetic tenant rows remain as audit anchors because `audit_logs` is append-only** — `audit_logs`
+  DELETE is blocked by `reject_audit_mutation()` (migration `0002`), so the 3 audit rows for the synthetic
+  tenants cannot be deleted; their 2 parent tenant rows are retained intentionally as anchors so those audit
+  rows keep a valid `tenant_id` reference. The retained tenants are **not active test users** and are **not**
+  tied to any remaining synthetic membership, file, contract, organization, or Auth user (all those are 0).
+- **No secrets, passwords, anon keys, or JWTs are recorded.** No production command is run by this PR.
+
+This cleanup further **reduces** the synthetic-data footprint in production, but it does **not** change the
+cutover posture: **production apply and verification do not approve cutover by themselves; cutover remains
+BLOCKED until the doc 17 cutover checklist passes; upload is not automatically production-ready.** **RISK-001
+remains OPEN** (criterion 5 unmet — §5).
