@@ -118,11 +118,14 @@ but targets **production** (`dzbfxulvxchdemcettrx`) and is gated by the cutover 
 - [ ] One-time **production** admin fixture setup (separate, elevated, human-run; doc 26 §5 shape) creates
       **synthetic** users/tenants/orgs/contracts in production. **Use synthetic data only — never real customer
       data for the test; isolate + remove it afterward.**
-- [ ] Run the verifier against production: `supabase link --project-ref dzbfxulvxchdemcettrx` → confirm the ref →
-      set **local** env (`STAGING_SUPABASE_URL`/`ANON_KEY`/`STORAGE_TEST_USERS` pointed at production; **local
-      only, never committed, never printed**) → `node scripts/verify-staging-storage-rest.mjs`.
-      *(The verifier's guard requires the staging ref by default; running it against production is an explicit,
-      separately-approved action — adapt the guard target deliberately, do not weaken it permanently.)*
+- [ ] Run the **production-targeted** verifier: `supabase link --project-ref dzbfxulvxchdemcettrx` → confirm the
+      ref → set **local** env `PRODUCTION_SUPABASE_URL` / `PRODUCTION_SUPABASE_ANON_KEY` /
+      `PRODUCTION_STORAGE_TEST_USERS` (pointed at production; **local only, never committed, never printed**) →
+      `node scripts/verify-production-storage-rest.mjs`.
+      *(Use `scripts/verify-production-storage-rest.mjs` — the production variant (PR #57), which **fail-loud
+      refuses** unless the linked ref + URL are production `dzbfxulvxchdemcettrx` and refuses the staging ref.
+      Do NOT edit/weaken the staging verifier's guard. Both verifiers are user-scoped, anon-key-only, no
+      service-role.)*
 - [ ] **All 14 REST checks must pass** + check-12 self-test + check-15 local `test-rls.sh` 222 — same as staging.
 - [ ] Confirm: real Storage REST API calls, user-scoped JWTs, **no service-role used by the verifier**, and
       record per-check `[PASS]` evidence (§11) — **no tokens/passwords/anon keys/JWTs**.

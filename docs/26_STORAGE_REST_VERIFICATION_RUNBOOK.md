@@ -4,6 +4,13 @@
 work through the REAL Supabase Storage REST API — with user-scoped JWTs, in hosted STAGING — not just
 `pg_policies` inspection.** The verifier is `scripts/verify-staging-storage-rest.mjs`.
 
+> **Production variant:** `scripts/verify-production-storage-rest.mjs` (PR #57) runs the **same 14 REST checks**
+> against **production** (`dzbfxulvxchdemcettrx`) with inverted guards (fail-loud refuses unless the linked ref +
+> URL are production; refuses the staging ref) and production-specific env vars
+> (`PRODUCTION_SUPABASE_URL`/`PRODUCTION_SUPABASE_ANON_KEY`/`PRODUCTION_STORAGE_TEST_USERS`). It is run **only**
+> during an approved production apply window per [28 §9](./28_PRODUCTION_STORAGE_APPLY_RUNBOOK.md); it has **NOT
+> been run**, and a green run does **not** close RISK-001 or approve cutover.
+
 > ## ⚠️ STATUS BANNER (do not remove)
 > - **The verifier was RUN in hosted staging on 2026-06-18 → real Storage REST API authorization verification
 >   PASSED (14/14 + the check-12 path self-test; check 15 = local `test-rls.sh` 222).** Evidence recorded in
