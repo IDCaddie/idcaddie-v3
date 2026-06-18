@@ -7,6 +7,15 @@ from PRs verified via `git log` / `gh pr list`.
 
 ---
 
+### PR #61 — Document doc 17 cutover blocker sequence · 2026-06-18
+- **Category:** cutover planning — **docs-only blocker sequencing.** No code, migration, script, env, or hosted command; **no production/staging commands run;** no cutover executed. RLS stays **222**; cutover stays **BLOCKED**; **RISK-001 stays OPEN**.
+- **Adds [30_DOC17_CUTOVER_BLOCKER_SEQUENCE](./30_DOC17_CUTOVER_BLOCKER_SEQUENCE.md)** — a ranked sequence of the remaining [17 §5](./17_OMC_PRODUCTION_REPLACEMENT_PARITY_GATE.md) cutover blockers, bucketed into product/code · hosted-staging-verification · data-migration/OMC-parity · security/privacy · operational · customer/OMC-signoff, with the **next 3 PRs** before any cutover talk (1: hosted staging Auth + full RLS-suite-on-hosted verification, boxes 5/6/8; 2: OMC-shaped dataset + critical-workflow validation plan, boxes 7/9; 3: required-workflow parity build plan from doc 27, boxes 1/2).
+- **The `contract-files` Storage path is marked COMPLETE but NOT sufficient for cutover** — it closes only the Storage authorization boundary (1 box's worth); **16 of 17 doc 17 §5 boxes remain unmet.** **RISK-001 remains OPEN** unless every documented closure criterion is satisfied (criterion 5 — the doc 17 §5 checklist — is not). **Cutover remains BLOCKED. Upload is not automatically production-ready.**
+- **Updated** docs 10 (index), 09 (handoff pointer), 00 (status pointer).
+- **Validation (local, verified):** `npm test` 67/67; lint clean; `tsc --noEmit` clean; `next build` clean (10 routes); `check-auth-safety`/`check-migration-safety`/`check-docs-updated` pass; `test-rls.sh` **222**; `gen-types-local.sh` 0-diff; `node --check scripts/verify-production-storage-rest.mjs` OK; no `* 2.*`/`* 3.*` strays. Docs-only.
+
+---
+
 ### PR #60 — Doc 17 cutover readiness review — refresh stale Storage status in the cutover docs · 2026-06-18
 - **Category:** cutover-doc accuracy — **docs-only.** No code/migration/script/src/Supabase/Vercel/secret change; **no cutover executed; no production or staging mutation.** RLS stays **222**; cutover stays **BLOCKED**; **RISK-001 stays OPEN**.
 - **Outcome of the doc 17 readiness review: cutover is a hard NO — all 17 doc 17 §5 go/no-go boxes remain unchecked.** Only the `contract-files` Storage boundary is hosted-applied + REST-verified (staging + production, 14/14); the broad cutover criteria (full RLS suite re-run against hosted Auth, Vercel-auth-tested, OMC-shaped dataset + critical-flow validation, files/AI/imports/connectors/license/invoices/reporting/billing/UAR/admin/audit-UI surfaces, data-migration plan, rehearsed rollback, OMC signoff) are **not met**. **No §5 box was ticked by this PR.**
