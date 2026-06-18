@@ -108,7 +108,10 @@ here, and none may be hand-waved at cutover.**
    the `0015` discovery proved is real.)* **→ PREPARED (not executed): the plan + verifier
    `scripts/verify-staging-auth-tenant-context.mjs` are in [31_HOSTED_STAGING_AUTH_TENANT_CONTEXT_VERIFICATION](./31_HOSTED_STAGING_AUTH_TENANT_CONTEXT_VERIFICATION.md); a human runs it later in an approved staging window.**
 2. **OMC-shaped staging dataset + critical-workflow validation plan** — define the dataset shape and the
-   critical-flow acceptance checks, loaded + validated in staging (boxes 7, 9).
+   critical-flow acceptance checks, loaded + validated in staging (boxes 7, 9). **→ PREPARED (not executed):
+   the dataset definition + validation plan + the review-and-apply SQL template are in
+   [32_STAGING_OMC_SHAPED_DATASET_AND_CRITICAL_FLOW_VALIDATION](./32_STAGING_OMC_SHAPED_DATASET_AND_CRITICAL_FLOW_VALIDATION.md)
+   (runbook only — no committed runnable seed; a human loads + validates later in staging).**
 3. **Required-workflow parity build plan from doc 27** — a sequenced plan for the missing/partial *required*
    workflows (start with the files product surface that sits on the now-ready Storage boundary), each citing its
    doc 27 row(s) (boxes 1, 2). *(Per doc 09, future feature PRs must cite doc 27 rows with evidence.)*
