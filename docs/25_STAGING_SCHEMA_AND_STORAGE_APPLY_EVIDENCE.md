@@ -64,6 +64,33 @@ cutover BLOCKED.
 
 ---
 
+## 0.1 Pending: Storage object-policy apply (plan finalized; NOT applied; NOT verified)
+
+**Current staging gap.** The private `contract-files` bucket exists (§0), but **NO `storage.objects` policies
+are applied** for it — `select count(*) from pg_policies where schemaname='storage' and tablename='objects'
+and policyname ilike '%contract%'` = **0**. Because `storage.objects` defaults to deny when RLS is on, the
+bucket is currently not writable/readable via policy — and **no upload action/route/UI, signed-URL flow, AI,
+or OCR has shipped** — so there is no exposure, but the authorization boundary is **not yet in place or
+verified**.
+
+**Plan finalized (this PR, docs-only).** The exact reviewed object-policy SQL — INSERT only when the `files`
+metadata row exists + the caller has contract-write authority; SELECT only when the caller can read the
+associated metadata; **no UPDATE / no DELETE / no `FOR ALL` / no public / no cross-tenant** — is in
+[22 §5](./22_HOSTED_STORAGE_BUCKET_APPLY_RUNBOOK.md). It requires two `SECURITY DEFINER` helpers
+(`can_write_contract_file` / `can_read_contract_file`) added first via a separate **tested migration `0014`**,
+then the `storage.objects` policies applied to **staging only** (not a migration — doc 21).
+
+**Still NOT done (pending, in order):**
+1. migration `0014` helpers (separate tested PR);
+2. `storage.objects` policies applied to **staging** (human, doc 22 §5, explicit approval);
+3. the [21 §6](./21_STORAGE_LOCAL_HARNESS_FEASIBILITY.md) Storage authorization verification, recorded in a [23](./23_STORAGE_STAGING_APPLY_EVIDENCE_TEMPLATE.md) copy;
+4. production apply (separate, later).
+
+**This PR applied/created/verified nothing** and **does not close RISK-001** or claim Storage authorization is
+verified. **No hosted command was run; production `dzbfxulvxchdemcettrx` untouched; cutover BLOCKED.**
+
+---
+
 ## 1. Execution metadata — PR #47 agent session (HISTORICAL; current state is §0)
 
 > The sections below (§1–§6) record the **PR #47 agent session**, in which the agent **correctly did NOT
