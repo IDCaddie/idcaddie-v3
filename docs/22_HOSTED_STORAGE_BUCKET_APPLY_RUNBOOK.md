@@ -220,6 +220,13 @@ RISK-001 stays OPEN.**
 Reproduced from [21 §6](./21_STORAGE_LOCAL_HARNESS_FEASIBILITY.md). This is the acceptance gate. **Record each
 result — with evidence + an independent reviewer's initials — in the [23_STORAGE_STAGING_APPLY_EVIDENCE_TEMPLATE](./23_STORAGE_STAGING_APPLY_EVIDENCE_TEMPLATE.md) record** (executor claims alone are not sufficient).
 
+> **Automated verifier:** this checklist is exercised by `scripts/verify-staging-storage-rest.mjs` (user-scoped,
+> staging-only, anon-key-only) — see the runbook [26_STORAGE_REST_VERIFICATION_RUNBOOK](./26_STORAGE_REST_VERIFICATION_RUNBOOK.md)
+> (env vars, one-time admin fixture setup, evidence template). Run:
+> `supabase link --project-ref ycdpzduxugdsffjqyoai` → confirm `cat supabase/.temp/project-ref` →
+> set the local env vars → `node scripts/verify-staging-storage-rest.mjs`. **As of now it has NOT been run →
+> real Storage REST API authorization verification is PENDING; RISK-001 remains OPEN; cutover remains BLOCKED.**
+
 **Bucket setup**
 - [ ] Bucket `contract-files` exists and is **PRIVATE** (`public = false`).
 - [ ] **No public read** — no public bucket, no public base URL; object access is **signed-URL only**.

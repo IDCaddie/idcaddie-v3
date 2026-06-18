@@ -137,9 +137,27 @@ JWTs before any upload action ships:
 - overwrite/`upsert`/move/copy/delete **denied**;
 - a signed URL is short-lived **and** single-object scoped.
 
-**This PR (docs-only) records the apply; it ran no hosted command, mutated nothing, and verified no live
-authorization.** **RISK-001 remains OPEN** (structural apply ≠ real-authz verification); **production
+**RISK-001 remains OPEN** (structural apply ≠ real-authz verification); **production
 `dzbfxulvxchdemcettrx` untouched**; **upload is NOT ready**; **cutover remains BLOCKED**.
+
+---
+
+## 0.3 Real Storage REST API authorization verification — verifier built, **NOT YET RUN** (PENDING)
+
+A user-scoped REST verifier now exists — `scripts/verify-staging-storage-rest.mjs` + the runbook
+[26_STORAGE_REST_VERIFICATION_RUNBOOK](./26_STORAGE_REST_VERIFICATION_RUNBOOK.md) — that proves all of the
+obligations above through the **real Supabase Storage REST API** with synthetic-user JWTs (staging-only;
+anon key only, no service-role; refuses to run unless the linked ref + URL are staging `ycdpzduxugdsffjqyoai`).
+
+**Status: the verifier has NOT been run; real Storage REST API authorization verification remains PENDING.**
+Record the per-check `[PASS]` evidence here (or in a [23](./23_STORAGE_STAGING_APPLY_EVIDENCE_TEMPLATE.md) copy)
+**only after** a human runs it green against staging (doc 26 §6) — no tokens/passwords/anon key in the record.
+Until then: **RISK-001 remains OPEN; production untouched; upload NOT ready; cutover remains BLOCKED.**
+
+| # | Check | Result (fill after run) | Reviewer |
+|---|---|---|---|
+| 1–14 | the REST obligations (doc 26 §1) | _pending_ | |
+| 15 | `scripts/test-rls.sh` → 222 (local; `0013` unchanged) | _pending_ | |
 
 ---
 
