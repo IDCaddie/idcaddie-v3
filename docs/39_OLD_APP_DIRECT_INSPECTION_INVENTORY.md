@@ -168,6 +168,10 @@ The repo **cannot** supply, and direct inspection MUST capture:
 Until these are captured live, **old-app replacement is not yet verified** and the build backlog (§7) is not
 finalized.
 
+> **Code-derived pre-fill:** [40_CODE_DERIVED_OLD_APP_INVENTORY](./40_CODE_DERIVED_OLD_APP_INVENTORY.md) seeds
+> this packet from the legacy codebase (routes, 52 connectors, AI paths, reports, admin/security) — **derived
+> from code, not live inspection**; it does not replace the live capture above.
+
 ---
 
 ## 9. Risk posture
