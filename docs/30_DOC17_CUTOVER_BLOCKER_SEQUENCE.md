@@ -125,6 +125,7 @@ Everything after that (data migration, rollback rehearsal, OMC signoff) follows 
 
 ## 5. Standing constraints (unchanged by this doc)
 
+- **Cutover scope = FULL old-app parity** (decision of record [38_OMC_FULL_PARITY_SCOPE_DECISION](./38_OMC_FULL_PARITY_SCOPE_DECISION.md)): every old-app capability is required unless OMC waives it in writing; the MVP subset framing is **not** sufficient for cutover. The blocker sequence below is necessary but **not** the whole scope — the build (item #3) spans the full doc 27 matrix, likely **dozens of PRs**.
 - **Storage path is complete but NOT sufficient for cutover.**
 - **RISK-001 remains OPEN** unless every documented closure criterion is satisfied (criterion 5 — doc 17 §5 —
   is not). Do not mark it closed.
