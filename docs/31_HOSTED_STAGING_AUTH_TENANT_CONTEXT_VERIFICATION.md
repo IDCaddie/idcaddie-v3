@@ -5,7 +5,7 @@
 that the hosted RLS matches the local suite — advancing [17 §5](./17_OMC_PRODUCTION_REPLACEMENT_PARITY_GATE.md)
 boxes **5, 6, 8**. The verifier is `scripts/verify-staging-auth-tenant-context.mjs`.
 
-> ## ✅ RUN 2026-06-18 — PASSED (evidence in §7)
+> ## ✅ RUN 2026-06-18 — PASSED (evidence in §7; synthetic-fixture cleanup/disposition in §8)
 > **Hosted staging Auth + tenant-context verification PASSED.** A human ran it against the deployed staging app
 > `https://idcaddie-v3.vercel.app` (staging Supabase `ycdpzduxugdsffjqyoai`): **8/8 automated checks + manual
 > Tenant A/Tenant B browser checks passed**, after correcting the Vercel env vars (§7). **The verifier used real
@@ -203,3 +203,38 @@ touched. No service-role key was used. No secrets, passwords, anon keys, cookies
 RISK-001 remains OPEN** unless every documented closure criterion is satisfied (the doc 17 §5 checklist is not).
 **Cutover remains BLOCKED. Upload is not automatically production-ready. Storage completion is necessary but not
 sufficient for cutover.**
+
+---
+
+## 8. Synthetic-fixture cleanup / disposition — 2026-06-18
+
+**Hosted staging Auth tenant-context cleanup/disposition recorded.** After the §7 run passed (8/8 automated +
+manual Tenant A/B), a human attempted cleanup of the synthetic staging fixtures. The agent ran nothing. **No
+production project was touched. No secrets, passwords, anon keys, cookies, JWTs, or tokens are recorded.**
+
+**Cleanup verification result (staging `ycdpzduxugdsffjqyoai`):**
+
+| Object | Count | Disposition |
+|---|---|---|
+| `tenant_memberships` (synthetic) | **0** | removed |
+| `organization_memberships` (synthetic) | **0** | removed |
+| retained synthetic `profiles` (audit anchors) | **2** | retained |
+| retained synthetic `tenants` (audit anchors) | **2** | retained |
+| retained synthetic Auth users | **2** | retained |
+| `audit_logs` for the synthetic users/tenants | **1** | retained (append-only) |
+
+**Interpretation:**
+- **Synthetic tenant/org access was removed** — the two synthetic users no longer have any active
+  `tenant_membership` or `organization_membership`, so they have **no tenant/org access through the app** (RLS
+  resolves them to no-membership).
+- **Two synthetic profiles, two synthetic tenants, and two synthetic Auth users remain as audit anchors** —
+  deleting the linked `profiles`/Auth users would attempt to `update` the append-only `audit_logs.actor_user_id`
+  (and removing the tenants would orphan the retained audit row), which is **blocked**.
+- **Audit log immutability prevented destructive cleanup and is working as intended** — `audit_logs` is
+  append-only (`reject_audit_mutation()`, `0002`); the **1** synthetic audit row cannot be deleted/updated, so
+  its anchor `profiles`/`tenants`/Auth users are intentionally retained. This mirrors the production cleanup
+  posture ([29 §6](./29_PRODUCTION_STORAGE_APPLY_EVIDENCE.md)).
+- **No production project was touched** (`dzbfxulvxchdemcettrx` NOT touched). No service-role key was used.
+
+**This cleanup evidence does not approve cutover.** **RISK-001 remains OPEN. Cutover remains BLOCKED. Upload is
+not automatically production-ready. Storage completion is necessary but not sufficient for cutover.**
