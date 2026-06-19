@@ -114,8 +114,9 @@ connector parity is not complete.
 Supersedes the narrower sequence; grounded in the docs, no invented completed work:
 
 1. **Full old-app inventory / direct inspection** — inspect the live old app directly (not just
-   `current-product-map.md`) to capture every surface/field/workflow; resolve the [18](./18_OMC_CONFIRMATION_PASS.md)
-   confirmation pass (which rows OMC actually uses → eligible waivers).
+   `current-product-map.md`) to capture every surface/field/workflow, using the **inspection packet**
+   [39_OLD_APP_DIRECT_INSPECTION_INVENTORY](./39_OLD_APP_DIRECT_INSPECTION_INVENTORY.md) (prepared, not yet run);
+   resolve the [18](./18_OMC_CONFIRMATION_PASS.md) confirmation pass (which rows OMC actually uses → eligible waivers).
 2. **Master full-parity matrix** — fold the inspection into [27](./27_LEGACY_OMC_FULL_PARITY_MATRIX.md) as the
    single line-item source of truth (every row required unless OMC-waived).
 3. **Build missing core workflows** — files upload/download, people/identity directory + UAR, contract
