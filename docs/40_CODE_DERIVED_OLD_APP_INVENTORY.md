@@ -181,7 +181,8 @@ Files (upload/download/preview/inbound) · Spend/Billing/Invoices · SSO/SAML/OI
 permissions/admin · Dashboards builder · Imports (non-destructive) · Audit viewer · Apps/Contracts field-parity +
 links + gantt · Migration + rehearsals + acceptance. **Consistent with [38 §8](./38_OMC_FULL_PARITY_SCOPE_DECISION.md):
 full parity likely means dozens of PRs — the 52 connectors alone imply a large sub-program.** Exact count needs
-the live walkthrough + OMC waivers; do not treat this as a low number.
+the live walkthrough + OMC waivers; do not treat this as a low number. **This inventory is sequenced into
+dependency-ordered epics + connector waves + PR-count ranges in [41_FULL_PARITY_IMPLEMENTATION_ROADMAP](./41_FULL_PARITY_IMPLEMENTATION_ROADMAP.md).**
 
 ---
 
