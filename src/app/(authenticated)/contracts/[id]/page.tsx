@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { getContractDetailForCurrentUser } from "@/lib/data/contracts";
+import { listContractFilesForCurrentUser } from "@/lib/data/contract-files";
 import { listAppsLinkedToContract } from "@/lib/data/links";
+import { ContractFiles } from "./contract-files";
 
 export const metadata = { title: "Contract · ID Caddie" };
 
@@ -27,6 +29,7 @@ export default async function ContractDetailPage({
   const { id } = await params;
   const result = await getContractDetailForCurrentUser(id);
   const linkedApps = result.ok ? await listAppsLinkedToContract(id) : null;
+  const files = result.ok ? await listContractFilesForCurrentUser(id) : null;
 
   return (
     <main className="flex flex-1 flex-col gap-6 p-8">
@@ -61,8 +64,8 @@ export default async function ContractDetailPage({
             </div>
             <p className="text-sm text-zinc-600 dark:text-zinc-400">
               Contract detail. Visibility is enforced by Postgres RLS. You can edit the supported
-              fields (RLS decides whether a save is allowed); linked apps, invoices, files, deletion,
-              and PDF/AI extraction are not built here.
+              fields (RLS decides whether a save is allowed) and attach PDF files (below); invoices,
+              linking/unlinking, deletion, and PDF/AI extraction are not built here.
             </p>
           </header>
 
@@ -144,9 +147,15 @@ export default async function ContractDetailPage({
             )}
           </section>
 
+          <ContractFiles
+            contractId={result.data.id}
+            files={files?.ok ? files.data : []}
+            listError={!files || !files.ok}
+          />
+
           <p className="text-xs text-zinc-500">
-            Invoices and files are not shown yet — those tables are default-deny and not safe to
-            surface (RISK-002).
+            Invoices are not shown yet — that table is default-deny and not safe to surface yet
+            (RISK-002).
           </p>
         </>
       )}

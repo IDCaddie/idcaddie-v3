@@ -48,7 +48,7 @@ service-role on any request path** (`check-auth-safety.sh` green); writes are **
 | E06 | App-user identity matching parity | matching rules, merge, match status | `/people/settings`, `syncIdpAssignments`, `0008` | Partial |
 | E07 | Contracts list/detail/create/edit parity | full field parity + gantt/timeline | `/contracts*`, `CONTRACT_FIELD_ORDER`, doc 15 | Partial |
 | E08 | Contract steward / write workflow parity | authority, audit, delete/archive, link/unlink | `updateContract`, `0004`/`0010` | Partial |
-| E09 | Files / upload / download parity | upload action, signed-URL read, preview, file↔app/contract links, inbound | `/files*`, `files/*`, Storage (done boundary) | Missing (surface) |
+| E09 | Files / upload / download parity | upload action, signed-URL read, preview, file↔app/contract links, inbound | `/files*`, `files/*`, Storage (done boundary) | **Partial — contract attachments (upload + signed-URL open) shipped PR #76 (E09a); files-page/preview/inbound/links remain** |
 | E10 | Invoices parity | invoice inventory/detail, chargeback | `/invoices*`, `companies/billing` | Missing |
 | E11 | Spend / license / account intelligence | ELU/waste, spend, account-intel | `IDCApps/insights/elu`, invoice AI | Partial/Missing |
 | E12 | Shadow IT / unmanaged accounts | UAR, stale users, orphan/shadow risk | `insights/uar`,`stale`, `/people/risks` | Missing |
@@ -175,7 +175,7 @@ rest are build PRs that each cite doc 27 rows + carry RLS tests + hosted validat
 
 1. **Execute the hosted-staging RLS suite** (disposable-isolated, doc 30 §6) → evidence PR → closes the hosted
    half of doc 17 §5 boxes 5/8.
-2. **E09a — contract-file upload action + signed-URL read** (sits on the done Storage boundary; no service-role).
+2. **E09a — contract-file upload action + signed-URL read** (sits on the done Storage boundary; no service-role). **→ SHIPPED (PR #76): contract attachment UI on `/contracts/[id]` — list/upload/open, files-row-first, server-derived path, 60 s signed URL, no service-role; `partial` (files page/preview/inbound/links remain).**
 3. **E09b — files list / detail / preview surface** (private bucket + signed URLs + file audit).
 4. **E16 — connector credential vault foundation** (RISK-007) — unblocks the whole connector program; build early.
 5. **E05/E06 — people/identity directory read + match-status surface** (org-scoped, default-deny).
