@@ -159,9 +159,11 @@ point them at 27/17/33/34) would materially reduce drift risk.
 
 No invented completed work. Realistic order:
 
-1. **Run the OMC confirmation pass (doc 18)** — *highest-value for de-risking.* It resolves the 40
-   `blocked-unknown` + the `probably`/`unknown` required-ness rows, which **sizes** the entire remaining build
-   (may shrink it dramatically). Workshop + a docs PR recording decisions into doc 17/27. (Human-led.)
+1. **Run the OMC confirmation pass (doc 18) + direct old-app inspection** — *highest-value for de-risking.* It
+   resolves the 40 `blocked-unknown` + the `probably`/`unknown` required-ness rows, which **sizes** the entire
+   remaining build (may shrink it dramatically). Use the **inspection packet**
+   [39_OLD_APP_DIRECT_INSPECTION_INVENTORY](./39_OLD_APP_DIRECT_INSPECTION_INVENTORY.md) (prepared, not yet run) to
+   capture the live app page-by-page; record decisions into doc 17/27. (Human-led.)
 2. **Execute the prepared hosted-staging RLS suite** against a disposable-isolated project (doc 30 §6 runbook) →
    record evidence → completes the hosted half of doc 17 §5 boxes 5/8. (Human-run; then a docs evidence PR.)
 3. **Execute item #2** (doc 32): load the OMC-shaped synthetic dataset + validate the *implemented* critical flows
