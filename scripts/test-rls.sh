@@ -77,6 +77,18 @@ grant select, insert, update, delete on all tables in schema public to authentic
 grant usage, select on all sequences in schema public to authenticated, service_role;
 grant execute on all functions in schema public to authenticated, service_role;
 grant select on auth.users to authenticated, service_role;
+
+-- `public.files` privileges are MIGRATION-OWNED (0013/0015/0016) and are the security boundary of the
+-- contract-file surface. The blanket grant above re-broadens EVERY table for `authenticated` (it grants
+-- update + delete on all tables), which would MASK the 0016 revoke and let a broad/incorrect grant slip
+-- through unnoticed (exactly the bug staging caught — broad DELETE/TRUNCATE/UPDATE on files). Re-assert
+-- the migration-intended `files` grants for `authenticated` so the suite (T37) reflects the REAL hosted
+-- privilege surface: SELECT + INSERT, UPDATE only on upload_status, NO DELETE, NO TRUNCATE. `service_role`
+-- is untouched. KEEP IN LOCKSTEP with migration 0016's revoke/grant — if 0016's files grant ever changes,
+-- update these two lines too, or the blanket grant above would mask the difference (T37's exact-column
+-- invariant assertion is the backstop that fails loudly if they drift).
+revoke update, delete, truncate on public.files from authenticated;
+grant update (upload_status) on public.files to authenticated;
 SQL
 
 for t in "${tests[@]}"; do

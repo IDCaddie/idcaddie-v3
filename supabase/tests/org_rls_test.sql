@@ -1500,13 +1500,18 @@ do $$ declare v int; begin
 end $$;
 reset role;
 
--- 34c: DELETE is denied for everyone (no DELETE policy) — even a tenant owner; the row survives.
+-- 34c: DELETE is denied for everyone — even a tenant owner; the row survives. After `0016` this is
+-- denied at the PRIVILEGE layer (`authenticated` has NO DELETE on `public.files` — the privilege check
+-- fires before RLS), a strictly stronger guarantee than the prior no-DELETE-policy 0-rows; T37 proves the
+-- privilege surface directly.
 select set_config('request.jwt.claims','{"sub":"0a000000-0000-0000-0000-000000000001"}',false); -- owner_a
 set role authenticated;
-do $$ declare v int; begin
-  delete from public.files where id='13000000-0000-0000-0000-0000000000e1';
-  get diagnostics v = row_count;
-  assert v = 0, format('T34 no DELETE policy — a tenant owner must not delete a file (%s rows)', v);
+do $$ declare ok boolean := false; begin
+  begin
+    delete from public.files where id='13000000-0000-0000-0000-0000000000e1';
+    ok := false;
+  exception when insufficient_privilege then ok := true; end;
+  assert ok, 'T34 DELETE on files must be denied (no DELETE privilege after 0016, and no DELETE policy)';
   assert (select count(*) from public.files where id='13000000-0000-0000-0000-0000000000e1') = 1, 'T34 the file must survive the delete attempt';
 end $$;
 reset role;
@@ -1650,6 +1655,50 @@ do $$ declare v int; begin
   update public.files set upload_status='uploaded' where id='13000000-0000-0000-0000-0000000000e1';
   get diagnostics v = row_count;
   assert v = 0, format('T36 a cross-tenant user must update 0 files, saw %s', v);
+end $$;
+reset role;
+
+-- ── Test 37: `public.files` PRIVILEGE surface for `authenticated` (migration 0016) ───────────────────
+-- `0016` REVOKEs the broad request-path mutations and grants ONLY `update (upload_status)`. Staging
+-- verification caught `authenticated` holding BROAD DELETE/TRUNCATE/UPDATE on `public.files` (a
+-- `grant update (col)` is additive and never revoked them; TRUNCATE especially bypasses row-level logic).
+-- This proves the corrected surface: `authenticated` keeps SELECT + INSERT, has NO DELETE / NO TRUNCATE,
+-- and may UPDATE ONLY `upload_status` — never any immutable column. (The harness re-asserts the migration-
+-- intended files grants after its blanket crutch, so this reflects the REAL hosted privilege surface; the
+-- catalog functions read any role's grants and are role-independent, run here as the reset superuser.)
+reset role;
+do $$ begin
+  assert     has_table_privilege('authenticated','public.files','SELECT'),   'T37 authenticated must keep SELECT on files';
+  assert     has_table_privilege('authenticated','public.files','INSERT'),   'T37 authenticated must keep INSERT on files';
+  assert not has_table_privilege('authenticated','public.files','DELETE'),   'T37 authenticated must NOT have DELETE on files';
+  assert not has_table_privilege('authenticated','public.files','TRUNCATE'), 'T37 authenticated must NOT have TRUNCATE on files';
+  -- UPDATE is column-scoped to upload_status ONLY (immutable columns are NOT user-updatable).
+  assert     has_column_privilege('authenticated','public.files','upload_status','UPDATE'),      'T37 authenticated must update upload_status';
+  assert not has_column_privilege('authenticated','public.files','tenant_id','UPDATE'),          'T37 must NOT update tenant_id';
+  assert not has_column_privilege('authenticated','public.files','contract_id','UPDATE'),        'T37 must NOT update contract_id';
+  assert not has_column_privilege('authenticated','public.files','uploaded_by','UPDATE'),        'T37 must NOT update uploaded_by';
+  assert not has_column_privilege('authenticated','public.files','storage_path','UPDATE'),       'T37 must NOT update storage_path';
+  assert not has_column_privilege('authenticated','public.files','storage_bucket','UPDATE'),     'T37 must NOT update storage_bucket';
+  assert not has_column_privilege('authenticated','public.files','original_filename','UPDATE'),  'T37 must NOT update original_filename';
+  assert not has_column_privilege('authenticated','public.files','byte_size','UPDATE'),          'T37 must NOT update byte_size';
+  assert not has_column_privilege('authenticated','public.files','content_type','UPDATE'),       'T37 must NOT update content_type';
+  assert not has_column_privilege('authenticated','public.files','sha256','UPDATE'),             'T37 must NOT update sha256';
+  -- the worker/AI-pipeline state columns the design most wants out of the request-path role's reach.
+  assert not has_column_privilege('authenticated','public.files','scan_status','UPDATE'),            'T37 must NOT update scan_status';
+  assert not has_column_privilege('authenticated','public.files','extraction_status','UPDATE'),      'T37 must NOT update extraction_status';
+  assert not has_column_privilege('authenticated','public.files','extraction_result_json','UPDATE'), 'T37 must NOT update extraction_result_json';
+  assert not has_column_privilege('authenticated','public.files','extraction_error','UPDATE'),       'T37 must NOT update extraction_error';
+  assert not has_column_privilege('authenticated','public.files','document_type','UPDATE'),          'T37 must NOT update document_type';
+  assert not has_column_privilege('authenticated','public.files','updated_at','UPDATE'),             'T37 must NOT update updated_at';
+  -- EXACT invariant (robust to schema growth / hosted drift): authenticated holds UPDATE on EXACTLY one
+  -- column, and it is upload_status — so any future column or stray column grant is caught, not just the
+  -- ones enumerated above. (Run as the reset superuser, which sees all grants in column_privileges.)
+  assert (
+    select coalesce(array_agg(column_name::text order by column_name::text), array[]::text[])
+    from information_schema.column_privileges
+    where grantee = 'authenticated' and table_schema = 'public'
+      and table_name = 'files' and privilege_type = 'UPDATE'
+  ) = array['upload_status'], 'T37 authenticated must hold UPDATE on EXACTLY [upload_status] on files';
 end $$;
 reset role;
 

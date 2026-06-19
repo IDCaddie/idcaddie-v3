@@ -265,9 +265,9 @@ but `0013` had **no UPDATE policy** and `0015` granted only SELECT/INSERT, so th
 narrow migration `0016`.
 
 **Fix (PR #78):** **Contract-file upload finalization is hardened.** A narrow `0016` UPDATE policy lets the
-**uploader** finalize ONLY their OWN row's `upload_status` (uploader-only, `can_write_contract`, no reassignment;
-column-scoped grant to `upload_status` only — proven by T36). The DAL now sets `upload_status='uploaded'` on a
-successful upload (**successful uploads no longer remain ambiguous pending rows**) and `upload_status='failed'`
+**uploader** finalize ONLY their OWN row's `upload_status` (uploader-only, `can_write_contract`, no reassignment —
+proven by T36; the privilege surface is corrected + proven by T37, §13). The DAL now sets `upload_status='uploaded'`
+on a successful upload (**successful uploads no longer remain ambiguous pending rows**) and `upload_status='failed'`
 on a failed object upload (**failed uploads are explicitly dispositioned**, or — if even that UPDATE is denied —
 documented as blocked by current policy and shown distinctly); download only signs finalized rows; the UI labels
 Uploaded / Pending / Failed and shows **Open only for finalized files**. **No DELETE/`FOR ALL`, no Storage-policy
@@ -275,3 +275,26 @@ change, no public bucket, no service-role.** **Storage authorization remains nec
 cutover. Upload is not automatically production-ready. Invoices remain not built. PDF/AI extraction remains not
 built. Old-app parity is not complete. UI/UX parity is not complete. AI/API connector parity is not complete.
 RISK-001 remains OPEN. Cutover remains BLOCKED.**
+
+---
+
+## 13. E09a — `0016` privilege-grant correction (staging caught a broad grant before merge)
+
+**Staging verification (after applying the first cut of `0016`) caught a privilege bug before merge** — the
+PR claim of a narrow grant was wrong. `has_table_privilege('authenticated','public.files', …)` returned **true
+for `delete`, `truncate`, AND `update`**, and `information_schema.column_privileges` showed UPDATE on **every**
+`public.files` column for `authenticated`. **Root cause:** `grant update (upload_status)` is **additive** — it
+never removed the BROAD DELETE/TRUNCATE/UPDATE `authenticated` already held (no migration granted these; hosted
+setup did). **TRUNCATE is especially unacceptable — it bypasses row-level logic.** The local `test-rls.sh`
+harness had **masked** this: its blanket `grant … on all tables … to authenticated` re-broadened `files` *after*
+the migrations, so no local test could detect it.
+
+**Correction (this PR, before merge):** `0016` now `revoke update, delete, truncate on public.files from
+authenticated` then `grant update (upload_status)` — after it `authenticated` holds EXACTLY
+`SELECT, INSERT, UPDATE(upload_status)` (no DELETE, no TRUNCATE; idempotent; SELECT/INSERT and `service_role`
+untouched; the UPDATE RLS policy unchanged). The harness now re-asserts the migration-intended `files` grants so
+the suite reflects the real hosted surface. New **T37** proves it (`has_table_privilege` no DELETE / no TRUNCATE;
+`has_column_privilege` UPDATE only on `upload_status`, denied on every immutable column) and **T34c** now asserts
+DELETE is denied at the privilege layer. RLS suite **222 → 248**. **A human must re-apply the corrected `0016`
+privilege SQL to staging** (the first cut was already applied there) — not done by this PR. **RISK-001 remains
+OPEN. Cutover remains BLOCKED. Upload is not automatically production-ready.**
