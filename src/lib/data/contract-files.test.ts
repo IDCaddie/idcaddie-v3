@@ -27,24 +27,36 @@ const NOT_PDF = new Uint8Array([0x68, 0x69, 0x21]); // "hi!"
 type SupaCfg = {
   insertError?: { code?: string } | null;
   uploadError?: unknown;
+  updateError?: unknown;
   listData?: unknown[];
   listError?: unknown;
-  downloadData?: { storage_path: string; storage_bucket: string | null } | null;
+  downloadData?: { storage_path: string; upload_status?: string } | null;
   downloadError?: unknown;
   signed?: { signedUrl: string } | null;
   signError?: unknown;
 };
 
 // Captures the calls we assert on.
-let captured: { insert?: Record<string, unknown>; uploadArgs?: unknown[]; signArgs?: unknown[] };
+let captured: {
+  insert?: Record<string, unknown>;
+  updates: Record<string, unknown>[];
+  uploadArgs?: unknown[];
+  signArgs?: unknown[];
+};
 
 function makeSupabase(cfg: SupaCfg) {
-  captured = {};
+  captured = { updates: [] };
   const from = () => ({
     insert: (payload: Record<string, unknown>) => {
       captured.insert = payload;
       return Promise.resolve({ error: cfg.insertError ?? null });
     },
+    update: (payload: Record<string, unknown>) => ({
+      eq: () => {
+        captured.updates.push(payload);
+        return Promise.resolve({ error: cfg.updateError ?? null });
+      },
+    }),
     select: () => ({
       eq: () => ({
         order: () => Promise.resolve({ data: cfg.listData ?? [], error: cfg.listError ?? null }),
@@ -133,11 +145,14 @@ describe("uploadContractFileForCurrentUser", () => {
     // path is server-derived contracts/{tenant}/{file_id}.pdf and the row id IS that file_id.
     expect(ins.storage_path).toBe(`contracts/${TENANT}/${ins.id}.pdf`);
     expect(ins.sha256).toMatch(/^[a-f0-9]{64}$/);
+    expect(ins.upload_status).toBe("pending"); // inserted pending, finalized below
     // upload happened AFTER the insert, to the SAME server-derived path.
     expect(captured.uploadArgs?.[0]).toBe(ins.storage_path);
+    // FINALIZE: a successful upload flips the row to 'uploaded' (no ambiguous pending row).
+    expect(captured.updates).toContainEqual({ upload_status: "uploaded" });
   });
 
-  it("RLS-denied metadata insert → not_allowed, no object upload", async () => {
+  it("RLS-denied metadata insert → not_allowed, no object upload, no finalize", async () => {
     setContext(goodContext);
     createClient.mockResolvedValue(makeSupabase({ insertError: { code: "42501" } }));
     const res = await uploadContractFileForCurrentUser({
@@ -148,9 +163,10 @@ describe("uploadContractFileForCurrentUser", () => {
     });
     expect(res).toEqual({ ok: false, error: "not_allowed" });
     expect(captured.uploadArgs).toBeUndefined(); // row-first failed → never uploaded bytes
+    expect(captured.updates).toEqual([]); // never finalized
   });
 
-  it("object upload failure after insert → upload_failed", async () => {
+  it("object upload failure → upload_failed AND the row is dispositioned 'failed' (not ambiguous pending)", async () => {
     setContext(goodContext);
     createClient.mockResolvedValue(makeSupabase({ uploadError: { message: "boom" } }));
     const res = await uploadContractFileForCurrentUser({
@@ -160,6 +176,8 @@ describe("uploadContractFileForCurrentUser", () => {
       bytes: PDF_BYTES,
     });
     expect(res).toEqual({ ok: false, error: "upload_failed" });
+    expect(captured.updates).toContainEqual({ upload_status: "failed" });
+    expect(captured.updates).not.toContainEqual({ upload_status: "uploaded" });
   });
 });
 
@@ -171,10 +189,22 @@ describe("getContractFileDownloadUrlForCurrentUser", () => {
     expect(captured.signArgs).toBeUndefined();
   });
 
-  it("authorized read → short-lived signed URL", async () => {
+  it("non-finalized (pending) row → not_ready, never signs", async () => {
     createClient.mockResolvedValue(
       makeSupabase({
-        downloadData: { storage_path: `contracts/${TENANT}/abc.pdf`, storage_bucket: "contract-files" },
+        downloadData: { storage_path: `contracts/${TENANT}/abc.pdf`, upload_status: "pending" },
+        signed: { signedUrl: "https://example.test/signed" },
+      }),
+    );
+    const res = await getContractFileDownloadUrlForCurrentUser("13000000-0000-0000-0000-0000000000f1");
+    expect(res).toEqual({ ok: false, error: "not_ready" });
+    expect(captured.signArgs).toBeUndefined();
+  });
+
+  it("finalized (uploaded) row → short-lived signed URL", async () => {
+    createClient.mockResolvedValue(
+      makeSupabase({
+        downloadData: { storage_path: `contracts/${TENANT}/abc.pdf`, upload_status: "uploaded" },
         signed: { signedUrl: "https://example.test/signed" },
       }),
     );

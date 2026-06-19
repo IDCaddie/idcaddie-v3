@@ -123,25 +123,38 @@ export function ContractFiles({
         <p className="text-zinc-600 dark:text-zinc-400">No files attached yet.</p>
       ) : (
         <ul className="divide-y divide-zinc-200 dark:divide-zinc-800">
-          {files.map((f) => (
-            <li key={f.id} className="flex items-center justify-between gap-3 py-2">
-              <span className="min-w-0">
-                <span className="block truncate font-medium">{f.filename}</span>
-                <span className="block text-xs text-zinc-500">
-                  {f.createdAt.slice(0, 10)}
-                  {f.uploadStatus !== "uploaded" ? ` · ${f.uploadStatus}` : ""}
+          {files.map((f) => {
+            const finalized = f.uploadStatus === "uploaded";
+            const statusLabel = finalized
+              ? "Uploaded"
+              : f.uploadStatus === "failed"
+                ? "Upload failed — not openable"
+                : "Pending — not yet openable";
+            return (
+              <li key={f.id} className="flex items-center justify-between gap-3 py-2">
+                <span className="min-w-0">
+                  <span className="block truncate font-medium">{f.filename}</span>
+                  <span className="block text-xs text-zinc-500">
+                    {f.createdAt.slice(0, 10)} · {statusLabel}
+                  </span>
                 </span>
-              </span>
-              <button
-                type="button"
-                onClick={() => onDownload(f.id)}
-                disabled={pending}
-                className="shrink-0 rounded border border-zinc-300 px-2.5 py-1 text-xs disabled:opacity-50 dark:border-zinc-700"
-              >
-                Open
-              </button>
-            </li>
-          ))}
+                {finalized ? (
+                  <button
+                    type="button"
+                    onClick={() => onDownload(f.id)}
+                    disabled={pending}
+                    className="shrink-0 rounded border border-zinc-300 px-2.5 py-1 text-xs disabled:opacity-50 dark:border-zinc-700"
+                  >
+                    Open
+                  </button>
+                ) : (
+                  // Open is shown ONLY for a finalized upload (confirmed Storage object). A pending/
+                  // failed row may have no object, so it is not openable.
+                  <span className="shrink-0 text-xs text-zinc-400">—</span>
+                )}
+              </li>
+            );
+          })}
         </ul>
       )}
     </section>

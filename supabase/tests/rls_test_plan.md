@@ -25,9 +25,13 @@ Before building UI, prove these pass against local Supabase.
 
 Cases 1–8 plus the org/cross-tenant/escalation matrix are enforced by
 `supabase/migrations/0002_org_scoped_rls.sql` and `0003_org_access_union.sql`,
-covered by the runnable suite `supabase/tests/org_rls_test.sql` (T1–T30, 153 assertions). The
-suite has been executed against Postgres 16 with a Supabase-style `auth` shim — all
-assertions pass (`ALL ORG-RLS ASSERTIONS PASSED`).
+covered by the runnable suite `supabase/tests/org_rls_test.sql` (T1–T36, 227 assertions; the
+later tests cover the `files` foundation/policies — T33 `0012`, T34 `0013` SELECT/INSERT, T35 `0014`
+storage-auth helpers, and **T36 `0016` the uploader-finalize UPDATE policy**: the uploader may set
+`upload_status` on their OWN row, but cross-tenant / cross-user updates and `uploaded_by`/`tenant_id`
+reassignment are denied; the column-grant narrowing to `upload_status` is hosted-only, masked locally
+by the blanket grant). The suite has been executed against Postgres 16 with a Supabase-style `auth`
+shim — all assertions pass (`ALL ORG-RLS ASSERTIONS PASSED`).
 
 **Destructive-delete hardening (T17/T24/T25, migration `0004`):** core evidence tables
 (`organizations`/`apps`/`contracts`/`app_contracts`/`people`/`app_users`) have **no `DELETE`

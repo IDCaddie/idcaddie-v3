@@ -154,9 +154,25 @@ export async function uploadContractFileForCurrentUser(
     .from(CONTRACT_FILES_BUCKET)
     .upload(storagePath, body, { contentType: "application/pdf", upsert: false });
   if (uploadError) {
-    // No UPDATE/DELETE policy on the request path → the row stays 'pending'; a future worker reconciles.
-    console.error("[data/contract-files] object upload failed");
+    // Disposition the orphan metadata row as 'failed' (RLS `0016`: uploader-only, same tenant) so it is
+    // not an ambiguous 'pending' row with no object. The `failed` row is excluded from open/download.
+    // If even this update is denied, the row stays 'pending' (we never service-role-clean it) — the UI
+    // still distinguishes pending from uploaded, so it is not misleading.
+    await supabase.from("files").update({ upload_status: "failed" }).eq("id", fileId);
+    console.error("[data/contract-files] object upload failed; row marked failed");
     return { ok: false, error: "upload_failed" };
+  }
+
+  // Step 3 — FINALIZE: the object exists, so flip the uploader's own row to 'uploaded' (RLS `0016`).
+  // The bucket/content_type/byte_size/sha256 were already persisted at insert; this confirms the
+  // status. If the finalize update fails, the file is still uploaded + usable (the object exists) — we
+  // return success and log; the row stays 'pending' (a rare degraded state, never a false 'uploaded').
+  const { error: finalizeError } = await supabase
+    .from("files")
+    .update({ upload_status: "uploaded" })
+    .eq("id", fileId);
+  if (finalizeError) {
+    console.error("[data/contract-files] finalize status update failed (object uploaded)");
   }
 
   return { ok: true, id: fileId };
@@ -164,12 +180,14 @@ export async function uploadContractFileForCurrentUser(
 
 export type ContractFileDownloadResult =
   | { ok: true; url: string }
-  | { ok: false; error: "not_found" | "sign_failed" };
+  | { ok: false; error: "not_found" | "not_ready" | "sign_failed" };
 
 // Generate a short-lived signed URL to open a file — ONLY after the RLS read confirms the user may
-// read the row (tenant-member SELECT) and the Storage SELECT policy authorizes the object. The URL is
-// returned for an immediate open; the storage path is never exposed. `fileId` is only a lookup key —
-// an RLS-hidden / cross-tenant file returns `not_found` (indistinguishable from a missing file).
+// read the row (tenant-member SELECT), the row is FINALIZED (`upload_status='uploaded'` ⇒ a confirmed
+// Storage object), and the Storage SELECT policy authorizes the object. The URL is returned for an
+// immediate open; the storage path is never exposed. `fileId` is only a lookup key — an RLS-hidden /
+// cross-tenant file returns `not_found` (indistinguishable from a missing file); a `pending`/`failed`
+// row (which may have no object) returns `not_ready` and is never signed.
 export async function getContractFileDownloadUrlForCurrentUser(
   fileId: string,
 ): Promise<ContractFileDownloadResult> {
@@ -178,7 +196,7 @@ export async function getContractFileDownloadUrlForCurrentUser(
 
   const { data, error } = await supabase
     .from("files")
-    .select("storage_path")
+    .select("storage_path, upload_status")
     .eq("id", fileId)
     .maybeSingle();
   if (error) {
@@ -186,6 +204,8 @@ export async function getContractFileDownloadUrlForCurrentUser(
     return { ok: false, error: "not_found" };
   }
   if (!data) return { ok: false, error: "not_found" }; // RLS hid it, or no such file
+  // Only finalized uploads are openable — a pending/failed row may have no Storage object.
+  if (data.upload_status !== "uploaded") return { ok: false, error: "not_ready" };
 
   // Always sign within the single private contract-files bucket — this surface only ever stores there
   // (every uploaded row sets storage_bucket = CONTRACT_FILES_BUCKET). A row pointing elsewhere simply
