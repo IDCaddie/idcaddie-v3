@@ -198,7 +198,7 @@ returns to `/login`; protected routes redirect to `/login` when logged out.
 ### 7.5 Disposition
 **This evidence does not approve cutover.** It advances doc 17 §5 boxes 5/6/8 (Auth/session/tenant-context +
 the hosted RLS isolation/`files`-grant spot checks); the **full `org_rls_test.sql` suite re-run against hosted
-Postgres/Auth** and the OMC-shaped dataset (box 7) + critical flows (box 9) remain. **No production project was
+Postgres/Auth** (prepared via `scripts/verify-staging-rls-suite.mjs` — [30 §6](./30_DOC17_CUTOVER_BLOCKER_SEQUENCE.md); not yet run) and the OMC-shaped dataset (box 7) + critical flows (box 9) remain. **No production project was
 touched. No service-role key was used. No secrets, passwords, anon keys, cookies, JWTs, or tokens are recorded.
 RISK-001 remains OPEN** unless every documented closure criterion is satisfied (the doc 17 §5 checklist is not).
 **Cutover remains BLOCKED. Upload is not automatically production-ready. Storage completion is necessary but not

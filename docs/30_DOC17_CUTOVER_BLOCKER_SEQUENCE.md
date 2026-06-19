@@ -131,3 +131,34 @@ Everything after that (data migration, rollback rehearsal, OMC signoff) follows 
 - **Cutover remains BLOCKED.** Doc 17 §5 is the binding go/no-go; **every** box must be true.
 - **Upload is not automatically production-ready.**
 - This doc runs no production/staging command and changes no code/migration/script/env/hosted state.
+
+---
+
+## 6. Hosted-staging RLS suite re-run (sub-task of item #1, boxes 5/8) — PREPARED, not yet run
+
+The remaining part of doc 17 §5 boxes 5/8 is the **full `org_rls_test.sql` suite re-run against hosted** (the
+PR #68 verifier covered Auth + tenant-isolation/`files`-grant spot checks, not the whole suite).
+
+**Analysis (`scripts/test-rls.sh` + `supabase/tests/org_rls_test.sql`).** `test-rls.sh` applies migrations to a
+**throwaway postgres:16 container** and runs the suite via `psql ... ON_ERROR_STOP=1` — it relies on the
+container being **disposable**, not on rollback. The suite's fixture setup is destructive: `truncate table` **17
+core tables incl. `public.audit_logs` restart identity cascade**, `delete from auth.users`, then ~116 INSERT /
+~77 UPDATE / ~70 DELETE + `set role authenticated|service_role`.
+
+**Hosted staging RLS execution is prepared but not yet run.** **Raw `org_rls_test.sql` must not be run directly
+against hosted staging unless wrapped in a proven rollback-only, staging-ref-guarded runner** — and even
+rollback-only against the **shared** staging project is unsafe: the `TRUNCATE` includes `audit_logs` and fires a
+**statement-level** trigger event that the row-level `reject_audit_mutation()` (`0002`) does **not** cover (it
+would wipe append-only audit history); `delete from auth.users` mutates the managed auth schema; `TRUNCATE`
+takes ACCESS EXCLUSIVE locks on 17 live tables; the privileged ops need a near-superuser connection.
+
+**Safe approach:** run it against a **dedicated, disposable, isolated** hosted Postgres (a separate scratch
+Supabase project or a Supabase branch DB — **never** the shared staging project `ycdpzduxugdsffjqyoai`, **never**
+production `dzbfxulvxchdemcettrx`), seeded fresh and disposed after. The runner
+`scripts/verify-staging-rls-suite.mjs` enforces this: it hard-refuses unless staging is the linked ref,
+hard-refuses if production is linked, and **detects the destructive statements and refuses the raw run against
+the shared project**. The script **connects to nothing**; only the explicit `disposable-isolated` opt-in **emits
+a rollback-only runbook** (snapshot key-table counts → `begin … rollback` → prove post==pre counts incl.
+`audit_logs` → dispose) for a human to run against a separate disposable project — so no connection string is
+handled and **no secrets/URLs are printed**. **This PR prepares the runner; it does not run it. Production must
+not be touched. RISK-001 remains OPEN. Cutover remains BLOCKED. Upload is not automatically production-ready.**
