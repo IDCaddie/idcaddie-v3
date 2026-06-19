@@ -5,9 +5,16 @@
 that the hosted RLS matches the local suite — advancing [17 §5](./17_OMC_PRODUCTION_REPLACEMENT_PARITY_GATE.md)
 boxes **5, 6, 8**. The verifier is `scripts/verify-staging-auth-tenant-context.mjs`.
 
+> ## ✅ RUN 2026-06-18 — PASSED (evidence in §7)
+> **Hosted staging Auth + tenant-context verification PASSED.** A human ran it against the deployed staging app
+> `https://idcaddie-v3.vercel.app` (staging Supabase `ycdpzduxugdsffjqyoai`): **8/8 automated checks + manual
+> Tenant A/Tenant B browser checks passed**, after correcting the Vercel env vars (§7). **The verifier used real
+> hosted Supabase Auth with user-scoped JWTs; no service-role key was used; no production project was touched;
+> no secrets recorded.** RISK-001 stays OPEN; cutover stays BLOCKED. §1–§6 below are the plan as authored.
+
 > ## ⚠️ STATUS BANNER (do not remove)
-> - **Hosted staging Auth + tenant-context verification is PREPARED, not executed.** This PR adds the plan + the
->   verifier; **no hosted verification was run; no production project was touched.**
+> - **Hosted staging Auth + tenant-context verification has now been RUN green (§7).** The plan + verifier below
+>   are unchanged; **the agent ran nothing — a human executed it.** **No production project was touched.**
 > - **No secrets, passwords, anon keys, cookies, or JWTs are recorded.** The verifier reads them from local env
 >   and prints only check names + PASS/FAIL.
 > - **User-scoped only** — public anon key + synthetic-user sign-in. **No service-role key** in the verifier.
@@ -128,3 +135,71 @@ Capture into a dated record (a [23](./23_STORAGE_STAGING_APPLY_EVIDENCE_TEMPLATE
 checklist), not its closure. **Cutover remains BLOCKED.** **Upload is not automatically production-ready.**
 **Storage completion is necessary but not sufficient for cutover.** RISK-002/007/013/016 remain open. OMC/Flywheel
 is a paying production **replacement, not a pilot**.
+
+---
+
+## 7. Recorded run evidence — 2026-06-18 (PASSED)
+
+**Hosted staging Auth + tenant-context verification passed.** A human ran it against the deployed staging app;
+the agent ran nothing. **No secrets, passwords, anon keys, cookies, JWTs, or tokens are recorded.**
+
+| Field | Value |
+|---|---|
+| Date | 2026-06-18 |
+| Staging project ref | `ycdpzduxugdsffjqyoai` |
+| Production project ref (untouched) | `dzbfxulvxchdemcettrx` — **NOT touched** |
+| Deployed app URL tested | `https://idcaddie-v3.vercel.app` |
+
+### 7.1 Initial failure + the Vercel env-var fix
+The first hosted app checks failed because the Vercel runtime env was missing `NEXT_PUBLIC_SUPABASE_URL` /
+`NEXT_PUBLIC_SUPABASE_ANON_KEY`:
+- `GET /login` = **500**, `GET /` = **500**, `GET /logout` = **500**; runtime logs showed the two missing
+  `NEXT_PUBLIC_SUPABASE_*` vars.
+
+**Fix:** **the Vercel environment variables were corrected for the tested deployment scope and the deployment
+was redeployed** — `NEXT_PUBLIC_SUPABASE_URL` → `https://ycdpzduxugdsffjqyoai.supabase.co` (staging),
+`NEXT_PUBLIC_SUPABASE_ANON_KEY` → the staging publishable/anon key (**no key value is recorded**).
+
+**Post-fix `curl` (no session):** `GET /login` = **HTTP 200**; `GET /` = **HTTP 307 → /login**; `GET /logout` =
+**HTTP 303 → /login**. **The deployed staging app was verified after Vercel env vars were corrected and
+redeployed.**
+
+### 7.2 Automated verifier — `node scripts/verify-staging-auth-tenant-context.mjs` → 8/8 PASS
+**The verifier used real hosted Supabase Auth with user-scoped JWTs; no service-role key was used by the verifier.**
+
+| # | Check | Result |
+|---|---|---|
+| A1 | Protected page redirects unauthenticated users to `/login` | **PASS** |
+| A2 | Public `/login` is reachable without a session | **PASS** |
+| A3 | Logout endpoint redirects to `/login` | **PASS** |
+| R1 | Login succeeds for a synthetic staging user (hosted Auth) | **PASS** |
+| R2 | Issued JWT is user-scoped (`role=authenticated`, not `service_role`) | **PASS** |
+| R3 | Tenant context resolves to the expected tenant | **PASS** |
+| R4 | Cross-tenant access denied / not exposed | **PASS** |
+| R5 | Hosted RLS/privilege parity — no `public.files` grant divergence | **PASS** |
+
+### 7.3 Manual browser checks — PASSED (Tenant A + Tenant B)
+**Manual browser checks passed for Tenant A and Tenant B** (all values below are **synthetic** staging test
+fixtures, not real customer data):
+
+| Tenant | Synthetic user | Active tenant | Tenant ID | Role |
+|---|---|---|---|---|
+| A | `tenant-a-auth-check@idcaddie-staging.local` | Hosted Auth Check Tenant A | `a1111111-aaaa-4aaa-8aaa-aaaaaaaaaaa1` | editor |
+| B | `tenant-b-auth-check@idcaddie-staging.local` | Hosted Auth Check Tenant B | `b2222222-bbbb-4bbb-8bbb-bbbbbbbbbbb2` | editor |
+
+Confirmed: `/` renders after login; `/apps` and `/contracts` render for the authenticated user; Tenant A context
+shows **Tenant A only** and Tenant B context shows **Tenant B only** (no cross-tenant data visible); logout
+returns to `/login`; protected routes redirect to `/login` when logged out.
+
+### 7.4 Synthetic staging fixture used (all synthetic)
+2 synthetic staging Auth users · 2 synthetic tenants · 2 synthetic profiles · 2 synthetic `tenant_memberships` ·
+**0 cross-org memberships** for those users (full tenant isolation per §4).
+
+### 7.5 Disposition
+**This evidence does not approve cutover.** It advances doc 17 §5 boxes 5/6/8 (Auth/session/tenant-context +
+the hosted RLS isolation/`files`-grant spot checks); the **full `org_rls_test.sql` suite re-run against hosted
+Postgres/Auth** and the OMC-shaped dataset (box 7) + critical flows (box 9) remain. **No production project was
+touched. No service-role key was used. No secrets, passwords, anon keys, cookies, JWTs, or tokens are recorded.
+RISK-001 remains OPEN** unless every documented closure criterion is satisfied (the doc 17 §5 checklist is not).
+**Cutover remains BLOCKED. Upload is not automatically production-ready. Storage completion is necessary but not
+sufficient for cutover.**
