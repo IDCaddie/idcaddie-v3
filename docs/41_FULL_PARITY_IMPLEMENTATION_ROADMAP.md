@@ -175,7 +175,7 @@ rest are build PRs that each cite doc 27 rows + carry RLS tests + hosted validat
 
 1. **Execute the hosted-staging RLS suite** (disposable-isolated, doc 30 §6) → evidence PR → closes the hosted
    half of doc 17 §5 boxes 5/8.
-2. **E09a — contract-file upload action + signed-URL read** (sits on the done Storage boundary; no service-role). **→ SHIPPED (PR #76): contract attachment UI on `/contracts/[id]` — list/upload/open, files-row-first, server-derived path, 60 s signed URL, no service-role; `partial` (files page/preview/inbound/links remain).**
+2. **E09a — contract-file upload action + signed-URL read** (sits on the done Storage boundary; no service-role). **→ SHIPPED (PR #76): contract attachment UI on `/contracts/[id]` — list/upload/open, files-row-first, server-derived path, 60 s signed URL, no service-role; `partial` (files page/preview/inbound/links remain). Manually verified on staging for the Tenant A happy path (§11).**
 3. **E09b — files list / detail / preview surface** (private bucket + signed URLs + file audit).
 4. **E16 — connector credential vault foundation** (RISK-007) — unblocks the whole connector program; build early.
 5. **E05/E06 — people/identity directory read + match-status surface** (org-scoped, default-deny).
@@ -203,3 +203,46 @@ UI/UX parity is not complete. AI/API connector parity is not complete. Hosted Au
 but old-app replacement is not yet verified. RISK-001 remains OPEN. Cutover remains BLOCKED. Upload is not
 automatically production-ready. Storage completion is necessary but not sufficient for cutover.** OMC/Flywheel is
 a paying production **replacement, not a pilot**.
+
+---
+
+## 11. E09a — contract-file attachment UI: staging verification evidence (2026-06-19)
+
+**Contract-file attachment UI was manually verified on staging for the tested Tenant A happy path.** A human ran
+it; the agent ran nothing. **No secrets, passwords, anon keys, cookies, JWTs, or tokens are recorded. No
+production project was touched.** All identifiers below are **synthetic** staging test fixtures, not real
+customer data.
+
+| Field | Value |
+|---|---|
+| Date | 2026-06-19 |
+| Staging project ref | `ycdpzduxugdsffjqyoai` |
+| Production project ref (untouched) | `dzbfxulvxchdemcettrx` — **NOT touched** |
+| Deployed app URL tested | `https://idcaddie-v3.vercel.app` |
+| Tested account (synthetic) | `tenant-editor-a@idcaddie-staging.local` |
+| Tenant (synthetic) | Storage Verifier Tenant A |
+| Contract tested (synthetic) | Storage Test Contract A1 — `cccca111-0000-0000-0000-0000000000a1` |
+| Tested URL | `https://idcaddie-v3.vercel.app/contracts/cccca111-0000-0000-0000-0000000000a1` |
+
+**Result: PASSED for the Tenant A happy path. The test showed contract detail loading, attachment section
+rendering, PDF upload, file listing, and Open action availability.** Observed, as the authorized Tenant A editor:
+- The contract detail page loaded; the **Files / Attachments** section rendered.
+- A PDF attachment upload worked; the uploaded file appeared in the attachment list; an **Open** action was
+  present for it.
+- The UI did **not** expose `storage_path` as visible page text.
+- The UI did **not** expose a signed URL as visible page text.
+- The page clearly states **invoices are not shown yet** and **PDF/AI extraction is not built here**.
+
+**Known state (recorded honestly): Multiple synthetic-test.pdf pending rows were visible because the upload was
+repeated during testing.** Each repeat created another `files` row at `upload_status='pending'` (the request
+path has **no UPDATE/DELETE policy** by design — PR #76 / `0013` — so the app cannot transition or remove them;
+a future worker/admin step reconciles). **No cleanup was performed by this PR**, and this PR does not mutate
+staging — the synthetic pending rows remain in staging until a human/worker cleans them up.
+
+**Scope / does NOT overclaim.** This verifies **only** the tested contract-file attachment happy path for Tenant
+A on staging. It does **not** prove full old-app parity, AI/PDF extraction, invoices, or connector parity, and it
+does **not** close RISK-001 or approve cutover. **Invoices remain not built. PDF/AI extraction remains not
+built. Old-app parity is not complete. UI/UX parity is not complete. AI/API connector parity is not complete.
+Storage authorization remains necessary but not sufficient for cutover. Hosted Auth/tenant-context is verified,
+but old-app replacement is not yet verified. Upload is not automatically production-ready. RISK-001 remains
+OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is ticked by this evidence.
