@@ -144,7 +144,7 @@ run. Until then the remaining build is unscoped (could be ~25 or ~110 PRs).
 | Overlap | Docs | Recommendation |
 |---|---|---|
 | **Parity is tracked in 5 places** | 11, 14, 17 §4, 27, 33 | **doc 27** = canonical line-item matrix; **doc 17** = canonical gate; **doc 33** = canonical build plan. Mark **11** and **14** as *superseded-by → 27/17* (keep as history) to stop them drifting from 27. |
-| **MVP scope vs full-replacement bar** | v3-product-scope vs 17/27 | **Tension:** v3-product-scope *defers* AI/connectors/dashboards/SSO/billing, but OMC cutover requires *full* parity. Annotate v3-product-scope as **superseded for cutover** by 17/27 (OMC = replacement, not MVP). |
+| **MVP scope vs full-replacement bar** | v3-product-scope vs 17/27 | **RESOLVED** by the decision of record [38_OMC_FULL_PARITY_SCOPE_DECISION](./38_OMC_FULL_PARITY_SCOPE_DECISION.md): full old-app parity is the cutover bar unless OMC waives a capability in writing; `v3-product-scope` is annotated **superseded for cutover** (kept as history). |
 | **Data-migration plan stated twice** | 34 vs v3-migration-plan | **doc 34** canonical; mark v3-migration-plan superseded. |
 | **Rollback / stop rules restated** | 20, 28 §10, 34 phase F, 35 | **doc 35** canonical rollback; others link to it. |
 | **RISK-001 narrative restated** | 00, 04, 09, 25, 29, 30, 31 | by-design banners, but drift risk if one lags — **doc 04 RISK-001 row is the single source of truth**; others should link, not re-assert criteria. |

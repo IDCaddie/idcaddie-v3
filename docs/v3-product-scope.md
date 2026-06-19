@@ -1,5 +1,13 @@
 # ID Caddie v3 Scope
 
+> **⚠️ SUPERSEDED FOR CUTOVER — historical product-planning context only.** This doc's **MVP subset** framing
+> (which defers AI/connectors/dashboards/reporting/SSO/billing) is **not** the OMC cutover bar. For the OMC/
+> Flywheel cutover, **full old-app parity is required unless OMC explicitly waives a capability in writing** —
+> see the decision of record [38_OMC_FULL_PARITY_SCOPE_DECISION](./38_OMC_FULL_PARITY_SCOPE_DECISION.md) (+ the
+> gate [17](./17_OMC_PRODUCTION_REPLACEMENT_PARITY_GATE.md) and matrix [27](./27_LEGACY_OMC_FULL_PARITY_MATRIX.md)).
+> **The MVP subset framing is not sufficient for OMC cutover.** Anything "deferred" below is a cutover blocker
+> unless OMC-waived. This doc is kept as history; it is not deleted.
+
 ## Product framing
 ID Caddie v3 is an enterprise SaaS governance and application source-of-truth platform.
 
