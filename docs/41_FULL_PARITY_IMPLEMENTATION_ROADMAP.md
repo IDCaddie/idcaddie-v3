@@ -409,3 +409,43 @@ service-role details are exposed. **Old-app parity is not complete. UI/UX parity
 parity is not complete. Storage authorization remains necessary but not sufficient for cutover. Upload is not
 automatically production-ready. Hosted Auth/tenant-context is verified, but old-app replacement is not yet
 verified. RISK-001 remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is ticked.
+
+---
+
+## 17. E01 — PR #81 shell/navigation staging verification (2026-06-19)
+
+**Authenticated shell/navigation was manually verified on staging.** A human ran it; the agent ran nothing. **No
+secrets, passwords, anon keys, cookies, JWTs, or tokens are recorded. No production project was touched**
+(`dzbfxulvxchdemcettrx`); **no staging data was mutated by this PR.** All identifiers are synthetic staging test
+fixtures.
+
+| Field | Value |
+|---|---|
+| Date | 2026-06-19 |
+| Staging project ref | `ycdpzduxugdsffjqyoai` |
+| Deployed app URL tested | `https://idcaddie-v3.vercel.app` |
+| Tested account (synthetic) | `tenant-editor-a@idcaddie-staging.local` |
+| Tenant (synthetic) / role | Storage Verifier Tenant A / `editor` |
+
+**Result: PASSED.** Observed after login:
+- The **persistent sidebar is visible**; it shows the **signed-in email** + the **active tenant name and role**.
+  **The sidebar shows signed-in email, active tenant name, and role.**
+- The **Home active state** is visible; **Apps and Contracts are enabled; unbuilt old-app areas are clearly
+  marked Not built yet.** Navigation groups render for **Workspace · Applications · Contracts & Files · People &
+  Identity · Insights · Administration**, plus a visible **Sign out** button.
+- **The sidebar does not expose signed URLs, storage paths, API tokens, connector secrets, JWTs, cookies, or
+  service-role details.**
+- The page clearly states the product is a skeleton and that unbuilt old-app parity areas remain.
+
+**Follow-up (recorded honestly, not hidden):** the sidebar/nav **chrome** does not expose raw tenant IDs, **but
+the Home page main content still displays a raw tenant UUID** (the active tenant slug + UUID) from the older
+skeleton/debug content. **The Home page main content still displays a raw tenant UUID from the older
+skeleton/debug content and should be cleaned up in a future UI polish PR.** (PR #81 deliberately kept the tenant
+id out of the new chrome but left the pre-existing debug display on the Home page body.)
+
+**Scope — no overclaim.** This verifies PR #81's shell/navigation staging behavior only. It does **not** prove
+full UI/UX parity, old-app parity, or that AI/connectors/reports/admin are built; and it does **not** close
+RISK-001 or approve cutover. **Core shell/navigation UI parity is improved but not complete. Old-app parity is
+not complete. UI/UX parity is not complete. AI/API connector parity is not complete. Hosted Auth/tenant-context
+is verified, but old-app replacement is not yet verified. Upload is not automatically production-ready. RISK-001
+remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is ticked by this evidence.
