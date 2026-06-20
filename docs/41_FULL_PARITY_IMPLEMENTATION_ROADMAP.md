@@ -790,3 +790,38 @@ total) + the nav test now asserts the two new enabled items map to implemented r
 complete. UI/UX parity is not complete. AI/API connector parity is not complete. Hosted Auth/tenant-context is
 verified, but old-app replacement is not yet verified. Upload is not automatically production-ready. RISK-001
 remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is ticked by this PR.
+
+---
+
+## 25. E14 / E23 — Reports + Audit/Logs read-only staging verification (PR #91)
+
+**Reports read-only staging verification passed. Audit / Logs read-only staging verification passed.** A human
+verified the §24 (PR #90) surfaces on the deployed staging app `https://idcaddie-v3.vercel.app` signed in as
+`tenant-editor-a@idcaddie-staging.local` (tenant **Storage Verifier Tenant A**). **The agent ran nothing — no
+hosted command, no staging mutation, no secrets. No production data was touched.**
+
+### 25.1 `/reports` — `https://idcaddie-v3.vercel.app/reports` — PASS
+Reports nav item enabled; the route is deployed and loads. Observed "visible to you" counts: **Apps visible 1 ·
+Contracts visible 2 · App-user accounts visible 2 · Accounts matched 1 · Accounts unmatched 1 · Files visible 5**.
+**Reports counts are RLS-scoped / visible-to-you, not absolute tenant-wide totals** (the page states this).
+Marked **Not built yet**: Export / download (CSV, PDF), Scheduled reports, Emailed reports, AI report insights,
+Connector-driven spend / license reporting, the legacy report types. **Exports remain not built. Scheduled reports
+remain not built. CSV/PDF report generation remains not built. AI report insights remain not built. Connector-driven
+spend/license reporting remains not built. Legacy report types remain not built.**
+
+### 25.2 `/audit` — `https://idcaddie-v3.vercel.app/audit` — PASS
+Audit / Logs nav item enabled; the route is deployed and loads. **2 recent audit entries visible.** **Audit / Logs
+shows only action, entity, timestamp, and a safe actor indicator.** Observed e.g. `contract.created / contract /
+2026-06-18 12:10`. **Audit / Logs does not expose tenant_id, actor_user_id, IP address, user_agent, before_json,
+after_json, tokens, secrets, signed URLs, storage paths, connector credentials, JWTs, cookies, or service-role
+details.** The page states the log is append-only. **Before/after audit diff remains not built. Full audit
+search/filter/export remains not built. Legacy audit retention/purge controls remain not built. Audit
+mutation/delete remains not built.**
+
+### 25.3 Scope / guardrails
+This verifies only the read-only Reports + Audit staging behavior for the synthetic Tenant A account — not full
+parity. **No production data was touched. No hosted commands were run by the agent. No RLS policies were changed.
+No migrations were added.** **Old-app parity is not complete. UI/UX parity is not complete. AI/API connector parity
+is not complete. Hosted Auth/tenant-context is verified, but old-app replacement is not yet verified. Upload is not
+automatically production-ready. RISK-001 remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is ticked by this
+verification.
