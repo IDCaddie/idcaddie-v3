@@ -1195,3 +1195,29 @@ staging then production later; next gate is still PR C, the encrypt/decrypt wrap
 complete. UI/UX parity is not complete. AI/API connector parity is not complete. Upload is not automatically
 production-ready. Hosted Auth/tenant-context is verified, but old-app replacement is not yet verified. RISK-001
 remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is ticked by this PR.
+
+---
+
+## 37. STAGING VERIFICATION — `0018` connector vault grant hardening (PR #103)
+
+**Connector vault grant hardening has been applied and verified on staging** (doc 42 §26). A human applied `0018`
+to staging (`ycdpzduxugdsffjqyoai`) via `db push` and queried the live privilege/policy surface. **Migration 0018
+is present on staging.** The table-privilege query returned **exactly two rows** — `authenticated | connector_runs
+| SELECT` and `authenticated | connectors | SELECT` — with **no anon rows, no connector_secrets rows, and no
+INSERT/UPDATE/DELETE/TRUNCATE/REFERENCES/TRIGGER grant for anon or authenticated.** `pg_policies` returned exactly
+the two tenant-member SELECT policies (connectors / connector_runs); **connector_secrets had no policies.** Linked
+ref remained `ycdpzduxugdsffjqyoai`.
+
+Confirmed live: **Connector metadata tables expose authenticated SELECT only. Connector secret material remains
+inaccessible to anon and authenticated users. Anon has no connector vault table privileges. No broad INSERT,
+UPDATE, DELETE, TRUNCATE, REFERENCES, or TRIGGER grants remain on connector vault tables for anon or
+authenticated.** The `0017` broad hosted-default grants are gone (resolving the §36 finding); the secret tier was
+never exposed. **The agent ran nothing — no hosted command, no staging mutation; production untouched.**
+
+**Connector vault is still not usable. Connector implementation remains blocked. No connector credentials are
+stored. No connector sync is implemented. No encryption/decryption wrapper is implemented. No provider connector is
+implemented. No OAuth callback is implemented. No connector UI is implemented. No service-role request path is
+added. No production data was touched.** A human re-applies `0018` to production later; next gate is still PR C.
+**Old-app parity is not complete. UI/UX parity is not complete. AI/API connector parity is not complete. Upload is
+not automatically production-ready. Hosted Auth/tenant-context is verified, but old-app replacement is not yet
+verified. RISK-001 remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is ticked by this verification.
