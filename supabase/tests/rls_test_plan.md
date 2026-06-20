@@ -25,10 +25,14 @@ Before building UI, prove these pass against local Supabase.
 
 Cases 1–8 plus the org/cross-tenant/escalation matrix are enforced by
 `supabase/migrations/0002_org_scoped_rls.sql` and `0003_org_access_union.sql`,
-covered by the runnable suite `supabase/tests/org_rls_test.sql` (T1–T39, 292 assertions; T38/T39 cover the
+covered by the runnable suite `supabase/tests/org_rls_test.sql` (T1–T40, 318 assertions; T38/T39 cover the
 connector-vault schema foundation (`0017`) — T38 = `connectors`/`connector_runs` tenant-member read + no
 request-path write; T39 = `connector_secrets` deny-all (RLS-enabled, zero policies, `authenticated`/`anon`
-hold zero privilege) + the no-secret-column-leak structural check; the
+hold zero privilege) + the no-secret-column-leak structural check; **T40 = the hardened grant surface
+(`0018`)** after staging found broad anon/authenticated INSERT/UPDATE/DELETE/TRUNCATE/REFERENCES/TRIGGER on
+the Tier-1 tables — exact per-role privilege arrays (authenticated=`[SELECT]` on connectors/connector_runs,
+zero on connector_secrets; anon=zero everywhere) + TRUNCATE/REFERENCES/TRIGGER negatives + tenant-scoped
+SELECT still works + cross-tenant SELECT still RLS-denied; the
 later tests cover the `files` foundation/policies — T33 `0012`, T34 `0013` SELECT/INSERT (+ T34c DELETE
 denied at the privilege layer), T35 `0014` storage-auth helpers, **T36 `0016` the uploader-finalize
 UPDATE policy** (uploader may set `upload_status` on their OWN row; cross-tenant / cross-user updates and

@@ -1881,4 +1881,76 @@ do $$ begin
 end $$;
 reset role;
 
+-- ── Test 40: connector vault HARDENED grant surface (migration 0018) ─────────────────────────────────
+-- Staging verification of 0017 found anon/authenticated holding broad INSERT/UPDATE/DELETE/TRUNCATE/
+-- REFERENCES/TRIGGER on connectors + connector_runs (0017 granted SELECT but never REVOKEd the hosted
+-- default grants; the harness re-assert masked it). 0018 REVOKEs ALL from anon+authenticated on all three
+-- vault tables, then GRANTs back ONLY SELECT to authenticated on the two Tier-1 tables; anon gets nothing.
+-- This pins the EXACT per-role privilege surface (the catalog functions are role-independent; run as the
+-- reset superuser). The harness re-assert mirrors 0018, so this reflects the REAL hosted surface.
+reset role;
+do $$
+  declare priv_authenticated_connectors      text[];
+          priv_authenticated_connector_runs  text[];
+          priv_authenticated_connector_secrets text[];
+          priv_anon_connectors               text[];
+          priv_anon_connector_runs           text[];
+          priv_anon_connector_secrets        text[];
+begin
+  select coalesce(array_agg(distinct privilege_type::text order by privilege_type::text), array[]::text[]) into priv_authenticated_connectors       from information_schema.role_table_grants where grantee='authenticated' and table_schema='public' and table_name='connectors';
+  select coalesce(array_agg(distinct privilege_type::text order by privilege_type::text), array[]::text[]) into priv_authenticated_connector_runs   from information_schema.role_table_grants where grantee='authenticated' and table_schema='public' and table_name='connector_runs';
+  select coalesce(array_agg(distinct privilege_type::text order by privilege_type::text), array[]::text[]) into priv_authenticated_connector_secrets from information_schema.role_table_grants where grantee='authenticated' and table_schema='public' and table_name='connector_secrets';
+  select coalesce(array_agg(distinct privilege_type::text order by privilege_type::text), array[]::text[]) into priv_anon_connectors                from information_schema.role_table_grants where grantee='anon' and table_schema='public' and table_name='connectors';
+  select coalesce(array_agg(distinct privilege_type::text order by privilege_type::text), array[]::text[]) into priv_anon_connector_runs            from information_schema.role_table_grants where grantee='anon' and table_schema='public' and table_name='connector_runs';
+  select coalesce(array_agg(distinct privilege_type::text order by privilege_type::text), array[]::text[]) into priv_anon_connector_secrets         from information_schema.role_table_grants where grantee='anon' and table_schema='public' and table_name='connector_secrets';
+
+  -- connector_secrets: ZERO privileges for BOTH request-path roles (deny-all intact).
+  assert priv_authenticated_connector_secrets = array[]::text[], format('T40 authenticated must hold ZERO privileges on connector_secrets, saw %s', priv_authenticated_connector_secrets);
+  assert priv_anon_connector_secrets          = array[]::text[], format('T40 anon must hold ZERO privileges on connector_secrets, saw %s', priv_anon_connector_secrets);
+  -- connectors / connector_runs: authenticated EXACTLY [SELECT]; anon ZERO.
+  assert priv_authenticated_connectors      = array['SELECT'], format('T40 authenticated must hold EXACTLY [SELECT] on connectors, saw %s', priv_authenticated_connectors);
+  assert priv_authenticated_connector_runs  = array['SELECT'], format('T40 authenticated must hold EXACTLY [SELECT] on connector_runs, saw %s', priv_authenticated_connector_runs);
+  assert priv_anon_connectors               = array[]::text[], format('T40 anon must hold ZERO privileges on connectors, saw %s', priv_anon_connectors);
+  assert priv_anon_connector_runs           = array[]::text[], format('T40 anon must hold ZERO privileges on connector_runs, saw %s', priv_anon_connector_runs);
+
+  -- Explicit negatives for the precise privileges staging found over-granted (TRUNCATE/REFERENCES/TRIGGER
+  -- are NOT covered by the per-DML harness crutch, so a regression would otherwise slip through unnoticed).
+  assert not has_table_privilege('authenticated','public.connectors','INSERT'),     'T40 authenticated must NOT have INSERT on connectors';
+  assert not has_table_privilege('authenticated','public.connectors','UPDATE'),     'T40 authenticated must NOT have UPDATE on connectors';
+  assert not has_table_privilege('authenticated','public.connectors','DELETE'),     'T40 authenticated must NOT have DELETE on connectors';
+  assert not has_table_privilege('authenticated','public.connectors','TRUNCATE'),   'T40 authenticated must NOT have TRUNCATE on connectors';
+  assert not has_table_privilege('authenticated','public.connectors','REFERENCES'), 'T40 authenticated must NOT have REFERENCES on connectors';
+  assert not has_table_privilege('authenticated','public.connectors','TRIGGER'),    'T40 authenticated must NOT have TRIGGER on connectors';
+  assert not has_table_privilege('authenticated','public.connector_runs','INSERT'),     'T40 authenticated must NOT have INSERT on connector_runs';
+  assert not has_table_privilege('authenticated','public.connector_runs','UPDATE'),     'T40 authenticated must NOT have UPDATE on connector_runs';
+  assert not has_table_privilege('authenticated','public.connector_runs','DELETE'),     'T40 authenticated must NOT have DELETE on connector_runs';
+  assert not has_table_privilege('authenticated','public.connector_runs','TRUNCATE'),   'T40 authenticated must NOT have TRUNCATE on connector_runs';
+  assert not has_table_privilege('authenticated','public.connector_runs','REFERENCES'), 'T40 authenticated must NOT have REFERENCES on connector_runs';
+  assert not has_table_privilege('authenticated','public.connector_runs','TRIGGER'),    'T40 authenticated must NOT have TRIGGER on connector_runs';
+  -- connector_secrets still has ZERO policies (deny-all) and the secret stays inaccessible to anon/authenticated.
+  assert (select count(*) from pg_policies where schemaname='public' and tablename='connector_secrets') = 0, 'T40 connector_secrets must still have ZERO RLS policies';
+  assert not has_table_privilege('authenticated','public.connector_secrets','SELECT'), 'T40 authenticated must NOT read connector_secrets';
+  assert not has_table_privilege('anon','public.connector_secrets','SELECT'),          'T40 anon must NOT read connector_secrets';
+end $$;
+reset role;
+-- 40b: tenant-scoped SELECT still works for the Tier-1 tables after 0018; cross-tenant still RLS-denied.
+select set_config('request.jwt.claims','{"sub":"0a000000-0000-0000-0000-000000000001"}',false); set role authenticated; -- owner_a
+do $$ begin
+  assert (select count(*) from public.connectors) = 1, 'T40 tenant-A member still reads its own connector after 0018';
+  assert (select count(*) from public.connector_runs) = 1, 'T40 tenant-A member still reads its own run after 0018';
+  assert (select count(*) from public.connectors where id='17000000-0000-0000-0000-0000000000b1') = 0, 'T40 cross-tenant connector still denied by RLS after 0018';
+end $$;
+reset role;
+-- 40c: anon cannot read any Tier-1 vault metadata (no privilege).
+set role anon;
+do $$ declare ok boolean := false; begin
+  begin perform 1 from public.connectors; ok := false; exception when insufficient_privilege then ok := true; end;
+  assert ok, 'T40 anon must have NO privilege to read connectors after 0018';
+end $$;
+do $$ declare ok boolean := false; begin
+  begin perform 1 from public.connector_runs; ok := false; exception when insufficient_privilege then ok := true; end;
+  assert ok, 'T40 anon must have NO privilege to read connector_runs after 0018';
+end $$;
+reset role;
+
 do $$ begin raise notice 'ALL ORG-RLS ASSERTIONS PASSED'; end $$;
