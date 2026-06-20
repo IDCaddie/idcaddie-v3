@@ -41,8 +41,6 @@ describe("NAV_SECTIONS", () => {
       "AI / Analysis",
       "Files / Documents",
       "Identity matching", // read-only match STATUS is on /people; the resolution workflow is not built
-      "Reports",
-      "Audit / Logs",
       "Admin / Settings",
     ]) {
       expect(byLabel[label]).toBeNull();
@@ -57,6 +55,8 @@ describe("NAV_SECTIONS", () => {
     expect(byLabel["Apps"]).toBe("/apps");
     expect(byLabel["Contracts"]).toBe("/contracts");
     expect(byLabel["People / Users"]).toBe("/people");
+    expect(byLabel["Reports"]).toBe("/reports");
+    expect(byLabel["Audit / Logs"]).toBe("/audit");
   });
 
   it("every enabled nav item maps to an implemented route (no enabled item points at an unbuilt area)", () => {

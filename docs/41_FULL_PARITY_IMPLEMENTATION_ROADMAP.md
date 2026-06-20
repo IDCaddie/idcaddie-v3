@@ -53,7 +53,7 @@ service-role on any request path** (`check-auth-safety.sh` green); writes are **
 | E11 | Spend / license / account intelligence | ELU/waste, spend, account-intel | `IDCApps/insights/elu`, invoice AI | Partial/Missing |
 | E12 | Shadow IT / unmanaged accounts | UAR, stale users, orphan/shadow risk | `insights/uar`,`stale`, `/people/risks` | Missing |
 | E13 | Imports / exports / ingestion | non-destructive upsert + preview; CSV; inbound | `/files/inbound`, `api/v1`, `IDCIngestor`, `runMigration` | Missing |
-| E14 | Reporting / scheduled reports | 7 report types + scheduler + email + export | `/reports/*`, `email/*`, `scheduledJobs` | Missing |
+| E14 | Reporting / scheduled reports | 7 report types + scheduler + email + export | `/reports`, summary DAL | **Partial — read-only `/reports` summary counts (apps/contracts/accounts/matched/unmatched/files, RLS-scoped "visible to you") shipped PR #90 (§24); generation / 7 report types / scheduler / email / export / CSV-PDF / AI insights / connector-driven reporting remain not built** |
 | E15 | AI document processing (contracts + invoices) | extraction worker, completion handler, review UI | `storage/processFileWithAI`, `handleDocumentAICompletion`, `documentPrompts` | Missing |
 | E16 | **Connector vault / token security foundation** | encrypted credential vault (prerequisite for all connectors) | `setAppPrivateData`, `PRIVATE_CREDENTIALS_SCHEMA`, doc 19 | Missing (RISK-007) |
 | E17 | Connector framework | scraper-config schema, scheduler, run/test/log, sync model | `appScraping/automatedScrapingService`, `scraperConfigManager` | Missing |
@@ -62,7 +62,7 @@ service-role on any request path** (`check-auth-safety.sh` green); writes are **
 | E20 | SCIM parity | SCIM provisioning + token mgmt | `scim/*`, `generateScimToken` | Missing |
 | E21 | Admin / company / users / groups / permissions | admin screens, groups, granular permissions, recompute | `/admin/*`,`/company/*`, `groups/*` | Partial/Missing |
 | E22 | Billing / admin parity | subscription billing, monthly billing, FX | `/admin/billing`, `calculateMonthlyBilling`, currency | Missing |
-| E23 | Audit / logging parity | audit viewer + before/after diff (keep append-only; **no 90-day purge**) | `/logging*`, `logging/*`, `0002`/`0010` | Partial |
+| E23 | Audit / logging parity | audit viewer + before/after diff (keep append-only; **no 90-day purge**) | `/audit`, audit DAL, `0001`/`0002`/`0010` | **Partial — read-only `/audit` viewer (recent entries: action/entity/timestamp + "actor recorded" label, RLS-scoped tenant-member read; NO tenant id / actor id / ip-ua / before-after diff blobs) shipped PR #90 (§24); before/after diff, search/filter/export remain; append-only by design (no mutation/delete)** |
 | E24 | Browser extension / discovery parity | Chrome extension discovery/ingest | `extension/`, `chromePluginFunction` | Missing |
 | E25 | OMC-shaped data migration | execute doc 34 (Firestore→v3) | doc 34 | Planned |
 | E26 | Rollback rehearsal | execute doc 35 in staging | doc 35 | Planned |
@@ -754,3 +754,39 @@ Cutover remains BLOCKED.** No doc 17 §5 box is ticked by this verification. (Th
 mismatch is resolved: with the §21 fixture applied + visible, `/apps` lists the app under the current code with
 working RLS-scoped counts — consistent with the earlier empty state being the fixture not yet applied/visible to
 this account.)
+
+---
+
+## 24. E14 / E23 — Reports + Audit/Logs read-only parity (PR #90)
+
+Two read-only surfaces built on existing RLS-backed reads — no new query power, no write workflow, no generation.
+
+### 24.1 Audit / Logs (`/audit`, E23)
+**Audit / Logs read-only parity is improved but not complete.** `audit_logs` already has a safe **tenant-member
+SELECT** policy (`is_tenant_member(tenant_id)`, `0001`) and is **append-only** (`reject_audit_mutation`, `0002` —
+no UPDATE/DELETE), so a read-only viewer is safe without any policy change. DAL `listRecentAuditEntriesForCurrentUser()`
+returns the most recent ≤50 entries the user may read, projected to a **deliberately minimal DTO**: `action`,
+`resourceType` (entity/table), `createdAt`, and a boolean **"actor recorded"** label. It **never** selects or
+exposes `tenant_id`, the raw `actor_user_id`, `resource_id`, `ip_address`, `user_agent`, or the
+`before_json`/`after_json` diff blobs (a test asserts the exact key set + that those columns are absent). The
+sidebar **Audit / Logs** item is now enabled → `/audit`. **Audit mutation/delete remains not built.** (Append-only
+by design.) Before/after diff, search/filter, and the legacy retention/purge controls remain not built.
+
+### 24.2 Reports (`/reports`, E14)
+**Reports read-only parity is improved but not complete.** `/reports` shows simple **"visible to you"** summary
+counts from existing RLS-backed reads — apps / contracts / files via RLS-scoped `head:true` exact counts (no row
+data fetched), and app-user accounts + matched/unmatched via the existing tested people helper (which dedups
+matched accounts; no person/IdP PII). Each count is `number | null` ("—" when its read fails — best-effort, never
+fatal); the DTO is integers/nulls only (no ids, no row contents). It **invents no report capability**:
+**Exports remain not built. Scheduled reports remain not built. CSV/PDF report generation remains not built. AI
+report insights remain not built. Connector-driven spend/license reporting remains not built.** (The page lists
+these explicitly as "Not built yet".) The sidebar **Reports** item is now enabled → `/reports`.
+
+### 24.3 Scope / guardrails
+Read-only — RLS is the authorization boundary; no service-role, no writes, no migration, no RLS-policy change, no
+exports/downloads, no fake data, no raw tenant IDs / secrets / tokens / signed URLs / storage paths. DTOs carry no
+tenant id or sensitive internals (tested); both routes inherit the `(authenticated)` auth guard; +6 tests (104
+total) + the nav test now asserts the two new enabled items map to implemented routes. **Old-app parity is not
+complete. UI/UX parity is not complete. AI/API connector parity is not complete. Hosted Auth/tenant-context is
+verified, but old-app replacement is not yet verified. Upload is not automatically production-ready. RISK-001
+remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is ticked by this PR.
