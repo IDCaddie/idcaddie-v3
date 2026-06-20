@@ -474,3 +474,93 @@ workflows remain not built. Connector sync remains not built. AI app/license int
 Old-app parity is not complete. UI/UX parity is not complete. AI/API connector parity is not complete. Hosted
 Auth/tenant-context is verified, but old-app replacement is not yet verified. Upload is not automatically
 production-ready. RISK-001 remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is ticked.
+
+---
+
+## 19. E03 / E04 — apps populated-path staging verification (PR #84, synthetic Tenant A fixture)
+
+PR #83's manual staging check (doc 41 §16/§17 chain) only covered the **empty** `/apps` path because Tenant A had
+no visible apps. A human applied a **tiny, clearly-synthetic, staging-only** fixture to Tenant A
+(`ycdpzduxugdsffjqyoai` — linked-ref confirmed; production `dzbfxulvxchdemcettrx` NOT touched) and verified the
+populated paths. **The agent ran nothing: no hosted command, no staging mutation, no secrets.** All IDs/names are
+synthetic.
+
+### 19.1 The synthetic fixture (reviewed; applied to staging by a human, NOT by the agent)
+
+Minimal, idempotent (`on conflict do nothing`), all in Tenant A `aaaa1111-1111-1111-1111-111111111111`, all in an
+obvious synthetic `5a9a0000-…` id namespace + "Staging Apps Verification" names. Applied as the privileged role
+in the staging SQL editor (RLS bypassed for seed only; the app's RLS still governs every read). **No migration,
+no RLS-policy change, no Storage, no `storage.objects`.** The match needs a `people` row (`person_id` NOT NULL);
+the match read helper surfaces **status only — no person PII**.
+
+```sql
+-- STAGING-ONLY synthetic fixture for apps inventory/detail verification. NEVER apply to production
+-- (dzbfxulvxchdemcettrx). Idempotent. Tenant A = aaaa1111-1111-1111-1111-111111111111.
+insert into public.apps (id, tenant_id, name, vendor_name, category, status) values
+  ('5a9a0000-0000-0000-0000-000000000a01','aaaa1111-1111-1111-1111-111111111111',
+   'Staging Apps Verification — App','Synthetic Vendor','Verification','active')
+on conflict (id) do nothing;
+
+-- Link the synthetic app to an EXISTING Tenant A contract (same-tenant composite FK, 0005).
+insert into public.app_contracts (app_id, contract_id, tenant_id) values
+  ('5a9a0000-0000-0000-0000-000000000a01','cccca111-0000-0000-0000-0000000000a1',
+   'aaaa1111-1111-1111-1111-111111111111')
+on conflict (app_id, contract_id) do nothing;
+
+-- 2 synthetic app users on the app.
+insert into public.app_users (id, tenant_id, app_id, email, display_name, status, license_type, last_active_at) values
+  ('5a9a0000-0000-0000-0000-000000000e01','aaaa1111-1111-1111-1111-111111111111','5a9a0000-0000-0000-0000-000000000a01',
+   'verify-user-1@staging-apps-verification.local','Staging Apps Verification User 1','active','Pro', now() - interval '5 days'),
+  ('5a9a0000-0000-0000-0000-000000000e02','aaaa1111-1111-1111-1111-111111111111','5a9a0000-0000-0000-0000-000000000a01',
+   'verify-user-2@staging-apps-verification.local','Staging Apps Verification User 2','inactive','Free', now() - interval '200 days')
+on conflict (id) do nothing;
+
+-- 1 synthetic person + 1 match (user 1 ↔ person) so the roster shows one matched + one unmatched.
+insert into public.people (id, tenant_id, primary_email, full_name) values
+  ('5a9a0000-0000-0000-0000-000000000f01','aaaa1111-1111-1111-1111-111111111111',
+   'verify-person-1@staging-apps-verification.local','Staging Apps Verification Person 1')
+on conflict (id) do nothing;
+
+insert into public.app_user_identity_matches (id, tenant_id, app_user_id, person_id, match_method, confidence) values
+  ('5a9a0000-0000-0000-0000-000000000d01','aaaa1111-1111-1111-1111-111111111111',
+   '5a9a0000-0000-0000-0000-000000000e01','5a9a0000-0000-0000-0000-000000000f01','email', 95.00)
+on conflict (app_user_id, person_id) do nothing;
+```
+
+### 19.2 Verification — PASSED
+
+**Apps inventory/detail populated-path staging verification passed for a synthetic Tenant A fixture.** A human
+logged in to `https://idcaddie-v3.vercel.app` as `tenant-editor-a@idcaddie-staging.local` and verified:
+- **`/apps`:** the list loads; the synthetic app row appears with its **linked-contract count (1)** and
+  **app-user count (2)**; the row is clickable. **Counts are RLS-scoped/visible-to-user counts, not absolute
+  tenant-wide totals.**
+- **`/apps/[id]`:** the app summary loads; the **Linked contracts** section shows the linked Tenant A contract;
+  the **App users / roster** section shows both synthetic users; the **identity match** column shows User 1
+  *matched* (method `email`, confidence 95) and User 2 *unmatched*; the **Actions** section clearly says
+  **Not built yet** for link/unlink, edit/archive, connector sync, AI analysis, and export.
+- **No tenant IDs, tokens, signed URLs, storage paths, service-role details, connector secrets, JWTs, or cookies
+  were visible** on either page.
+
+**The empty /apps path was already verified separately** (doc 41 §17). **The synthetic fixture exercised
+visible app rows, linked-contract counts, app-user counts, app detail, linked contracts, app users/roster, and
+Not built yet actions.** **Cross-tenant isolation** (Tenant B cannot see Tenant A's synthetic app/app_users/links)
+is already proven by `org_rls_test.sql` **T25/T28/T29** + the hosted Auth verifier **R4** (cross-tenant denial),
+so no separate manual Tenant B check was run.
+
+### 19.3 Disposition
+
+**Preferred + chosen: leave the synthetic rows in staging as verification fixtures.** They are harmless, clearly
+synthetic (the `5a9a0000-…` namespace + "Staging Apps Verification" names + `…staging-apps-verification.local`
+emails), and a populated Tenant A app benefits future UI verification. **The synthetic fixture is staging-only and
+must not be treated as customer data.** No cleanup is required; **no direct `storage.objects` / storage-table
+manipulation was used or needed** (apps fixtures involve no Storage).
+
+### 19.4 Scope / guardrails
+
+**No production data was touched. No production commands were run. No RLS policies were changed. No migrations
+were added** (the existing schema + the `0006`/`0007`/`0008` read policies already support this; none unavoidable).
+This verifies only the apps populated-path staging behavior. **App write/edit/delete workflows remain not built.
+Connector sync remains not built. AI app/license intelligence remains not built. Old-app parity is not complete.
+UI/UX parity is not complete. AI/API connector parity is not complete. Hosted Auth/tenant-context is verified, but
+old-app replacement is not yet verified. Upload is not automatically production-ready. RISK-001 remains OPEN.
+Cutover remains BLOCKED.** No doc 17 §5 box is ticked by this evidence.
