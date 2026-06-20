@@ -626,3 +626,76 @@ paths / tokens / secrets; auth guard preserved. The DTO carries no tenant id / p
 parity is not complete. UI/UX parity is not complete. AI/API connector parity is not complete. Hosted
 Auth/tenant-context is verified, but old-app replacement is not yet verified. Upload is not automatically
 production-ready. RISK-001 remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is ticked.
+
+---
+
+## 21. E03–E06 — staging Apps/People populated-path FIXTURE PROCESS (PR #87, human-run)
+
+**A repeatable staging-only Apps / People populated-path fixture process now exists.** After #84/#86 (the populated
+path was recorded then corrected because `/apps` showed “No apps to show”), this PR adds a **reviewed, guarded,
+human-run** way to seed a tiny synthetic Tenant A fixture in staging and verify the populated paths. **The process
+is human-run and was not executed by the agent.** **The current live populated-path verification remains incomplete
+until a human applies the fixture and verifies `/apps`, `/apps/[id]`, and `/people`.**
+
+### 21.1 Purpose
+Make `/apps`, `/apps/[id]`, and `/people` have visible Tenant A data on staging so a human can verify the populated
+paths repeatably. **The fixture is synthetic and must not be treated as customer data.**
+
+### 21.2 Exact tables touched (INSERT only)
+`public.apps`, `public.app_contracts`, `public.app_users`, `public.people`, `public.app_user_identity_matches`.
+**No Storage / `storage.objects`, no RLS-policy change, no migration.** Reviewed file:
+`supabase/fixtures/staging_apps_people_verification.sql` (idempotent `on conflict do nothing`).
+
+### 21.3 Exact synthetic IDs / names (Tenant A `aaaa1111-1111-1111-1111-111111111111`)
+| Row | ID (`5a9a0000-…` namespace) | Name / value |
+|---|---|---|
+| app | `5a9a0000-0000-0000-0000-000000000a01` | Staging Apps Verification — App |
+| app_contract | → existing contract `cccca111-0000-0000-0000-0000000000a1` | Storage Test Contract A1 |
+| app_user 1 (matched) | `5a9a0000-0000-0000-0000-000000000e01` | Staging Apps Verification User 1 |
+| app_user 2 (unmatched) | `5a9a0000-0000-0000-0000-000000000e02` | Staging Apps Verification User 2 |
+| person | `5a9a0000-0000-0000-0000-000000000f01` | Staging Apps Verification Person 1 |
+| match (user 1 ↔ person) | `5a9a0000-0000-0000-0000-000000000d01` | method `email`, confidence 95 |
+
+### 21.4 Exact human command to run it
+A human (never the agent) runs the guarded launcher — it **fails closed unless the linked ref is exactly staging
+`ycdpzduxugdsffjqyoai`, prints the linked ref, refuses production `dzbfxulvxchdemcettrx` explicitly, and requires
+the confirmation phrase `SEED STAGING APPS FIXTURE`**. It uses **no service-role key**; by default it only prints
+the fixture + SQL-editor instructions (connects to nothing):
+```
+cat supabase/.temp/project-ref     # must print ycdpzduxugdsffjqyoai
+bash scripts/seed-staging-apps-fixture.sh "SEED STAGING APPS FIXTURE"
+```
+Then paste `supabase/fixtures/staging_apps_people_verification.sql` into the **staging** Supabase SQL editor and run
+it (or, only if the human exports a `STAGING_DB_URL` that itself references the staging ref, the script applies it
+via `psql`). **The agent does none of this.**
+
+### 21.5 Verification checklist (after a human applies the fixture), signed in as `tenant-editor-a@idcaddie-staging.local`
+**Expected `/apps`:** the **synthetic app row is visible** (“Staging Apps Verification — App”); the **linked
+contract count is visible as RLS-scoped / visible-to-you** (1); the **app-user count is visible as RLS-scoped /
+visible-to-you** (2); the row is clickable.
+**Expected `/apps/[id]`:** the **summary is visible**; the **linked contract is visible** (Storage Test Contract
+A1); the **app users / roster is visible** (User 1, User 2); the **“Not built yet” actions are visible**
+(link/unlink, edit/archive, connector sync, AI analysis, export).
+**Expected `/people`:** the **app-user accounts are visible** (2 across 1 app); the **matched/unmatched status is
+visible** (User 1 matched, User 2 unmatched); **no `tenant_id` / `person_id` is exposed**; **manual / bulk matching
+are still not built**.
+
+### 21.6 Cleanup / disposition
+**Preferred: leave the clearly-synthetic rows in staging for repeatable verification** (they are harmless and
+obviously synthetic). A human may intentionally remove them using the documented **OPTIONAL CLEANUP** block at the
+bottom of the fixture file (commented-out `delete` statements that target EXACTLY the `5a9a0000-…` rows — **no
+unrelated rows**).
+
+### 21.7 Warnings
+**Never apply to production** (`dzbfxulvxchdemcettrx`) — the script refuses it and the fixture header says so.
+**Fixture data is not customer data.** **Fixture verification does not close RISK-001.** **Fixture verification
+does not approve cutover.**
+
+### 21.8 Scope / status
+**No production data was touched. No hosted commands were run by the agent. No RLS policies were changed. No
+migrations were added** (the fixture uses the existing schema + the `0006`/`0007`/`0008` read policies; none
+unavoidable). **Apps inventory/detail code parity is improved, but populated hosted verification remains
+incomplete. People / Users read-only code parity is improved, but populated hosted verification remains incomplete.
+Old-app parity is not complete. UI/UX parity is not complete. AI/API connector parity is not complete. Hosted
+Auth/tenant-context is verified, but old-app replacement is not yet verified. Upload is not automatically
+production-ready. RISK-001 remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is ticked by this process.
