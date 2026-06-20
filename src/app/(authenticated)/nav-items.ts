@@ -9,7 +9,7 @@ export type NavSection = { title: string; items: NavItem[] };
 
 // The real, implemented authenticated routes that may be linked. Keep in sync with the route tree;
 // the test asserts every linked NavItem.href is one of these (so an unbuilt area can never be linked).
-export const IMPLEMENTED_ROUTES = ["/", "/apps", "/contracts", "/people"] as const;
+export const IMPLEMENTED_ROUTES = ["/", "/apps", "/contracts", "/people", "/reports", "/audit"] as const;
 
 export const NAV_SECTIONS: NavSection[] = [
   {
@@ -45,8 +45,10 @@ export const NAV_SECTIONS: NavSection[] = [
   {
     title: "Insights",
     items: [
-      { label: "Reports", href: null },
-      { label: "Audit / Logs", href: null },
+      // Read-only: summary counts (Reports) + recent audit entries (Audit). Generation/export/scheduling
+      // and before/after diff are NOT built — see the pages' "Not built yet" copy.
+      { label: "Reports", href: "/reports", note: "summary counts only" },
+      { label: "Audit / Logs", href: "/audit", note: "recent, read-only" },
     ],
   },
   {
