@@ -372,3 +372,41 @@ staging, then production, in a future step). Next gate is still **PR C** (server
 **Old-app parity is not complete. UI/UX parity is not complete. AI/API connector parity is not complete. Upload is
 not automatically production-ready. Hosted Auth/tenant-context is verified, but old-app replacement is not yet
 verified. RISK-001 remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is ticked by this PR.
+
+## 26. Staging verification — `0018` grant hardening (PR #103)
+
+**Connector vault grant hardening has been applied and verified on staging.** A human applied `0018` to the
+staging project `ycdpzduxugdsffjqyoai` (`db push`) and queried the live privilege + policy surface. **Migration
+0018 is present on staging** (the remote migration list shows `0018` after `db push`). **The agent ran nothing —
+no hosted command, no staging mutation, no secrets. No production data was touched.**
+
+### 26.1 Observed — PASS
+The live `information_schema` table-privilege query returned **exactly two rows**:
+
+| grantee | table | privilege |
+| --- | --- | --- |
+| `authenticated` | `connector_runs` | `SELECT` |
+| `authenticated` | `connectors` | `SELECT` |
+
+— no `anon` rows, no `connector_secrets` rows, and **no `INSERT`/`UPDATE`/`DELETE`/`TRUNCATE`/`REFERENCES`/`TRIGGER`
+grant for `anon` or `authenticated`** on any connector vault table. `pg_policies` returned exactly the two
+tenant-member SELECT policies (`connectors` → "members read tenant connectors", SELECT; `connector_runs` →
+"members read tenant connector runs", SELECT); **`connector_secrets` had no policies.** The linked ref remained
+`ycdpzduxugdsffjqyoai`.
+
+So, confirmed live: **Connector metadata tables expose authenticated SELECT only. Connector secret material remains
+inaccessible to anon and authenticated users. Anon has no connector vault table privileges. No broad INSERT,
+UPDATE, DELETE, TRUNCATE, REFERENCES, or TRIGGER grants remain on connector vault tables for anon or
+authenticated.** This matches the migration `0018` intent + the local `org_rls_test.sql` T40 exact-privilege-array
+proof — the broad hosted-default grants `0017` left in place are gone, and the secret tier was never exposed.
+
+### 26.2 Scope / guardrails
+This verifies only the `0018` grant surface on staging — not any connector behavior (there is none). **Connector
+vault is still not usable. Connector implementation remains blocked. No connector credentials are stored. No
+connector sync is implemented. No encryption/decryption wrapper is implemented. No provider connector is
+implemented. No OAuth callback is implemented. No connector UI is implemented. No service-role request path is
+added. No production data was touched.** A human re-applies `0018` to production in a future step (an agent never
+runs hosted commands); next gate is still **PR C** (server-only encrypt/decrypt wrapper). **Old-app parity is not
+complete. UI/UX parity is not complete. AI/API connector parity is not complete. Upload is not automatically
+production-ready. Hosted Auth/tenant-context is verified, but old-app replacement is not yet verified. RISK-001
+remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is ticked by this verification.
