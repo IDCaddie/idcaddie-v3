@@ -40,7 +40,7 @@ service-role on any request path** (`check-auth-safety.sh` green); writes are **
 
 | # | Epic | Scope | Legacy evidence | v3 status |
 |---|---|---|---|---|
-| E01 | Core shell / nav / UI parity | authenticated shell, nav, breadcrumbs, loading/empty/error, table primitives | `(authenticated)/layout.tsx`, `components/`, `hooks/useTable*` | Partial |
+| E01 | Core shell / nav / UI parity | authenticated shell, nav, breadcrumbs, loading/empty/error, table primitives | `(authenticated)/layout.tsx`, `nav.tsx`/`nav-items.ts` | **Partial — persistent shell + full-parity nav (active state, tenant/user context, unbuilt areas marked "Not built yet") shipped PR #81 (§16); breadcrumbs/loading-skeletons/table primitives remain** |
 | E02 | Dashboard / home / custom dashboards | home metrics + the custom **dashboards builder** | `/page.tsx`, `/dashboards*` | Missing |
 | E03 | Apps inventory / detail parity | list (cost/util/user metrics), detail (roster/invoices/compliance/linked) | `/IDCApps`, `/IDCApps/[id]` | Partial |
 | E04 | App users parity | per-app roster, status, bulk | `IDCApps/[id]` roster, `listUsers` | Partial |
@@ -385,3 +385,27 @@ does **not** prove production cleanup, does **not** close RISK-001, and does **n
 authorization remains necessary but not sufficient for cutover. Upload is not automatically production-ready.
 Old-app parity is not complete. UI/UX parity is not complete. AI/API connector parity is not complete. RISK-001
 remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is ticked by this disposition.
+
+---
+
+## 16. E01 — authenticated shell / navigation (PR #81)
+
+**Core shell/navigation UI parity is improved but not complete.** A persistent authenticated sidebar
+(`(authenticated)/nav.tsx` + the pure, tested `nav-items.ts`, wired into `(authenticated)/layout.tsx`) now wraps
+every authenticated route, with navigation groups across the full old-app parity areas (Home/Dashboards · Apps /
+Connectors / AI / Analysis · Contracts / Files · People / Identity matching · Reports / Audit · Admin / Settings),
+**active state** (`usePathname`), the signed-in **email + active tenant name/role** (never the tenant id), and
+sign-out.
+
+**Unbuilt old-app areas remain clearly marked as not built.** Only the **3 implemented routes** (`/`, `/apps`,
+`/contracts`) are linkable; everything else is a **disabled "Not built yet"** item. **No placeholder routes were
+added** (no backend, no new page routes); **no unbuilt module is implied to work** (a test fences that only real
+routes are linkable). The home page copy now states what is implemented vs not.
+
+**Scope.** UI only — no migration, no RLS/Storage policy, no data model, no DB write, no AI/connectors/imports/
+exports/reports/invoices, no hosted command. The session guard is unchanged; the nav carries no authorization
+itself (RLS governs all data); no secrets / signed URLs / Storage paths / tokens / connector credentials / JWTs /
+service-role details are exposed. **Old-app parity is not complete. UI/UX parity is not complete. AI/API connector
+parity is not complete. Storage authorization remains necessary but not sufficient for cutover. Upload is not
+automatically production-ready. Hosted Auth/tenant-context is verified, but old-app replacement is not yet
+verified. RISK-001 remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is ticked.

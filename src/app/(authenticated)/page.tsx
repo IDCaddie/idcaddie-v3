@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { resolveTenantContext } from "@/lib/auth/tenant-context";
 
 export const metadata = { title: "ID Caddie" };
@@ -28,9 +27,12 @@ export default async function ProtectedHome() {
   return (
     <main className="flex flex-1 flex-col gap-6 p-8">
       <header className="space-y-1">
-        <h1 className="text-xl font-semibold">Protected shell</h1>
+        <h1 className="text-xl font-semibold">Home</h1>
         <p className="text-sm text-zinc-600 dark:text-zinc-400">
-          Tenant/org context, resolved from Postgres under RLS. Not product UI.
+          Your tenant/org context, resolved from Postgres under RLS. The sidebar lists the full old-app
+          parity areas — only <span className="font-medium">Apps</span> and{" "}
+          <span className="font-medium">Contracts</span> are implemented so far; everything marked “Not
+          built yet” is an old-app area still to come. This is a skeleton, not the finished product.
         </p>
       </header>
 
@@ -38,20 +40,13 @@ export default async function ProtectedHome() {
         <Badge label="auth/session" state="on" />
         <Badge label="tenant context" state="on" />
         <Badge label="org context" state="on" />
+        <Badge label="hosted Auth (staging)" state="on" />
         <Badge label="app inventory (read-only)" state="on" />
-        <Badge label="contracts (read-only)" state="on" />
+        <Badge label="contracts (read/create/edit)" state="on" />
+        <Badge label="contract file attach/open" state="on" />
         <Badge label="tenant switching" state="soon" />
-        <Badge label="hosted Supabase" state="off" />
+        <Badge label="dashboards/people/reports/connectors/AI/admin" state="off" />
       </div>
-
-      <nav className="flex flex-col gap-1 text-sm">
-        <Link href="/apps" className="font-medium underline">
-          → Apps inventory (read-only)
-        </Link>
-        <Link href="/contracts" className="font-medium underline">
-          → Contracts (read-only)
-        </Link>
-      </nav>
 
       {ctx === null ? (
         // Should not happen (layout guards), but never crash.
@@ -116,14 +111,6 @@ export default async function ProtectedHome() {
         </section>
       )}
 
-      <form action="/logout" method="post">
-        <button
-          type="submit"
-          className="rounded border border-zinc-300 px-4 py-2 text-sm dark:border-zinc-700"
-        >
-          Sign out
-        </button>
-      </form>
     </main>
   );
 }
