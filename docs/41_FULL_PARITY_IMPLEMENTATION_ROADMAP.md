@@ -1136,3 +1136,32 @@ were run. No migrations were added. No RLS policies were changed. No service-rol
 is not complete. UI/UX parity is not complete. AI/API connector parity is not complete. Upload is not automatically
 production-ready. Hosted Auth/tenant-context is verified, but old-app replacement is not yet verified. RISK-001
 remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is ticked by this acceptance PR.
+
+---
+
+## 35. IMPLEMENTATION — Connector vault schema foundation, PR A (PR #101, migration `0017`)
+
+**Connector vault schema foundation is added.** The first gated implementation PR (doc 42 §20 PR A, shipped with
+its PR B deny-all tests; doc 42 §24). Migration `0017_connector_vault_schema_foundation.sql` creates the docs/42 §4
+tables — `public.connectors` (Tier-1 metadata) + `public.connector_runs` (Tier-1 safe run summaries) +
+`public.connector_secrets` (Tier-2 secret material) — with the two-tier RLS/grant posture; audit reuses the
+existing append-only `audit_logs` (no separate table).
+
+**Connector vault is still not usable. Connector secret material is not readable by authenticated users:**
+`connector_secrets` is RLS-enabled with **zero policies** (default deny-all) and `authenticated`/`anon` hold **zero
+privilege** — there is no SQL a logged-in user can run to read/write/delete a secret. Tier-1 metadata is
+tenant-member READ-only (no request-path write — that is a later gated PR). Proven by `org_rls_test.sql` **T38**
+(tenant-scoped metadata read + no-write) + **T39** (secret deny-all at runtime + privilege-surface + no-secret-
+column structural check); suite **248 → 292**; `test-rls.sh` re-asserts the secret-table revoke after its blanket
+grant (the `0015`/`0016` masking lesson); same-tenant integrity via composite `(connector_id, tenant_id)` FKs (the
+`0005` pattern); `database.types.ts` regenerated.
+
+**Schema/RLS/tests only — no execution path.** **Connector implementation remains blocked. No connector credentials
+are stored. No connector sync is implemented. No encryption/decryption wrapper is implemented. No provider connector
+is implemented. No OAuth callback is implemented. No connector UI is implemented. No service-role request path is
+added.** The next gate is **PR C** (server-only encrypt/decrypt wrapper + no-browser-import guard) — no secret of
+any kind is stored until its tests pass. A human must apply `0017` to staging then production in a future step (an
+agent never runs hosted commands). **No production data was touched. No hosted commands were run. Old-app parity is
+not complete. UI/UX parity is not complete. AI/API connector parity is not complete. Upload is not automatically
+production-ready. Hosted Auth/tenant-context is verified, but old-app replacement is not yet verified. RISK-001
+remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is ticked by this PR.
