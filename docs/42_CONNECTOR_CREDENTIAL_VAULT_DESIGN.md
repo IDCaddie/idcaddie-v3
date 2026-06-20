@@ -242,3 +242,68 @@ not built. Imports remain not built. Exports remain not built. Billing remains n
 complete. UI/UX parity is not complete. AI/API connector parity is not complete. Upload is not automatically
 production-ready. Hosted Auth/tenant-context is verified, but old-app replacement is not yet verified. RISK-001
 remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is ticked by this design PR.
+
+---
+
+## 19. Design acceptance status (PR #100)
+
+**Connector credential vault design is accepted as the design baseline.** The §1–§18 design is the agreed shape
+that all future vault work builds against — changing it requires a documented design revision, not an ad-hoc
+implementation choice. **The vault is not implemented. Connectors remain not built. No connector credentials are
+stored. No connector sync is implemented.** Acceptance of the *design* is **not** acceptance of any *code*:
+**implementation must proceed in gated PRs** (§20), each gate cleared before the next begins. **It is not
+connector-ready.** **Connector implementation remains blocked until the gated vault implementation PRs are
+complete.** **No production data was touched. No hosted commands were run. No migrations were added. No RLS
+policies were changed. No service-role access was added.**
+
+## 20. Implementation sequence (gated PRs — none of these exist yet)
+
+Each PR is separate, reviewed, and merged only after the prior gate passes. No PR may bundle a later step.
+
+- **PR A — Vault schema migration, no execution path.** Creates the conceptual §4 tables (metadata Tier-1 +
+  secret Tier-2) as a migration with **REVOKE broad + GRANT narrow** on the secret tables. **No decrypt/encrypt
+  code, no runner, no provider, no UI** — schema only.
+- **PR B — RLS + deny-all secret tests.** Adds `org_rls_test.sql` assertions: cross-tenant metadata read denied;
+  `authenticated` has **no** privilege on `connector_secrets`/`oauth_pending` (`has_table_privilege`); Tier-1
+  admin/steward write gating. The suite must be green before any access wrapper exists.
+- **PR C — Server-only vault access wrapper + no-browser-import guard.** A server-only encrypt/decrypt module with
+  a build/lint guard (extend `check-auth-safety`) proving it is never imported by client code. **Encryption
+  wrapper tests pass before any secret of any kind is stored** (OAuth token, API key, PAT, or webhook secret).
+- **PR D — Audit/run lifecycle tables or model.** `connector_runs` + the audit event wiring (reuse append-only
+  `audit_logs`), server-written only, with tests. Required before any sync.
+- **PR E — Connector metadata UI only.** Read-only safe-metadata DTO + page (name/provider/status/last-sync), the
+  §12 no-secret-in-DTO test. **No connect/sync action.**
+- **PR F — OAuth callback skeleton with state/nonce validation, no provider token storage until tested.** The
+  `oauth_pending` CSRF/state/nonce/PKCE flow + callback validation, with tests — **no provider access/refresh
+  token is stored until the §14 encryption + callback tests pass.**
+- **PR G — First low-risk connector, only after vault tests and audit pass.** One identity provider behind a
+  feature flag, staging-only, human-verified, citing its doc 27 row + RLS tests + hosted evidence; ticks no doc 17
+  §5 box.
+
+## 21. Do not skip (hard gates)
+
+- **No connector credentials before vault schema + deny-all tests** (PR A + PR B green).
+- **No connector secret of ANY kind stored before encryption-wrapper tests** (PR C green) — this covers OAuth
+  access/refresh tokens **and** API keys, PATs, and webhook signing secrets (all are envelope-encrypted Tier-2
+  secrets per §4/§8, so all require the PR C encrypt/decrypt wrapper, not just OAuth tokens).
+- **No connector credential write or sync before the run/audit model** (PR D green) — §10 audits connect/rotate/
+  revoke, not only sync, so the audit/run model precedes every audited credential action.
+- **No browser exposure of secrets ever** — the client contract is the safe-metadata DTO; secrets never serialize
+  to props/HTML/JSON/RSC/logs/errors/exports.
+- **No production credential migration before staging verification** — staging-first (`ycdpzduxugdsffjqyoai`),
+  human-verified, never production (`dzbfxulvxchdemcettrx`) until accepted + the doc 17 §5 gate.
+
+## 22. Open questions before implementation
+
+These must be resolved (in the relevant gated PR's design note) before that step proceeds: **KMS provider and key
+management**; **envelope-encryption library**; **local dev secret handling** (no real secrets in repo/CI);
+**rotation UX**; **revocation UX**; **provider-specific OAuth callback routing**; **audit retention**; **rate-limit
+store** (server-side, non-client-writable, per §9).
+
+## 23. Acceptance does NOT mean
+
+Accepting this design baseline **does not approve implementation**; **does not approve production**; **does not
+close RISK-001**; **does not approve cutover**; **does not permit connector sync**. **RISK-001 remains OPEN. Cutover
+remains BLOCKED. Old-app parity is not complete. UI/UX parity is not complete. AI/API connector parity is not
+complete. Upload is not automatically production-ready. Hosted Auth/tenant-context is verified, but old-app
+replacement is not yet verified.** No doc 17 §5 box is ticked by this acceptance.
