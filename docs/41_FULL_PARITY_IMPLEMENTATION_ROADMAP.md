@@ -298,3 +298,56 @@ the suite reflects the real hosted surface. New **T37** proves it (`has_table_pr
 DELETE is denied at the privilege layer. RLS suite **222 → 248**. **A human must re-apply the corrected `0016`
 privilege SQL to staging** (the first cut was already applied there) — not done by this PR. **RISK-001 remains
 OPEN. Cutover remains BLOCKED. Upload is not automatically production-ready.**
+
+---
+
+## 14. E09a — PR #78 staging verification evidence (2026-06-19, post-merge)
+
+PR #78 merged at `33053dc`. A human (a) repaired the staging `public.files` privileges that the first cut of
+`0016` had left over-broad, then (b) verified a new upload end-to-end. **The agent ran nothing. No secrets,
+passwords, anon keys, cookies, JWTs, or tokens are recorded. No production project was touched** (`dzbfxulvxchdemcettrx`);
+**no staging data was mutated by this PR.** All identifiers are **synthetic** staging test fixtures.
+
+### 14.1 Staging privilege repair — verified
+
+Staging privilege repair was performed **before merge** (the first applied `0016` left `authenticated` with broad
+`public.files` mutation privileges — doc §13). Verified on staging (`ycdpzduxugdsffjqyoai`):
+- **Authenticated no longer has DELETE or TRUNCATE on public.files in staging** — `DELETE`=false, `TRUNCATE`=false.
+- `SELECT`=true, `INSERT`=true. **Authenticated has UPDATE only on public.files.upload_status in staging** (column
+  privilege exists for `upload_status` only).
+- `public.files` policies are: **members read tenant files** (SELECT), **writers insert contract files** (INSERT),
+  **uploader finalizes own file** (UPDATE).
+- The linked ref remained `ycdpzduxugdsffjqyoai`; **production was not touched.**
+
+### 14.2 New-upload finalization — verified
+
+**Contract-file upload finalization was verified on staging for a new upload after PR #78.** A human uploaded a
+PDF on the deployed staging app as the Tenant A editor:
+
+| Field | Value |
+|---|---|
+| Tested URL | `https://idcaddie-v3.vercel.app/contracts/cccca1cc-0000-0000-0000-0000000000cc` |
+| Tenant (synthetic) | Storage Verifier Tenant A |
+| Contract (synthetic) | Storage Test Contract A Central |
+| Uploaded file (synthetic) | `Invoices from Insight Canada Inc (3).PDF` |
+
+Observed DB result: `upload_status='uploaded'`, `scan_status='pending'`, `extraction_status='not_started'`,
+`storage_bucket='contract-files'`, `content_type='application/pdf'`, `byte_size=53826`, `has_storage_object=true`.
+
+**The new upload finalized as uploaded, stored storage_bucket, content_type, byte_size, and had a matching private
+Storage object.** New uploads now finalize successfully — **new uploads no longer remain ambiguous pending rows** —
+and the **Open** action is available for the uploaded file. `scan_status`/`extraction_status` correctly stay
+`pending`/`not_started` (scanning + AI extraction are not built).
+
+### 14.3 Historical rows + scope
+
+**Existing pre-fix synthetic-test.pdf pending/orphan rows remain as historical staging evidence** (the §11/§12
+pending rows + the one orphan metadata row from before PR #78 — the request path has no DELETE policy by design,
+so the app cannot remove them). **No cleanup was performed in this PR**; this PR does not mutate staging.
+
+**Scope — no overclaim.** This verifies PR #78's new upload finalization path on staging. It does **not** prove
+invoices, PDF/AI extraction, or old-app parity, and it does **not** close RISK-001 or approve cutover.
+**Invoices remain not built. PDF/AI extraction remains not built. Old-app parity is not complete. UI/UX parity is
+not complete. AI/API connector parity is not complete. Storage authorization remains necessary but not sufficient
+for cutover. Upload is not automatically production-ready. RISK-001 remains OPEN. Cutover remains BLOCKED.** No
+doc 17 §5 box is ticked by this evidence.
