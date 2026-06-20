@@ -1005,3 +1005,67 @@ policies were changed. No migrations were added.** **Old-app parity is not compl
 AI/API connector parity is not complete. Hosted Auth/tenant-context is verified, but old-app replacement is not yet
 verified. Upload is not automatically production-ready. RISK-001 remains OPEN. Cutover remains BLOCKED.** No doc 17
 §5 box is ticked by this verification.
+
+---
+
+## 32. CHECKPOINT — Read-only visible parity wave (PRs #80–#97)
+
+**Read-only visible parity wave through PR #97 is complete and staging-verified.** **This is not full old-app
+parity. This is not cutover readiness.** It is a milestone: every implemented v3 surface in the wave is read-only,
+RLS-scoped (RLS is the sole authorization boundary — no service-role on request paths, no new policies, no
+broadened access), staging-verified by a human, and built by reusing existing verified read surfaces with DTOs
+deliberately stripped of sensitive internals. Staging ref `ycdpzduxugdsffjqyoai`; production ref
+`dzbfxulvxchdemcettrx` (never touched). After #97: **RLS suite 248 green · 117 tests · 16 build routes.**
+
+### 32.1 What is implemented + staging-verified in this wave
+| Surface | Build PR | Staging verification |
+| --- | --- | --- |
+| Shell / navigation (E01) | #81 | #82 (verified) |
+| Contract files attach/open/finalize (E09a) | #76, #78 | #77, #79 (#80 blocked-cleanup recorded) |
+| Apps inventory — empty + populated (E03) | #83 (#88 defensive count-read hardening was closed UNMERGED) | #84→#86 corrected→#89 (populated PASS) |
+| App detail — populated (E04) | #83 | #89 (verified) |
+| People / Users — populated (E05/E06) | #85 | #89 (verified) |
+| Reports (E14) | #90 | #91 (verified) |
+| Audit / Logs (E23) | #90 | #91 (verified) |
+| Admin / Settings (E21) | #92 | #93 (verified) |
+| Files / Documents (E09) | #94 | #95 (verified) |
+| Dashboards (E02) | #96 | #97 (verified) |
+
+The synthetic staging Apps/People **fixture process exists and was human-run** (§21; ref-guarded, confirmation-
+phrase, no service-role). **No production data was touched. No hosted commands were run by the agent. No RLS
+policies were changed. No migrations were added.**
+
+### 32.2 What remains NOT built
+**Connectors remain not built. AI / Analysis remains not built. Identity matching workflow remains not built.
+Imports remain not built. Exports remain not built. Billing remains not built. SSO/SAML/OIDC remains not built.
+SCIM/IdP import remains not built. Connector credential vault remains not built.** Also not built: tenant
+switching, user invitations, role management, API keys / ingestion tokens, connector-driven spend/license
+reporting, a real report builder / CSV / PDF / scheduled delivery, AI document/app/license intelligence, and
+production cutover.
+
+### 32.3 Next fork — pick ONE design PR (do NOT build the capability directly)
+**The next strategic fork is connector vault versus identity matching workflow.** Both are write/secret surfaces
+that the read-only wave deliberately avoided; each needs a **separate design PR before any implementation**.
+
+**Option A — Connector credential vault**
+- Needed before any real connector.
+- Requires security design first.
+- Must handle secrets, encryption, rotation, audit, least privilege, no browser exposure.
+- Higher risk.
+
+**Option B — Identity matching workflow**
+- Needed before UAR and identity resolution parity.
+- Requires write/RLS design first.
+- Must handle manual match/unmatch, audit, reversible changes, no cross-tenant leakage.
+- Medium-high risk.
+
+**Recommendation.** **Recommended next step is connector credential vault only after a separate security design
+PR, or identity matching workflow only after a separate RLS/write design PR.** Do not start connectors directly.
+Do not start AI directly. Do not start imports/exports directly. Do either: (1) a connector vault security design
+PR, or (2) an identity matching workflow RLS/write design PR.
+
+### 32.4 Posture (unchanged by this checkpoint)
+**The read-only parity wave is a milestone, not cutover approval. RISK-001 remains OPEN. Cutover remains BLOCKED.
+Old-app parity is not complete. UI/UX parity is not complete. AI/API connector parity is not complete. Upload is
+not automatically production-ready. Hosted Auth/tenant-context is verified, but old-app replacement is not yet
+verified.** No doc 17 §5 box is ticked by this checkpoint.
