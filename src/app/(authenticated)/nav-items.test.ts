@@ -36,7 +36,6 @@ describe("NAV_SECTIONS", () => {
       NAV_SECTIONS.flatMap((s) => s.items).map((i) => [i.label, i.href]),
     );
     for (const label of [
-      "Dashboards",
       "Connectors",
       "AI / Analysis",
       "Identity matching", // read-only match STATUS is on /people; the resolution workflow is not built
@@ -57,6 +56,7 @@ describe("NAV_SECTIONS", () => {
     expect(byLabel["Audit / Logs"]).toBe("/audit");
     expect(byLabel["Admin / Settings"]).toBe("/admin");
     expect(byLabel["Files / Documents"]).toBe("/files");
+    expect(byLabel["Dashboards"]).toBe("/dashboards");
   });
 
   it("every enabled nav item maps to an implemented route (no enabled item points at an unbuilt area)", () => {
