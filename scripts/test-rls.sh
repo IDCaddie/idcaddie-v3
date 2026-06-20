@@ -90,17 +90,17 @@ grant select on auth.users to authenticated, service_role;
 revoke update, delete, truncate on public.files from authenticated;
 grant update (upload_status) on public.files to authenticated;
 
--- `public.connector_secrets` (migration 0017) is the connector-vault SECRET tier: DENY-ALL for the
--- request-path role (RLS-enabled, ZERO policies, no migration grant). The blanket grant above re-broadens
--- it (select/insert/update/delete on ALL tables to authenticated), which would MASK the deny-all and let
--- a secret-table grant slip through — exactly the 0015/0016 masking gap. Re-assert the migration-intended
--- deny-all so the suite (T39) reflects the REAL hosted privilege surface: `authenticated`/`anon` hold NO
--- privilege on connector_secrets. The Tier-1 metadata tables keep SELECT-only (migration 0017 grants
--- SELECT to authenticated; the blanket crutch adds INSERT/UPDATE/DELETE which 0017 never granted, so
--- re-assert those away too). KEEP IN LOCKSTEP with migration 0017 (T39/T38's exact-privilege invariants
--- are the backstop that fails loudly if they drift).
-revoke all on public.connector_secrets from authenticated, anon;
-revoke insert, update, delete, truncate on public.connectors, public.connector_runs from authenticated, anon;
+-- The connector-vault tables (migrations 0017 + 0018) have a least-privilege grant surface that the
+-- blanket grant above re-broadens (it grants select/insert/update/delete on ALL tables to authenticated),
+-- which would MASK the intended posture — exactly the 0015/0016/0018 masking gap (staging verification of
+-- 0017 caught broad INSERT/UPDATE/DELETE/TRUNCATE/REFERENCES/TRIGGER on connectors/connector_runs that the
+-- prior partial re-assert here had let slip). MIRROR migration 0018 exactly so the suite reflects the REAL
+-- hosted surface: `revoke all` from authenticated/anon on all three, then `grant select` back to
+-- authenticated on the two Tier-1 metadata tables only. After this: authenticated = SELECT on
+-- connectors/connector_runs and NOTHING on connector_secrets; anon = NOTHING on all three. KEEP IN
+-- LOCKSTEP with migration 0018 (T39/T40's exact-privilege arrays are the backstop that fails loudly on drift).
+revoke all on public.connector_secrets, public.connectors, public.connector_runs from authenticated, anon;
+grant select on public.connectors, public.connector_runs to authenticated;
 SQL
 
 for t in "${tests[@]}"; do

@@ -1165,3 +1165,33 @@ agent never runs hosted commands). **No production data was touched. No hosted c
 not complete. UI/UX parity is not complete. AI/API connector parity is not complete. Upload is not automatically
 production-ready. Hosted Auth/tenant-context is verified, but old-app replacement is not yet verified. RISK-001
 remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is ticked by this PR.
+
+---
+
+## 36. HARDENING — Connector vault metadata/run grants, migration `0018` (PR #102)
+
+**Staging verification of 0017 found broad metadata/run table grants that must be hardened before the connector
+sequence continues** (doc 42 §25). A human applied `0017` to staging (`ycdpzduxugdsffjqyoai`); `connector_secrets`
+was correct (RLS enabled, zero policies, no `anon`/`authenticated` privilege), but `connectors` + `connector_runs`
+carried broad `anon`/`authenticated` `INSERT/UPDATE/DELETE/TRUNCATE/REFERENCES/TRIGGER/SELECT` — because `0017`
+did `grant select` but never `revoke`d the hosted-default grants (the `0015`/`0016` masking lesson; the local
+harness re-assert had only revoked the per-DML privileges, masking it). **Connector secret material remained
+inaccessible to anon and authenticated users** (the bug was only on the Tier-1 metadata/run tables).
+
+**Connector metadata/run grants are being hardened to least privilege.** Migration
+`0018_harden_connector_vault_grants.sql` does `revoke all` from `anon` + `authenticated` on all three vault tables,
+then `grant select` back to `authenticated` on `connectors` + `connector_runs` only — after it the `authenticated`
+surface is EXACTLY `connectors=SELECT`, `connector_runs=SELECT`, `connector_secrets=(none)`; `anon=(none)`
+everywhere (no INSERT/UPDATE/DELETE/TRUNCATE/REFERENCES/TRIGGER for any request-path role). No write policy added;
+`service_role` untouched; idempotent. Proven by `org_rls_test.sql` **T40** (exact per-role privilege arrays +
+TRUNCATE/REFERENCES/TRIGGER negatives + tenant-scoped SELECT still works + cross-tenant SELECT still RLS-denied);
+the harness re-assert now mirrors `0018`; suite **292 → 318**; types 0-diff (grant-only).
+
+**Connector vault is still not usable. Connector implementation remains blocked. No connector credentials are
+stored. No connector sync is implemented. No encryption/decryption wrapper is implemented. No provider connector is
+implemented. No OAuth callback is implemented. No connector UI is implemented. No service-role request path is
+added. No production data was touched. No hosted commands were run by the agent** (a human re-applies `0018` to
+staging then production later; next gate is still PR C, the encrypt/decrypt wrapper). **Old-app parity is not
+complete. UI/UX parity is not complete. AI/API connector parity is not complete. Upload is not automatically
+production-ready. Hosted Auth/tenant-context is verified, but old-app replacement is not yet verified. RISK-001
+remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is ticked by this PR.
