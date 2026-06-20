@@ -1108,3 +1108,31 @@ built. Exports remain not built. Billing remains not built. Old-app parity is no
 complete. AI/API connector parity is not complete. Upload is not automatically production-ready. Hosted
 Auth/tenant-context is verified, but old-app replacement is not yet verified. RISK-001 remains OPEN. Cutover remains
 BLOCKED.** No doc 17 §5 box is ticked by this design PR.
+
+---
+
+## 34. ACCEPTANCE — Connector vault design baseline + gated sequence (PR #100)
+
+**Connector credential vault design is accepted as the design baseline.** The doc 42 §1–§18 design is the agreed
+shape future vault work builds against; §19–§23 add the acceptance status + gated implementation sequence so future
+work **cannot skip straight into connector implementation**. **The vault is not implemented. Connectors remain not
+built. No connector credentials are stored. No connector sync is implemented.**
+
+**Gated implementation sequence (doc 42 §20 — none of these PRs exist yet):** **PR A** vault schema migration (no
+execution path) → **PR B** RLS + deny-all secret tests → **PR C** server-only access wrapper + no-browser-import
+guard → **PR D** audit/run lifecycle model → **PR E** connector metadata UI only → **PR F** OAuth callback skeleton
+with state/nonce validation (no provider token storage until tested) → **PR G** first low-risk connector, only
+after vault tests + audit pass. **Hard gates (§21):** no connector credentials before vault schema + deny-all
+tests; **no connector secret of ANY kind (OAuth token, API key, PAT, webhook secret) stored before
+encryption-wrapper tests**; no connector credential write or sync before the run/audit model; no browser exposure
+of secrets ever; no production credential migration before staging verification.
+
+**Acceptance does NOT mean** (doc 42 §23): not approval to implement, not production approval, does not close
+RISK-001, not cutover approval, does not permit connector sync. Open questions (KMS provider, envelope library,
+local dev secret handling, rotation/revocation UX, provider OAuth callback routing, audit retention, rate-limit
+store) must be resolved in the relevant gated PR before that step proceeds. **Connector implementation remains
+blocked until the gated vault implementation PRs are complete. No production data was touched. No hosted commands
+were run. No migrations were added. No RLS policies were changed. No service-role access was added. Old-app parity
+is not complete. UI/UX parity is not complete. AI/API connector parity is not complete. Upload is not automatically
+production-ready. Hosted Auth/tenant-context is verified, but old-app replacement is not yet verified. RISK-001
+remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is ticked by this acceptance PR.
