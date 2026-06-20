@@ -852,3 +852,32 @@ capability list + the nav test now asserts the new enabled item maps to an imple
 not complete. UI/UX parity is not complete. AI/API connector parity is not complete. Hosted Auth/tenant-context is
 verified, but old-app replacement is not yet verified. Upload is not automatically production-ready. RISK-001
 remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is ticked by this PR.
+
+---
+
+## 27. E21 — Admin / Settings read-only staging verification (PR #93)
+
+**Admin / Settings read-only staging verification passed.** A human verified the §26 (PR #92) surface on the
+deployed staging app `https://idcaddie-v3.vercel.app/admin` signed in as `tenant-editor-a@idcaddie-staging.local`
+(tenant **Storage Verifier Tenant A**). **The agent ran nothing — no hosted command, no staging mutation, no
+secrets. No production data was touched.**
+
+### 27.1 Observed — PASS
+The Admin / Settings nav item is enabled and the `/admin` route is deployed and loads. **The Admin / Settings page
+shows signed-in email, active tenant name, role, tenant membership count, organization membership summary,
+implemented modules, and explicit Not built yet administration capabilities.** Organization memberships are shown
+without raw organization IDs. **Raw tenant IDs and raw organization IDs are intentionally not shown on the Admin /
+Settings page.** Every administration capability is marked Not built yet: **Tenant switching remains deferred /
+not built. User invitations remain not built. Role management remains not built. SSO/SAML/OIDC remains not built.
+SCIM/IdP import remains not built. Connector credential vault remains not built. Billing remains not built. API
+keys / ingestion tokens remain not built. Data retention controls remain not built. Security settings remain not
+built.** **No tokens, secrets, API keys, connector credentials, JWTs, cookies, signed URLs, storage paths, or
+service-role details are visible.**
+
+### 27.2 Scope / guardrails
+This verifies only the read-only Admin / Settings staging behavior for the synthetic Tenant A account — not full
+parity, and nothing here is writable. **No production data was touched. No hosted commands were run by the agent.
+No RLS policies were changed. No migrations were added.** **Old-app parity is not complete. UI/UX parity is not
+complete. AI/API connector parity is not complete. Hosted Auth/tenant-context is verified, but old-app replacement
+is not yet verified. Upload is not automatically production-ready. RISK-001 remains OPEN. Cutover remains
+BLOCKED.** No doc 17 §5 box is ticked by this verification.
