@@ -7,6 +7,15 @@ from PRs verified via `git log` / `gh pr list`.
 
 ---
 
+### PR #80 — Record contract-file cleanup disposition · 2026-06-19
+- **Category:** ops disposition — **docs-only.** No src/migration/script/package change; **no hosted command run by this PR; no production/staging mutation; no secrets.** RLS unchanged + stays **248**; no doc 17 §5 box ticked; cutover stays **BLOCKED**; **RISK-001 stays OPEN**.
+- **A human attempted to clean up the pre-fix synthetic-test.pdf staging rows** (delete the old Storage objects directly from `storage.objects`, then the matching `public.files` rows — recorded [41 §15](./41_FULL_PARITY_IMPLEMENTATION_ROADMAP.md)). **Direct SQL cleanup of `storage.objects` was safely blocked by Supabase Storage protections** — *"Direct deletion from storage tables is not allowed. Use the Storage API instead."* The direct SQL cleanup **failed safely**; **no cleanup was performed**; no production touched.
+- **Disposition:** this confirms direct `storage.objects` DELETE is **not** an acceptable cleanup path (consistent with v3's posture: private bucket + signed URLs + RLS, no direct storage-table manipulation). **Future cleanup must use an approved Storage API/admin/worker path, not direct `storage.objects` DELETE.** **Pre-fix staging contract-file rows remain as historical evidence** — current Tenant A state: **1** good finalized upload (`uploaded`, has object — **the finalized post-PR #78 upload remains valid and openable**) + **4** old pre-fix `pending` rows (2 with objects, 2 metadata-only orphans). The app request path still does not provide DELETE cleanup (no DELETE policy by design).
+- **No overclaim:** records a blocked staging cleanup only — does not prove production cleanup, close RISK-001, or approve cutover. **Storage authorization remains necessary but not sufficient for cutover. Upload is not automatically production-ready. Old-app parity is not complete. UI/UX parity is not complete. AI/API connector parity is not complete. RISK-001 remains OPEN. Cutover remains BLOCKED.** Updated docs 41 (§15), 09, 00.
+- **Validation (local, verified):** `npm test` 77/77; lint clean; `tsc --noEmit` clean; `next build` clean (10 routes); `check-auth-safety`/`check-migration-safety`/`check-docs-updated`/`pr-review-summary` pass; `test-rls.sh` **248**; `gen-types-local.sh` 0-diff; `node --check` on all three scripts OK; no `* 2.*`/`* 3.*` strays. Docs-only.
+
+---
+
 ### PR #79 — Record contract-file finalization staging evidence · 2026-06-19
 - **Category:** ops evidence — **docs-only.** No src/migration/script/package change; **no hosted command run by this PR; no production/staging mutation; no secrets.** RLS unchanged + stays **248**; no doc 17 §5 box ticked; cutover stays **BLOCKED**; **RISK-001 stays OPEN**.
 - **Contract-file upload finalization was verified on staging for a new upload after PR #78** (merged `33053dc`; recorded [41 §14](./41_FULL_PARITY_IMPLEMENTATION_ROADMAP.md)). A human (a) repaired the staging `public.files` privileges the first cut of `0016` left over-broad, then (b) verified a new upload — the agent ran nothing.
