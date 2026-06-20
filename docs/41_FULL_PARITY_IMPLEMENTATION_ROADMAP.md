@@ -912,3 +912,35 @@ null), empty state, fail-closed; + the nav test asserts the new enabled item map
 **Old-app parity is not complete. UI/UX parity is not complete. AI/API connector parity is not complete. Hosted
 Auth/tenant-context is verified, but old-app replacement is not yet verified. Upload is not automatically
 production-ready. RISK-001 remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is ticked by this PR.
+
+---
+
+## 29. E09 — Files / Documents read-only staging verification (PR #95)
+
+**Files / Documents read-only staging verification passed.** A human verified the §28 (PR #94) surface on the
+deployed staging app `https://idcaddie-v3.vercel.app/files` signed in as `tenant-editor-a@idcaddie-staging.local`
+(tenant **Storage Verifier Tenant A**). **The agent ran nothing — no hosted command, no staging mutation, no
+secrets. No production data was touched.**
+
+### 29.1 Observed — PASS
+The Files / Documents nav item is enabled and the `/files` route is deployed and loads; **5 files visible** to the
+user. **The Files / Documents page shows file names, related contract links, upload status, content type, size,
+and added dates for files visible to the signed-in user.** **The uploaded PDF row is visible and linked to Storage
+Test Contract A Central.** Observed: `Invoices from Insight Canada Inc (3).PDF` · Storage Test Contract A Central
+· Uploaded · `application/pdf` · 52.6 KB · 2026-06-20. **Pending synthetic-test.pdf rows are visible and marked
+Pending — not yet openable.** **The page instructs users to open files from the related contract using the
+verified contract-level open path.** **No storage paths, object names, or signed URLs are shown.**
+
+Every standalone capability is marked Not built yet: **Standalone upload remains not built. Standalone
+open/download remains not built. Delete remains not built. Export remains not built. Connector ingestion remains
+not built. AI document analysis remains not built.** **No raw storage paths, signed URLs, bucket internals, tenant
+IDs, tokens, secrets, service-role details, JWTs, cookies, connector credentials, or API keys are visible.**
+**Contract-level file attachment remains the implemented upload/open path.**
+
+### 29.2 Scope / guardrails
+This verifies only the read-only Files / Documents staging behavior for the synthetic Tenant A account — not full
+parity, and nothing here is writable. **No production data was touched. No hosted commands were run by the agent.
+No RLS policies were changed. No migrations were added.** **Old-app parity is not complete. UI/UX parity is not
+complete. AI/API connector parity is not complete. Hosted Auth/tenant-context is verified, but old-app replacement
+is not yet verified. Upload is not automatically production-ready. RISK-001 remains OPEN. Cutover remains
+BLOCKED.** No doc 17 §5 box is ticked by this verification.
