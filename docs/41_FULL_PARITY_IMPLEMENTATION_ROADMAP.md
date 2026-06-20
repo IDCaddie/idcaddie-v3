@@ -598,6 +598,13 @@ not complete. RISK-001 remains OPEN. Cutover remains BLOCKED.** Re-verifying the
 confirm (via the hosted app or a hosted query) that the fixture exists and is visible to this account, then re-run
 the manual `/apps` + `/apps/[id]` check — not done here.
 
+> **UPDATE (PR #89, 2026-06-20) — RESOLVED, now PASSES.** After a human applied the §21 fixture to staging
+> `ycdpzduxugdsffjqyoai`, all three populated paths were re-verified on live staging and **PASS** — recorded in
+> **§23**. `/apps` now lists the synthetic app with RLS-scoped counts (Contracts 1, Users 2). **The §86 correction
+> above was accurate when written** (the fixture had not yet been applied/visible to this account at that time);
+> this UPDATE does not erase it — it records the resolution. The fixture remains synthetic; this does not close
+> RISK-001 or approve cutover.
+
 ---
 
 ## 20. E05 / E06 — People / Users + identity-matching read parity (PR #85)
@@ -699,3 +706,51 @@ incomplete. People / Users read-only code parity is improved, but populated host
 Old-app parity is not complete. UI/UX parity is not complete. AI/API connector parity is not complete. Hosted
 Auth/tenant-context is verified, but old-app replacement is not yet verified. Upload is not automatically
 production-ready. RISK-001 remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is ticked by this process.
+
+---
+
+<!-- §22 is reserved for the separate PR #88 "/apps inventory readable-app listing" fix. -->
+
+## 23. E03–E06 — Apps/People populated-path staging verification PASSED (PR #89, synthetic Tenant A fixture)
+
+This resolves the §19/§19.5 chain (recorded → corrected → fixture process → now verified). **Apps populated-path
+staging verification passed for the synthetic Tenant A fixture. People populated-path staging verification passed
+for the synthetic Tenant A fixture.** **The fixture was applied manually by a human to staging project
+ycdpzduxugdsffjqyoai.** Via the §21 process, a human then verified the three live routes signed in as
+`tenant-editor-a@idcaddie-staging.local`. **The agent ran nothing — no hosted command, no staging mutation, no
+secrets.** **No production data was touched. No production commands were run.**
+
+### 23.1 `/apps` — `https://idcaddie-v3.vercel.app/apps` — PASS
+1 app visible to `tenant-editor-a@idcaddie-staging.local`: **Staging Apps Verification — App** · vendor **Synthetic
+Vendor** · category **Verification** · status **active** · **Contracts count 1** · **Users count 2**. The page
+states the counts are “visible to you” / RLS-scoped. **Counts are RLS-scoped / visible-to-you, not absolute
+tenant-wide totals.**
+
+### 23.2 `/apps/[id]` — `…/apps/5a9a0000-0000-0000-0000-000000000a01` — PASS
+**The app detail page shows linked contract, two app users, one matched account, one unmatched account, and Not
+built yet actions.** Specifically: the app loads; **linked contract** = Storage Test Contract A1 — Storage Test
+Vendor A1; **visible accounts 2 · matched 1 · unmatched 1 · match rate 50% · stale candidates 1**; User 1 = matched
+· email (95); User 2 = unmatched; the **Not built yet** Actions are Link/unlink contracts, Edit/archive app,
+Connector sync, AI app/license analysis, Export. The page states it does not expose person names, identity-account
+details, license rules/utilization, invoices, files, the identity-matching algorithm, merge, provisioning,
+deprovisioning, or an unmanaged-account report.
+
+### 23.3 `/people` — `https://idcaddie-v3.vercel.app/people` — PASS
+**The People page shows two app-user accounts, one matched and one unmatched, without exposing person/IdP directory
+details.** Accounts visible to you **2** · across apps **1** · matched **1** · unmatched **1**; identity shows
+matched for User 1 and unmatched for User 2. The page states the account fields are app-account values (not
+person/IdP directory data) and that identity shows only whether a match exists, not who it matched. The old-app
+capabilities are all marked Not built yet.
+
+### 23.4 Scope / guardrails
+**The fixture remains synthetic and must not be treated as customer data. The fixture verification does not close
+RISK-001. The fixture verification does not approve cutover.** Read-only — no write workflow was exercised.
+**Manual matching remains not built. Bulk identity resolution remains not built. Connector sync remains not built.
+SCIM / IdP import remains not built. AI-assisted matching remains not built. Exports remain not built. People
+directory / employee records remain not built. UAR remains not built.** **Old-app parity is not complete. UI/UX
+parity is not complete. AI/API connector parity is not complete. Hosted Auth/tenant-context is verified, but
+old-app replacement is not yet verified. Upload is not automatically production-ready. RISK-001 remains OPEN.
+Cutover remains BLOCKED.** No doc 17 §5 box is ticked by this verification. (This confirms the §86-recorded
+mismatch is resolved: with the §21 fixture applied + visible, `/apps` lists the app under the current code with
+working RLS-scoped counts — consistent with the earlier empty state being the fixture not yet applied/visible to
+this account.)
