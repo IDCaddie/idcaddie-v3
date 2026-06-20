@@ -975,3 +975,33 @@ maps to an implemented route. **Old-app parity is not complete. UI/UX parity is 
 parity is not complete. Hosted Auth/tenant-context is verified, but old-app replacement is not yet verified.
 Upload is not automatically production-ready. RISK-001 remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is
 ticked by this PR.
+
+---
+
+## 31. E02 — Dashboards read-only staging verification (PR #97)
+
+**Dashboards read-only staging verification passed.** A human verified the §30 (PR #96) surface on the deployed
+staging app `https://idcaddie-v3.vercel.app/dashboards` signed in as `tenant-editor-a@idcaddie-staging.local`
+(tenant **Storage Verifier Tenant A**). **The agent ran nothing — no hosted command, no staging mutation, no
+secrets. No production data was touched.**
+
+### 31.1 Observed — PASS
+The Dashboards nav item is enabled and the `/dashboards` route is deployed and loads. **Dashboard counts are
+RLS-scoped / visible-to-you, not absolute tenant-wide totals** (the page states this). Observed counts: **Apps
+visible 1 · Contracts visible 2 · Files visible 5 · App-user accounts visible 2 · 1 matched / 1 unmatched · Recent
+audit entries 2**; the Reports card is visible. **Dashboard links only to implemented pages.** **Recent audit
+entries are count-only and do not expose audit detail, actor identity, IP address, or raw audit data.** **No tenant
+IDs, actor IDs, raw audit JSON, storage paths, signed URLs, tokens, secrets, service-role details, connector
+credentials, JWTs, cookies, or API keys are visible.**
+
+Every dashboard capability is marked Not built yet: **Custom dashboard builder remains not built. Charts /
+visualizations remain not built. Connector-driven spend/license dashboards remain not built. AI dashboard insights
+remain not built. Dashboard export remains not built. Scheduled dashboard delivery remains not built.**
+
+### 31.2 Scope / guardrails
+This verifies only the read-only Dashboards staging behavior for the synthetic Tenant A account — not full parity,
+and nothing here is writable. **No production data was touched. No hosted commands were run by the agent. No RLS
+policies were changed. No migrations were added.** **Old-app parity is not complete. UI/UX parity is not complete.
+AI/API connector parity is not complete. Hosted Auth/tenant-context is verified, but old-app replacement is not yet
+verified. Upload is not automatically production-ready. RISK-001 remains OPEN. Cutover remains BLOCKED.** No doc 17
+§5 box is ticked by this verification.
