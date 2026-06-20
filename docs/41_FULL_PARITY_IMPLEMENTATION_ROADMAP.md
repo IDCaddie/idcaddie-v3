@@ -60,7 +60,7 @@ service-role on any request path** (`check-auth-safety.sh` green); writes are **
 | E18 | Connector provider batches (52) | per-provider scrapers in waves (§4) | `appScraping/scrapers/*` (52) | Missing |
 | E19 | SSO / SAML / OIDC parity | enterprise SSO + callback | `/admin/sso`, `services/samlAuth`,`oidcAuth`, `/sso-callback` | Missing |
 | E20 | SCIM parity | SCIM provisioning + token mgmt | `scim/*`, `generateScimToken` | Missing |
-| E21 | Admin / company / users / groups / permissions | admin screens, groups, granular permissions, recompute | `/admin/*`,`/company/*`, `groups/*` | Partial/Missing |
+| E21 | Admin / company / users / groups / permissions | admin screens, groups, granular permissions, recompute | `/admin`, tenant-context resolver | **Partial — read-only `/admin` (account context: email + active tenant name/role + org memberships, NO raw ids; module status; "Not built yet" capability list) shipped PR #92 (§26); invitations / role mgmt / SSO / SCIM / vault / billing / API keys / retention / security-setting writes + tenant switching remain not built** |
 | E22 | Billing / admin parity | subscription billing, monthly billing, FX | `/admin/billing`, `calculateMonthlyBilling`, currency | Missing |
 | E23 | Audit / logging parity | audit viewer + before/after diff (keep append-only; **no 90-day purge**) | `/audit`, audit DAL, `0001`/`0002`/`0010` | **Partial — read-only `/audit` viewer (recent entries: action/entity/timestamp + "actor recorded" label, RLS-scoped tenant-member read; NO tenant id / actor id / ip-ua / before-after diff blobs) shipped PR #90 (§24); before/after diff, search/filter/export remain; append-only by design (no mutation/delete)** |
 | E24 | Browser extension / discovery parity | Chrome extension discovery/ingest | `extension/`, `chromePluginFunction` | Missing |
@@ -825,3 +825,30 @@ No migrations were added.** **Old-app parity is not complete. UI/UX parity is no
 is not complete. Hosted Auth/tenant-context is verified, but old-app replacement is not yet verified. Upload is not
 automatically production-ready. RISK-001 remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is ticked by this
 verification.
+
+---
+
+## 26. E21 — Admin / Settings read-only parity (PR #92)
+
+**Admin / Settings read-only parity is improved but not complete.** A read-only **`/admin`** route reuses the
+existing RLS-scoped tenant-context resolver (`resolveTenantContext` → `deriveContext`) — **no new DAL, no
+service-role, no new DB read.** A pure mapper `toAdminContextView()` projects the resolved context to a SAFE view
+that exposes ONLY the **signed-in email + active tenant NAME/role + organization membership NAMES/roles**, plus a
+read-only "implemented modules" overview. **No raw tenant / organization / user IDs are exposed on the page** (the
+mapper drops every id; a test asserts the projected view contains none of the source ids — the home/debug page
+keeps showing the tenant id, this page does not). The sidebar **Admin / Settings** item is now enabled → `/admin`.
+
+**Explicit "Not built yet" capability list** (read-only — nothing is writable here): **Tenant switching remains
+deferred / not built. User invitations remain not built. Role management remains not built. SSO/SAML/OIDC remains
+not built. SCIM/IdP import remains not built. Connector credential vault remains not built. Billing remains not
+built. API keys / ingestion tokens remain not built. Data retention controls remain not built. Security settings
+remain not built.**
+
+**Scope / guardrails.** Read-only — RLS is the authorization boundary (the reused resolver is user-scoped, no
+service-role, no cross-tenant); no admin writes, no invitation/role/tenant-switch/billing/connector/API-key
+workflow; no migration, no RLS-policy change; no raw tenant IDs / secrets / tokens / signed URLs / storage paths;
+the route inherits the `(authenticated)` auth guard. +4 tests (108 total) — the safe-projection (no id leak) + the
+capability list + the nav test now asserts the new enabled item maps to an implemented route. **Old-app parity is
+not complete. UI/UX parity is not complete. AI/API connector parity is not complete. Hosted Auth/tenant-context is
+verified, but old-app replacement is not yet verified. Upload is not automatically production-ready. RISK-001
+remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is ticked by this PR.
