@@ -351,3 +351,37 @@ invoices, PDF/AI extraction, or old-app parity, and it does **not** close RISK-0
 not complete. AI/API connector parity is not complete. Storage authorization remains necessary but not sufficient
 for cutover. Upload is not automatically production-ready. RISK-001 remains OPEN. Cutover remains BLOCKED.** No
 doc 17 §5 box is ticked by this evidence.
+
+---
+
+## 15. E09a — pre-fix staging row cleanup attempt: safely BLOCKED (2026-06-19)
+
+A human attempted to clean up the §11/§12/§14 historical synthetic-test.pdf staging rows by deleting the old
+Storage objects directly from `storage.objects` and then deleting the matching `public.files` rows. **The agent
+ran nothing. No production project was touched** (`dzbfxulvxchdemcettrx`); **no staging data was mutated by this
+PR.** All identifiers are synthetic staging test fixtures.
+
+**Result — the attempt was rejected:** **Direct SQL cleanup of storage.objects was safely blocked by Supabase
+Storage protections** — *"Direct deletion from storage tables is not allowed. Use the Storage API instead."* The
+direct SQL cleanup **failed safely**, so **no cleanup was performed** and the old pre-fix rows remain. This is a
+**good** signal: it confirms direct `storage.objects` DELETE is **not** an acceptable cleanup path — consistent
+with v3's whole posture (no direct `storage.objects` manipulation; private bucket + signed URLs + RLS).
+**Future cleanup must use an approved Storage API/admin/worker path, not direct storage.objects DELETE.**
+
+**Current staging file state for Tenant A after the blocked cleanup:**
+
+| Rows | State | Note |
+|---|---|---|
+| **1 good finalized upload** | `upload_status='uploaded'`, `storage_bucket='contract-files'`, `content_type='application/pdf'`, `byte_size=53826`, `has_storage_object=true` | `Invoices from Insight Canada Inc (3).PDF` on *Storage Test Contract A Central* (the §14 post-PR #78 upload) — **valid + openable** |
+| **4 old pre-fix `synthetic-test.pdf` rows** | all `pending`; **2** have matching Storage objects, **2** are metadata-only **orphan** rows | created **before** PR #78 fixed upload finalization/disposition; historical staging evidence |
+
+**The finalized post-PR #78 upload remains valid and openable.** **Pre-fix staging contract-file rows remain as
+historical evidence.** The app **request path still does not provide DELETE cleanup** (no DELETE policy by
+design — `0013`/`0016`), so removing the old rows + objects is a deliberate human/worker step via the Storage
+API, not this PR.
+
+**Scope — no overclaim.** **No cleanup was performed.** This records a blocked staging cleanup attempt only; it
+does **not** prove production cleanup, does **not** close RISK-001, and does **not** approve cutover. **Storage
+authorization remains necessary but not sufficient for cutover. Upload is not automatically production-ready.
+Old-app parity is not complete. UI/UX parity is not complete. AI/API connector parity is not complete. RISK-001
+remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is ticked by this disposition.
