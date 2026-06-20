@@ -89,6 +89,18 @@ grant select on auth.users to authenticated, service_role;
 -- invariant assertion is the backstop that fails loudly if they drift).
 revoke update, delete, truncate on public.files from authenticated;
 grant update (upload_status) on public.files to authenticated;
+
+-- `public.connector_secrets` (migration 0017) is the connector-vault SECRET tier: DENY-ALL for the
+-- request-path role (RLS-enabled, ZERO policies, no migration grant). The blanket grant above re-broadens
+-- it (select/insert/update/delete on ALL tables to authenticated), which would MASK the deny-all and let
+-- a secret-table grant slip through — exactly the 0015/0016 masking gap. Re-assert the migration-intended
+-- deny-all so the suite (T39) reflects the REAL hosted privilege surface: `authenticated`/`anon` hold NO
+-- privilege on connector_secrets. The Tier-1 metadata tables keep SELECT-only (migration 0017 grants
+-- SELECT to authenticated; the blanket crutch adds INSERT/UPDATE/DELETE which 0017 never granted, so
+-- re-assert those away too). KEEP IN LOCKSTEP with migration 0017 (T39/T38's exact-privilege invariants
+-- are the backstop that fails loudly if they drift).
+revoke all on public.connector_secrets from authenticated, anon;
+revoke insert, update, delete, truncate on public.connectors, public.connector_runs from authenticated, anon;
 SQL
 
 for t in "${tests[@]}"; do

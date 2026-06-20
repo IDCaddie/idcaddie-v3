@@ -375,6 +375,193 @@ export type Database = {
           },
         ]
       }
+      connector_runs: {
+        Row: {
+          connector_id: string
+          created_at: string
+          error_class: string | null
+          finished_at: string | null
+          id: string
+          items_seen: number | null
+          started_at: string | null
+          status: string
+          tenant_id: string
+        }
+        Insert: {
+          connector_id: string
+          created_at?: string
+          error_class?: string | null
+          finished_at?: string | null
+          id?: string
+          items_seen?: number | null
+          started_at?: string | null
+          status?: string
+          tenant_id: string
+        }
+        Update: {
+          connector_id?: string
+          created_at?: string
+          error_class?: string | null
+          finished_at?: string | null
+          id?: string
+          items_seen?: number | null
+          started_at?: string | null
+          status?: string
+          tenant_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "connector_runs_connector_same_tenant"
+            columns: ["connector_id", "tenant_id"]
+            isOneToOne: false
+            referencedRelation: "connectors"
+            referencedColumns: ["id", "tenant_id"]
+          },
+          {
+            foreignKeyName: "connector_runs_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      connector_secrets: {
+        Row: {
+          aad_digest: string | null
+          aead_nonce: string | null
+          ciphertext: string | null
+          connector_id: string
+          created_at: string
+          dek_wrapped: string | null
+          expires_at: string | null
+          id: string
+          is_active: boolean
+          key_id: string | null
+          revoked_at: string | null
+          secret_kind: string
+          status: string
+          tenant_id: string
+          version: number
+        }
+        Insert: {
+          aad_digest?: string | null
+          aead_nonce?: string | null
+          ciphertext?: string | null
+          connector_id: string
+          created_at?: string
+          dek_wrapped?: string | null
+          expires_at?: string | null
+          id?: string
+          is_active?: boolean
+          key_id?: string | null
+          revoked_at?: string | null
+          secret_kind: string
+          status?: string
+          tenant_id: string
+          version?: number
+        }
+        Update: {
+          aad_digest?: string | null
+          aead_nonce?: string | null
+          ciphertext?: string | null
+          connector_id?: string
+          created_at?: string
+          dek_wrapped?: string | null
+          expires_at?: string | null
+          id?: string
+          is_active?: boolean
+          key_id?: string | null
+          revoked_at?: string | null
+          secret_kind?: string
+          status?: string
+          tenant_id?: string
+          version?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "connector_secrets_connector_same_tenant"
+            columns: ["connector_id", "tenant_id"]
+            isOneToOne: false
+            referencedRelation: "connectors"
+            referencedColumns: ["id", "tenant_id"]
+          },
+          {
+            foreignKeyName: "connector_secrets_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      connectors: {
+        Row: {
+          connected_by: string | null
+          created_at: string
+          display_name: string | null
+          granted_scopes_safe: string[] | null
+          health: string | null
+          id: string
+          last_sync_at: string | null
+          organization_id: string | null
+          provider: string
+          status: string
+          tenant_id: string
+          updated_at: string
+        }
+        Insert: {
+          connected_by?: string | null
+          created_at?: string
+          display_name?: string | null
+          granted_scopes_safe?: string[] | null
+          health?: string | null
+          id?: string
+          last_sync_at?: string | null
+          organization_id?: string | null
+          provider: string
+          status?: string
+          tenant_id: string
+          updated_at?: string
+        }
+        Update: {
+          connected_by?: string | null
+          created_at?: string
+          display_name?: string | null
+          granted_scopes_safe?: string[] | null
+          health?: string | null
+          id?: string
+          last_sync_at?: string | null
+          organization_id?: string | null
+          provider?: string
+          status?: string
+          tenant_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "connectors_connected_by_fkey"
+            columns: ["connected_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "connectors_org_same_tenant"
+            columns: ["organization_id", "tenant_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id", "tenant_id"]
+          },
+          {
+            foreignKeyName: "connectors_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       contracts: {
         Row: {
           auto_renew: boolean

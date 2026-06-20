@@ -307,3 +307,31 @@ close RISK-001**; **does not approve cutover**; **does not permit connector sync
 remains BLOCKED. Old-app parity is not complete. UI/UX parity is not complete. AI/API connector parity is not
 complete. Upload is not automatically production-ready. Hosted Auth/tenant-context is verified, but old-app
 replacement is not yet verified.** No doc 17 §5 box is ticked by this acceptance.
+
+## 24. Implementation progress — PR A landed (schema foundation, migration `0017`)
+
+**Connector vault schema foundation is added.** Migration `0017_connector_vault_schema_foundation.sql` creates the
+§4 tables — **`public.connectors`** (Tier-1 metadata) + **`public.connector_runs`** (Tier-1 safe run summaries) +
+**`public.connector_secrets`** (Tier-2 secret material) — with the §5 RLS/grant posture. Audit reuses the existing
+append-only `audit_logs` (§10), so no separate audit table. This is the §20 **PR A** step (schema migration, no
+execution path) shipped together with its **PR B** deny-all RLS tests (the schema is not merged untested):
+`org_rls_test.sql` **T38** (Tier-1 tenant-member read + no request-path write) + **T39** (Tier-2 deny-all at the
+runtime AND privilege-surface layer + the no-secret-column structural check); suite **248 → 292**.
+
+**Connector vault is still not usable.** **Connector secret material is not readable by authenticated users** —
+`connector_secrets` is RLS-enabled with **zero policies** (default deny-all) and `authenticated`/`anon` hold **zero
+privilege** (T39 proves it three ways: runtime denial, `has_table_privilege`, and an exact-zero-privileges
+invariant; `test-rls.sh` re-asserts the revoke after its blanket-grant crutch so the suite reflects the real hosted
+surface — the `0015`/`0016` masking lesson). The Tier-1 metadata tables are tenant-member **READ-only** (no INSERT/
+UPDATE/DELETE policy or grant — the connect/rotate/revoke write path is a later gated PR). Same-tenant integrity is
+enforced at the constraint layer (composite `(connector_id, tenant_id)` FKs, the `0005` pattern), not merely by RLS.
+
+**Connector implementation remains blocked.** **No connector credentials are stored. No connector sync is
+implemented. No encryption/decryption wrapper is implemented. No provider connector is implemented. No OAuth
+callback is implemented. No connector UI is implemented. No service-role request path is added.** The remaining
+gates are unchanged: **next is PR C** (server-only encrypt/decrypt wrapper + no-browser-import guard) — no secret of
+any kind may be stored until its tests pass (§21). **No production data was touched. No hosted commands were run. A
+human must apply `0017` to staging, then production, in a future step (an agent never runs hosted commands).
+RISK-001 remains OPEN. Cutover remains BLOCKED. Old-app parity is not complete. UI/UX parity is not complete. AI/API
+connector parity is not complete. Upload is not automatically production-ready. Hosted Auth/tenant-context is
+verified, but old-app replacement is not yet verified.** No doc 17 §5 box is ticked by this PR.

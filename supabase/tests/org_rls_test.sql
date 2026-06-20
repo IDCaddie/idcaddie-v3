@@ -1702,4 +1702,183 @@ do $$ begin
 end $$;
 reset role;
 
+-- ── Test 38: connector vault Tier-1 metadata RLS (migration 0017) ────────────
+-- public.connectors + public.connector_runs are tenant-member READ-only (is_tenant_member), hold NO
+-- secret, and have NO INSERT/UPDATE/DELETE policy or grant (writes are a later server-only gated PR —
+-- docs/42 §20). Fixtures inserted privileged (bypass RLS) so the policy/grant surface is what is tested.
+reset role;
+insert into public.connectors (id, tenant_id, provider, display_name, status, connected_by) values
+  ('17000000-0000-0000-0000-0000000000a1','11111111-1111-1111-1111-111111111111','slack','Slack A','active','0a000000-0000-0000-0000-000000000001'),
+  ('17000000-0000-0000-0000-0000000000b1','22222222-2222-2222-2222-222222222222','slack','Slack B','active','0b000000-0000-0000-0000-000000000001');
+insert into public.connector_runs (id, tenant_id, connector_id, status) values
+  ('17a00000-0000-0000-0000-0000000000a1','11111111-1111-1111-1111-111111111111','17000000-0000-0000-0000-0000000000a1','success'),
+  ('17a00000-0000-0000-0000-0000000000b1','22222222-2222-2222-2222-222222222222','17000000-0000-0000-0000-0000000000b1','success');
+-- A FAKE secret fixture (2 dummy bytes — NOT a real credential) so T39 can prove it is unreadable.
+insert into public.connector_secrets (id, tenant_id, connector_id, secret_kind, ciphertext) values
+  ('17b00000-0000-0000-0000-0000000000a1','11111111-1111-1111-1111-111111111111','17000000-0000-0000-0000-0000000000a1','oauth_access','\xdead'::bytea);
+
+-- 38a: a tenant-A member reads ONLY tenant-A metadata.
+select set_config('request.jwt.claims','{"sub":"0a000000-0000-0000-0000-000000000001"}',false); set role authenticated; -- owner_a
+do $$ begin
+  assert (select count(*) from public.connectors) = 1, 'T38 tenant-A member sees exactly its own 1 connector';
+  assert (select count(*) from public.connectors where id='17000000-0000-0000-0000-0000000000b1') = 0, 'T38 tenant-A member must NOT see the tenant-B connector';
+  assert (select count(*) from public.connector_runs) = 1, 'T38 tenant-A member sees exactly its own 1 connector run';
+  assert (select count(*) from public.connector_runs where tenant_id='22222222-2222-2222-2222-222222222222') = 0, 'T38 tenant-A member must NOT see the tenant-B run';
+end $$;
+reset role;
+-- 38b: cross-tenant — owner_b sees ONLY tenant-B metadata, never tenant A's.
+select set_config('request.jwt.claims','{"sub":"0b000000-0000-0000-0000-000000000001"}',false); set role authenticated; -- owner_b
+do $$ begin
+  assert (select count(*) from public.connectors) = 1, 'T38 tenant-B member sees exactly its own 1 connector';
+  assert (select count(*) from public.connectors where id='17000000-0000-0000-0000-0000000000a1') = 0, 'T38 cross-tenant: tenant-B must NOT see the tenant-A connector';
+  assert (select count(*) from public.connector_runs where id='17a00000-0000-0000-0000-0000000000a1') = 0, 'T38 cross-tenant: tenant-B must NOT see the tenant-A run';
+end $$;
+reset role;
+-- 38c: a non-member and an org-only manager (NOT a tenant member) read 0 (the is_tenant_member asymmetry).
+select set_config('request.jwt.claims','{"sub":"0a000000-0000-0000-0000-0000000000ff"}',false); set role authenticated; -- nobody (no membership)
+do $$ begin
+  assert (select count(*) from public.connectors) = 0, 'T38 non-member sees 0 connectors';
+  assert (select count(*) from public.connector_runs) = 0, 'T38 non-member sees 0 connector runs';
+end $$;
+reset role;
+select set_config('request.jwt.claims','{"sub":"0a000000-0000-0000-0000-0000000000a1"}',false); set role authenticated; -- mgr_a1 (org-only, not a tenant member)
+do $$ begin
+  assert (select count(*) from public.connectors) = 0, 'T38 org-only manager (not a tenant member) sees 0 connectors';
+end $$;
+reset role;
+-- 38d: anon has NO privilege to read any vault metadata.
+set role anon;
+do $$ declare ok boolean := false; begin
+  begin perform 1 from public.connectors; ok := false; exception when insufficient_privilege then ok := true; end;
+  assert ok, 'T38 anon must have NO privilege to read connectors';
+end $$;
+do $$ declare ok boolean := false; begin
+  begin perform 1 from public.connector_runs; ok := false; exception when insufficient_privilege then ok := true; end;
+  assert ok, 'T38 anon must have NO privilege to read connector_runs';
+end $$;
+reset role;
+-- 38e: the request-path role cannot WRITE Tier-1 metadata (no INSERT/UPDATE/DELETE grant or policy yet).
+select set_config('request.jwt.claims','{"sub":"0a000000-0000-0000-0000-000000000001"}',false); set role authenticated; -- owner_a (a tenant-A member)
+do $$ declare ok boolean := false; begin
+  begin insert into public.connectors (tenant_id, provider) values ('11111111-1111-1111-1111-111111111111','evil'); ok := false;
+  exception when insufficient_privilege then ok := true; end;
+  assert ok, 'T38 authenticated must NOT insert connectors (writes are a later server-only PR)';
+end $$;
+do $$ declare ok boolean := false; begin
+  begin update public.connectors set status='active' where id='17000000-0000-0000-0000-0000000000a1'; ok := false;
+  exception when insufficient_privilege then ok := true; end;
+  assert ok, 'T38 authenticated must NOT update connectors';
+end $$;
+do $$ declare ok boolean := false; begin
+  begin delete from public.connectors where id='17000000-0000-0000-0000-0000000000a1'; ok := false;
+  exception when insufficient_privilege then ok := true; end;
+  assert ok, 'T38 authenticated must NOT delete connectors';
+end $$;
+do $$ declare ok boolean := false; begin
+  begin insert into public.connector_runs (tenant_id, connector_id, status) values ('11111111-1111-1111-1111-111111111111','17000000-0000-0000-0000-0000000000a1','queued'); ok := false;
+  exception when insufficient_privilege then ok := true; end;
+  assert ok, 'T38 authenticated must NOT insert connector_runs (server-only writes later)';
+end $$;
+reset role;
+-- 38f: CONSTRAINT-LAYER tenant isolation (defense-in-depth, not merely RLS). Even the privileged role
+-- cannot bind a tenant-B secret/run onto a tenant-A connector — the composite (connector_id, tenant_id) FK
+-- to connectors(id, tenant_id) fails with foreign_key_violation (the 0005 pattern; analog of T26).
+reset role;
+do $$ declare ok boolean := false; begin
+  begin
+    insert into public.connector_secrets (tenant_id, connector_id, secret_kind)
+      values ('22222222-2222-2222-2222-222222222222','17000000-0000-0000-0000-0000000000a1','api_key'); -- tenant-B row, tenant-A connector
+    ok := false;
+  exception when foreign_key_violation then ok := true; end;
+  assert ok, 'T38 a tenant-B connector_secrets row must NOT bind a tenant-A connector (composite FK)';
+end $$;
+do $$ declare ok boolean := false; begin
+  begin
+    insert into public.connector_runs (tenant_id, connector_id, status)
+      values ('22222222-2222-2222-2222-222222222222','17000000-0000-0000-0000-0000000000a1','queued'); -- tenant-B row, tenant-A connector
+    ok := false;
+  exception when foreign_key_violation then ok := true; end;
+  assert ok, 'T38 a tenant-B connector_runs row must NOT bind a tenant-A connector (composite FK)';
+end $$;
+reset role;
+
+-- ── Test 39: connector_secrets DENY-ALL + privilege surface (migration 0017) ─────────────────────────
+-- The secret tier must have NO request-path access: RLS-enabled with ZERO policies (default deny-all) AND
+-- the request-path roles hold NO base privilege. No SQL a logged-in user runs can read/write/delete a
+-- secret. Proven at BOTH the runtime layer (39a/39b) and the catalog/privilege layer (39c — the 0016/T37
+-- lesson, role-independent, run as the reset superuser) + structural no-secret-leak (39d).
+-- 39a: a tenant-A member who CAN see the connector still CANNOT touch its secret material.
+select set_config('request.jwt.claims','{"sub":"0a000000-0000-0000-0000-000000000001"}',false); set role authenticated; -- owner_a
+do $$ declare ok boolean := false; begin
+  begin perform 1 from public.connector_secrets; ok := false; exception when insufficient_privilege then ok := true; end;
+  assert ok, 'T39 authenticated (even a tenant member) must NOT read connector_secrets (deny-all, no grant)';
+end $$;
+do $$ declare ok boolean := false; begin
+  begin insert into public.connector_secrets (tenant_id, connector_id, secret_kind) values ('11111111-1111-1111-1111-111111111111','17000000-0000-0000-0000-0000000000a1','api_key'); ok := false;
+  exception when insufficient_privilege then ok := true; end;
+  assert ok, 'T39 authenticated must NOT insert connector_secrets';
+end $$;
+do $$ declare ok boolean := false; begin
+  begin update public.connector_secrets set status='revoked'; ok := false; exception when insufficient_privilege then ok := true; end;
+  assert ok, 'T39 authenticated must NOT update connector_secrets';
+end $$;
+do $$ declare ok boolean := false; begin
+  begin delete from public.connector_secrets; ok := false; exception when insufficient_privilege then ok := true; end;
+  assert ok, 'T39 authenticated must NOT delete connector_secrets';
+end $$;
+reset role;
+-- 39b: anon is denied too.
+set role anon;
+do $$ declare ok boolean := false; begin
+  begin perform 1 from public.connector_secrets; ok := false; exception when insufficient_privilege then ok := true; end;
+  assert ok, 'T39 anon must NOT read connector_secrets';
+end $$;
+reset role;
+-- 39c: PRIVILEGE SURFACE (catalog; role-independent; run as the reset superuser).
+reset role;
+do $$ begin
+  assert not has_table_privilege('authenticated','public.connector_secrets','SELECT'),   'T39 authenticated must NOT have SELECT on connector_secrets';
+  assert not has_table_privilege('authenticated','public.connector_secrets','INSERT'),   'T39 authenticated must NOT have INSERT on connector_secrets';
+  assert not has_table_privilege('authenticated','public.connector_secrets','UPDATE'),   'T39 authenticated must NOT have UPDATE on connector_secrets';
+  assert not has_table_privilege('authenticated','public.connector_secrets','DELETE'),   'T39 authenticated must NOT have DELETE on connector_secrets';
+  assert not has_table_privilege('authenticated','public.connector_secrets','TRUNCATE'), 'T39 authenticated must NOT have TRUNCATE on connector_secrets';
+  assert not has_table_privilege('anon','public.connector_secrets','SELECT'),            'T39 anon must NOT have SELECT on connector_secrets';
+  -- EXACT invariant: authenticated holds ZERO privilege types on connector_secrets (robust to drift).
+  assert (
+    select coalesce(array_agg(distinct privilege_type::text order by privilege_type::text), array[]::text[])
+    from information_schema.role_table_grants
+    where grantee = 'authenticated' and table_schema = 'public' and table_name = 'connector_secrets'
+  ) = array[]::text[], 'T39 authenticated must hold EXACTLY zero privileges on connector_secrets';
+  -- Tier-1 metadata: authenticated keeps SELECT but NOT write (writes are a later gated PR).
+  assert     has_table_privilege('authenticated','public.connectors','SELECT'),     'T39 authenticated keeps SELECT on connectors';
+  assert not has_table_privilege('authenticated','public.connectors','INSERT'),     'T39 authenticated must NOT INSERT connectors';
+  assert not has_table_privilege('authenticated','public.connectors','UPDATE'),     'T39 authenticated must NOT UPDATE connectors';
+  assert not has_table_privilege('authenticated','public.connectors','DELETE'),     'T39 authenticated must NOT DELETE connectors';
+  assert     has_table_privilege('authenticated','public.connector_runs','SELECT'), 'T39 authenticated keeps SELECT on connector_runs';
+  assert not has_table_privilege('authenticated','public.connector_runs','INSERT'), 'T39 authenticated must NOT INSERT connector_runs';
+  assert not has_table_privilege('authenticated','public.connector_runs','DELETE'), 'T39 authenticated must NOT DELETE connector_runs';
+  -- EXACT invariant on the Tier-1 tables (the T37 files pattern): authenticated holds EXACTLY [SELECT] —
+  -- catches any future stray grant (e.g. a hosted-default TRUNCATE/UPDATE) the per-privilege checks miss.
+  assert (
+    select coalesce(array_agg(distinct privilege_type::text order by privilege_type::text), array[]::text[])
+    from information_schema.role_table_grants
+    where grantee='authenticated' and table_schema='public' and table_name='connectors'
+  ) = array['SELECT'], 'T39 authenticated must hold EXACTLY [SELECT] on connectors';
+  assert (
+    select coalesce(array_agg(distinct privilege_type::text order by privilege_type::text), array[]::text[])
+    from information_schema.role_table_grants
+    where grantee='authenticated' and table_schema='public' and table_name='connector_runs'
+  ) = array['SELECT'], 'T39 authenticated must hold EXACTLY [SELECT] on connector_runs';
+end $$;
+-- 39d: RLS enabled on all three vault tables; secret table has ZERO policies; readable tables leak NO secret column.
+do $$ begin
+  assert (select relrowsecurity from pg_class where oid='public.connectors'::regclass),       'T39 connectors must have RLS enabled';
+  assert (select relrowsecurity from pg_class where oid='public.connector_secrets'::regclass), 'T39 connector_secrets must have RLS enabled';
+  assert (select relrowsecurity from pg_class where oid='public.connector_runs'::regclass),    'T39 connector_runs must have RLS enabled';
+  assert (select count(*) from pg_policies where schemaname='public' and tablename='connector_secrets') = 0, 'T39 connector_secrets must have ZERO RLS policies (deny-all)';
+  assert (select count(*) from information_schema.columns where table_schema='public' and table_name='connectors'     and column_name in ('ciphertext','dek_wrapped','aead_nonce','aad_digest','key_id')) = 0, 'T39 connectors (readable) must expose NO secret column';
+  assert (select count(*) from information_schema.columns where table_schema='public' and table_name='connector_runs' and column_name in ('ciphertext','dek_wrapped','aead_nonce','aad_digest','key_id')) = 0, 'T39 connector_runs (readable) must expose NO secret column';
+end $$;
+reset role;
+
 do $$ begin raise notice 'ALL ORG-RLS ASSERTIONS PASSED'; end $$;
