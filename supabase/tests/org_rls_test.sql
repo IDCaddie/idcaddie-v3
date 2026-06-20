@@ -1325,17 +1325,17 @@ insert into public.files (id, tenant_id, storage_path, original_filename, byte_s
   ('13000000-0000-0000-0000-0000000000c6','11111111-1111-1111-1111-111111111111','x/c6.pdf','c6.pdf',
    1024, repeat('a',64), 'passed');
 
--- 33d: CATALOG — after `0013`, `files` is SELECT+INSERT-policied (no longer zero-policy), but keeps
--- the safe shape: 0 UPDATE (scan/extraction status transitions are a future worker, not a user
--- UPDATE), 0 DELETE, 0 FOR ALL; RLS still enabled. (The T33 "0 policies" check from `0012` is
--- intentionally superseded here — `0013` is the file RLS step.)
+-- 33d: CATALOG — after `0013`, `files` is SELECT+INSERT-policied (no longer zero-policy); after `0016`
+-- it also has exactly ONE narrow UPDATE policy (the uploader-finalize, T36) — still 0 DELETE, 0 FOR
+-- ALL; RLS still enabled. (The T33 "0 policies" check from `0012` is intentionally superseded here —
+-- `0013` is the file RLS step; `0016` adds only the scoped uploader-finalize UPDATE.)
 do $$ declare v int; begin
   select count(*) into v from pg_policies where schemaname='public' and tablename='files' and cmd='SELECT';
   assert v = 1, format('T33 files must have a SELECT policy after 0013, saw %s', v);
   select count(*) into v from pg_policies where schemaname='public' and tablename='files' and cmd='INSERT';
   assert v = 1, format('T33 files must have an INSERT policy after 0013, saw %s', v);
   select count(*) into v from pg_policies where schemaname='public' and tablename='files' and cmd='UPDATE';
-  assert v = 0, format('T33 files must have 0 UPDATE policies (status updates deferred), saw %s', v);
+  assert v = 1, format('T33 files must have exactly 1 UPDATE policy after 0016 (uploader-finalize), saw %s', v);
   select count(*) into v from pg_policies where schemaname='public' and tablename='files' and cmd='DELETE';
   assert v = 0, format('T33 files must have 0 DELETE policies, saw %s', v);
   select count(*) into v from pg_policies where schemaname='public' and tablename='files' and cmd='ALL';
@@ -1500,26 +1500,28 @@ do $$ declare v int; begin
 end $$;
 reset role;
 
--- 34c: DELETE is denied for everyone (no DELETE policy) — even a tenant owner; the row survives.
+-- 34c: DELETE is denied for everyone — even a tenant owner; the row survives. After `0016` this is
+-- denied at the PRIVILEGE layer (`authenticated` has NO DELETE on `public.files` — the privilege check
+-- fires before RLS), a strictly stronger guarantee than the prior no-DELETE-policy 0-rows; T37 proves the
+-- privilege surface directly.
 select set_config('request.jwt.claims','{"sub":"0a000000-0000-0000-0000-000000000001"}',false); -- owner_a
 set role authenticated;
-do $$ declare v int; begin
-  delete from public.files where id='13000000-0000-0000-0000-0000000000e1';
-  get diagnostics v = row_count;
-  assert v = 0, format('T34 no DELETE policy — a tenant owner must not delete a file (%s rows)', v);
+do $$ declare ok boolean := false; begin
+  begin
+    delete from public.files where id='13000000-0000-0000-0000-0000000000e1';
+    ok := false;
+  exception when insufficient_privilege then ok := true; end;
+  assert ok, 'T34 DELETE on files must be denied (no DELETE privilege after 0016, and no DELETE policy)';
   assert (select count(*) from public.files where id='13000000-0000-0000-0000-0000000000e1') = 1, 'T34 the file must survive the delete attempt';
 end $$;
 reset role;
--- 34d: UPDATE is denied (no UPDATE policy) — even a tenant editor cannot change a file's status
--- (scan/extraction transitions are deferred to a future worker, not a user UPDATE).
-select set_config('request.jwt.claims','{"sub":"0a000000-0000-0000-0000-0000000000ed"}',false); -- editor_a
-set role authenticated;
-do $$ declare v int; begin
-  update public.files set scan_status='passed' where id='13000000-0000-0000-0000-0000000000e1';
-  get diagnostics v = row_count;
-  assert v = 0, format('T34 no UPDATE policy — a tenant editor must not update a file status (%s rows)', v);
-end $$;
-reset role;
+-- 34d: SUPERSEDED by `0016`. `0013` had NO UPDATE policy; `0016` adds a NARROW one (the uploader-
+-- finalize) plus a column grant of `update (upload_status)` ONLY — so a user can change ONLY
+-- upload_status on their OWN row, never scan_status / extraction / storage_path / etc. The uploader-
+-- finalize ROW scoping (uploader-only, cross-tenant/cross-user denial, no-reassign WITH CHECK) is proven
+-- by T36. The COLUMN-grant narrowing (scan/extraction NOT user-updatable) is enforced at the HOSTED
+-- privilege layer and is MASKED locally by test-rls.sh's blanket `grant ... to authenticated` (the same
+-- gap class as `0015`), so it is intentionally NOT asserted here.
 
 -- ── Test 35: contract-file Storage authorization helpers (0014) ──────────────
 -- can_write_contract_file / can_read_contract_file are the SECURITY DEFINER predicates the staging
@@ -1594,6 +1596,110 @@ reset role;
 select set_config('request.jwt.claims','{"sub":"0a000000-0000-0000-0000-000000000001"}',false); set role authenticated; -- owner_a
 do $$ begin assert not public.can_read_contract_file('15000000-0000-0000-0000-00000000dead','11111111-1111-1111-1111-111111111111'), 'T35 nonexistent file id must fail closed (read)'; end $$;
 do $$ begin assert not public.can_read_contract_file('15000000-0000-0000-0000-0000000000a1','22222222-2222-2222-2222-222222222222'), 'T35 wrong tenant id must fail closed (read)'; end $$;
+reset role;
+
+-- ── Test 36: files UPDATE finalize policy (migration 0016) ───────────────────
+-- 0016 adds a NARROW UPDATE policy: the UPLOADER (uploaded_by = auth.uid()) may update their OWN file
+-- row for a contract they may write (can_write_contract). WITH CHECK repeats it, so uploaded_by /
+-- tenant_id / contract_id cannot be reassigned; the column grant is update (upload_status) only. The app
+-- uses it to FINALIZE a successful upload ('uploaded') or DISPOSITION a failed one ('failed'). Uses the
+-- tenant-A file 13000000-…e1 that editor_a (0a…ed) inserted in T34b (contract A1, tenant A).
+reset role;
+-- 36a: the UPLOADER (editor_a) may finalize their OWN file → 'uploaded'.
+select set_config('request.jwt.claims','{"sub":"0a000000-0000-0000-0000-0000000000ed"}',false); set role authenticated; -- editor_a (uploader)
+do $$ declare v int; begin
+  update public.files set upload_status='uploaded' where id='13000000-0000-0000-0000-0000000000e1';
+  get diagnostics v = row_count;
+  assert v = 1, format('T36 uploader should finalize their own file to uploaded (%s rows)', v);
+end $$;
+-- 36b: the UPLOADER may also disposition their OWN file → 'failed'.
+do $$ declare v int; begin
+  update public.files set upload_status='failed' where id='13000000-0000-0000-0000-0000000000e1';
+  get diagnostics v = row_count;
+  assert v = 1, format('T36 uploader should disposition their own file failed (%s rows)', v);
+end $$;
+-- 36c: WITH CHECK / column grant — the uploader cannot REASSIGN ownership (uploaded_by) of their own row.
+do $$ declare ok boolean := false; begin
+  begin
+    update public.files set uploaded_by='0a000000-0000-0000-0000-000000000001'
+      where id='13000000-0000-0000-0000-0000000000e1';
+    ok := false;
+  exception when insufficient_privilege then ok := true; end;
+  assert ok, 'T36 uploader must NOT reassign uploaded_by (WITH CHECK / column grant)';
+end $$;
+-- 36d: WITH CHECK / FK — the uploader cannot MOVE their row cross-tenant.
+do $$ declare ok boolean := false; begin
+  begin
+    update public.files set tenant_id='22222222-2222-2222-2222-222222222222'
+      where id='13000000-0000-0000-0000-0000000000e1';
+    ok := false;
+  exception
+    when insufficient_privilege then ok := true;
+    when foreign_key_violation then ok := true;
+    when check_violation then ok := true;
+  end;
+  assert ok, 'T36 uploader must NOT move their file cross-tenant';
+end $$;
+reset role;
+-- 36e: a same-tenant NON-uploader (owner_a) updates 0 of editor_a's files (USING: uploaded_by != self).
+select set_config('request.jwt.claims','{"sub":"0a000000-0000-0000-0000-000000000001"}',false); set role authenticated; -- owner_a (NOT the uploader)
+do $$ declare v int; begin
+  update public.files set upload_status='uploaded' where id='13000000-0000-0000-0000-0000000000e1';
+  get diagnostics v = row_count;
+  assert v = 0, format('T36 a same-tenant non-uploader must update 0 of another user files, saw %s', v);
+end $$;
+reset role;
+-- 36f: a DIFFERENT tenant (owner_b) updates 0 tenant-A files (USING; cross-tenant).
+select set_config('request.jwt.claims','{"sub":"0b000000-0000-0000-0000-000000000001"}',false); set role authenticated; -- owner_b (tenant B)
+do $$ declare v int; begin
+  update public.files set upload_status='uploaded' where id='13000000-0000-0000-0000-0000000000e1';
+  get diagnostics v = row_count;
+  assert v = 0, format('T36 a cross-tenant user must update 0 files, saw %s', v);
+end $$;
+reset role;
+
+-- ── Test 37: `public.files` PRIVILEGE surface for `authenticated` (migration 0016) ───────────────────
+-- `0016` REVOKEs the broad request-path mutations and grants ONLY `update (upload_status)`. Staging
+-- verification caught `authenticated` holding BROAD DELETE/TRUNCATE/UPDATE on `public.files` (a
+-- `grant update (col)` is additive and never revoked them; TRUNCATE especially bypasses row-level logic).
+-- This proves the corrected surface: `authenticated` keeps SELECT + INSERT, has NO DELETE / NO TRUNCATE,
+-- and may UPDATE ONLY `upload_status` — never any immutable column. (The harness re-asserts the migration-
+-- intended files grants after its blanket crutch, so this reflects the REAL hosted privilege surface; the
+-- catalog functions read any role's grants and are role-independent, run here as the reset superuser.)
+reset role;
+do $$ begin
+  assert     has_table_privilege('authenticated','public.files','SELECT'),   'T37 authenticated must keep SELECT on files';
+  assert     has_table_privilege('authenticated','public.files','INSERT'),   'T37 authenticated must keep INSERT on files';
+  assert not has_table_privilege('authenticated','public.files','DELETE'),   'T37 authenticated must NOT have DELETE on files';
+  assert not has_table_privilege('authenticated','public.files','TRUNCATE'), 'T37 authenticated must NOT have TRUNCATE on files';
+  -- UPDATE is column-scoped to upload_status ONLY (immutable columns are NOT user-updatable).
+  assert     has_column_privilege('authenticated','public.files','upload_status','UPDATE'),      'T37 authenticated must update upload_status';
+  assert not has_column_privilege('authenticated','public.files','tenant_id','UPDATE'),          'T37 must NOT update tenant_id';
+  assert not has_column_privilege('authenticated','public.files','contract_id','UPDATE'),        'T37 must NOT update contract_id';
+  assert not has_column_privilege('authenticated','public.files','uploaded_by','UPDATE'),        'T37 must NOT update uploaded_by';
+  assert not has_column_privilege('authenticated','public.files','storage_path','UPDATE'),       'T37 must NOT update storage_path';
+  assert not has_column_privilege('authenticated','public.files','storage_bucket','UPDATE'),     'T37 must NOT update storage_bucket';
+  assert not has_column_privilege('authenticated','public.files','original_filename','UPDATE'),  'T37 must NOT update original_filename';
+  assert not has_column_privilege('authenticated','public.files','byte_size','UPDATE'),          'T37 must NOT update byte_size';
+  assert not has_column_privilege('authenticated','public.files','content_type','UPDATE'),       'T37 must NOT update content_type';
+  assert not has_column_privilege('authenticated','public.files','sha256','UPDATE'),             'T37 must NOT update sha256';
+  -- the worker/AI-pipeline state columns the design most wants out of the request-path role's reach.
+  assert not has_column_privilege('authenticated','public.files','scan_status','UPDATE'),            'T37 must NOT update scan_status';
+  assert not has_column_privilege('authenticated','public.files','extraction_status','UPDATE'),      'T37 must NOT update extraction_status';
+  assert not has_column_privilege('authenticated','public.files','extraction_result_json','UPDATE'), 'T37 must NOT update extraction_result_json';
+  assert not has_column_privilege('authenticated','public.files','extraction_error','UPDATE'),       'T37 must NOT update extraction_error';
+  assert not has_column_privilege('authenticated','public.files','document_type','UPDATE'),          'T37 must NOT update document_type';
+  assert not has_column_privilege('authenticated','public.files','updated_at','UPDATE'),             'T37 must NOT update updated_at';
+  -- EXACT invariant (robust to schema growth / hosted drift): authenticated holds UPDATE on EXACTLY one
+  -- column, and it is upload_status — so any future column or stray column grant is caught, not just the
+  -- ones enumerated above. (Run as the reset superuser, which sees all grants in column_privileges.)
+  assert (
+    select coalesce(array_agg(column_name::text order by column_name::text), array[]::text[])
+    from information_schema.column_privileges
+    where grantee = 'authenticated' and table_schema = 'public'
+      and table_name = 'files' and privilege_type = 'UPDATE'
+  ) = array['upload_status'], 'T37 authenticated must hold UPDATE on EXACTLY [upload_status] on files';
+end $$;
 reset role;
 
 do $$ begin raise notice 'ALL ORG-RLS ASSERTIONS PASSED'; end $$;

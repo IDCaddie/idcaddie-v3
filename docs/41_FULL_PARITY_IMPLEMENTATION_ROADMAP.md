@@ -175,7 +175,7 @@ rest are build PRs that each cite doc 27 rows + carry RLS tests + hosted validat
 
 1. **Execute the hosted-staging RLS suite** (disposable-isolated, doc 30 §6) → evidence PR → closes the hosted
    half of doc 17 §5 boxes 5/8.
-2. **E09a — contract-file upload action + signed-URL read** (sits on the done Storage boundary; no service-role). **→ SHIPPED (PR #76): contract attachment UI on `/contracts/[id]` — list/upload/open, files-row-first, server-derived path, 60 s signed URL, no service-role; `partial` (files page/preview/inbound/links remain). Manually verified on staging for the Tenant A happy path (§11).**
+2. **E09a — contract-file upload action + signed-URL read** (sits on the done Storage boundary; no service-role). **→ SHIPPED (PR #76): contract attachment UI on `/contracts/[id]` — list/upload/open, files-row-first, server-derived path, 60 s signed URL, no service-role; `partial` (files page/preview/inbound/links remain). Manually verified on staging for the Tenant A happy path (§11). Upload finalization hardened in PR #78 (§12): migration `0016` uploader-finalize policy → success='uploaded', failure='failed', Open only for finalized rows.**
 3. **E09b — files list / detail / preview surface** (private bucket + signed URLs + file audit).
 4. **E16 — connector credential vault foundation** (RISK-007) — unblocks the whole connector program; build early.
 5. **E05/E06 — people/identity directory read + match-status surface** (org-scoped, default-deny).
@@ -246,3 +246,55 @@ built. Old-app parity is not complete. UI/UX parity is not complete. AI/API conn
 Storage authorization remains necessary but not sufficient for cutover. Hosted Auth/tenant-context is verified,
 but old-app replacement is not yet verified. Upload is not automatically production-ready. RISK-001 remains
 OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is ticked by this evidence.
+
+---
+
+## 12. E09a — upload finalization hardening (PR #78, from the §11 staging finding)
+
+**The §11 staging finding (recorded, NOT mutated by this PR):** for contract `cccca111-…a1` there were **3
+`public.files` rows**, **2** with matching `storage.objects` and **1 orphan** metadata row with no Storage
+object (`68006ec4-8292-439a-a03c-643ad86ff3cf`, `has_storage_object=false`); the 2 uploaded rows
+(`1a14edc4-2187-4d5d-a24f-b93706080eae`, `aad70c32-dd19-4454-94ad-fb7a7b196361`) had objects. **All 3 stayed
+`upload_status='pending'`** with `content_type`/`byte_size`/`storage_bucket` NULL. The repeated `synthetic-test.pdf`
+rows came from repeated manual uploads. (Those staging rows are **not** mutated by this PR; the app cannot
+delete/transition them — no DELETE policy — so a human/worker cleans them up later.)
+
+**Root cause:** PR #76 inserted the `files` row FIRST (forced by the Storage policy), then uploaded the object —
+but `0013` had **no UPDATE policy** and `0015` granted only SELECT/INSERT, so the app could never flip a row off
+`pending`. **The existing schema truly could not finalize without an UPDATE capability**, so PR #78 adds the
+narrow migration `0016`.
+
+**Fix (PR #78):** **Contract-file upload finalization is hardened.** A narrow `0016` UPDATE policy lets the
+**uploader** finalize ONLY their OWN row's `upload_status` (uploader-only, `can_write_contract`, no reassignment —
+proven by T36; the privilege surface is corrected + proven by T37, §13). The DAL now sets `upload_status='uploaded'`
+on a successful upload (**successful uploads no longer remain ambiguous pending rows**) and `upload_status='failed'`
+on a failed object upload (**failed uploads are explicitly dispositioned**, or — if even that UPDATE is denied —
+documented as blocked by current policy and shown distinctly); download only signs finalized rows; the UI labels
+Uploaded / Pending / Failed and shows **Open only for finalized files**. **No DELETE/`FOR ALL`, no Storage-policy
+change, no public bucket, no service-role.** **Storage authorization remains necessary but not sufficient for
+cutover. Upload is not automatically production-ready. Invoices remain not built. PDF/AI extraction remains not
+built. Old-app parity is not complete. UI/UX parity is not complete. AI/API connector parity is not complete.
+RISK-001 remains OPEN. Cutover remains BLOCKED.**
+
+---
+
+## 13. E09a — `0016` privilege-grant correction (staging caught a broad grant before merge)
+
+**Staging verification (after applying the first cut of `0016`) caught a privilege bug before merge** — the
+PR claim of a narrow grant was wrong. `has_table_privilege('authenticated','public.files', …)` returned **true
+for `delete`, `truncate`, AND `update`**, and `information_schema.column_privileges` showed UPDATE on **every**
+`public.files` column for `authenticated`. **Root cause:** `grant update (upload_status)` is **additive** — it
+never removed the BROAD DELETE/TRUNCATE/UPDATE `authenticated` already held (no migration granted these; hosted
+setup did). **TRUNCATE is especially unacceptable — it bypasses row-level logic.** The local `test-rls.sh`
+harness had **masked** this: its blanket `grant … on all tables … to authenticated` re-broadened `files` *after*
+the migrations, so no local test could detect it.
+
+**Correction (this PR, before merge):** `0016` now `revoke update, delete, truncate on public.files from
+authenticated` then `grant update (upload_status)` — after it `authenticated` holds EXACTLY
+`SELECT, INSERT, UPDATE(upload_status)` (no DELETE, no TRUNCATE; idempotent; SELECT/INSERT and `service_role`
+untouched; the UPDATE RLS policy unchanged). The harness now re-asserts the migration-intended `files` grants so
+the suite reflects the real hosted surface. New **T37** proves it (`has_table_privilege` no DELETE / no TRUNCATE;
+`has_column_privilege` UPDATE only on `upload_status`, denied on every immutable column) and **T34c** now asserts
+DELETE is denied at the privilege layer. RLS suite **222 → 248**. **A human must re-apply the corrected `0016`
+privilege SQL to staging** (the first cut was already applied there) — not done by this PR. **RISK-001 remains
+OPEN. Cutover remains BLOCKED. Upload is not automatically production-ready.**
