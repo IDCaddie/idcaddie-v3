@@ -9,7 +9,7 @@ export type NavSection = { title: string; items: NavItem[] };
 
 // The real, implemented authenticated routes that may be linked. Keep in sync with the route tree;
 // the test asserts every linked NavItem.href is one of these (so an unbuilt area can never be linked).
-export const IMPLEMENTED_ROUTES = ["/", "/apps", "/contracts"] as const;
+export const IMPLEMENTED_ROUTES = ["/", "/apps", "/contracts", "/people"] as const;
 
 export const NAV_SECTIONS: NavSection[] = [
   {
@@ -37,8 +37,9 @@ export const NAV_SECTIONS: NavSection[] = [
   {
     title: "People & identity",
     items: [
-      { label: "People / Users", href: null },
-      { label: "Identity matching", href: null },
+      { label: "People / Users", href: "/people" },
+      // Read-only match STATUS is on /people; the matching workflow (resolve/review/merge) is not built.
+      { label: "Identity matching", href: null, note: "status on People; resolution not built" },
     ],
   },
   {
