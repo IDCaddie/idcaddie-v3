@@ -479,11 +479,26 @@ production-ready. RISK-001 remains OPEN. Cutover remains BLOCKED.** No doc 17 §
 
 ## 19. E03 / E04 — apps populated-path staging verification (PR #84, synthetic Tenant A fixture)
 
+> **⚠️ SUPERSEDED / CORRECTED by PR #86 (2026-06-19) — DO NOT read this section as live fact.** New live
+> staging evidence contradicts the populated-path claims below: logged in as
+> `tenant-editor-a@idcaddie-staging.local` (tenant **Storage Verifier Tenant A · editor**) at
+> `https://idcaddie-v3.vercel.app/apps`, the page still shows **“No apps to show.”** **Therefore the populated
+> `/apps` and `/apps/[id]` path is NOT currently verified for this account; only the empty-state path is
+> verified.** The PR #83 code merged and local validation passed; the `/apps` empty-state staging verification
+> passed; **Apps inventory/detail parity is improved in code, but populated hosted verification remains
+> incomplete.** **The `/apps/[id]` populated detail path is not currently verified; the `/people` populated path
+> is not currently verified.** **The synthetic fixture below is either not present, not visible through RLS, or
+> not associated with this account/tenant in hosted staging — the exact root cause remains unverified** (no
+> hosted query was run to determine it). This original record is **retained, not deleted**, for the audit trail.
+> **No production data was touched. No hosted commands were run. No RLS policies were changed. No migrations were
+> added. Old-app parity is not complete. RISK-001 remains OPEN. Cutover remains BLOCKED.** See [05 PR #86] +
+> §19.5 below.
+
 PR #83's manual staging check (doc 41 §16/§17 chain) only covered the **empty** `/apps` path because Tenant A had
 no visible apps. A human applied a **tiny, clearly-synthetic, staging-only** fixture to Tenant A
 (`ycdpzduxugdsffjqyoai` — linked-ref confirmed; production `dzbfxulvxchdemcettrx` NOT touched) and verified the
 populated paths. **The agent ran nothing: no hosted command, no staging mutation, no secrets.** All IDs/names are
-synthetic.
+synthetic. *(Superseded — see the banner above: this populated-path result is NOT currently reproducible.)*
 
 ### 19.1 The synthetic fixture (reviewed; applied to staging by a human, NOT by the agent)
 
@@ -527,7 +542,7 @@ insert into public.app_user_identity_matches (id, tenant_id, app_user_id, person
 on conflict (app_user_id, person_id) do nothing;
 ```
 
-### 19.2 Verification — PASSED
+### 19.2 Verification — PASSED *(⚠️ SUPERSEDED by §19.5 — this populated-path result is NOT currently reproducible; see the §19 banner)*
 
 **Apps inventory/detail populated-path staging verification passed for a synthetic Tenant A fixture.** A human
 logged in to `https://idcaddie-v3.vercel.app` as `tenant-editor-a@idcaddie-staging.local` and verified:
@@ -564,6 +579,24 @@ Connector sync remains not built. AI app/license intelligence remains not built.
 UI/UX parity is not complete. AI/API connector parity is not complete. Hosted Auth/tenant-context is verified, but
 old-app replacement is not yet verified. Upload is not automatically production-ready. RISK-001 remains OPEN.
 Cutover remains BLOCKED.** No doc 17 §5 box is ticked by this evidence.
+
+### 19.5 Correction (PR #86, 2026-06-19) — populated path NOT currently verified
+
+**The §19 populated-path result above is superseded / corrected, not deleted.** New live staging evidence: logged
+in as `tenant-editor-a@idcaddie-staging.local` (tenant **Storage Verifier Tenant A · editor**) at
+`https://idcaddie-v3.vercel.app/apps`, the page still shows **“No apps to show”**; the page itself states app
+visibility and counts are RLS-scoped. **What is true:** PR #83 code merged successfully and local validation
+passed; **the `/apps` empty-state staging verification passed**; **Apps inventory/detail parity is improved in
+code, but populated hosted verification remains incomplete.** **What is NOT currently verified:** **populated-path
+staging verification is currently NOT reproducible for `tenant-editor-a@idcaddie-staging.local` because `/apps`
+still shows “No apps to show”**; **the `/apps/[id]` populated detail path is not currently verified**; **the
+`/people` populated path is not currently verified.** **Root cause:** the synthetic fixture (§19.1) is **either not
+present, not visible through RLS, or not associated with this account/tenant in hosted staging — the exact root
+cause remains unverified** (this corrective PR ran no hosted query). **No production data was touched. No hosted
+commands were run in this corrective PR. No RLS policies were changed. No migrations were added. Old-app parity is
+not complete. RISK-001 remains OPEN. Cutover remains BLOCKED.** Re-verifying the populated path requires a human to
+confirm (via the hosted app or a hosted query) that the fixture exists and is visible to this account, then re-run
+the manual `/apps` + `/apps/[id]` check — not done here.
 
 ---
 
