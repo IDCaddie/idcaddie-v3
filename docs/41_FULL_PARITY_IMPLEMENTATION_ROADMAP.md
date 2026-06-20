@@ -42,8 +42,8 @@ service-role on any request path** (`check-auth-safety.sh` green); writes are **
 |---|---|---|---|---|
 | E01 | Core shell / nav / UI parity | authenticated shell, nav, breadcrumbs, loading/empty/error, table primitives | `(authenticated)/layout.tsx`, `nav.tsx`/`nav-items.ts` | **Partial — persistent shell + full-parity nav (active state, tenant/user context, unbuilt areas marked "Not built yet") shipped PR #81 (§16); breadcrumbs/loading-skeletons/table primitives remain** |
 | E02 | Dashboard / home / custom dashboards | home metrics + the custom **dashboards builder** | `/page.tsx`, `/dashboards*` | Missing |
-| E03 | Apps inventory / detail parity | list (cost/util/user metrics), detail (roster/invoices/compliance/linked) | `/IDCApps`, `/IDCApps/[id]` | Partial |
-| E04 | App users parity | per-app roster, status, bulk | `IDCApps/[id]` roster, `listUsers` | Partial |
+| E03 | Apps inventory / detail parity | list (cost/util/user metrics), detail (roster/invoices/compliance/linked) | `/apps`, `/apps/[id]` | **Partial — inventory now shows RLS-scoped linked-contract + app-user counts; detail has summary/ownership/linked-contracts/account-intel insight + "Not built yet" actions (PR #83, §18); cost/util metrics, invoices, compliance remain** |
+| E04 | App users parity | per-app roster, status, bulk | `/apps/[id]` roster, app-users DAL | **Partial — read-only roster + match status (PR #83/§18); write/bulk/provisioning remain** |
 | E05 | Identity users / employees parity | people directory (IdP + app-only), drill-down | `/people`, `rebuildPeople`, `companies/people` | Missing |
 | E06 | App-user identity matching parity | matching rules, merge, match status | `/people/settings`, `syncIdpAssignments`, `0008` | Partial |
 | E07 | Contracts list/detail/create/edit parity | full field parity + gantt/timeline | `/contracts*`, `CONTRACT_FIELD_ORDER`, doc 15 | Partial |
@@ -449,3 +449,28 @@ RISK-001 or approve cutover. **Core shell/navigation UI parity is improved but n
 not complete. UI/UX parity is not complete. AI/API connector parity is not complete. Hosted Auth/tenant-context
 is verified, but old-app replacement is not yet verified. Upload is not automatically production-ready. RISK-001
 remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is ticked by this evidence.
+
+---
+
+## 18. E03 / E04 — apps inventory & detail parity (PR #83)
+
+**Apps inventory/detail parity is improved but not complete**, using only the existing RLS-backed read surfaces
+(no migration, no policy change, no writes).
+
+- **Inventory (`/apps`):** each app now shows its **RLS-scoped linked-contract count + app-user count** — honest
+  "visible to you" tallies (only rows the user may read under `app_contracts` `0006` / `app_users` `0007`, never
+  an absolute total), via a new server DAL `listAppsWithCountsForCurrentUser()` (reads `apps` + the visible
+  `app_contracts`/`app_users` `app_id`s, tallied in app code) + clearer empty-state copy. No caller tenant_id, no
+  service-role, no embedded joins.
+- **Detail (`/apps/[id]`):** keeps the app summary, ownership org IDs (pre-existing display, unchanged), linked
+  contracts, the account-intelligence insight (matched/unmatched/stale — roster + match status only, no PII), and
+  the app-users roster with match status; **adds a clear "Not built yet" Actions section** (link/unlink, edit/
+  archive, connector sync, AI app/license analysis, export) so the gaps are explicit.
+
+**Scope.** Read-only — RLS is the authorization boundary (cross-tenant denial proven by `org_rls_test.sql` T25/
+T28/T29); no app write/edit/delete, no connector sync, no AI, no imports/exports/reports/invoices, no fake data,
+no raw tenant IDs added, no signed URLs / Storage paths / tokens / secrets exposed. **App write/edit/delete
+workflows remain not built. Connector sync remains not built. AI app/license intelligence remains not built.
+Old-app parity is not complete. UI/UX parity is not complete. AI/API connector parity is not complete. Hosted
+Auth/tenant-context is verified, but old-app replacement is not yet verified. Upload is not automatically
+production-ready. RISK-001 remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is ticked.

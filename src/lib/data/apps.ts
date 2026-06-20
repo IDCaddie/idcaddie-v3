@@ -86,6 +86,69 @@ export async function getAppDetailForCurrentUser(appId: string): Promise<AppDeta
   };
 }
 
+// Inventory row = the safe AppSummary columns + two RLS-SCOPED counts (linked contracts you may read,
+// app users you may read). The counts reflect ONLY rows the signed-in user is allowed to see (RLS on
+// app_contracts `0006` / app_users `0007`) — we never show a count of rows the user can't read. They
+// are honest "visible to you" tallies, not absolute totals; no person/identity/license/invoice/file data.
+export type AppInventoryRow = AppSummary & {
+  linkedContractCount: number;
+  appUserCount: number;
+};
+
+// Tally a flat list of app ids into per-app counts.
+function tallyByApp(appIds: readonly (string | null | undefined)[]): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const id of appIds) {
+    if (!id) continue;
+    counts.set(id, (counts.get(id) ?? 0) + 1);
+  }
+  return counts;
+}
+
+// List the apps the current user may read, each with its RLS-scoped linked-contract + app-user counts.
+// Three RLS-filtered reads (apps, the visible app_contracts app_ids, the visible app_users app_ids),
+// tallied in app code — no caller-supplied tenant_id, no service-role, no writes, no embedded joins.
+export async function listAppsWithCountsForCurrentUser(): Promise<DataResult<AppInventoryRow[]>> {
+  const supabase = await createClient();
+
+  const { data: apps, error: appsErr } = await supabase
+    .from("apps")
+    .select("id, name, vendor_name, category, status")
+    .order("name", { ascending: true });
+  if (appsErr) {
+    console.error("[data/apps] listAppsWithCountsForCurrentUser apps query failed");
+    return { ok: false, error: "query_failed" };
+  }
+
+  // Visible link rows (RLS `0006`) + visible app_users (RLS `0007`) — app_id only, tallied per app.
+  const { data: links, error: linksErr } = await supabase.from("app_contracts").select("app_id");
+  if (linksErr) {
+    console.error("[data/apps] listAppsWithCountsForCurrentUser links query failed");
+    return { ok: false, error: "query_failed" };
+  }
+  const { data: users, error: usersErr } = await supabase.from("app_users").select("app_id");
+  if (usersErr) {
+    console.error("[data/apps] listAppsWithCountsForCurrentUser users query failed");
+    return { ok: false, error: "query_failed" };
+  }
+
+  const contractCounts = tallyByApp((links ?? []).map((l) => l.app_id));
+  const userCounts = tallyByApp((users ?? []).map((u) => u.app_id));
+
+  return {
+    ok: true,
+    data: (apps ?? []).map((a) => ({
+      id: a.id,
+      name: a.name,
+      vendorName: a.vendor_name,
+      category: a.category,
+      status: a.status,
+      linkedContractCount: contractCounts.get(a.id) ?? 0,
+      appUserCount: userCounts.get(a.id) ?? 0,
+    })),
+  };
+}
+
 // List the apps the current user may read. RLS (keyed on the user's tenant/org memberships)
 // decides visibility — we pass no tenant filter; the database is the authorization boundary.
 export async function listAppsForCurrentUser(): Promise<DataResult<AppSummary[]>> {

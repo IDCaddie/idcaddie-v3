@@ -237,6 +237,36 @@ export default async function AppDetailPage({
             )}
           </section>
 
+          <section className="space-y-2 text-sm">
+            <h2 className="font-medium">Actions</h2>
+            <p className="text-xs text-zinc-500">
+              These old-app actions are not implemented in v3 yet — shown so the gap is explicit, not
+              hidden. This surface is read-only.
+            </p>
+            <ul className="flex flex-wrap gap-2">
+              {[
+                "Link / unlink contracts",
+                "Edit / archive app",
+                "Connector sync",
+                "AI app / license analysis",
+                "Export",
+              ].map((action) => (
+                <li key={action}>
+                  <span
+                    aria-disabled="true"
+                    title="Not built yet"
+                    className="inline-flex items-center gap-2 rounded border border-zinc-300 px-2.5 py-1 text-xs text-zinc-400 dark:border-zinc-700"
+                  >
+                    {action}
+                    <span className="rounded-full border border-zinc-300 px-1.5 text-[10px] dark:border-zinc-700">
+                      Not built yet
+                    </span>
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </section>
+
           <p className="text-xs text-zinc-500">
             Only a matched/unmatched status is shown — no person names, identity-account details
             (provider/email/status), license rules/utilization, invoices, or files. No identity
