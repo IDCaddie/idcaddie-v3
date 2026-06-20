@@ -709,7 +709,36 @@ production-ready. RISK-001 remains OPEN. Cutover remains BLOCKED.** No doc 17 §
 
 ---
 
-<!-- §22 is reserved for the separate PR #88 "/apps inventory readable-app listing" fix. -->
+## 22. E03 — /apps inventory: defensive count-read hardening (PR #88, NOT the staging fix)
+
+**This is defensive hardening — it did NOT fix the observed staging symptom.** PR #88 was originally opened to
+"fix" the §86-recorded `/apps` empty state, but **§23 (PR #89) established the real cause: the §21 fixture had not
+yet been applied / was not visible to that account** — an operational state, resolved by *applying the fixture*,
+not a code bug. Rebased onto current main (post-#89) and kept **only** as a latent-resilience improvement, with the
+docs corrected to be causally honest.
+
+**What it hardens.** `listAppsWithCountsForCurrentUser()` runs the primary `apps` list plus two **secondary,
+unbounded** count scans (`select app_id from app_contracts`, `select app_id from app_users`). Previously a failure
+of *either* count scan fail-closed the **whole** helper (`{ok:false}` → the red "Could not load apps" banner),
+blacking out the entire readable apps inventory because a secondary enrichment scan errored. On a large tenant
+those unbounded scans are a realistic statement-timeout candidate. The hardening makes the **apps read the only
+fatal read**: a count-scan failure is logged and degrades that count to `null` (rendered "—", unknown) while
+**every readable app still lists**. `AppInventoryRow.linkedContractCount`/`appUserCount` become `number | null`;
+the page renders `?? "—"`.
+
+**Honesty + scope.** This does **not** fix the observed `/apps` symptom (that was fixture-not-applied/not-visible,
+resolved by §23/#89); it is a defensive improvement for a count-query degradation path that has **not** been
+observed in staging. Counts stay **RLS-scoped / visible-to-you** (`null` on failure never over-counts and injects
+no foreign rows); the DTO still exposes only `id/name/vendorName/category/status` + the two now-nullable counts —
+no `tenant_id`/`person_id`/org IDs/raw rows/tokens/URLs/secrets (key-set asserted, incl. the degraded path). App
+detail and `/people` are unchanged (neither imports the inventory DTO). **No RLS-policy change, no migration, no
+production touched, no hosted command, no service-role.** +2 tests (degraded-path). **Old-app parity is not
+complete. UI/UX parity is not complete. AI/API connector parity is not complete. RISK-001 remains OPEN. Cutover
+remains BLOCKED.** No doc 17 §5 box is ticked. *(Reasonable alternative considered: close #88 unmerged as
+unnecessary — kept because the hardening is correct, minimal, and tested, and the failure mode is real if
+undemonstrated; the reviewer may still close it.)*
+
+---
 
 ## 23. E03–E06 — Apps/People populated-path staging verification PASSED (PR #89, synthetic Tenant A fixture)
 

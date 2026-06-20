@@ -85,10 +85,10 @@ export default async function AppsPage() {
                       </span>
                     </td>
                     <td className="py-2 pr-4 text-right tabular-nums text-zinc-600 dark:text-zinc-400">
-                      {app.linkedContractCount}
+                      {app.linkedContractCount ?? "—"}
                     </td>
                     <td className="py-2 pr-4 text-right tabular-nums text-zinc-600 dark:text-zinc-400">
-                      {app.appUserCount}
+                      {app.appUserCount ?? "—"}
                     </td>
                   </tr>
                 ))}
@@ -96,7 +96,8 @@ export default async function AppsPage() {
             </table>
           </div>
           <p className="text-xs text-zinc-500">
-            Counts are “visible to you” (RLS-scoped), not absolute totals. Connector-synced inventory,
+            Counts are “visible to you” (RLS-scoped), not absolute totals; a “—” means that count is
+            temporarily unavailable (not zero) and never hides the app. Connector-synced inventory,
             spend/license intelligence, imports, exports, and reports are not built yet.
           </p>
         </section>

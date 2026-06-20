@@ -90,9 +90,11 @@ export async function getAppDetailForCurrentUser(appId: string): Promise<AppDeta
 // app users you may read). The counts reflect ONLY rows the signed-in user is allowed to see (RLS on
 // app_contracts `0006` / app_users `0007`) — we never show a count of rows the user can't read. They
 // are honest "visible to you" tallies, not absolute totals; no person/identity/license/invoice/file data.
+// A count is `null` when its relation read FAILED (rendered as "—"): the app row is still listed — a
+// count-query failure must never hide a readable app (the apps query is the only fatal read).
 export type AppInventoryRow = AppSummary & {
-  linkedContractCount: number;
-  appUserCount: number;
+  linkedContractCount: number | null;
+  appUserCount: number | null;
 };
 
 // Tally a flat list of app ids into per-app counts.
@@ -108,6 +110,15 @@ function tallyByApp(appIds: readonly (string | null | undefined)[]): Map<string,
 // List the apps the current user may read, each with its RLS-scoped linked-contract + app-user counts.
 // Three RLS-filtered reads (apps, the visible app_contracts app_ids, the visible app_users app_ids),
 // tallied in app code — no caller-supplied tenant_id, no service-role, no writes, no embedded joins.
+//
+// FAIL-CLOSED on the APPS read ONLY: if the apps query errors we return a safe error label (we cannot
+// list apps we could not read). The two COUNT reads are NON-FATAL by design — DEFENSIVE HARDENING, not a
+// fix for any observed bug: the counts are unbounded secondary scans, and a transient failure of one
+// (timeout, etc.) must NOT black out the readable apps list. (The §86-recorded `/apps` empty state was
+// the staging fixture not yet applied/visible to that account — resolved by applying the fixture, PR #89
+// / doc 41 §23 — NOT a count-read failure.) On a count-read failure we log it and surface that count as
+// `null` ("—", unknown) for every row, while still listing every readable app. Counts stay RLS-scoped
+// (tallied from RLS-filtered reads) and never over-count.
 export async function listAppsWithCountsForCurrentUser(): Promise<DataResult<AppInventoryRow[]>> {
   const supabase = await createClient();
 
@@ -121,19 +132,18 @@ export async function listAppsWithCountsForCurrentUser(): Promise<DataResult<App
   }
 
   // Visible link rows (RLS `0006`) + visible app_users (RLS `0007`) — app_id only, tallied per app.
+  // Non-fatal: a failure ⇒ that count map is null (rendered "—"), but the apps still list.
   const { data: links, error: linksErr } = await supabase.from("app_contracts").select("app_id");
   if (linksErr) {
-    console.error("[data/apps] listAppsWithCountsForCurrentUser links query failed");
-    return { ok: false, error: "query_failed" };
+    console.error("[data/apps] listAppsWithCountsForCurrentUser links count query failed (non-fatal)");
   }
   const { data: users, error: usersErr } = await supabase.from("app_users").select("app_id");
   if (usersErr) {
-    console.error("[data/apps] listAppsWithCountsForCurrentUser users query failed");
-    return { ok: false, error: "query_failed" };
+    console.error("[data/apps] listAppsWithCountsForCurrentUser users count query failed (non-fatal)");
   }
 
-  const contractCounts = tallyByApp((links ?? []).map((l) => l.app_id));
-  const userCounts = tallyByApp((users ?? []).map((u) => u.app_id));
+  const contractCounts = linksErr ? null : tallyByApp((links ?? []).map((l) => l.app_id));
+  const userCounts = usersErr ? null : tallyByApp((users ?? []).map((u) => u.app_id));
 
   return {
     ok: true,
@@ -143,8 +153,8 @@ export async function listAppsWithCountsForCurrentUser(): Promise<DataResult<App
       vendorName: a.vendor_name,
       category: a.category,
       status: a.status,
-      linkedContractCount: contractCounts.get(a.id) ?? 0,
-      appUserCount: userCounts.get(a.id) ?? 0,
+      linkedContractCount: contractCounts ? (contractCounts.get(a.id) ?? 0) : null,
+      appUserCount: userCounts ? (userCounts.get(a.id) ?? 0) : null,
     })),
   };
 }
