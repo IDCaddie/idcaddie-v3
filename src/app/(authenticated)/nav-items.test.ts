@@ -39,7 +39,6 @@ describe("NAV_SECTIONS", () => {
       "Dashboards",
       "Connectors",
       "AI / Analysis",
-      "Files / Documents",
       "Identity matching", // read-only match STATUS is on /people; the resolution workflow is not built
     ]) {
       expect(byLabel[label]).toBeNull();
@@ -57,6 +56,7 @@ describe("NAV_SECTIONS", () => {
     expect(byLabel["Reports"]).toBe("/reports");
     expect(byLabel["Audit / Logs"]).toBe("/audit");
     expect(byLabel["Admin / Settings"]).toBe("/admin");
+    expect(byLabel["Files / Documents"]).toBe("/files");
   });
 
   it("every enabled nav item maps to an implemented route (no enabled item points at an unbuilt area)", () => {

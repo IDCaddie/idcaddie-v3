@@ -9,7 +9,7 @@ export type NavSection = { title: string; items: NavItem[] };
 
 // The real, implemented authenticated routes that may be linked. Keep in sync with the route tree;
 // the test asserts every linked NavItem.href is one of these (so an unbuilt area can never be linked).
-export const IMPLEMENTED_ROUTES = ["/", "/apps", "/contracts", "/people", "/reports", "/audit", "/admin"] as const;
+export const IMPLEMENTED_ROUTES = ["/", "/apps", "/contracts", "/people", "/reports", "/audit", "/admin", "/files"] as const;
 
 export const NAV_SECTIONS: NavSection[] = [
   {
@@ -31,7 +31,9 @@ export const NAV_SECTIONS: NavSection[] = [
     title: "Contracts & files",
     items: [
       { label: "Contracts", href: "/contracts" },
-      { label: "Files / Documents", href: null, note: "attach files on a contract" },
+      // Read-only file list; upload/open happen on the contract (the verified path). No standalone
+      // upload/delete/export/open-download — see the page's "Not built yet" copy.
+      { label: "Files / Documents", href: "/files", note: "read-only; upload on a contract" },
     ],
   },
   {

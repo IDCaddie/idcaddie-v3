@@ -48,7 +48,7 @@ service-role on any request path** (`check-auth-safety.sh` green); writes are **
 | E06 | App-user identity matching parity | matching rules, merge, match status | `/people` match status, `0008` | **Partial — read-only matched/unmatched STATUS surfaced on `/people` + app detail (PR #85/§20); matching rules / manual match-unmatch / merge / resolution workflow remain not built** |
 | E07 | Contracts list/detail/create/edit parity | full field parity + gantt/timeline | `/contracts*`, `CONTRACT_FIELD_ORDER`, doc 15 | Partial |
 | E08 | Contract steward / write workflow parity | authority, audit, delete/archive, link/unlink | `updateContract`, `0004`/`0010` | Partial |
-| E09 | Files / upload / download parity | upload action, signed-URL read, preview, file↔app/contract links, inbound | `/files*`, `files/*`, Storage (done boundary) | **Partial — contract attachments (upload + signed-URL open) shipped PR #76 (E09a); files-page/preview/inbound/links remain** |
+| E09 | Files / upload / download parity | upload action, signed-URL read, preview, file↔app/contract links, inbound | `/files`, `files/*`, Storage (done boundary) | **Partial — contract attachments (upload + signed-URL open) shipped PR #76 (E09a); read-only `/files` list (safe metadata + contract link, no storage path/signed URL) shipped PR #94 (§28); standalone upload/open-download/delete/export/preview/inbound remain** |
 | E10 | Invoices parity | invoice inventory/detail, chargeback | `/invoices*`, `companies/billing` | Missing |
 | E11 | Spend / license / account intelligence | ELU/waste, spend, account-intel | `IDCApps/insights/elu`, invoice AI | Partial/Missing |
 | E12 | Shadow IT / unmanaged accounts | UAR, stale users, orphan/shadow risk | `insights/uar`,`stale`, `/people/risks` | Missing |
@@ -881,3 +881,34 @@ No RLS policies were changed. No migrations were added.** **Old-app parity is no
 complete. AI/API connector parity is not complete. Hosted Auth/tenant-context is verified, but old-app replacement
 is not yet verified. Upload is not automatically production-ready. RISK-001 remains OPEN. Cutover remains
 BLOCKED.** No doc 17 §5 box is ticked by this verification.
+
+---
+
+## 28. E09 — Files / Documents read-only list (PR #94)
+
+**Files / Documents read-only parity is improved but not complete.** A read-only **`/files`** route + DAL
+`listFilesForCurrentUser()` lists the contract files the current user may read (RLS-scoped — `files` SELECT =
+`is_tenant_member(tenant_id)`, `0013`), each with safe metadata: **file name, related contract (linked when
+separately readable), upload status, content type, size, added date.** It reuses the same discipline as the proven
+contract-files DAL: the user-scoped client (no service-role), an explicit safe column subset, and a DTO that
+**deliberately never selects or exposes `storage_path`, `storage_bucket`, the raw object name, `sha256`,
+`tenant_id`, `uploaded_by`, the extraction blobs, or any signed URL** (a test asserts the exact key set + the
+absence of every forbidden internal). The sidebar **Files / Documents** item is now enabled → `/files`.
+
+**Open path + not-built scope.** **Standalone open/download remains not built** (the existing safe download helper
+is **not** reused standalone here — keeping the PR narrow and avoiding any signed-URL surface on `/files`); a file
+links to its contract, where the existing verified open flow lives. **Contract-level file attachment remains the
+implemented upload path.** **Standalone file upload remains not built. Standalone file delete remains not built.
+Standalone file export remains not built.** No connector ingestion, no AI document analysis, no new Storage
+authorization. **No raw storage paths, signed URLs, bucket internals, tenant IDs, tokens, secrets, service-role
+details, JWTs, cookies, connector credentials, or API keys are exposed.**
+
+**Scope / guardrails.** Read-only — RLS is the authorization boundary (no cross-tenant; reads only `files` +
+`contracts`, both tenant-member SELECT); no writes, no migration, no RLS-policy change; existing contract-file
+behavior is unchanged (contract-files.ts + the contract detail page are untouched); the route inherits the
+`(authenticated)` auth guard. +6 tests (114 total): the safe-projection (no storage-path/bucket/sha256/tenant-id/
+uploaded-by leak), status formatting (uploaded/failed/pending), size formatting, contract-name mapping (incl.
+null), empty state, fail-closed; + the nav test asserts the new enabled item maps to an implemented route.
+**Old-app parity is not complete. UI/UX parity is not complete. AI/API connector parity is not complete. Hosted
+Auth/tenant-context is verified, but old-app replacement is not yet verified. Upload is not automatically
+production-ready. RISK-001 remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is ticked by this PR.
