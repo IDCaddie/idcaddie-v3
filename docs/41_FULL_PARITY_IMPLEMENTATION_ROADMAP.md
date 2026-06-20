@@ -41,7 +41,7 @@ service-role on any request path** (`check-auth-safety.sh` green); writes are **
 | # | Epic | Scope | Legacy evidence | v3 status |
 |---|---|---|---|---|
 | E01 | Core shell / nav / UI parity | authenticated shell, nav, breadcrumbs, loading/empty/error, table primitives | `(authenticated)/layout.tsx`, `nav.tsx`/`nav-items.ts` | **Partial — persistent shell + full-parity nav (active state, tenant/user context, unbuilt areas marked "Not built yet") shipped PR #81 (§16); breadcrumbs/loading-skeletons/table primitives remain** |
-| E02 | Dashboard / home / custom dashboards | home metrics + the custom **dashboards builder** | `/page.tsx`, `/dashboards*` | Missing |
+| E02 | Dashboard / home / custom dashboards | home metrics + the custom **dashboards builder** | `/dashboards`, dashboard summary DAL | **Partial — read-only `/dashboards` summary (RLS-scoped visible-to-you counts: apps/contracts/files/accounts/matched/unmatched/recent-audit, linking to implemented pages) shipped PR #96 (§30); custom dashboard builder / charts / connector-spend / AI insights / export / scheduled delivery remain not built** |
 | E03 | Apps inventory / detail parity | list (cost/util/user metrics), detail (roster/invoices/compliance/linked) | `/apps`, `/apps/[id]` | **Partial — inventory now shows RLS-scoped linked-contract + app-user counts; detail has summary/ownership/linked-contracts/account-intel insight + "Not built yet" actions (PR #83, §18); cost/util metrics, invoices, compliance remain** |
 | E04 | App users parity | per-app roster, status, bulk | `/apps/[id]` roster, app-users DAL | **Partial — read-only roster + match status (PR #83/§18); write/bulk/provisioning remain** |
 | E05 | Identity users / employees parity | people directory (IdP + app-only), drill-down | `/people`, app-users DAL | **Partial — read-only `/people` identity-ACCOUNTS view (app_users + app + match status, no person PII) shipped PR #85 (§20); the person/employee DIRECTORY (people/identity_accounts) stays deferred (RISK-002)** |
@@ -944,3 +944,34 @@ No RLS policies were changed. No migrations were added.** **Old-app parity is no
 complete. AI/API connector parity is not complete. Hosted Auth/tenant-context is verified, but old-app replacement
 is not yet verified. Upload is not automatically production-ready. RISK-001 remains OPEN. Cutover remains
 BLOCKED.** No doc 17 §5 box is ticked by this verification.
+
+---
+
+## 30. E02 — Dashboards read-only summary (PR #96)
+
+**Dashboards read-only parity is improved but not complete.** A read-only **`/dashboards`** route + a thin DAL
+`getDashboardSummaryForCurrentUser()` that **composes two already-verified, already-tested helpers** —
+`getReportsSummaryForCurrentUser()` (apps/contracts/files/account counts) + `listRecentAuditEntriesForCurrentUser()`
+(a recent-activity COUNT only) — into a numbers-only summary. **No new DB read, no new query power, no new RLS
+policy, no service-role.** The page shows stat cards (apps, contracts, files, app-user accounts +
+matched/unmatched, recent audit entries, reports) — **Dashboard counts are RLS-scoped / visible-to-you, not
+absolute tenant-wide totals** (each `number | null`, "—" when its underlying read failed). **Dashboard links only
+to implemented read-only pages.** Those are `/apps`, `/contracts`, `/files`, `/people`, `/audit`, `/reports`. The sidebar
+**Dashboards** item is now enabled → `/dashboards`.
+
+**Not built (read-only — no builder/charts/analytics/AI/export):** **Custom dashboard builder remains not built.
+Connector-driven spend/license dashboards remain not built. AI dashboard insights remain not built. Dashboard
+exports remain not built. Scheduled dashboard delivery remains not built.** (Charts/visualizations are also not
+built — the dashboard adds no new data logic.)
+
+**Scope / guardrails.** Read-only — RLS is the authorization boundary (the reused helpers are user-scoped, no
+cross-tenant, no service-role); no writes, no migration, no RLS-policy change; the existing reports/audit/people/
+files helpers are unchanged (pure reuse); the DTO is integers/nulls only — **no tenant IDs, organization IDs,
+storage paths, signed URLs, raw audit JSON, `actor_user_id`, IP/user-agent, tokens, secrets, service-role,
+connector credentials, JWTs, cookies, or API keys** (a test asserts the numbers-only key set); the route inherits
+the `(authenticated)` auth guard. +3 tests (117 total): the composition + numbers-only DTO, the degraded
+(null) recent-activity case, and the degraded reports pass-through; + the nav test asserts the new enabled item
+maps to an implemented route. **Old-app parity is not complete. UI/UX parity is not complete. AI/API connector
+parity is not complete. Hosted Auth/tenant-context is verified, but old-app replacement is not yet verified.
+Upload is not automatically production-ready. RISK-001 remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is
+ticked by this PR.
