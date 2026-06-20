@@ -1069,3 +1069,42 @@ PR, or (2) an identity matching workflow RLS/write design PR.
 Old-app parity is not complete. UI/UX parity is not complete. AI/API connector parity is not complete. Upload is
 not automatically production-ready. Hosted Auth/tenant-context is verified, but old-app replacement is not yet
 verified.** No doc 17 §5 box is ticked by this checkpoint.
+
+---
+
+## 33. DESIGN — Connector credential vault (PR #99, Option A)
+
+**Connector credential vault design is drafted but not implemented. Connector implementation remains blocked until
+the vault design is reviewed and accepted.** This is the §32.3 Option-A design PR — docs-only, the prerequisite
+for any connector work and for **RISK-007** (connector secrets). The full design is
+[42_CONNECTOR_CREDENTIAL_VAULT_DESIGN](./42_CONNECTOR_CREDENTIAL_VAULT_DESIGN.md).
+
+**The five load-bearing decisions.** (1) **Two-tier split** — metadata (name/provider/status/last-sync) in
+RLS-readable tables; secret material (tokens/keys) in a store with **no `authenticated` grant and RLS deny-all**, so
+no SQL a logged-in user runs returns a secret. (2) **Envelope encryption** — per-secret DEK under AEAD, DEKs wrapped
+by a KEK in a managed KMS (never repo/env/browser), AAD binding ciphertext to `{tenant_id, connector_id,
+secret_kind, version}`. (3) **Server-only secret use** — decrypt only inside a server-side runner covered by
+`check-auth-safety`; the client contract is a safe-metadata DTO and nothing else. (4) **Re-authorized execution** —
+every action re-derives tenant context server-side from the JWT and verifies membership **and** admin/steward role;
+no blanket service-role, client `tenant_id` never trusted. (5) **Auditable / reversible / killable** — append-only
+audit (reuse `reject_audit_mutation`), versioned + revocable secrets, per-tenant/per-connector/global kill-switch.
+
+**Threat model (malicious Tenant-A user) → control:** read Tenant-B creds → secret tier has no authenticated path;
+trigger Tenant-B sync → runner re-checks target-tenant membership+role; exfiltrate tokens / browser-leak → secrets
+never serialized, log/error redaction deny-list; service-role exploit → none on request paths (existing gate),
+runner uses a narrow dedicated identity; refresh replay → single-flight + refresh-token rotation; callback abuse →
+single-use CSRF `state` bound to initiating user+tenant+PKCE/nonce; viewer→admin elevation → server-side role check
+every action; stale/deleted creds → versioned active-pointer + tombstone, runner refuses revoked; audit/run
+poisoning → append-only + server-written-only.
+
+**Schema/RLS are conceptual only — no migration, table, policy, or encryption code in this PR.** Carries the
+`0016`/T37 lesson: `REVOKE` broad + `GRANT` narrow for the secret tables and assert the privilege surface
+(`has_table_privilege`) in the RLS suite. Sequencing is gated on design acceptance (step 0); rollout is staging-only
+(`ycdpzduxugdsffjqyoai`), feature-flagged, human-verified, never production (`dzbfxulvxchdemcettrx`) until accepted
++ the doc 17 §5 gate. **No connector credentials are stored by this PR. No connector sync is implemented by this PR.
+No production data was touched. No hosted commands were run. No migrations were added. No RLS policies were changed.
+No service-role access was added. Connectors remain not built. AI / Analysis remains not built. Imports remain not
+built. Exports remain not built. Billing remains not built. Old-app parity is not complete. UI/UX parity is not
+complete. AI/API connector parity is not complete. Upload is not automatically production-ready. Hosted
+Auth/tenant-context is verified, but old-app replacement is not yet verified. RISK-001 remains OPEN. Cutover remains
+BLOCKED.** No doc 17 §5 box is ticked by this design PR.
