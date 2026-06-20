@@ -44,8 +44,8 @@ service-role on any request path** (`check-auth-safety.sh` green); writes are **
 | E02 | Dashboard / home / custom dashboards | home metrics + the custom **dashboards builder** | `/page.tsx`, `/dashboards*` | Missing |
 | E03 | Apps inventory / detail parity | list (cost/util/user metrics), detail (roster/invoices/compliance/linked) | `/apps`, `/apps/[id]` | **Partial — inventory now shows RLS-scoped linked-contract + app-user counts; detail has summary/ownership/linked-contracts/account-intel insight + "Not built yet" actions (PR #83, §18); cost/util metrics, invoices, compliance remain** |
 | E04 | App users parity | per-app roster, status, bulk | `/apps/[id]` roster, app-users DAL | **Partial — read-only roster + match status (PR #83/§18); write/bulk/provisioning remain** |
-| E05 | Identity users / employees parity | people directory (IdP + app-only), drill-down | `/people`, `rebuildPeople`, `companies/people` | Missing |
-| E06 | App-user identity matching parity | matching rules, merge, match status | `/people/settings`, `syncIdpAssignments`, `0008` | Partial |
+| E05 | Identity users / employees parity | people directory (IdP + app-only), drill-down | `/people`, app-users DAL | **Partial — read-only `/people` identity-ACCOUNTS view (app_users + app + match status, no person PII) shipped PR #85 (§20); the person/employee DIRECTORY (people/identity_accounts) stays deferred (RISK-002)** |
+| E06 | App-user identity matching parity | matching rules, merge, match status | `/people` match status, `0008` | **Partial — read-only matched/unmatched STATUS surfaced on `/people` + app detail (PR #85/§20); matching rules / manual match-unmatch / merge / resolution workflow remain not built** |
 | E07 | Contracts list/detail/create/edit parity | full field parity + gantt/timeline | `/contracts*`, `CONTRACT_FIELD_ORDER`, doc 15 | Partial |
 | E08 | Contract steward / write workflow parity | authority, audit, delete/archive, link/unlink | `updateContract`, `0004`/`0010` | Partial |
 | E09 | Files / upload / download parity | upload action, signed-URL read, preview, file↔app/contract links, inbound | `/files*`, `files/*`, Storage (done boundary) | **Partial — contract attachments (upload + signed-URL open) shipped PR #76 (E09a); files-page/preview/inbound/links remain** |
@@ -564,3 +564,32 @@ Connector sync remains not built. AI app/license intelligence remains not built.
 UI/UX parity is not complete. AI/API connector parity is not complete. Hosted Auth/tenant-context is verified, but
 old-app replacement is not yet verified. Upload is not automatically production-ready. RISK-001 remains OPEN.
 Cutover remains BLOCKED.** No doc 17 §5 box is ticked by this evidence.
+
+---
+
+## 20. E05 / E06 — People / Users + identity-matching read parity (PR #85)
+
+**People / Users read-only parity is improved but not complete.** A read-only **`/people`** route + server DAL
+`listIdentityAccountsForCurrentUser()` shows the **identity ACCOUNTS** the user may read across visible apps —
+each with its app (linked), the account's own fields (display name / email / status / license / last-active), and
+a matched/unmatched STATUS — plus a summary (accounts, distinct apps, matched, unmatched). The **People / Users**
+sidebar item is now enabled → `/people`.
+
+**It reuses only surfaces already proven safe + surfaced on app detail** — `app_users` (`0007`), `apps` (name),
+match status from `app_user_identity_matches` (`0008`). It reads **`app_users`/`apps`/`matches` only — never
+`people`/`identity_accounts`** — so it exposes **no person PII** (no `people` row, no `person_id`, no IdP
+provider/email/status); the org-scoped people/identity directory read stays **deferred (RISK-002)**. Accounts are
+a **flat list, not grouped/merged** — it never implies a resolution the system hasn't made.
+
+**Identity Matching read-only parity is improved but not complete** — read-only match STATUS is surfaced on
+`/people` (and app detail), but a dedicated matching/resolution surface + the workflow remain not built, so the
+**Identity matching** nav item stays "Not built yet". **Manual match/unmatch workflows remain not built. Bulk
+identity resolution remains not built. SCIM/IdP import remains not built. Connector sync remains not built.
+AI-assisted identity matching remains not built. Exports remain not built.**
+
+**Scope.** Read-only — RLS is the authorization boundary (no cross-tenant — `org_rls_test.sql` T29/T30); no
+write/edit/delete, no migration, no RLS-policy change, no fake data, no raw tenant IDs, no signed URLs / Storage
+paths / tokens / secrets; auth guard preserved. The DTO carries no tenant id / person id (tested). **Old-app
+parity is not complete. UI/UX parity is not complete. AI/API connector parity is not complete. Hosted
+Auth/tenant-context is verified, but old-app replacement is not yet verified. Upload is not automatically
+production-ready. RISK-001 remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is ticked.

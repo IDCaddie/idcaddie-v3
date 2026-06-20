@@ -40,8 +40,7 @@ describe("NAV_SECTIONS", () => {
       "Connectors",
       "AI / Analysis",
       "Files / Documents",
-      "People / Users",
-      "Identity matching",
+      "Identity matching", // read-only match STATUS is on /people; the resolution workflow is not built
       "Reports",
       "Audit / Logs",
       "Admin / Settings",
@@ -57,5 +56,12 @@ describe("NAV_SECTIONS", () => {
     expect(byLabel["Home"]).toBe("/");
     expect(byLabel["Apps"]).toBe("/apps");
     expect(byLabel["Contracts"]).toBe("/contracts");
+    expect(byLabel["People / Users"]).toBe("/people");
+  });
+
+  it("every enabled nav item maps to an implemented route (no enabled item points at an unbuilt area)", () => {
+    for (const item of NAV_SECTIONS.flatMap((s) => s.items)) {
+      if (item.href !== null) expect(IMPLEMENTED_ROUTES).toContain(item.href);
+    }
   });
 });
