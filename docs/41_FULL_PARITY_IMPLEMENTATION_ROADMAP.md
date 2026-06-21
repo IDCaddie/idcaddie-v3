@@ -1221,3 +1221,34 @@ added. No production data was touched.** A human re-applies `0018` to production
 **Old-app parity is not complete. UI/UX parity is not complete. AI/API connector parity is not complete. Upload is
 not automatically production-ready. Hosted Auth/tenant-context is verified, but old-app replacement is not yet
 verified. RISK-001 remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is ticked by this verification.
+
+---
+
+## 38. IMPLEMENTATION — PR C: server-only connector vault crypto wrapper (PR #104)
+
+**Server-only connector vault crypto wrapper is implemented and tested** (doc 42 §27) — the §20 PR C gate, the
+reviewed envelope-encryption boundary the §21 hard gates require **before any connector secret may be stored**.
+`src/lib/server/connector-vault/crypto.ts` exposes `encryptConnectorSecret` / `decryptConnectorSecret` over an
+injected `ConnectorVaultKeyProvider` (KMS abstraction). Pure AEAD — **no database access, no Supabase client
+import, no service-role, no `process.env`** (a test asserts the only import is `node:crypto`). AES-256-GCM, a
+per-secret DEK wrapped by the provider's KEK, a structured payload (`v/alg/kekId/wrappedDek/iv/ciphertext/tag/
+aadDigest`), and **AAD binding `{tenant_id, connector_id, secret_kind, version}`** so decryption fails closed on
+any swap; plaintext only ever leaves `decryptConnectorSecret`; DEK zeroed after use; typed `ConnectorVaultCryptoError`
+with no plaintext/key bytes in messages.
+
+**Server-only boundary:** under `src/lib/server/`, a runtime browser-sentinel, and a static guard test
+(`no-client-import.test.ts`) asserting no `"use client"`/`src/app` file imports it. **The wrapper uses test-only
+key material in tests only** (an in-memory provider in the test file — random KEKs, no checked-in keys, no env
+secrets); **no real KMS is integrated.** +19 tests (117 → 136): round-trip; ciphertext ≠ / contains-no plaintext;
+tenant/connector/kind/version-swap fail; tampered ciphertext/tag fail; wrong KEK fails; redacted errors; input
+validation; all five secret kinds; purity + server-only guards.
+
+**No real connector credentials are stored. No connector secret material is inserted, updated, or deleted. No
+connector sync is implemented. No provider connector is implemented. No OAuth callback is implemented. No connector
+UI is implemented. No service-role request path is added. No production data was touched. No hosted commands were
+run.** No migration; RLS suite unchanged (318); types 0-diff. **Connector vault is still not usable for real
+credentials until the remaining gated PRs are complete** (PR D audit/run model → PR E metadata UI → PR F OAuth
+callback → PR G first connector). **Connector implementation remains blocked. Old-app parity is not complete. UI/UX
+parity is not complete. AI/API connector parity is not complete. Upload is not automatically production-ready.
+Hosted Auth/tenant-context is verified, but old-app replacement is not yet verified. RISK-001 remains OPEN. Cutover
+remains BLOCKED.** No doc 17 §5 box is ticked by this PR.

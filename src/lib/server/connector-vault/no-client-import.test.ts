@@ -1,0 +1,60 @@
+import { describe, it, expect } from "vitest";
+import fs from "node:fs";
+import path from "node:path";
+
+// Static server-only guard (docs/42 §6, PR C property 1.4): prove the connector vault crypto module is
+// never reachable from client/browser code. This scans every .ts/.tsx under src/ and asserts that:
+//   (a) NO file that declares "use client" imports the crypto module, and
+//   (b) NO file under src/app (the route/component tree, server or client) imports it directly —
+//       the crypto wrapper is reached only via future server-only DAL/runner code under src/lib/server.
+// If a later PR legitimately wires the wrapper into a server-only runner, that runner lives under
+// src/lib/server (not src/app, not a "use client" file), so this guard keeps holding.
+
+const SRC = path.resolve(__dirname, "..", "..", "..", "..", "src");
+const CRYPTO_REL_HINTS = ["connector-vault/crypto", "server/connector-vault/crypto", "lib/server/connector-vault/crypto"];
+
+function walk(dir: string): string[] {
+  const out: string[] = [];
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      if (entry.name === "node_modules" || entry.name === ".next") continue;
+      out.push(...walk(full));
+    } else if (/\.(ts|tsx)$/.test(entry.name)) {
+      out.push(full);
+    }
+  }
+  return out;
+}
+
+function importsCrypto(src: string): boolean {
+  // any import/require/dynamic-import that references the crypto module path
+  return CRYPTO_REL_HINTS.some((hint) => src.includes(hint));
+}
+
+describe("connector vault crypto is server-only (no client/app import path)", () => {
+  const files = walk(SRC).filter((f) => !f.includes(path.join("server", "connector-vault")));
+
+  it("no \"use client\" file imports the connector vault crypto module", () => {
+    const offenders = files.filter((f) => {
+      const src = fs.readFileSync(f, "utf8");
+      const isClient = /^\s*["']use client["']/m.test(src);
+      return isClient && importsCrypto(src);
+    });
+    expect(offenders).toEqual([]);
+  });
+
+  it("no file under src/app imports the connector vault crypto module directly", () => {
+    const appDir = path.join(SRC, "app");
+    const offenders = files
+      .filter((f) => f.startsWith(appDir))
+      .filter((f) => importsCrypto(fs.readFileSync(f, "utf8")));
+    expect(offenders).toEqual([]);
+  });
+
+  it("the crypto module declares its server-only runtime sentinel", () => {
+    const src = fs.readFileSync(path.join(SRC, "lib", "server", "connector-vault", "crypto.ts"), "utf8");
+    expect(src).toMatch(/server-only/);
+    expect(src).toMatch(/globalThis[^\n]*window/); // the browser-detection sentinel
+  });
+});
