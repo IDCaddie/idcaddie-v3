@@ -495,3 +495,34 @@ until the remaining gated PRs are complete. Connector implementation remains blo
 complete. UI/UX parity is not complete. AI/API connector parity is not complete. Upload is not automatically
 production-ready. Hosted Auth/tenant-context is verified, but old-app replacement is not yet verified. RISK-001
 remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is ticked by this PR.
+
+## 29. Staging verification — `0019` run/audit lifecycle (PR #107)
+
+**Connector run/audit lifecycle migration 0019 has been applied and verified on staging.** A human applied `0019`
+to the staging project `ycdpzduxugdsffjqyoai` and queried the live schema + privilege/policy surface. **The agent
+ran nothing — no hosted command, no staging mutation, no secrets. No production data was touched.**
+
+### 29.1 Observed — PASS
+The remote migration list showed `0019` **absent** before push; `supabase db push --linked` applied
+`0019_connector_run_audit_lifecycle.sql`; the list then showed `0019` **present** on Remote. The linked project ref
+remained `ycdpzduxugdsffjqyoai`. The live `connector_runs_status_check` query returned the six lifecycle states —
+**`connector_runs` supports queued, running, succeeded, failed, canceled, and timed_out.** The table-privilege
+query returned **exactly two rows** — `authenticated | connector_runs | SELECT` and `authenticated | connectors |
+SELECT` — with **no anon rows and no connector_secrets rows**: **Connector metadata tables expose authenticated
+SELECT only. Anon has no connector vault table privileges. Connector secret material remains inaccessible to anon
+and authenticated users. No broad INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, or TRIGGER grants remain on
+connector vault tables for anon or authenticated.** `pg_policies` returned exactly the two tenant-member SELECT
+policies (`connectors` → "members read tenant connectors", SELECT; `connector_runs` → "members read tenant
+connector runs", SELECT); **`connector_secrets` has no policies.** This matches the `0019` intent + the local
+`org_rls_test.sql` T41 proof — the six-state lifecycle landed and the `0018` least-privilege surface is intact.
+
+### 29.2 Scope / guardrails
+This verifies only the `0019` schema + grant/policy surface on staging — not any connector behavior (there is
+none). **Connector vault is still not usable. Connector implementation remains blocked. No connector credentials
+are stored. No connector sync is implemented. No provider connector is implemented. No OAuth callback is
+implemented. No connector UI is implemented. No service-role request path is added. No production data was
+touched.** A human re-applies `0019` to production in a future step (an agent never runs hosted commands); next
+gate is still **PR E** (read-only connector metadata UI). **Old-app parity is not complete. UI/UX parity is not
+complete. AI/API connector parity is not complete. Upload is not automatically production-ready. Hosted
+Auth/tenant-context is verified, but old-app replacement is not yet verified. RISK-001 remains OPEN. Cutover
+remains BLOCKED.** No doc 17 §5 box is ticked by this verification.
