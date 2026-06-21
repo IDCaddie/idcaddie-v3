@@ -1285,3 +1285,28 @@ Connector implementation remains blocked. Old-app parity is not complete. UI/UX 
 connector parity is not complete. Upload is not automatically production-ready. Hosted Auth/tenant-context is
 verified, but old-app replacement is not yet verified. RISK-001 remains OPEN. Cutover remains BLOCKED.** No doc 17
 §5 box is ticked by this PR.
+
+---
+
+## 40. STAGING VERIFICATION — `0019` connector run/audit lifecycle (PR #107)
+
+**Connector run/audit lifecycle migration 0019 has been applied and verified on staging** (doc 42 §29). A human
+applied `0019` to staging (`ycdpzduxugdsffjqyoai`): the remote migration list showed `0019` absent before push,
+`supabase db push --linked` applied it, the list then showed `0019` **present** on Remote; linked ref remained
+`ycdpzduxugdsffjqyoai`. The live `connector_runs_status_check` returned the six lifecycle states — **`connector_runs`
+supports queued, running, succeeded, failed, canceled, and timed_out.** The table-privilege query returned
+**exactly two rows** (`authenticated | connector_runs | SELECT` and `authenticated | connectors | SELECT`) with no
+anon rows and no connector_secrets rows; `pg_policies` returned exactly the two tenant-member SELECT policies and
+**`connector_secrets` has no policies.** **Connector metadata tables expose authenticated SELECT only. Anon has no
+connector vault table privileges. Connector secret material remains inaccessible to anon and authenticated users.
+No broad INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, or TRIGGER grants remain on connector vault tables for anon
+or authenticated.** The six-state lifecycle landed and the `0018` least-privilege surface is intact (matching T41).
+
+**The agent ran nothing — no hosted command, no staging mutation; production untouched. Connector vault is still
+not usable. Connector implementation remains blocked. No connector credentials are stored. No connector sync is
+implemented. No provider connector is implemented. No OAuth callback is implemented. No connector UI is
+implemented. No service-role request path is added. No production data was touched.** A human re-applies `0019` to
+production later; next gate is still **PR E** (read-only connector metadata UI). **Old-app parity is not complete.
+UI/UX parity is not complete. AI/API connector parity is not complete. Upload is not automatically production-ready.
+Hosted Auth/tenant-context is verified, but old-app replacement is not yet verified. RISK-001 remains OPEN. Cutover
+remains BLOCKED.** No doc 17 §5 box is ticked by this verification.
