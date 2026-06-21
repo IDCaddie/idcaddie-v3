@@ -792,3 +792,39 @@ human applies `0020` to staging then production in a future step (an agent never
 AI/API connector parity is not complete. Upload is not automatically production-ready. Hosted
 Auth/tenant-context is verified, but old-app replacement is not yet verified. RISK-001 remains OPEN. Cutover
 remains BLOCKED.** No doc 17 §5 box is ticked by this PR.
+
+## 34. Staging verification — `0020` oauth_pending replay store (PR #112)
+
+**OAuth pending replay store migration 0020 has been applied and verified on staging.** A human applied `0020`
+to the staging project `ycdpzduxugdsffjqyoai` and queried the live RLS / privilege / policy surface. **The
+agent ran nothing — no hosted command, no staging mutation, no secrets. No production data was touched.**
+
+### 34.1 Observed — PASS
+The remote migration list showed `0020` **absent** before push; `supabase db push --linked` applied
+`0020_oauth_pending_replay_store.sql`; the list then showed `0020` **present** on Remote. The linked project
+ref remained `ycdpzduxugdsffjqyoai`. The live RLS query returned `connector_secrets rls_enabled = true` and
+`oauth_pending rls_enabled = true` — **Oauth_pending RLS is enabled.** The table-privilege query returned
+**exactly two rows** — `authenticated | connector_runs | SELECT` and `authenticated | connectors | SELECT` —
+with **no anon rows, no connector_secrets rows, and no oauth_pending rows**: **Oauth_pending is not readable or
+writable by anon or authenticated users. Connector secret material remains inaccessible to anon and
+authenticated users. Connector metadata tables expose authenticated SELECT only. Anon has no connector vault
+table privileges. No broad INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, or TRIGGER grants remain on connector
+vault tables for anon or authenticated.** `pg_policies` returned exactly the two tenant-member SELECT policies
+(`connectors` → "members read tenant connectors", SELECT; `connector_runs` → "members read tenant connector
+runs", SELECT); **`connector_secrets` has no policies** and **Oauth_pending has no policies.** This matches the
+`0020` intent + the local `org_rls_test.sql` T42 proof — the deny-all replay store landed and the `0018`
+least-privilege metadata surface is intact.
+
+### 34.2 Scope / guardrails
+This verifies only the `0020` RLS / grant / policy surface on staging — not any connector behavior (there is
+none). **No OAuth code is exchanged for tokens. No access token is stored. No refresh token is stored. No
+connector credentials are stored. No connector secret material is inserted, updated, or deleted. No connector
+sync is implemented. No provider connector is implemented. No credential form is implemented. No connect/
+reconnect/disconnect action is implemented. No manual or scheduled run action is implemented. No service-role
+request path is added. No production data was touched.** A human re-applies `0020` to production in a future
+step (an agent never runs hosted commands); next is the §32.1 KMS-backed key provider → the server-only
+consume path → PR G first connector. **Connector vault is still not usable for real credentials until the
+remaining gated PRs are complete. Connector implementation remains blocked. Old-app parity is not complete.
+UI/UX parity is not complete. AI/API connector parity is not complete. Upload is not automatically
+production-ready. Hosted Auth/tenant-context is verified, but old-app replacement is not yet verified. RISK-001
+remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is ticked by this verification.
