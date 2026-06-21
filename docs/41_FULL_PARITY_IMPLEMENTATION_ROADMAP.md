@@ -1345,3 +1345,45 @@ connector). **Connector implementation remains blocked. Old-app parity is not co
 complete. AI/API connector parity is not complete. Upload is not automatically production-ready. Hosted
 Auth/tenant-context is verified, but old-app replacement is not yet verified. RISK-001 remains OPEN. Cutover
 remains BLOCKED.** No doc 17 §5 box is ticked by this PR.
+
+---
+
+## 42. IMPLEMENTATION — PR F: OAuth callback validation skeleton (PR #109)
+
+**OAuth callback skeleton is added. OAuth state/nonce validation is implemented** (doc 42 §31) — the §20 PR F
+gate, CSRF/replay validation infrastructure only. **No OAuth code is exchanged for tokens. No access token is
+stored. No refresh token is stored.** No provider is contacted; the vault stays not usable for real
+credentials.
+
+- **`src/lib/server/connector-vault/oauth-state.ts`** (server-only, PURE — only import `node:crypto`): a
+  stateless **HMAC-SHA256-signed** `state` binds `{tenant_id, provider, connector_id?, subject?,
+  redirect_intent, nonce, exp}`. `createOAuthState` mints it; `validateOAuthState` verifies the HMAC over the
+  exact signed bytes **before** trusting any field (constant-time), then nonce/expiry/optional
+  tenant-provider-connector binding/optional single-use replay — returning a safe reason CODE only (never a
+  secret/nonce/token/code). The signing key is an **injected signer** (server-only secret / KMS in prod — NOT
+  here; test-only in-memory signer in tests). Single-use replay via an injected `ConsumedNonceStore` (in-memory
+  in tests); the **production DB-backed `oauth_pending` replay store remains a gate** (no DB write here).
+- **Inert route `/connectors/oauth/callback`** (route count 17 → 18): parses provider/code/state/error, builds
+  the signer from a server-only env secret **this PR does not set** (so it is inert "not configured" by
+  default), and returns a **safe plain-text inert response**. It **never exchanges the `code`** (value never
+  read/returned/logged), never calls a provider endpoint, never writes `connector_secrets`, never marks a
+  connector connected, never persists query params.
+
++26 app tests (158 → 184; build 17 → 18 routes; RLS suite unchanged **327**, no migration, types 0-diff):
+valid/tampered/wrong-tenant/wrong-provider/wrong-connector/expired/missing-nonce/wrong-key/missing-malformed/
+replay (+ rejected state does not burn the nonce); results carry no secret/nonce; the handler rejects
+missing/tampered state, does not exchange the code, and returns inert statuses; a static scan proving the
+module + route do no `fetch`/`createClient`/`process.env`(module)/`connector_secrets`/`service_role`/
+`access_token`/`refresh_token`/`token_endpoint`/`grant_type`; the no-client-import guard now covers oauth-state
+(the inert route is the only allowed `src/app` importer); and the connector metadata UI still queries no
+`connector_secrets`. **No OAuth code is exchanged for tokens. No access token is stored. No refresh token is
+stored. No connector credentials are stored. No connector secret material is inserted, updated, or deleted. No
+connector sync is implemented. No provider connector is implemented. No credential form is implemented. No
+connect/reconnect/disconnect action is implemented. No manual or scheduled run action is implemented. No
+service-role request path is added. No production data was touched. No hosted commands were run. Connector
+vault is still not usable for real credentials until the remaining gated PRs are complete** (next: PR G first
+connector — only after the production signer/KMS secret + the single-use `oauth_pending` replay store are wired
+and tested). **Connector implementation remains blocked. Old-app parity is not complete. UI/UX parity is not
+complete. AI/API connector parity is not complete. Upload is not automatically production-ready. Hosted
+Auth/tenant-context is verified, but old-app replacement is not yet verified. RISK-001 remains OPEN. Cutover
+remains BLOCKED.** No doc 17 §5 box is ticked by this PR.
