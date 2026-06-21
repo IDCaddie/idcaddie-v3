@@ -828,3 +828,60 @@ remaining gated PRs are complete. Connector implementation remains blocked. Old-
 UI/UX parity is not complete. AI/API connector parity is not complete. Upload is not automatically
 production-ready. Hosted Auth/tenant-context is verified, but old-app replacement is not yet verified. RISK-001
 remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is ticked by this verification.
+
+## 35. Implementation — KMS-backed `ConnectorVaultKeyProvider` skeleton (PR #113)
+
+**KMS-backed ConnectorVaultKeyProvider skeleton is added. The KMS adapter is server-only.** This lands the
+§32.1 production key-provider BOUNDARY (the §32.4 gate-2 prerequisite before any real credential storage) as
+`src/lib/server/connector-vault/kms-key-provider.ts` — and stores nothing. **No connector credentials are
+stored. No connector secret material is inserted, updated, deleted, or read.** No DB, no Supabase, no
+service-role, no `connector_secrets`. **Tests use mocked or test-only key material only. No real KMS
+credentials are required in tests.**
+
+### 35.1 Dependency-free KMS boundary (no SDK)
+The adapter reduces the external KMS to a tiny `KmsClient` interface — `generateDataKey(kekId)` +
+`decrypt(wrappedDek, kekId)` — which maps **1:1 to AWS KMS `GenerateDataKey`/`Decrypt`** (and GCP KMS
+`encrypt`/`decrypt`). **No AWS/GCP SDK is added** in this PR. A real KMS-backed `KmsClient` is wired in a
+LATER gated PR (the only place an SDK would be introduced, with mocked tests). Keeping the adapter SDK-free
+means its unit tests need **no AWS/GCP credentials and make no network call** — a test-only in-memory fake
+`KmsClient` (AES-256-GCM over random in-process KEKs, `kekId` bound as AAD) stands in.
+
+### 35.2 Adapter (`createKmsKeyProvider(config)`)
+Implements the PR C `ConnectorVaultKeyProvider` (`generateDataKey`/`unwrapDataKey`) over the injected
+`KmsClient` + a `{ currentKekId, previousKekIds? }` config, and additionally exposes the non-secret
+`currentKekId` / `allowedKekIds` **metadata** a future storage/runner records. Behavior:
+- **Wrap (new secrets) only under the current KEK** — `generateDataKey(kekId)` rejects any non-current
+  `kekId` (you never wrap a new secret under a retired key).
+- **Rotation (current + previous):** `unwrapDataKey` accepts the current OR a previous (grace-window) KEK so
+  rows wrapped before a rotation still decrypt; **rotate by alias, no re-encryption** (§32.1).
+- **Reject unknown key id** before any KMS call (a row referencing a retired/foreign KEK fails closed).
+- **Fail closed when not configured** — `createKmsKeyProvider` throws on missing `kmsClient` / `currentKekId`
+  / null config; `kmsKeyProviderConfigFromEnv()` reads `CONNECTOR_VAULT_KMS_KEY_ID` (+ `_PREVIOUS_KEY_IDS`)
+  and returns **null when unset** (this PR sets nothing and binds no real client, so production stays inert
+  until BOTH env config AND a reviewed real client are wired).
+- **Redacted errors** — wrap/unwrap/invalid-DEK failures throw a typed `ConnectorVaultKeyProviderError` with
+  a fixed safe message; **never** a plaintext DEK, wrapped-DEK bytes, ciphertext, or KEK material; the
+  injected `KmsClient`'s underlying error is swallowed (its message never surfaces). Nothing logs. Key
+  ids/aliases are non-sensitive metadata (they name a KMS key, they are not the key) and are never pushed to
+  a browser surface. Server-only: runtime browser sentinel + the `no-client-import` guard; the only import is
+  the erased `ConnectorVaultKeyProvider` type.
+
+### 35.3 Tests (+11 app tests, 193 → 204; RLS suite unchanged **352**, no migration, types 0-diff)
+configured fake provider wraps/unwraps; rotation (a DEK wrapped under the previous KEK still unwraps, a new
+wrap under a retired KEK is refused); wrong/unknown key id fails; missing config fails closed; unwrap-failure
+and wrap-failure errors contain no plaintext/key/wrapped bytes; an invalid-length DEK from KMS fails closed;
+`kmsKeyProviderConfigFromEnv` returns null when unset and parses ids when set; **the crypto wrapper
+`encryptConnectorSecret`/`decryptConnectorSecret` round-trips THROUGH the KMS-backed provider** (no real
+KMS); module purity (only the `./crypto` type import, no DB/Supabase/service-role/`connector_secrets`/SDK/
+network); and the no-client-import guard now covers `kms-key-provider`.
+
+**No OAuth code is exchanged for tokens. No access token is stored. No refresh token is stored. No connector
+sync is implemented. No provider connector is implemented. No credential form is implemented. No connect/
+reconnect/disconnect action is implemented. No manual or scheduled run action is implemented. No service-role
+request path is added. No production data was touched. No hosted commands were run. Connector vault is still
+not usable for real credentials until the remaining gated PRs are complete** (next: a reviewed real KMS-backed
+`KmsClient` + the server-only `oauth_pending` consume path → PR G first connector). **Connector implementation
+remains blocked. Old-app parity is not complete. UI/UX parity is not complete. AI/API connector parity is not
+complete. Upload is not automatically production-ready. Hosted Auth/tenant-context is verified, but old-app
+replacement is not yet verified. RISK-001 remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is ticked
+by this PR.
