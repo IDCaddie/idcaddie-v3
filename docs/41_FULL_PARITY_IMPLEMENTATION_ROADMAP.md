@@ -1535,3 +1535,44 @@ server-only `oauth_pending` consume path → PR G first connector). **Connector 
 Old-app parity is not complete. UI/UX parity is not complete. AI/API connector parity is not complete. Upload
 is not automatically production-ready. Hosted Auth/tenant-context is verified, but old-app replacement is not
 yet verified. RISK-001 remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is ticked by this PR.
+
+---
+
+## 47. IMPLEMENTATION — real AWS KMS client adapter skeleton (PR #114)
+
+**Real KMS client adapter skeleton is added. The adapter is server-only** (doc 42 §36) — the concrete
+`KmsClient` (PR #113 boundary) for the §32.1 chosen provider, **AWS KMS**:
+`src/lib/server/connector-vault/aws-kms-client.ts`. It stores nothing. **Tests use mocked KMS responses only;
+no real KMS credentials are required in tests; no live KMS calls are made in tests.**
+
+- **AWS KMS command-shape mapping (still SDK-free):** the adapter emits the exact AWS KMS commands —
+  wrap → `GenerateDataKey { KeyId, KeySpec: "AES_256" }` → `{ Plaintext (DEK), CiphertextBlob (wrapped) }`;
+  unwrap → `Decrypt { KeyId, CiphertextBlob }` → `{ Plaintext (DEK) }` (passing `KeyId` makes KMS enforce the
+  blob was wrapped under that key) — through an **injected `AwsKmsCommandSender`**. **NO `@aws-sdk/client-kms`
+  dependency is added**; wiring a real SDK-backed sender (`new KMSClient({region}).send(...)`) is the **next
+  gate** (the one PR where the SDK is introduced, mocked in its tests). So this adapter's tests need no AWS
+  credentials and make no live call — a mock sender returns canned responses + records the command shapes.
+- **`createAwsKmsClient({ send, region })`** implements `KmsClient`; **fails closed** on missing `send` /
+  missing-or-garbage `region` (AWS region format checked); `awsKmsConfigFromEnv()` returns null when
+  `CONNECTOR_VAULT_AWS_KMS_REGION` is unset/invalid and binds no sender (inert by default). **Redacted
+  errors** — failures throw a typed `AwsKmsError` with no plaintext/key/blob/region/SDK detail (the sender's
+  error is swallowed); a missing/short `Plaintext` fails closed; nothing logs. Server-only (sentinel +
+  no-client-import guard; only the erased `./kms-key-provider` type import). Wired to nothing — reached only
+  via `createKmsKeyProvider` later.
+
++11 app tests (204 → 215; RLS suite unchanged **352**, no migration, types 0-diff): missing-config fail-closed;
+wrap→GenerateDataKey + unwrap→Decrypt command-shape mapping; mocked-success returns DEK/wrapped only through
+the contract; KMS/SDK error redacted; malformed/missing response fails closed; wrong KeyId on Decrypt fails
+closed; env helper null-when-unset; **the AWS adapter composes through `createKmsKeyProvider` + the crypto
+wrapper round-trip** (no real KMS); module purity + the no-client-import guard now covers `aws-kms-client`.
+**No OAuth code is exchanged for tokens. No access token is stored. No refresh token is stored. No connector
+credentials are stored. No connector secret material is inserted, updated, deleted, or read. No connector sync
+is implemented. No provider connector is implemented. No credential form is implemented. No connect/reconnect/
+disconnect action is implemented. No manual or scheduled run action is implemented. No service-role request
+path is added. No production data was touched. No hosted commands were run. Connector vault is still not usable
+for real credentials until the remaining gated PRs are complete** (next: the SDK-wiring gate — a reviewed real
+`@aws-sdk/client-kms`-backed sender — + the server-only `oauth_pending` consume path → PR G first connector).
+**Connector implementation remains blocked. Old-app parity is not complete. UI/UX parity is not complete.
+AI/API connector parity is not complete. Upload is not automatically production-ready. Hosted Auth/tenant-context
+is verified, but old-app replacement is not yet verified. RISK-001 remains OPEN. Cutover remains BLOCKED.** No
+doc 17 §5 box is ticked by this PR.
