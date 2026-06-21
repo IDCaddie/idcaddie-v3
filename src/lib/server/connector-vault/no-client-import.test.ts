@@ -24,6 +24,9 @@ const CRYPTO_REL_HINTS = [
   "connector-vault/oauth-pending",
   "server/connector-vault/oauth-pending",
   "lib/server/connector-vault/oauth-pending",
+  "connector-vault/kms-key-provider",
+  "server/connector-vault/kms-key-provider",
+  "lib/server/connector-vault/kms-key-provider",
 ];
 
 function walk(dir: string): string[] {
