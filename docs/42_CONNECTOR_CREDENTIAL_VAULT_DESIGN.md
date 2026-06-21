@@ -410,3 +410,39 @@ runs hosted commands); next gate is still **PR C** (server-only encrypt/decrypt 
 complete. UI/UX parity is not complete. AI/API connector parity is not complete. Upload is not automatically
 production-ready. Hosted Auth/tenant-context is verified, but old-app replacement is not yet verified. RISK-001
 remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is ticked by this verification.
+
+## 27. Implementation — PR C: server-only crypto wrapper (PR #104)
+
+**Server-only connector vault crypto wrapper is implemented and tested.** This is the §20 **PR C** gate, the
+reviewed envelope-encryption boundary the §21 hard gates require **before any connector secret of any kind may be
+stored**.
+`src/lib/server/connector-vault/crypto.ts` exposes `encryptConnectorSecret` / `decryptConnectorSecret` over an
+**injected `ConnectorVaultKeyProvider`** (the KMS abstraction: `generateDataKey(kekId)` / `unwrapDataKey`). It is
+pure AEAD — **no database access, no Supabase client import, no service-role, no `process.env`** (a test asserts
+the module's only import is `node:crypto`).
+
+**Crypto.** AES-256-GCM (authenticated encryption); per-secret DEK wrapped by the provider's KEK (envelope, §1.2);
+the structured payload is `{ v, alg, kekId, wrappedDek, iv, ciphertext, tag, aadDigest }` (maps to
+`connector_secrets` `ciphertext`/`dek_wrapped`/`aead_nonce`/`aad_digest` later). **AAD binds
+`{tenant_id, connector_id, secret_kind, version}`** (§4) — decryption fails closed if any of them changes;
+plaintext is returned **only** from `decryptConnectorSecret`. The DEK is zeroed after use; errors are typed
+`ConnectorVaultCryptoError` with fixed, safe messages (no plaintext / ciphertext / key bytes — §11).
+
+**Server-only boundary (§6).** The module lives under `src/lib/server/`, carries a runtime sentinel that throws if
+evaluated in a browser, and a **static guard test** (`no-client-import.test.ts`) asserts no `"use client"` file
+and nothing under `src/app` imports it. **The wrapper uses test-only key material in tests only.** An in-memory
+`KeyProvider` defined inside the test file (random KEKs, never persisted, never an env secret, no checked-in key)
+**no real KMS is integrated in this PR.** +19 tests: round-trip; ciphertext ≠ plaintext and contains no plaintext;
+tenant/connector/kind/version-swap each fail; tampered ciphertext / tag fail; wrong KEK id fails; errors carry no
+plaintext; input validation; all five secret kinds round-trip; module purity + server-only guards.
+
+**No credential is stored or moved by this PR.** **No real connector credentials are stored. No connector secret
+material is inserted, updated, or deleted. No connector sync is implemented. No provider connector is implemented.
+No OAuth callback is implemented. No connector UI is implemented. No service-role request path is added. No
+production data was touched. No hosted commands were run.** No migration; RLS suite unchanged (318); types 0-diff.
+**Connector vault is still not usable for real credentials until the remaining gated PRs are complete.** The
+remaining gates are PR D audit/run model → PR E metadata UI → PR F OAuth callback → PR G first connector. **Connector implementation
+remains blocked. Old-app parity is not complete. UI/UX parity is not complete. AI/API connector parity is not
+complete. Upload is not automatically production-ready. Hosted Auth/tenant-context is verified, but old-app
+replacement is not yet verified. RISK-001 remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is ticked by
+this PR. (Open question §17 deferred: the real KMS provider + local-dev secret handling are still to be chosen.)
