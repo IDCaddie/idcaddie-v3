@@ -377,34 +377,43 @@ export type Database = {
       }
       connector_runs: {
         Row: {
+          completed_at: string | null
           connector_id: string
           created_at: string
-          error_class: string | null
-          finished_at: string | null
+          failure_code: string | null
+          failure_label: string | null
           id: string
-          items_seen: number | null
+          records_failed: number | null
+          records_imported: number | null
+          records_seen: number | null
           started_at: string | null
           status: string
           tenant_id: string
         }
         Insert: {
+          completed_at?: string | null
           connector_id: string
           created_at?: string
-          error_class?: string | null
-          finished_at?: string | null
+          failure_code?: string | null
+          failure_label?: string | null
           id?: string
-          items_seen?: number | null
+          records_failed?: number | null
+          records_imported?: number | null
+          records_seen?: number | null
           started_at?: string | null
           status?: string
           tenant_id: string
         }
         Update: {
+          completed_at?: string | null
           connector_id?: string
           created_at?: string
-          error_class?: string | null
-          finished_at?: string | null
+          failure_code?: string | null
+          failure_label?: string | null
           id?: string
-          items_seen?: number | null
+          records_failed?: number | null
+          records_imported?: number | null
+          records_seen?: number | null
           started_at?: string | null
           status?: string
           tenant_id?: string
