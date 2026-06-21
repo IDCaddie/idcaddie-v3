@@ -1065,3 +1065,153 @@ real KEK alias are provisioned and staging-verified by a human; this PR ships on
 AI/API connector parity is not complete. Upload is not automatically production-ready. Hosted Auth/tenant-context
 is verified, but old-app replacement is not yet verified. RISK-001 remains OPEN. Cutover remains BLOCKED.** No
 doc 17 §5 box is ticked by this PR.
+
+## 39. Provisioning plan — runner identity / DB grants / OAuth consume / KMS-IAM / staging verification (PR #117)
+
+**Runner identity provisioning plan is recorded. KMS/IAM provisioning plan is recorded. OAuth consume
+execution plan is recorded.** This is a **docs/design provisioning PR** — it implements NOTHING: **No runner
+identity is implemented by this PR. No runner DB grants are added by this PR. No real KMS/IAM grant is
+configured by this PR.** No migration, no env secret, no code. It records the provisioning the code primitives
+(PR #101–#116) require before any real credential storage or provider connector, so a future implementer (and
+a human operator) execute it deliberately, not ad hoc. **The vault stays NOT usable for real credentials.**
+
+### 39.1 Runner identity model
+- **The principal.** Connector-vault privileged actions (consume a pending OAuth state, write/read
+  `connector_secrets`, write `connector_runs`, KMS wrap/unwrap) execute as a **single dedicated server-side
+  "connector runner" identity** — a background worker / server process, NOT a request handler. It is the §3
+  "separate server-side principal, not the user." It holds (a) a narrow Postgres role/connection (`§39.2`)
+  and (b) a narrow AWS IAM identity (`§39.4`).
+- **Which code paths may use it.** ONLY server-only modules under `src/lib/server/connector-vault/` invoked
+  by the runner process (the future executors that satisfy the injected `OAuthPendingConsumer` (PR #116),
+  `ConnectorVaultKeyProvider` (PR #113), `KmsClient` (PR #114), `AwsKmsCommandSender` (PR #115)). These are
+  reached via the runner's own entrypoint (a queue worker / cron / internal job), never via a Next.js route,
+  server action, or page render that a browser can trigger.
+- **Which paths must NEVER use it.** No browser/client code, no `"use client"` file, no `src/app` route or
+  server action, no user-facing page. The existing `no-client-import` guard already fences the server-only
+  modules; the runner connection/role is additionally never imported by request-path code (a future guard
+  asserts the runner DB client is not reached from `src/app`).
+- **How it differs from the normal authenticated-user RLS path.** A request runs as the Supabase `anon`/
+  `authenticated` role under the user's JWT, with **RLS as the sole authority** — and that role is **deny-all**
+  on `oauth_pending`/`connector_secrets` (it literally cannot touch them). The runner is a *different* DB
+  principal with *narrow explicit grants* (not RLS-scoped to a tenant — it re-derives + verifies the tenant
+  server-side per action, §3 T2). So the two paths are isolated: the user path can never reach secret/consume
+  surfaces; the runner path is never reachable from a browser request.
+- **Why it is NOT a broad service-role request path.** The runner is NOT the Supabase `service_role` used on a
+  request path (the existing `check-auth-safety` gate forbids that, and the standing rule is "no service-role
+  on request paths; RLS is the boundary"). It is a **narrow, dedicated identity** with least-privilege grants
+  (`§39.2`), reachable only from the runner process — so it adds **no browser-accessible service-role path**.
+  (Implementation may realize it as a dedicated `connector_runner` DB role with explicit grants, or as a
+  `SECURITY DEFINER` accessor owned by such a role — chosen + justified in the implementing PR; either way it
+  is not a blanket `service_role` exposed to request code.)
+
+### 39.2 Database privileges (intended — least privilege; no grant added here)
+The runner's intended Postgres privileges, to be implemented + staging-verified in a FUTURE migration PR
+(this PR adds none; the tables stay deny-all to `anon`/`authenticated`):
+- **`oauth_pending`** — runner: `SELECT` + `UPDATE (consumed_at)` only (for the atomic single-use consume,
+  §38) + `INSERT` (to create the pending row at authorize-time) + a scheduled `DELETE`/sweep of expired rows.
+  **NOT** `UPDATE` on any other column, **NOT** broad `DELETE` of arbitrary rows beyond the expiry sweep.
+- **`connector_secrets`** — runner: `INSERT` (store a new wrapped secret version), `SELECT` (read a wrapped
+  secret to unwrap server-side), `UPDATE (is_active, revoked_at, status)` (rotate/revoke); **NOT** `DELETE`
+  (secrets are tombstoned/versioned, never hard-deleted — §9).
+- **`connectors` / `connector_runs`** — runner: `INSERT`/`UPDATE` on the safe metadata it writes (connector
+  status, run lifecycle rows). `connectors`/`connector_runs` keep the existing **`authenticated` = `[SELECT]`
+  only** request-path surface (`0018`/T40) UNCHANGED — the runner's write grant is separate and not given to
+  `authenticated`.
+- **Hard limits:** **no `anon` access anywhere; no normal `authenticated` direct access to
+  `oauth_pending`/`connector_secrets`; no broad `TRUNCATE`/`REFERENCES`/`TRIGGER`** for any of these roles
+  (the `0017`/`0018` REVOKE-broad-then-GRANT-narrow lesson + the T39/T40/T42 exact-privilege-array tests
+  extend to the runner). Every grant is the minimum verb on the minimum columns.
+- **Audit requirement:** EVERY privileged runner action (`connector.run.created/.started/.completed/.failed`,
+  `connector.credential.created/.revoked`, `connector.oauth.state.created/.consumed/.expired/.rejected`)
+  appends to the **append-only `audit_logs`** (`reject_audit_mutation`, `0002`) with **safe metadata only**
+  (tenant/provider/connector id + a reason code) — **never** a raw nonce/state/code/token/key.
+
+### 39.3 OAuth consume execution plan
+- The runner (and only the runner) performs the **atomic single-use** `oauth_pending` consume via the PR #116
+  `consumeOAuthPending` + a runner-identity-backed `OAuthPendingConsumer` (the `UPDATE … consumed_at = now()
+  WHERE … consumed_at IS NULL AND expires_at > now() RETURNING …` of §38). **Consume is single-use**: a
+  second/concurrent callback consumes nothing.
+- **Expired / reused / mismatched (tenant/provider/connector/nonce) states FAIL CLOSED** — the consume returns
+  a safe reason code and the flow stops; nothing downstream runs.
+- **The raw nonce / raw state / authorization code are NEVER persisted or logged** — `oauth_pending` stores
+  only `nonce_hash` (sha256) + `state_jti` (§32.3); the callback never reads/returns/logs the `code` (§31).
+- **No token exchange happens until the consume path is implemented (runner executor) AND staging-verified**
+  (§39.6/§39.7 gate). Only after a state is verifiably consumed-exactly-once does the runner proceed to the
+  (later) authorization-code exchange — which itself stores only envelope-encrypted secrets, never plaintext.
+
+### 39.4 KMS / IAM provisioning plan
+- **KEK alias naming.** A per-environment KMS alias, e.g. `alias/idcaddie-connector-vault-kek-staging` and
+  `alias/idcaddie-connector-vault-kek-prod` (distinct keys, distinct accounts/regions where possible). The
+  alias — not a raw key ARN — is the configured `kekId` (§32.1), so rotation re-points the alias with no
+  re-encryption. The alias is a **non-secret handle** recorded per wrapped DEK.
+- **Region / config source.** The AWS region comes from a server-only env var (`§39.5`,
+  `CONNECTOR_VAULT_AWS_KMS_REGION`, read by `awsKmsConfigFromEnv` / the SDK sender, PR #114/#115). Region is
+  non-secret metadata.
+- **IAM principal.** The runner's AWS identity is granted a **narrow IAM policy: only `kms:GenerateDataKey` +
+  `kms:Decrypt`, scoped by `Resource` to the single connector-vault KEK alias/ARN** (and optionally a
+  `kms:ViaService`/condition limiting use). **No `kms:*`, no `kms:CreateKey`/`ScheduleKeyDeletion`/`PutKeyPolicy`,
+  no `Resource: *`, no broad IAM** — deny-broad by construction.
+- **Rotation plan.** KMS automatic annual KEK rotation enabled, plus on-demand rotation by alias on suspected
+  compromise; per-secret DEKs rotate on each secret `version` bump (§32.1). No mass re-encryption needed.
+- **Staging vs production separation.** Separate KEK aliases, separate IAM principals/roles, separate regions/
+  accounts where feasible; a staging credential can never decrypt a production secret and vice versa.
+- **No committed credentials.** No AWS access key / secret / session token is ever committed to the repo or
+  placed in a client bundle. **If the runner runs where an IAM role is available** (an instance/task role /
+  OIDC federation), the SDK resolves credentials from the default provider chain (PR #115) and **NO AWS keys
+  are placed in app env at all** — preferred. Static AWS keys are a last resort, server-only secret-manager
+  only, never in the repo.
+
+### 39.5 Environment / config
+- **Conceptual variables (server-only):** `CONNECTOR_VAULT_AWS_KMS_REGION` (region; PR #114/#115),
+  `CONNECTOR_VAULT_KMS_KEY_ID` (+ `CONNECTOR_VAULT_KMS_PREVIOUS_KEY_IDS`) (the KEK alias[es]; PR #113/#114),
+  `CONNECTOR_OAUTH_STATE_SECRET` (+ `CONNECTOR_OAUTH_STATE_KEY_ID`) (the HMAC state-signing secret; §32.2/§31),
+  and the runner's DB connection (a server-only secret). All **server-only**.
+- **What may exist in staging:** the staging KEK alias + region + a staging state-signing secret + the runner
+  staging DB connection — set by a human on the runner's hosting, after the staging grants/IAM are applied
+  and verified (§39.6). **This PR sets none.**
+- **What may exist in production:** the production equivalents — set by a human only after staging is verified
+  and the production migration + IAM are applied (§39.7). **This PR sets none.**
+- **What must NEVER exist in a client bundle:** ANY of the above — no region, alias, signing secret, DB
+  connection, or AWS key is ever `NEXT_PUBLIC_*` or imported by a `"use client"`/`src/app` browser path. The
+  server-only modules + the `no-client-import` guard enforce this.
+- **Fail-closed when missing:** every reader already returns null / throws a typed redacted error when its
+  config is unset (`kmsKeyProviderConfigFromEnv`, `awsKmsConfigFromEnv`, `createAwsKmsSdkSenderFromEnv`,
+  `createKmsKeyProvider`, the inert OAuth callback) — so an unconfigured deploy is **inert**, never a weak
+  default.
+
+### 39.6 Staging verification plan (human-executed; an agent runs nothing hosted)
+1. A human applies any future **runner-grant migration to STAGING first** (`db push --linked` against
+   `ycdpzduxugdsffjqyoai`), then queries the live surface.
+2. **Verify `oauth_pending` remains inaccessible to `anon`/`authenticated`** — exactly zero privilege, RLS-on,
+   zero policies (the T42 invariant still holds after the runner grant).
+3. **Verify `connector_secrets` remains inaccessible to `anon`/`authenticated`** — exactly zero privilege,
+   deny-all (the T39 invariant still holds).
+4. **Verify the runner can perform ONLY its intended operations** — the runner role's privilege array equals
+   exactly the §39.2 set (no extra verb, no `TRUNCATE`/`REFERENCES`/`TRIGGER`, no DELETE on `connector_secrets`).
+5. **Verify NO browser path can invoke runner operations** — `authenticated`/`anon` still cannot consume
+   `oauth_pending` or read/write `connector_secrets`; the runner entrypoint is not a route.
+6. **Verify the KMS path with a staging-safe / non-production key** (a staging KEK alias or a mocked/test
+   provider) — never a production key; a round-trip wrap/unwrap succeeds under the runner's staging IAM only.
+7. **Record the evidence (a docs-only verification PR) BEFORE any provider-connector work begins.**
+
+### 39.7 Gates
+1. **No real credential storage before the runner DB grants + the KMS IAM are implemented AND staging-verified**
+   (§39.2/§39.4/§39.6).
+2. **No provider connector before the runner consume path + the KMS path are implemented AND staging-verified.**
+3. **No production credential flow before the production migration + the production IAM/KMS are applied AND
+   verified** (staging green first, then production, then a recorded production verification — as every prior
+   vault migration did).
+4. **RISK-001 remains OPEN until the full connector flow is built, verified, and the doc 17 §5 cutover
+   criteria are met** — this plan does not advance any §5 box.
+
+**No runner identity is implemented by this PR. No runner DB grants are added by this PR. No real KMS/IAM grant
+is configured by this PR. No OAuth code is exchanged for tokens. No access token is stored. No refresh token is
+stored. No connector credentials are stored. No connector secret material is inserted, updated, deleted, or
+read. No connector sync is implemented. No provider connector is implemented. No credential form is implemented.
+No connect/reconnect/disconnect action is implemented. No manual or scheduled run action is implemented. No
+browser-accessible service-role path is added. No production data was touched. No hosted commands were run.
+Connector vault is still not usable for real credentials until the remaining gated PRs are complete. Connector
+implementation remains blocked. Old-app parity is not complete. UI/UX parity is not complete. AI/API connector
+parity is not complete. Upload is not automatically production-ready. Hosted Auth/tenant-context is verified, but
+old-app replacement is not yet verified. RISK-001 remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is
+ticked by this PR.
