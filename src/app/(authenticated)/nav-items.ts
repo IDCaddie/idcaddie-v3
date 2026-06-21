@@ -9,7 +9,7 @@ export type NavSection = { title: string; items: NavItem[] };
 
 // The real, implemented authenticated routes that may be linked. Keep in sync with the route tree;
 // the test asserts every linked NavItem.href is one of these (so an unbuilt area can never be linked).
-export const IMPLEMENTED_ROUTES = ["/", "/apps", "/contracts", "/people", "/reports", "/audit", "/admin", "/files", "/dashboards"] as const;
+export const IMPLEMENTED_ROUTES = ["/", "/apps", "/contracts", "/people", "/reports", "/audit", "/admin", "/files", "/dashboards", "/connectors"] as const;
 
 export const NAV_SECTIONS: NavSection[] = [
   {
@@ -25,7 +25,10 @@ export const NAV_SECTIONS: NavSection[] = [
     title: "Applications",
     items: [
       { label: "Apps", href: "/apps" },
-      { label: "Connectors", href: null },
+      // Read-only connector metadata (provider/label/status/scopes + latest run). No connecting,
+      // credentials, OAuth, sync, or disconnect — see the page's "Not built yet" copy. The vault is
+      // still not usable for real credentials.
+      { label: "Connectors", href: "/connectors", note: "read-only metadata" },
       { label: "AI / Analysis", href: null },
     ],
   },
