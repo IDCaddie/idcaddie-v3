@@ -25,15 +25,19 @@ Before building UI, prove these pass against local Supabase.
 
 Cases 1–8 plus the org/cross-tenant/escalation matrix are enforced by
 `supabase/migrations/0002_org_scoped_rls.sql` and `0003_org_access_union.sql`,
-covered by the runnable suite `supabase/tests/org_rls_test.sql` (T1–T40, 318 assertions; T38/T39 cover the
+covered by the runnable suite `supabase/tests/org_rls_test.sql` (T1–T41, 327 assertions; T38/T39 cover the
 connector-vault schema foundation (`0017`) — T38 = `connectors`/`connector_runs` tenant-member read + no
 request-path write; T39 = `connector_secrets` deny-all (RLS-enabled, zero policies, `authenticated`/`anon`
 hold zero privilege) + the no-secret-column-leak structural check; **T40 = the hardened grant surface
 (`0018`)** after staging found broad anon/authenticated INSERT/UPDATE/DELETE/TRUNCATE/REFERENCES/TRIGGER on
 the Tier-1 tables — exact per-role privilege arrays (authenticated=`[SELECT]` on connectors/connector_runs,
 zero on connector_secrets; anon=zero everywhere) + TRUNCATE/REFERENCES/TRIGGER negatives + tenant-scoped
-SELECT still works + cross-tenant SELECT still RLS-denied; the
-later tests cover the `files` foundation/policies — T33 `0012`, T34 `0013` SELECT/INSERT (+ T34c DELETE
+SELECT still works + cross-tenant SELECT still RLS-denied; **T41 = the `connector_runs` run-lifecycle schema
+(`0019`)** — the six lifecycle states accepted (queued/running/succeeded/failed/canceled/timed_out) + an
+out-of-set status rejected + the renamed/added safe columns (completed_at, records_seen/imported/failed,
+failure_code, failure_label) present with the old names gone + no secret column + grant shape unchanged
+(authenticated `[SELECT]` only, anon zero, no write policy, audit still reuses append-only `audit_logs`);
+the later tests cover the `files` foundation/policies — T33 `0012`, T34 `0013` SELECT/INSERT (+ T34c DELETE
 denied at the privilege layer), T35 `0014` storage-auth helpers, **T36 `0016` the uploader-finalize
 UPDATE policy** (uploader may set `upload_status` on their OWN row; cross-tenant / cross-user updates and
 `uploaded_by`/`tenant_id` reassignment denied), and **T37 the `files` privilege surface** for

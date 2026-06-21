@@ -1252,3 +1252,36 @@ callback → PR G first connector). **Connector implementation remains blocked. 
 parity is not complete. AI/API connector parity is not complete. Upload is not automatically production-ready.
 Hosted Auth/tenant-context is verified, but old-app replacement is not yet verified. RISK-001 remains OPEN. Cutover
 remains BLOCKED.** No doc 17 §5 box is ticked by this PR.
+
+---
+
+## 39. IMPLEMENTATION — PR D: connector run/audit lifecycle foundation (PR #105)
+
+**Connector run/audit lifecycle foundation is added** (doc 42 §28) — the §20 PR D gate, the safe run/audit model
+required before any connector execution or credential storage. **No connector execution is implemented. No provider
+connector is implemented.** Two pieces:
+
+- **Migration `0019_connector_run_audit_lifecycle.sql`** widens `connector_runs` (`0017`) to the **six-state**
+  lifecycle (`queued/running/succeeded/failed/canceled/timed_out`), renames `finished_at→completed_at`,
+  `items_seen→records_seen`, `error_class→failure_code`, and adds safe `records_imported`/`records_failed` +
+  `failure_label`. Safe metadata only (no secret/token/key/payload). **Grants UNCHANGED** — `authenticated`
+  `[SELECT]` only, `anon` none, **no write policy** (run writes remain future server-only/runner work). Audit
+  reuses the **append-only `audit_logs`** (no new connector audit table). No `connector_secrets` change.
+- **`src/lib/server/connector-vault/run-lifecycle.ts`** (server-only, PURE — NO imports, no DB/Supabase/
+  service-role/`process.env`): typed states + valid transitions, the conceptual audit actions
+  (`connector.run.created/.started/.completed/.failed`, `connector.credential.created/.revoked`), and pure
+  builders that VALIDATE then return the safe shape a future runner would persist (no DB write), with a redaction
+  guard that rejects any secret-shaped field name / credential-shaped value / unsafe failure label.
+
++15 app tests (136 → 151) + **T41** (RLS suite **318 → 327**): lifecycle/transition validation, safe-labels-only,
+secret-field rejection, module purity + server-only guard; T41 proves the six states accepted + out-of-set status
+rejected + renamed/added columns present (old names gone) + no secret column + grant shape unchanged + no
+request-path write. Types regenerated. **No connector credentials are stored. No connector secret material is
+inserted, updated, or deleted. No connector sync is implemented. No OAuth callback is implemented. No connector UI
+is implemented. No service-role request path is added. No production data was touched. No hosted commands were
+run.** A human applies `0019` to staging then production later; next gate is **PR E** (read-only connector metadata
+UI). **Connector vault is still not usable for real credentials until the remaining gated PRs are complete.
+Connector implementation remains blocked. Old-app parity is not complete. UI/UX parity is not complete. AI/API
+connector parity is not complete. Upload is not automatically production-ready. Hosted Auth/tenant-context is
+verified, but old-app replacement is not yet verified. RISK-001 remains OPEN. Cutover remains BLOCKED.** No doc 17
+§5 box is ticked by this PR.

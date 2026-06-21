@@ -1711,8 +1711,8 @@ insert into public.connectors (id, tenant_id, provider, display_name, status, co
   ('17000000-0000-0000-0000-0000000000a1','11111111-1111-1111-1111-111111111111','slack','Slack A','active','0a000000-0000-0000-0000-000000000001'),
   ('17000000-0000-0000-0000-0000000000b1','22222222-2222-2222-2222-222222222222','slack','Slack B','active','0b000000-0000-0000-0000-000000000001');
 insert into public.connector_runs (id, tenant_id, connector_id, status) values
-  ('17a00000-0000-0000-0000-0000000000a1','11111111-1111-1111-1111-111111111111','17000000-0000-0000-0000-0000000000a1','success'),
-  ('17a00000-0000-0000-0000-0000000000b1','22222222-2222-2222-2222-222222222222','17000000-0000-0000-0000-0000000000b1','success');
+  ('17a00000-0000-0000-0000-0000000000a1','11111111-1111-1111-1111-111111111111','17000000-0000-0000-0000-0000000000a1','succeeded'),
+  ('17a00000-0000-0000-0000-0000000000b1','22222222-2222-2222-2222-222222222222','17000000-0000-0000-0000-0000000000b1','succeeded');
 -- A FAKE secret fixture (2 dummy bytes — NOT a real credential) so T39 can prove it is unreadable.
 insert into public.connector_secrets (id, tenant_id, connector_id, secret_kind, ciphertext) values
   ('17b00000-0000-0000-0000-0000000000a1','11111111-1111-1111-1111-111111111111','17000000-0000-0000-0000-0000000000a1','oauth_access','\xdead'::bytea);
@@ -1950,6 +1950,65 @@ end $$;
 do $$ declare ok boolean := false; begin
   begin perform 1 from public.connector_runs; ok := false; exception when insufficient_privilege then ok := true; end;
   assert ok, 'T40 anon must have NO privilege to read connector_runs after 0018';
+end $$;
+reset role;
+
+-- ── Test 41: connector_runs LIFECYCLE schema (migration 0019) ─────────────────────────────────────────
+-- 0019 widens connector_runs to the safe run-lifecycle shape: the six states (queued/running/succeeded/
+-- failed/canceled/timed_out), the renamed completion/counter/failure-code columns, and the added safe
+-- counter + failure-label columns. It adds NO grant and NO write policy (writes stay future server-only),
+-- so the 0018 surface is unchanged: authenticated = [SELECT], anon = [], connector_runs holds NO secret
+-- column, and audit reuses the append-only audit_logs (no new connector audit table).
+reset role;
+-- 41a: the six lifecycle states are accepted (privileged set-based insert; row visibility is RLS, T38/T40).
+insert into public.connector_runs (id, tenant_id, connector_id, status)
+select gen_random_uuid(), '11111111-1111-1111-1111-111111111111', '17000000-0000-0000-0000-0000000000a1', s
+from unnest(array['queued','running','succeeded','failed','canceled','timed_out']) as s;
+-- 41b: an out-of-set status is rejected by the check (the old 'success' value is no longer valid).
+do $$ declare ok boolean := false; begin
+  begin
+    insert into public.connector_runs (id, tenant_id, connector_id, status)
+      values (gen_random_uuid(),'11111111-1111-1111-1111-111111111111','17000000-0000-0000-0000-0000000000a1','success');
+    ok := false;
+  exception when check_violation then ok := true; end;
+  assert ok, 'T41 connector_runs.status must reject an out-of-lifecycle value (e.g. the old success)';
+end $$;
+-- 41c: the renamed + added safe lifecycle columns exist; the old names are gone.
+do $$ begin
+  assert (select count(*) from information_schema.columns where table_schema='public' and table_name='connector_runs'
+          and column_name in ('completed_at','records_seen','records_imported','records_failed','failure_code','failure_label')) = 6,
+         'T41 connector_runs must have the 6 lifecycle columns (completed_at, records_*, failure_code, failure_label)';
+  assert (select count(*) from information_schema.columns where table_schema='public' and table_name='connector_runs'
+          and column_name in ('finished_at','items_seen','error_class')) = 0,
+         'T41 the old connector_runs column names (finished_at/items_seen/error_class) must be gone';
+  -- still NO secret column on the readable run table.
+  assert (select count(*) from information_schema.columns where table_schema='public' and table_name='connector_runs'
+          and column_name in ('ciphertext','dek_wrapped','aead_nonce','aad_digest','key_id','token','secret','api_key')) = 0,
+         'T41 connector_runs (readable) must expose NO secret column';
+end $$;
+-- 41d: grant shape unchanged by 0019 — authenticated EXACTLY [SELECT], anon NOTHING, still no write policy.
+do $$ begin
+  assert (select coalesce(array_agg(distinct privilege_type::text order by privilege_type::text), array[]::text[])
+          from information_schema.role_table_grants
+          where grantee='authenticated' and table_schema='public' and table_name='connector_runs') = array['SELECT'],
+         'T41 authenticated must still hold EXACTLY [SELECT] on connector_runs after 0019';
+  assert (select coalesce(array_agg(distinct privilege_type::text order by privilege_type::text), array[]::text[])
+          from information_schema.role_table_grants
+          where grantee='anon' and table_schema='public' and table_name='connector_runs') = array[]::text[],
+         'T41 anon must still hold ZERO privileges on connector_runs after 0019';
+  assert (select count(*) from pg_policies where schemaname='public' and tablename='connector_runs' and cmd <> 'SELECT') = 0,
+         'T41 connector_runs must have NO non-SELECT (write) policy';
+  -- audit reuses the existing append-only audit_logs — 0019 created NO new connector audit table.
+  assert (select count(*) from information_schema.tables where table_schema='public' and table_name like 'connector_audit%') = 0,
+         'T41 no separate connector audit table exists (audit reuses append-only audit_logs)';
+end $$;
+-- 41e: the request-path role still cannot WRITE a run after 0019 (server-only writes remain a later PR).
+select set_config('request.jwt.claims','{"sub":"0a000000-0000-0000-0000-000000000001"}',false); set role authenticated; -- owner_a (tenant-A member)
+do $$ declare ok boolean := false; begin
+  begin insert into public.connector_runs (tenant_id, connector_id, status)
+    values ('11111111-1111-1111-1111-111111111111','17000000-0000-0000-0000-0000000000a1','queued'); ok := false;
+  exception when insufficient_privilege then ok := true; end;
+  assert ok, 'T41 authenticated must still NOT insert connector_runs after 0019 (server-only writes later)';
 end $$;
 reset role;
 

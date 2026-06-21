@@ -11,7 +11,17 @@ import path from "node:path";
 // src/lib/server (not src/app, not a "use client" file), so this guard keeps holding.
 
 const SRC = path.resolve(__dirname, "..", "..", "..", "..", "src");
-const CRYPTO_REL_HINTS = ["connector-vault/crypto", "server/connector-vault/crypto", "lib/server/connector-vault/crypto"];
+// Any import path that references a server-only connector-vault module (crypto wrapper PR C, run/audit
+// lifecycle PR D). The guard holds as the dir grows: new server-only modules under connector-vault/ are
+// reached only from other src/lib/server code, never from "use client" / src/app.
+const CRYPTO_REL_HINTS = [
+  "connector-vault/crypto",
+  "server/connector-vault/crypto",
+  "lib/server/connector-vault/crypto",
+  "connector-vault/run-lifecycle",
+  "server/connector-vault/run-lifecycle",
+  "lib/server/connector-vault/run-lifecycle",
+];
 
 function walk(dir: string): string[] {
   const out: string[] = [];

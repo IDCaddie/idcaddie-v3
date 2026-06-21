@@ -81,7 +81,7 @@ from the request path.
 
 **Tier 1 — metadata (RLS-readable, NEVER holds a secret):**
 - `connectors` — `id, tenant_id, organization_id?, provider, display_name, status (pending|active|error|revoked|disabled), connected_by, granted_scopes_safe[], last_sync_at, health, created_at, updated_at`. No token, no key, no ciphertext, no key id beyond an opaque non-sensitive handle.
-- `connector_runs` — `id, connector_id, tenant_id, started_at, finished_at, status (queued|running|success|failed), items_seen?, error_class?` (a *class*, never a provider message). RLS-readable safe metadata.
+- `connector_runs` — `id, connector_id, tenant_id, status (queued|running|succeeded|failed|canceled|timed_out), started_at, completed_at?, failure_code? (a stable machine code, never a provider message), failure_label? (a short SAFE human label), records_seen?, records_imported?, records_failed?, created_at`. RLS-readable safe metadata only — no secret, no token/key, no raw provider payload. (`provider` is read from the parent `connectors` row, not denormalized onto each run.) Six-state lifecycle + the renamed/added columns ship in migration `0019` (PR D, §28).
 
 **Tier 2 — secrets (NO `authenticated` grant, RLS deny-all, server/KMS path only):**
 - `connector_secrets` — `id, connector_id, tenant_id, secret_kind (oauth_access|oauth_refresh|api_key|pat|webhook_signing), version, is_active, ciphertext, dek_wrapped, aead_nonce, aad_digest, expires_at?, created_at, revoked_at?`. The `authenticated` role holds **zero** privileges here; only the connector-runner identity / `SECURITY DEFINER` accessors reach it. Plaintext is never a column.
@@ -149,12 +149,15 @@ Until the §17 open questions (which providers, exact header, window, cache back
 
 ## 9. Connector run lifecycle
 
-`queued → running → success | failed`, each transition server-written to `connector_runs` with timestamps and
-counts only. Runs are **rate-limited** per connector/tenant (T2 abuse, cost); the **rate-limit counter is
+Six-state lifecycle (migration `0019`, §28): `queued → running → {succeeded | failed | timed_out}`, with
+`queued | running → canceled`; the four terminal states (`succeeded/failed/canceled/timed_out`) have no outgoing
+transition. Each transition is server-written to `connector_runs` with timestamps + safe counters + a machine
+`failure_code` and safe `failure_label` only (no secret, no provider payload). Runs are **rate-limited** per connector/tenant (T2 abuse, cost); the **rate-limit counter is
 server-side state** (runner identity / a deny-all store), **never an `authenticated`-writable Tier-1 column**, and
 is enforced inside the runner **before any secret is touched** — so a malicious tenant cannot reset or inflate it. Manual sync requires admin/steward;
 the runner re-verifies membership+role for the run's tenant before touching secrets (T2). A run that fails records
-an `error_class` (e.g. `auth_expired`, `provider_5xx`, `rate_limited`) — **never** a raw provider message or token.
+a `failure_code` (a stable machine code, e.g. `auth_expired`, `provider_5xx`, `rate_limited`) + a short safe
+`failure_label` — **never** a raw provider message or token.
 
 ## 10. Auditing
 
@@ -446,3 +449,49 @@ remains blocked. Old-app parity is not complete. UI/UX parity is not complete. A
 complete. Upload is not automatically production-ready. Hosted Auth/tenant-context is verified, but old-app
 replacement is not yet verified. RISK-001 remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is ticked by
 this PR. (Open question §17 deferred: the real KMS provider + local-dev secret handling are still to be chosen.)
+
+## 28. Implementation — PR D: connector run/audit lifecycle foundation (PR #105)
+
+**Connector run/audit lifecycle foundation is added.** This is the §20 **PR D** gate, the safe run/audit model that
+must exist before any connector execution or credential storage. **No connector execution is implemented. No provider
+connector is implemented.** It is two pieces — a narrow schema widening + a pure server-only model — and nothing
+that runs a connector.
+
+**Schema (migration `0019_connector_run_audit_lifecycle.sql`).** Widens the existing `connector_runs` (`0017`) to
+the safe run-lifecycle shape: the **six states** `queued / running / succeeded / failed / canceled / timed_out`
+(was a 4-state `success` check — there are zero rows, so `success → succeeded` is a free rewrite); renames
+`finished_at → completed_at`, `items_seen → records_seen`, `error_class → failure_code`; and adds
+`records_imported`, `records_failed` (non-negative counters) + `failure_label` (a short SAFE human label). **Safe
+metadata only — no secret, no token/key, no raw provider payload** (the §39/T39 "connector_runs holds no secret
+column" invariant still holds). **Grants UNCHANGED:** `connector_runs` keeps the `0018` least-privilege surface —
+`authenticated` = `[SELECT]` only (new columns inherit it), `anon` = none, and **no write policy is added** (run
+writes remain future server-only/runner work, never a request-path write). Audit reuses the existing **append-only
+`audit_logs`** (`reject_audit_mutation`, `0002`) — **no new connector audit table.** No `connector_secrets` change.
+
+**Model (`src/lib/server/connector-vault/run-lifecycle.ts`, server-only, PURE).** Typed lifecycle: the six run
+states + terminal set + the only valid transitions (`assertValidRunTransition` / `isValidRunTransition`); the
+conceptual audit actions `connector.run.created / .started / .completed / .failed / connector.credential.created /
+.revoked`; and pure builders `buildConnectorRunRecord` / `buildConnectorAuditEvent` that **validate then return the
+safe shape a future runner would persist — performing NO database write.** A redaction guard
+(`assertNoSecretFields` + a credential-value check + `assertSafeFailureLabel`) **rejects any secret-shaped field
+name or credential-shaped value** (token/secret/key/refresh/authorization/cookie/ciphertext/…, and JWT/`ghp_`/
+`sk-`/`Bearer`-shaped values). The module has **NO imports** (pure TS — no DB, no Supabase, no service-role, no
+`process.env`; a test asserts it), a runtime browser sentinel, and the `no-client-import.test.ts` guard now covers
+it too (no `"use client"` / `src/app` file imports it).
+
+**Tests** (+15 app tests, 136 → 151; RLS suite **318 → 327** via **T41**): lifecycle state + transition validation;
+safe-error-labels-only; secret-shaped field/value rejection in run + audit metadata; module purity + server-only
+guard; **T41** proves the six states are accepted + an out-of-set status rejected + the renamed/added safe columns
+present (old names gone) + no secret column + the grant shape unchanged (`authenticated [SELECT]` only, `anon`
+none, no write policy, audit still reuses `audit_logs`) + the request-path role still cannot write a run. Types
+regenerated.
+
+**No connector credentials are stored. No connector secret material is inserted, updated, or deleted. No connector
+sync is implemented. No OAuth callback is implemented. No connector UI is implemented. No service-role request path
+is added. No production data was touched. No hosted commands were run.** A human applies `0019` to staging then
+production in a future step (an agent never runs hosted commands); next gate is **PR E** (connector metadata UI,
+read-only) → PR F OAuth callback → PR G first connector. **Connector vault is still not usable for real credentials
+until the remaining gated PRs are complete. Connector implementation remains blocked. Old-app parity is not
+complete. UI/UX parity is not complete. AI/API connector parity is not complete. Upload is not automatically
+production-ready. Hosted Auth/tenant-context is verified, but old-app replacement is not yet verified. RISK-001
+remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is ticked by this PR.
