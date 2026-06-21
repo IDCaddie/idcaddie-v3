@@ -1387,3 +1387,43 @@ and tested). **Connector implementation remains blocked. Old-app parity is not c
 complete. AI/API connector parity is not complete. Upload is not automatically production-ready. Hosted
 Auth/tenant-context is verified, but old-app replacement is not yet verified. RISK-001 remains OPEN. Cutover
 remains BLOCKED.** No doc 17 §5 box is ticked by this PR.
+
+---
+
+## 43. DECISION RECORD — KMS / OAuth-signer / local-dev secrets / `oauth_pending` replay store (PR #110)
+
+**KMS/key-provider decision is recorded. OAuth state signer decision is recorded. OAuth replay-store design is
+recorded** (doc 42 §32). Docs/design-decision PR resolving the remaining §17 open questions that gate any real
+credential storage — **it implements nothing.** No migration (the `oauth_pending` schema is conceptual/design-only).
+
+- **KMS/key-provider (§32.1):** the production `ConnectorVaultKeyProvider` is backed by an **external managed KMS**
+  (default AWS KMS / GCP KMS) holding the KEK; **Supabase Vault/pgsodium is rejected** for the KEK (it co-locates
+  key + ciphertext). KEK owned by the server-only runner identity (KMS `GenerateDataKey`/`Decrypt` only, never a
+  request-path role); `kekId` = a non-sensitive KMS handle stored per wrapped DEK; rotation by alias (no mass
+  re-encryption); unwrap failure **fails closed** (typed error, no key/plaintext, run marked `failed`); local-dev
+  uses the in-memory test provider — **no committed keys, no prod secret read in tests**.
+- **OAuth signer secret (§32.2):** a **server-only ≥32-byte HMAC secret** from the host secret store (read via
+  `CONNECTOR_OAUTH_STATE_SECRET`), never in repo/migration/client; rotation accepts {current, previous} keys for a
+  grace window = max state TTL (≤10 min); the `state` carries only the signature, never the key; failures return a
+  safe reason code only.
+- **`oauth_pending` replay store (§32.3, design-only):** a Tier-2 table (`tenant_id`, provider, connector_id?,
+  subject?, `state_jti`, `nonce_hash` [sha256, raw nonce never stored], `expires_at`, `consumed_at?`, `created_at`,
+  safe attempt/reason metadata) with `UNIQUE(state_jti)`/`UNIQUE(nonce_hash)`; **single-use consume = one atomic
+  UPDATE** (server-only path); **RLS deny-all + zero anon/authenticated privilege** (mirrors `connector_secrets`);
+  constant-time hash compare; scheduled expiry sweep; `connector.oauth.state.created/.consumed/.expired/.rejected`
+  into the append-only `audit_logs` (safe metadata only).
+- **Gates (§32.4):** no real OAuth token storage before the replay store is implemented+tested; no real credential
+  storage before the production KMS provider is implemented+tested; no provider connector before replay store + key
+  provider + audit path are complete; no browser credential form until the secret write path is explicitly
+  reviewed; no production credential storage before staging verification.
+
+**No real connector credential storage is implemented. No OAuth token exchange is implemented. No access token is
+stored. No refresh token is stored. No connector secret material is inserted, updated, or deleted. No connector
+sync is implemented. No provider connector is implemented. No credential form is implemented. No connect/reconnect/
+disconnect action is implemented. No manual or scheduled run action is implemented. No service-role request path is
+added. No production data was touched. No hosted commands were run. Connector vault is still not usable for real
+credentials until the remaining gated PRs are complete** (next: PR G first connector — only after §32.1 KMS
+provider + §32.3 `oauth_pending` replay store are implemented and tested). **Connector implementation remains
+blocked. Old-app parity is not complete. UI/UX parity is not complete. AI/API connector parity is not complete.
+Upload is not automatically production-ready. Hosted Auth/tenant-context is verified, but old-app replacement is
+not yet verified. RISK-001 remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is ticked by this PR.

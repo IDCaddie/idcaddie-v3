@@ -226,7 +226,7 @@ locally so a stale credential is unusable (T9).
 
 ## 17. Open questions
 
-- **KMS choice:** Supabase Vault (pgsodium) vs external cloud KMS for the KEK — affects §6 and the runner identity.
+- ~~**KMS choice:** Supabase Vault (pgsodium) vs external cloud KMS for the KEK~~ — **RESOLVED in §32.1**: external managed KMS (default AWS KMS / GCP KMS) holds the KEK; Supabase Vault rejected for the KEK. (The OAuth-signer-secret, local-dev-secret, and `oauth_pending` replay-store questions are also resolved in §32.)
 - **Steward role:** distinct `connector-steward` role vs reuse `admin` (affects the role taxonomy + RLS predicates).
 - **Scope granularity:** per-tenant vs per-organization connector ownership (`organization_id` optional in §4).
 - **Webhook providers:** which connectors need inbound webhooks → HMAC signing-secret storage + per-provider
@@ -626,3 +626,109 @@ question). **Connector implementation remains blocked. Old-app parity is not com
 complete. AI/API connector parity is not complete. Upload is not automatically production-ready. Hosted
 Auth/tenant-context is verified, but old-app replacement is not yet verified. RISK-001 remains OPEN. Cutover
 remains BLOCKED.** No doc 17 §5 box is ticked by this PR.
+
+## 32. Decision record — KMS / OAuth-signer / local-dev secrets / `oauth_pending` replay store (PR #110)
+
+**KMS/key-provider decision is recorded. OAuth state signer decision is recorded. OAuth replay-store design is
+recorded.** This is a **docs/design-decision PR** — it resolves the remaining `§17` open questions that gate any
+real credential storage, and **implements nothing**: **No real connector credential storage is implemented. No
+OAuth token exchange is implemented. No access token is stored. No refresh token is stored. No connector secret
+material is inserted, updated, or deleted.** No migration is added (the `oauth_pending` schema below is
+**conceptual/design-only** — its migration is a later gated PR). The vault stays NOT usable for real credentials.
+
+### 32.1 Production `ConnectorVaultKeyProvider` / KMS decision
+- **Approach — external managed KMS holds the KEK; envelope encryption only.** The production
+  `ConnectorVaultKeyProvider` (§6, the PR C interface `generateDataKey(kekId)` / `unwrapDataKey(wrappedDek,
+  kekId)`) is backed by a **managed cloud KMS** (default **AWS KMS**; **GCP KMS** is the equivalent if the runner
+  lands on GCP). `generateDataKey` calls the KMS `GenerateDataKey` (returns a plaintext DEK + the KMS-wrapped
+  DEK); `unwrapDataKey` calls KMS `Decrypt`. **The KEK never leaves the KMS** and is never stored in Postgres,
+  the repo, env, or any browser-reachable surface — only the **wrapped DEK** is persisted (in
+  `connector_secrets.dek_wrapped`).
+- **REJECTED: Supabase Vault / pgsodium for the KEK** — it co-locates the key material with the ciphertext in the
+  same database trust domain, defeating envelope encryption's separation (a DB compromise would yield both). (The
+  §3 residual "compromised host with live KEK access" risk is unchanged and remains an incident-response concern,
+  not a schema defense.)
+- **KEK ownership.** The KEK is owned by the **server-side connector runner identity** (a narrow IAM principal
+  whose ONLY KMS permissions are `GenerateDataKey` + `Decrypt` under the single connector-vault KEK) — never the
+  request-path `authenticated` role, never a browser, never a blanket service-role. This preserves
+  "no service-role on request paths" (§1).
+- **Key id / version handling.** `kekId` is a **non-sensitive KMS key handle/alias** (e.g. an alias ARN), stored
+  alongside each wrapped DEK so a row records which KEK wrapped it. KEK rotation is by **alias** (the alias points
+  at the current KMS key version; old versions stay decryptable), so existing rows unwrap without re-encryption.
+  The `EncryptedConnectorSecret.kekId` (PR C) carries this handle.
+- **Rotation expectations.** KEK rotation is handled by the KMS (automatic annual rotation enabled, plus on-demand
+  rotation on suspected compromise). DEKs are **per-secret** (already true in PR C) and a secret is re-wrapped
+  under a fresh DEK on each `version` bump (rotate/reconnect). No mass re-encryption is required for KEK rotation.
+- **Unwrap-failure behavior.** A KMS `Decrypt` failure (wrong KEK, revoked key, tamper, KMS unavailable) **fails
+  closed**: `unwrapDataKey` throws, the crypto wrapper surfaces the existing typed `ConnectorVaultCryptoError`
+  ("data key unwrap failed…") with **no key bytes / ciphertext / plaintext** in the message (PR C redaction), the
+  runner marks the run `failed` with a safe `failure_code` (e.g. `key_unwrap_failed`), and **no plaintext secret
+  is produced**. A KMS outage degrades to "connector temporarily unavailable", never to a plaintext fallback.
+- **Local-dev / test-only provider rules.** Local dev and tests use the **in-memory `ConnectorVaultKeyProvider`**
+  (the existing `createInMemoryKeyProvider`, random per-process KEKs in a Map) — **test-only, never production**.
+  **No key is ever committed to the repo. No production secret is ever read in tests** (the PR C/PR F purity tests
+  already assert the modules read no `process.env` and import no Supabase/service-role). A developer who wants to
+  exercise the real KMS path uses their own throwaway dev KMS key + a gitignored `.env.local`, never a prod key.
+
+### 32.2 OAuth state signer secret decision
+- **Source — a server-only HMAC signing secret.** The OAuth-state signer (§31, the PR F
+  `createHmacStateSigner(secret, keyId)`) is fed a **≥32-byte random secret from a server-only secret store**
+  (the runner/host secret manager — e.g. the deploy platform's encrypted env or the same KMS-backed secret path),
+  read via the route's `CONNECTOR_OAUTH_STATE_SECRET` env var. It is **NEVER** in the repo, a migration, a
+  client bundle, or any browser-reachable surface. (A throwaway value may be set in a gitignored `.env.local` for
+  local dev; tests use a fixed test-only secret, never env.)
+- **Rotation plan + grace window.** Rotation publishes a new `CONNECTOR_OAUTH_STATE_KEY_ID` + secret. Because a
+  signed `state` is short-lived (TTL ≤ 10 min, §31), validation accepts **{current, previous}** signing keys for
+  a **grace window equal to the max state TTL** (so in-flight authorizations still validate), then the previous
+  key is dropped. `keyId` distinguishes them. No long-lived multi-key set is retained.
+- **No-client-exposure rule.** The signing secret is server-only by construction: `oauth-state.ts` is server-only
+  (browser sentinel + the `no-client-import` guard) and reads no env; only the inert route reads the env secret,
+  and only on the server. The `state` carried to the browser contains the HMAC **signature**, never the key.
+- **Safe error behavior.** A signature/expiry/nonce/binding failure returns the existing PR F **safe reason CODE
+  only** (`bad_signature` / `expired` / …) — never the signing secret, the nonce, the authorization code, or a
+  provider payload; nothing is logged.
+
+### 32.3 `oauth_pending` single-use replay store — design only (no migration in this PR)
+Conceptual Tier-2 schema (illustrative columns; the migration is a later gated PR):
+- `oauth_pending` — `id, tenant_id, organization_id?, provider, connector_id?, subject?, state_jti (a random
+  unique id embedded in the signed state), nonce_hash (sha256 of the nonce — the RAW nonce is never stored),
+  expires_at, consumed_at?, created_at, attempt_count? (safe counter), last_rejected_code? (a safe reason code,
+  never a secret)`.
+- **Single-use enforcement.** `UNIQUE (state_jti)` and `UNIQUE (nonce_hash)`. **Consume is one atomic UPDATE**:
+  `update oauth_pending set consumed_at = now() where state_jti = $1 and consumed_at is null and expires_at >
+  now() returning ...` — a second callback finds `consumed_at` already set (or no row) and is rejected
+  (`replayed`). This is the **server-only consume path**; no request-path role can write it.
+- **RLS / grants (mirrors `connector_secrets`).** RLS-enabled with **zero policies (deny-all)**; `anon` and
+  `authenticated` hold **zero** privileges (no select/insert/update/delete). **No anon access. No broad
+  authenticated write access.** Only the connector-runner identity / a `SECURITY DEFINER` consume function
+  reaches it. `service_role` is never used on a request path.
+- **Hashing / comparison.** Store `nonce_hash` (sha256), not the raw nonce; where the app compares a hash, use a
+  **constant-time** compare (as PR C/PR F already do via `timingSafeEqual`).
+- **Expiry / cleanup.** Rows past `expires_at` are swept by a scheduled server-only job (and/or deleted on
+  consume after a short retention for audit), keeping the table bounded.
+- **Audit (safe metadata only).** `connector.oauth.state.created` / `.consumed` / `.expired` / `.rejected`
+  recorded into the **append-only `audit_logs`** (§10) with safe metadata only (tenant/provider/connector id +
+  a reason code) — **never the raw nonce, `state`, signing key, token, or authorization code**.
+
+### 32.4 Gates (restated — these MUST hold before any real token is stored)
+1. **No real OAuth token storage before the `oauth_pending` replay store is implemented and tested** (the
+   stateless PR F skeleton does not provide cross-request single-use; that requires this store).
+2. **No real connector credential storage before the production KMS/key-provider (§32.1) is implemented and
+   tested** (the in-memory provider is test-only).
+3. **No provider connector before the replay store + key provider + the audit path are all complete.**
+4. **No browser credential form until the secret write path is explicitly reviewed** (a dedicated security review
+   PR, not an incidental UI change).
+5. **No production credential storage before staging verification** (apply + verify on staging first, as every
+   prior vault migration did).
+
+**No real connector credential storage is implemented. No OAuth token exchange is implemented. No access token is
+stored. No refresh token is stored. No connector secret material is inserted, updated, or deleted. No connector
+sync is implemented. No provider connector is implemented. No credential form is implemented. No connect/
+reconnect/disconnect action is implemented. No manual or scheduled run action is implemented. No service-role
+request path is added. No production data was touched. No hosted commands were run. Connector vault is still not
+usable for real credentials until the remaining gated PRs are complete.** This PR resolves the `§17` KMS-choice +
+the local-dev-secret + the OAuth replay/signer open questions as DECISIONS (the steward-role / scope-granularity
+/ webhook / refresh-concurrency `§17` questions remain open). **Connector implementation remains blocked. Old-app
+parity is not complete. UI/UX parity is not complete. AI/API connector parity is not complete. Upload is not
+automatically production-ready. Hosted Auth/tenant-context is verified, but old-app replacement is not yet
+verified. RISK-001 remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is ticked by this PR.
