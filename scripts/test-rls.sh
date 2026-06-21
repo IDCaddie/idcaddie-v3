@@ -99,7 +99,10 @@ grant update (upload_status) on public.files to authenticated;
 -- authenticated on the two Tier-1 metadata tables only. After this: authenticated = SELECT on
 -- connectors/connector_runs and NOTHING on connector_secrets; anon = NOTHING on all three. KEEP IN
 -- LOCKSTEP with migration 0018 (T39/T40's exact-privilege arrays are the backstop that fails loudly on drift).
-revoke all on public.connector_secrets, public.connectors, public.connector_runs from authenticated, anon;
+-- oauth_pending (migration 0020) is a near-Tier-2 deny-all store (RLS-enabled, ZERO policies, no grant —
+-- like connector_secrets); the blanket grant above re-broadens it too, so revoke it back here (NOTHING is
+-- granted to authenticated/anon on it). T42's exact-zero-privilege array is the backstop.
+revoke all on public.connector_secrets, public.connectors, public.connector_runs, public.oauth_pending from authenticated, anon;
 grant select on public.connectors, public.connector_runs to authenticated;
 SQL
 

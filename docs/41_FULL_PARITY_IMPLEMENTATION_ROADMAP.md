@@ -1427,3 +1427,42 @@ provider + §32.3 `oauth_pending` replay store are implemented and tested). **Co
 blocked. Old-app parity is not complete. UI/UX parity is not complete. AI/API connector parity is not complete.
 Upload is not automatically production-ready. Hosted Auth/tenant-context is verified, but old-app replacement is
 not yet verified. RISK-001 remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is ticked by this PR.
+
+---
+
+## 44. IMPLEMENTATION — `oauth_pending` single-use replay store (PR #111)
+
+**OAuth pending replay store schema is added** (doc 42 §33) — migration `0020_oauth_pending_replay_store.sql`
+lands the §32.3 design, the §32.4 gate-1 prerequisite before any real OAuth token storage. **The oauth_pending
+table is not readable or writable by anon or authenticated users. OAuth replay-store implementation remains
+server-only.** Table + deny-all RLS/grant + a pure server-only helper only — no consume function, no route, no
+token exchange, no credential storage; `connector_secrets` untouched.
+
+- **`public.oauth_pending`** (`tenant_id`, `organization_id?`, `connector_id?`, provider, `subject?`,
+  `state_jti`, `nonce_hash` [sha256 — raw nonce never stored], `intent`, `expires_at` NOT NULL, `consumed_at?`,
+  `created_at`, `attempt_count`, `last_rejected_code?` [CHECK = safe reason set]). **Single-use:**
+  `UNIQUE(state_jti)` + `UNIQUE(nonce_hash)`. **Same-tenant:** composite `(connector_id, tenant_id)` FK
+  (MATCH SIMPLE; skipped when connector_id null). **No raw nonce/state/code/token/secret column.**
+- **RLS deny-all (mirrors `connector_secrets`):** RLS-enabled + ZERO policies + `revoke all` from anon +
+  authenticated (no grant). After `0020`, authenticated + anon hold EXACTLY zero privilege. The future
+  server-only consume path (runner / `SECURITY DEFINER`, a later PR) does the atomic single-use UPDATE.
+  `test-rls.sh` re-asserts the `oauth_pending` revoke after its blanket-grant crutch.
+- **Server-only helper** `src/lib/server/connector-vault/oauth-pending.ts` (PURE — only `node:crypto`):
+  `hashOAuthValue` (deterministic sha256) + `buildOAuthPendingRecord` (validates + returns the safe row,
+  hashing the raw nonce and never returning it, rejecting secret-shaped fields). No DB/token-exchange/
+  `connector_secrets`/service-role; server-only (sentinel + no-client-import guard).
+
+**T42** (RLS suite **327 → 352**): deny-all (runtime + catalog exact-zero-privilege) + structural (RLS,
+zero policies, no secret column, `expires_at` NOT NULL, UNIQUE single-use rejects duplicates, composite-FK
+cross-tenant block) + `connector_secrets`/Tier-1 grants unchanged. **+9 app tests** for the helper; types
+regenerated (includes `oauth_pending`). **No OAuth code is exchanged for tokens. No access token is stored. No
+refresh token is stored. No connector credentials are stored. No connector secret material is inserted,
+updated, or deleted. No connector sync is implemented. No provider connector is implemented. No credential
+form is implemented. No connect/reconnect/disconnect action is implemented. No manual or scheduled run action
+is implemented. No service-role request path is added. No production data was touched. No hosted commands were
+run. Connector vault is still not usable for real credentials until the remaining gated PRs are complete**
+(next: the §32.1 KMS-backed key provider → the server-only consume path → PR G first connector; a human
+applies `0020` to staging then production later). **Connector implementation remains blocked. Old-app parity
+is not complete. UI/UX parity is not complete. AI/API connector parity is not complete. Upload is not
+automatically production-ready. Hosted Auth/tenant-context is verified, but old-app replacement is not yet
+verified. RISK-001 remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is ticked by this PR.

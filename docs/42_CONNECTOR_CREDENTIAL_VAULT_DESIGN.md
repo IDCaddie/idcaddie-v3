@@ -85,7 +85,7 @@ from the request path.
 
 **Tier 2 — secrets (NO `authenticated` grant, RLS deny-all, server/KMS path only):**
 - `connector_secrets` — `id, connector_id, tenant_id, secret_kind (oauth_access|oauth_refresh|api_key|pat|webhook_signing), version, is_active, ciphertext, dek_wrapped, aead_nonce, aad_digest, expires_at?, created_at, revoked_at?`. The `authenticated` role holds **zero** privileges here; only the connector-runner identity / `SECURITY DEFINER` accessors reach it. Plaintext is never a column.
-- `oauth_pending` — short-TTL CSRF/state store: `state, nonce?, pkce_verifier?, tenant_id, organization_id?, provider, initiated_by, expires_at, consumed_at?`. Server-only; single-use. `pkce_verifier`/`nonce` are acceptable as plaintext-at-rest **only** because `oauth_pending` is Tier-2 (RLS deny-all + zero `authenticated` grant), single-use, and short-TTL — there is no request-path read; both are also on the §11 redaction deny-list.
+- `oauth_pending` — short-TTL CSRF/state store. **SUPERSEDED by the stricter §32.3 decision + the shipped `0020` schema (§33): it stores `nonce_hash` (sha256) and NO raw `nonce`, NO raw `state` payload, and NO `pkce_verifier` column** — only `state_jti`/`nonce_hash` + safe metadata (`tenant_id, organization_id?, connector_id?, provider, subject?, intent, expires_at, consumed_at?, created_at, attempt_count, last_rejected_code?`). Server-only; single-use (`UNIQUE(state_jti)`/`UNIQUE(nonce_hash)`); Tier-2 (RLS deny-all + zero `anon`/`authenticated` grant) — no request-path read/write. (The earlier sketch here allowed plaintext `nonce`/`pkce_verifier` at rest; the resolved design hashes the nonce and defers PKCE-verifier handling, so no plaintext secret is stored.)
 
 **Binding.** AEAD additional-authenticated-data (AAD) binds each ciphertext to `{tenant_id, connector_id,
 secret_kind, version}` so a row copied/replayed into another tenant or kind fails to decrypt — a structural defense
@@ -732,3 +732,63 @@ the local-dev-secret + the OAuth replay/signer open questions as DECISIONS (the 
 parity is not complete. UI/UX parity is not complete. AI/API connector parity is not complete. Upload is not
 automatically production-ready. Hosted Auth/tenant-context is verified, but old-app replacement is not yet
 verified. RISK-001 remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is ticked by this PR.
+
+## 33. Implementation — `oauth_pending` single-use replay store (PR #111)
+
+**OAuth pending replay store schema is added.** This lands the §32.3 design as migration
+`0020_oauth_pending_replay_store.sql` — the §32.4 gate-1 prerequisite before any real OAuth token may be
+stored (the stateless PR F `state` proves tamper/expiry/binding but cannot enforce cross-request single-use
+without a shared store). **It creates ONLY the table + its deny-all RLS/grant posture + a pure server-only
+helper.** No consume function, no route, no token exchange, no credential storage; `connector_secrets` is
+untouched. **The oauth_pending table is not readable or writable by anon or authenticated users. OAuth
+replay-store implementation remains server-only.**
+
+### 33.1 Schema (migration `0020`)
+`public.oauth_pending` — `id, tenant_id, organization_id?, connector_id?, provider, subject?, state_jti,
+nonce_hash, intent, expires_at (NOT NULL), consumed_at?, created_at, attempt_count, last_rejected_code?`.
+**Safe metadata only** — `nonce_hash` is sha256 (the **raw nonce is never stored**); there is NO raw `state`
+payload, authorization code, access/refresh token, API key, webhook secret, PKCE/`code_verifier`, or
+provider raw payload column (T42 asserts none exist). `last_rejected_code` is a CHECK-constrained safe reason
+code (the PR F `OAuthStateReason` set), never a secret. **Single-use:** `UNIQUE (state_jti)` +
+`UNIQUE (nonce_hash)`. **Same-tenant integrity:** the composite `(connector_id, tenant_id)` FK to
+`connectors(id, tenant_id)` (MATCH SIMPLE — skipped when `connector_id` is null for a fresh connect) so a
+cross-tenant connector can never bind. `expires_at` is required.
+
+### 33.2 RLS / grants (deny-all, server-only — mirrors `connector_secrets`)
+RLS-ENABLED with **ZERO policies** (default deny-all); `revoke all on public.oauth_pending from anon,
+authenticated` (countering the hosted-default grants — the `0015`/`0016`/`0017`/`0018` masking lesson).
+**No authenticated/anon read or write policy; no grant.** After `0020`, `authenticated` and `anon` hold
+EXACTLY zero privileges (no SELECT/INSERT/UPDATE/DELETE/TRUNCATE) — there is no SQL a request-path role can
+run that touches it. The future server-only consume path (the runner identity / a `SECURITY DEFINER`
+accessor; a later gated PR) does the atomic single-use UPDATE. `service_role` is never used on a request
+path. The `test-rls.sh` harness re-asserts the `oauth_pending` revoke after its blanket-grant crutch (so the
+suite reflects the REAL hosted surface).
+
+### 33.3 Server-only helper (`src/lib/server/connector-vault/oauth-pending.ts`, PURE)
+`hashOAuthValue(value)` (sha256 hex — deterministic, so the future consume path hashes a returning nonce the
+same way the create path did) + `buildOAuthPendingRecord(input)` which validates and returns the safe row
+shape, **hashing the raw nonce and never storing or returning it**, and rejecting any secret-shaped extra
+field. NO database access, NO token exchange, NO `connector_secrets`, NO Supabase/service-role import
+(only import is `node:crypto`); server-only (runtime browser sentinel + the `no-client-import` guard).
+
+### 33.4 Tests
+**T42** (RLS suite **327 → 352**): `oauth_pending` deny-all at runtime (authenticated + anon cannot
+read/insert/update/delete) + the catalog/privilege layer (authenticated/anon hold EXACTLY zero privilege) +
+structural posture (RLS enabled, zero policies, no raw nonce/state/code/token/secret column, `expires_at`
+NOT NULL, UNIQUE `state_jti`/`nonce_hash` reject duplicates, the composite-FK cross-tenant binding blocked) +
+`connector_secrets` and the Tier-1 grant surface unchanged by `0020`. **+9 app tests** for the helper
+(deterministic hash; the raw nonce is never returned; required-field + invalid-`expiresAt` + secret-shaped
+field rejection; module purity). `database.types.ts` regenerated (now includes `oauth_pending`).
+
+**No OAuth code is exchanged for tokens. No access token is stored. No refresh token is stored. No connector
+credentials are stored. No connector secret material is inserted, updated, or deleted. No connector sync is
+implemented. No provider connector is implemented. No credential form is implemented. No connect/reconnect/
+disconnect action is implemented. No manual or scheduled run action is implemented. No service-role request
+path is added. No production data was touched. No hosted commands were run. Connector vault is still not
+usable for real credentials until the remaining gated PRs are complete** (next: the §32.1 KMS-backed
+`ConnectorVaultKeyProvider` implementation, then the server-only consume path, then PR G first connector). A
+human applies `0020` to staging then production in a future step (an agent never runs hosted commands).
+**Connector implementation remains blocked. Old-app parity is not complete. UI/UX parity is not complete.
+AI/API connector parity is not complete. Upload is not automatically production-ready. Hosted
+Auth/tenant-context is verified, but old-app replacement is not yet verified. RISK-001 remains OPEN. Cutover
+remains BLOCKED.** No doc 17 §5 box is ticked by this PR.

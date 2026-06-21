@@ -1069,6 +1069,72 @@ export type Database = {
           },
         ]
       }
+      oauth_pending: {
+        Row: {
+          attempt_count: number
+          connector_id: string | null
+          consumed_at: string | null
+          created_at: string
+          expires_at: string
+          id: string
+          intent: string
+          last_rejected_code: string | null
+          nonce_hash: string
+          organization_id: string | null
+          provider: string
+          state_jti: string
+          subject: string | null
+          tenant_id: string
+        }
+        Insert: {
+          attempt_count?: number
+          connector_id?: string | null
+          consumed_at?: string | null
+          created_at?: string
+          expires_at: string
+          id?: string
+          intent: string
+          last_rejected_code?: string | null
+          nonce_hash: string
+          organization_id?: string | null
+          provider: string
+          state_jti: string
+          subject?: string | null
+          tenant_id: string
+        }
+        Update: {
+          attempt_count?: number
+          connector_id?: string | null
+          consumed_at?: string | null
+          created_at?: string
+          expires_at?: string
+          id?: string
+          intent?: string
+          last_rejected_code?: string | null
+          nonce_hash?: string
+          organization_id?: string | null
+          provider?: string
+          state_jti?: string
+          subject?: string | null
+          tenant_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "oauth_pending_connector_same_tenant"
+            columns: ["connector_id", "tenant_id"]
+            isOneToOne: false
+            referencedRelation: "connectors"
+            referencedColumns: ["id", "tenant_id"]
+          },
+          {
+            foreignKeyName: "oauth_pending_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       organization_memberships: {
         Row: {
           created_at: string

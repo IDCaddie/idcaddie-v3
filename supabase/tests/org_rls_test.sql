@@ -2012,4 +2012,119 @@ do $$ declare ok boolean := false; begin
 end $$;
 reset role;
 
+-- ── Test 42: oauth_pending single-use replay store DENY-ALL + posture (migration 0020) ───────────────
+-- The OAuth replay store is near-Tier-2: RLS-enabled with ZERO policies (default deny-all) AND the
+-- request-path roles hold NO base privilege — no SQL a logged-in user runs can read/write it (server-only
+-- consume in a later PR). Proven at the runtime layer (42a/42b) + the catalog/privilege layer (42c) +
+-- structural posture (42d: composite-FK cross-tenant block, UNIQUE single-use, no secret column).
+reset role;
+-- 42a: a tenant-A member cannot read/insert/update/delete oauth_pending (deny-all, no grant).
+select set_config('request.jwt.claims','{"sub":"0a000000-0000-0000-0000-000000000001"}',false); set role authenticated; -- owner_a
+do $$ declare ok boolean := false; begin
+  begin perform 1 from public.oauth_pending; ok := false; exception when insufficient_privilege then ok := true; end;
+  assert ok, 'T42 authenticated must NOT read oauth_pending (deny-all, no grant)';
+end $$;
+do $$ declare ok boolean := false; begin
+  begin insert into public.oauth_pending (tenant_id, provider, state_jti, nonce_hash, intent, expires_at)
+    values ('11111111-1111-1111-1111-111111111111','github','jti-x','hash-x','connect', now() + interval '10 min'); ok := false;
+  exception when insufficient_privilege then ok := true; end;
+  assert ok, 'T42 authenticated must NOT insert oauth_pending';
+end $$;
+do $$ declare ok boolean := false; begin
+  begin update public.oauth_pending set consumed_at = now(); ok := false; exception when insufficient_privilege then ok := true; end;
+  assert ok, 'T42 authenticated must NOT update oauth_pending';
+end $$;
+do $$ declare ok boolean := false; begin
+  begin delete from public.oauth_pending; ok := false; exception when insufficient_privilege then ok := true; end;
+  assert ok, 'T42 authenticated must NOT delete oauth_pending';
+end $$;
+reset role;
+-- 42b: anon is denied too.
+set role anon;
+do $$ declare ok boolean := false; begin
+  begin perform 1 from public.oauth_pending; ok := false; exception when insufficient_privilege then ok := true; end;
+  assert ok, 'T42 anon must NOT read oauth_pending';
+end $$;
+reset role;
+-- 42c: PRIVILEGE SURFACE (catalog; role-independent; run as the reset superuser) — EXACTLY zero privileges.
+reset role;
+do $$ begin
+  assert not has_table_privilege('authenticated','public.oauth_pending','SELECT'),   'T42 authenticated must NOT have SELECT on oauth_pending';
+  assert not has_table_privilege('authenticated','public.oauth_pending','INSERT'),   'T42 authenticated must NOT have INSERT on oauth_pending';
+  assert not has_table_privilege('authenticated','public.oauth_pending','UPDATE'),   'T42 authenticated must NOT have UPDATE on oauth_pending';
+  assert not has_table_privilege('authenticated','public.oauth_pending','DELETE'),   'T42 authenticated must NOT have DELETE on oauth_pending';
+  assert not has_table_privilege('authenticated','public.oauth_pending','TRUNCATE'), 'T42 authenticated must NOT have TRUNCATE on oauth_pending';
+  assert not has_table_privilege('anon','public.oauth_pending','SELECT'),            'T42 anon must NOT have SELECT on oauth_pending';
+  -- EXACT invariant: authenticated holds ZERO privilege types on oauth_pending (robust to drift).
+  assert (
+    select coalesce(array_agg(distinct privilege_type::text order by privilege_type::text), array[]::text[])
+    from information_schema.role_table_grants
+    where grantee = 'authenticated' and table_schema = 'public' and table_name = 'oauth_pending'
+  ) = array[]::text[], 'T42 authenticated must hold EXACTLY zero privileges on oauth_pending';
+  assert (
+    select coalesce(array_agg(distinct privilege_type::text order by privilege_type::text), array[]::text[])
+    from information_schema.role_table_grants
+    where grantee = 'anon' and table_schema = 'public' and table_name = 'oauth_pending'
+  ) = array[]::text[], 'T42 anon must hold EXACTLY zero privileges on oauth_pending';
+end $$;
+-- 42d: structural — RLS enabled, ZERO policies, no secret column; UNIQUE single-use; composite-FK cross-tenant block.
+do $$ begin
+  assert (select relrowsecurity from pg_class where oid='public.oauth_pending'::regclass), 'T42 oauth_pending must have RLS enabled';
+  assert (select count(*) from pg_policies where schemaname='public' and tablename='oauth_pending') = 0, 'T42 oauth_pending must have ZERO RLS policies (deny-all)';
+  -- NO secret/token/code column ever (only hashes + safe metadata).
+  assert (select count(*) from information_schema.columns where table_schema='public' and table_name='oauth_pending'
+          and column_name in ('nonce','raw_nonce','state','state_payload','code','authorization_code','access_token','refresh_token','api_key','webhook_secret','ciphertext','pkce_verifier','code_verifier')) = 0,
+         'T42 oauth_pending must expose NO raw nonce / state / code / token / secret column';
+  -- expires_at is required (NOT NULL).
+  assert (select is_nullable from information_schema.columns where table_schema='public' and table_name='oauth_pending' and column_name='expires_at') = 'NO',
+         'T42 oauth_pending.expires_at must be NOT NULL (a pending row always expires)';
+  -- single-use: UNIQUE on state_jti and nonce_hash.
+  assert (select count(*) from pg_constraint where conrelid='public.oauth_pending'::regclass and contype='u' and conname in ('oauth_pending_state_jti_key','oauth_pending_nonce_hash_key')) = 2,
+         'T42 oauth_pending must UNIQUE-constrain state_jti and nonce_hash (single-use)';
+end $$;
+-- 42e: a UNIQUE state_jti / nonce_hash blocks a duplicate (single-use) — privileged inserts (run as superuser).
+insert into public.oauth_pending (id, tenant_id, connector_id, provider, state_jti, nonce_hash, intent, expires_at)
+  values ('42a00000-0000-0000-0000-0000000000a1','11111111-1111-1111-1111-111111111111','17000000-0000-0000-0000-0000000000a1','github','jti-A','hash-A','connect', now() + interval '10 min');
+do $$ declare ok boolean := false; begin
+  begin -- same state_jti again → unique violation
+    insert into public.oauth_pending (tenant_id, provider, state_jti, nonce_hash, intent, expires_at)
+      values ('11111111-1111-1111-1111-111111111111','github','jti-A','hash-B','connect', now() + interval '10 min'); ok := false;
+  exception when unique_violation then ok := true; end;
+  assert ok, 'T42 duplicate state_jti must be rejected (single-use UNIQUE)';
+end $$;
+do $$ declare ok boolean := false; begin
+  begin -- same nonce_hash again → unique violation
+    insert into public.oauth_pending (tenant_id, provider, state_jti, nonce_hash, intent, expires_at)
+      values ('11111111-1111-1111-1111-111111111111','github','jti-C','hash-A','connect', now() + interval '10 min'); ok := false;
+  exception when unique_violation then ok := true; end;
+  assert ok, 'T42 duplicate nonce_hash must be rejected (single-use UNIQUE)';
+end $$;
+-- 42f: a tenant-B row binding a tenant-A connector is blocked structurally by the composite FK.
+do $$ declare ok boolean := false; begin
+  begin
+    insert into public.oauth_pending (tenant_id, connector_id, provider, state_jti, nonce_hash, intent, expires_at)
+      values ('22222222-2222-2222-2222-222222222222','17000000-0000-0000-0000-0000000000a1','github','jti-D','hash-D','connect', now() + interval '10 min'); ok := false;
+  exception when foreign_key_violation then ok := true; end;
+  assert ok, 'T42 a tenant-B oauth_pending row must NOT bind a tenant-A connector (composite FK)';
+end $$;
+-- 42g: connector_secrets remains untouched by 0020 (still deny-all, zero authenticated privilege).
+do $$ begin
+  assert (select coalesce(array_agg(distinct privilege_type::text order by privilege_type::text), array[]::text[])
+          from information_schema.role_table_grants
+          where grantee='authenticated' and table_schema='public' and table_name='connector_secrets') = array[]::text[],
+         'T42 connector_secrets must STILL hold zero authenticated privilege after 0020';
+  assert (select count(*) from pg_policies where schemaname='public' and tablename='connector_secrets') = 0,
+         'T42 connector_secrets must STILL have zero policies after 0020';
+  -- connector metadata grants unchanged: authenticated EXACTLY [SELECT] on connectors/connector_runs.
+  assert (select coalesce(array_agg(distinct privilege_type::text order by privilege_type::text), array[]::text[])
+          from information_schema.role_table_grants
+          where grantee='authenticated' and table_schema='public' and table_name='connectors') = array['SELECT'],
+         'T42 authenticated must STILL hold EXACTLY [SELECT] on connectors after 0020';
+  assert (select coalesce(array_agg(distinct privilege_type::text order by privilege_type::text), array[]::text[])
+          from information_schema.role_table_grants
+          where grantee='authenticated' and table_schema='public' and table_name='connector_runs') = array['SELECT'],
+         'T42 authenticated must STILL hold EXACTLY [SELECT] on connector_runs after 0020';
+end $$;
+reset role;
+
 do $$ begin raise notice 'ALL ORG-RLS ASSERTIONS PASSED'; end $$;
