@@ -479,7 +479,7 @@ name or credential-shaped value** (token/secret/key/refresh/authorization/cookie
 `process.env`; a test asserts it), a runtime browser sentinel, and the `no-client-import.test.ts` guard now covers
 it too (no `"use client"` / `src/app` file imports it).
 
-**Tests** (+15 app tests, 136 → 151; RLS suite **318 → 327** via **T41**): lifecycle state + transition validation;
+**Tests** (+16 app tests, 136 → 151; RLS suite **318 → 327** via **T41**): lifecycle state + transition validation;
 safe-error-labels-only; secret-shaped field/value rejection in run + audit metadata; module purity + server-only
 guard; **T41** proves the six states are accepted + an out-of-set status rejected + the renamed/added safe columns
 present (old names gone) + no secret column + the grant shape unchanged (`authenticated [SELECT]` only, `anon`
@@ -999,6 +999,68 @@ request path is added. No production data was touched. No hosted commands were r
 added to production or staging. Connector vault is still not usable for real credentials until the remaining
 gated PRs are complete** (next: the server-only `oauth_pending` consume path → PR G first connector — only
 after the runner identity's IAM/KMS grant + a real KEK alias are provisioned and staging-verified by a human).
+**Connector implementation remains blocked. Old-app parity is not complete. UI/UX parity is not complete.
+AI/API connector parity is not complete. Upload is not automatically production-ready. Hosted Auth/tenant-context
+is verified, but old-app replacement is not yet verified. RISK-001 remains OPEN. Cutover remains BLOCKED.** No
+doc 17 §5 box is ticked by this PR.
+
+## 38. Implementation — server-only `oauth_pending` consume path (PR #116)
+
+**Server-only oauth_pending consume path is added. The consume path performs atomic single-use consumption.**
+This is the §16/§32.3 single-use consume — the last replay-store prerequisite before a first connector can be
+sketched — as `src/lib/server/connector-vault/oauth-pending-consume.ts`. It stores nothing and is wired to
+nothing (no connector, no OAuth callback change, no route, no credential-write). **No OAuth code is exchanged
+for tokens. No access token is stored. No refresh token is stored. No connector credentials are stored. No
+connector secret material is inserted, updated, deleted, or read.**
+
+### 38.1 Deny-all preserved (no migration, no service-role request path)
+`oauth_pending` is Tier-2 deny-all — RLS-enabled, zero policies, zero `anon`/`authenticated` grant
+(migration `0020`, T42). A request-path (`authenticated`) client therefore **cannot** touch it, and this PR
+keeps it that way: **Oauth_pending remains not directly readable or writable by anon or authenticated users.**
+The consume runs as the SERVER-ONLY connector-runner identity, NOT a browser/request principal. So the module
+ships only the PURE consume LOGIC + result classification and **delegates the privileged DB write to an
+INJECTED `OAuthPendingConsumer`** (the runner-identity-backed executor — a real DB-backed implementation is
+wired in a later gated PR, backed by a `SECURITY DEFINER` accessor / the runner's own connection, never
+reachable from request/browser code). **No browser-accessible service-role path is added; no migration is
+needed (deny-all is unchanged); the RLS suite stays 352.**
+
+### 38.2 Atomic single-use
+The executor's `runAtomicConsume` performs ONE statement — the documented reference SQL:
+`update public.oauth_pending set consumed_at = $now where state_jti = $jti and nonce_hash = $nonce_hash and
+tenant_id = $tenant_id and provider = $provider and connector_id is not distinct from $connector_id
+(null-safe) and consumed_at is null and expires_at > $now returning id, state_jti, consumed_at`. Success is
+"exactly one row changed" → `{ ok: true, consumed: { stateJti, consumedAt } }`. A concurrent second callback
+finds `consumed_at` already set (or 0 rows) and consumes nothing. On 0 rows, `consumeOAuthPending` does a
+READ-ONLY classify (by the unique `state_jti`) and returns a SAFE reason code — `not_found` /
+`already_consumed` / `expired` / `tenant_mismatch` / `provider_mismatch` / `connector_mismatch` /
+`nonce_mismatch` / `malformed_input` — **never mutating again, so single-use is preserved**. Identity
+mismatches are reported before consumed/expired (a wrong tenant/provider/connector/nonce on a known `jti` is
+a forgery/confused-deputy signal).
+
+### 38.3 Redaction
+A result carries only a safe reason CODE + non-secret metadata (`stateJti`, `consumedAt` timestamp). It NEVER
+includes a raw nonce, raw state, authorization code, provider payload, or any secret — `nonce_hash` is the
+only nonce-derived input and it is a one-way hash, never echoed back into an error. Nothing logs. The module
+is server-only (runtime browser sentinel + the `no-client-import` guard) and PURE — NO imports (no DB, no
+Supabase, no service-role, no `process.env`, no `connector_secrets`, no token exchange).
+
+### 38.4 Tests (+16 app tests, 225 → 241; RLS suite unchanged **352**, no migration, types 0-diff)
+consume changes exactly one matching row (and issues exactly one atomic mutation); a second consume fails
+closed (`already_consumed` — single-use); a fresh-connect (null connector) row consumes on a null input;
+every failure case maps to its safe reason (not_found / expired / already_consumed / tenant / provider /
+connector [present + fresh-connect-vs-bound] / nonce mismatch / malformed_input); a malformed input never
+reaches the atomic mutation; a missing consumer throws a typed error; a failure result echoes back no raw
+tenant/nonce/state value; module purity (no imports / DB / Supabase / service-role / `connector_secrets` /
+token); and the OAuth callback route **still exchanges no code and stores no token**. The deny-all RLS proofs
+(T42 oauth_pending, T39 connector_secrets, T40 connectors/connector_runs authenticated-SELECT-only) are
+unchanged and still pass.
+
+**No connector sync is implemented. No provider connector is implemented. No credential form is implemented.
+No connect/reconnect/disconnect action is implemented. No manual or scheduled run action is implemented. No
+browser-accessible service-role path is added. No production data was touched. No hosted commands were run.
+Connector vault is still not usable for real credentials until the remaining gated PRs are complete** (next:
+PR G — a first low-risk connector — only after the runner-identity-backed executor + the IAM/KMS grant + a
+real KEK alias are provisioned and staging-verified by a human; this PR ships only the pure consume contract).
 **Connector implementation remains blocked. Old-app parity is not complete. UI/UX parity is not complete.
 AI/API connector parity is not complete. Upload is not automatically production-ready. Hosted Auth/tenant-context
 is verified, but old-app replacement is not yet verified. RISK-001 remains OPEN. Cutover remains BLOCKED.** No
