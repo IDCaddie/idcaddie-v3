@@ -1576,3 +1576,45 @@ for real credentials until the remaining gated PRs are complete** (next: the SDK
 AI/API connector parity is not complete. Upload is not automatically production-ready. Hosted Auth/tenant-context
 is verified, but old-app replacement is not yet verified. RISK-001 remains OPEN. Cutover remains BLOCKED.** No
 doc 17 §5 box is ticked by this PR.
+
+---
+
+## 48. IMPLEMENTATION — AWS KMS SDK sender wiring (PR #115)
+
+**AWS KMS SDK sender wiring is added. The AWS KMS sender is server-only** (doc 42 §37) — the SDK-wiring gate:
+the concrete `@aws-sdk/client-kms`-backed implementation of the `AwsKmsCommandSender` seam (PR #114),
+`src/lib/server/connector-vault/aws-kms-sdk-sender.ts`. Stores nothing; wired to nothing (no connector/OAuth/
+route/credential-write). **Tests mock AWS KMS responses only; no real AWS or KMS credentials are required in
+tests; no live KMS calls are made in tests.**
+
+- **Dependency:** adds **`@aws-sdk/client-kms`** (`^3.x`) — the single dependency the §32.1/§36 plan reserved
+  for this gate, and the only place it is imported. The 2 moderate `npm audit` advisories are PRE-EXISTING
+  `next`→`postcss` transitive issues, **not** from the AWS SDK; `audit fix --force` is not run (it would
+  downgrade Next). The SDK import is server-only (sentinel + no-client-import guard + `next build` confirm no
+  client/route reaches it → not bundled into a browser route).
+- **`awsKmsSenderFromClient(client)`** (testable core) builds the real `GenerateDataKeyCommand { KeyId,
+  KeySpec: "AES_256" }` / `DecryptCommand { KeyId, CiphertextBlob }`, calls `client.send(command)`, and maps
+  the SDK output to our `AwsKmsResponse`. Tests inject a MOCK `{ send }` → no SDK construction, no network, no
+  credentials. **`createAwsKmsSdkSender({ region })`** validates the region (fails closed before any client)
+  and constructs `new KMSClient({ region })` (credentials via the runner's IAM default provider chain — never
+  hardcoded). **`createAwsKmsSdkSenderFromEnv()`** returns null unless `CONNECTOR_VAULT_AWS_KMS_REGION` is set
+  (this PR sets no env — inert). **Redaction** — send failure / malformed response throws a typed
+  `AwsKmsSdkError` (fixed message; the raw AWS error is swallowed; nothing logs); the §36 adapter re-validates.
+
++10 app tests (215 → 225; RLS suite unchanged **352**, no migration, types 0-diff): fail-closed config/no
+client; wrap→GenerateDataKeyCommand + unwrap→DecryptCommand shape mapping (real SDK Command instances via a
+mock client — no live call); raw AWS error swallowed; malformed/missing-Plaintext response fails closed; env
+helper null-when-unset; **the mocked SDK sender composes through `createAwsKmsClient` + `createKmsKeyProvider`
++ the crypto wrapper round-trip** (no real KMS); module scope + the no-client-import guard now covers
+`aws-kms-sdk-sender`. **No OAuth code is exchanged for tokens. No access token is stored. No refresh token is
+stored. No connector credentials are stored. No connector secret material is inserted, updated, deleted, or
+read. No connector sync is implemented. No provider connector is implemented. No credential form is
+implemented. No connect/reconnect/disconnect action is implemented. No manual or scheduled run action is
+implemented. No service-role request path is added. No production data was touched. No hosted commands were
+run. No environment variable is added to production or staging. Connector vault is still not usable for real
+credentials until the remaining gated PRs are complete** (next: the server-only `oauth_pending` consume path →
+PR G first connector — only after the runner IAM/KMS grant + a real KEK alias are provisioned and
+staging-verified by a human). **Connector implementation remains blocked. Old-app parity is not complete. UI/UX
+parity is not complete. AI/API connector parity is not complete. Upload is not automatically production-ready.
+Hosted Auth/tenant-context is verified, but old-app replacement is not yet verified. RISK-001 remains OPEN.
+Cutover remains BLOCKED.** No doc 17 §5 box is ticked by this PR.

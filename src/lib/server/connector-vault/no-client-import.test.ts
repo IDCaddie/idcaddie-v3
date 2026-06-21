@@ -30,6 +30,9 @@ const CRYPTO_REL_HINTS = [
   "connector-vault/aws-kms-client",
   "server/connector-vault/aws-kms-client",
   "lib/server/connector-vault/aws-kms-client",
+  "connector-vault/aws-kms-sdk-sender",
+  "server/connector-vault/aws-kms-sdk-sender",
+  "lib/server/connector-vault/aws-kms-sdk-sender",
 ];
 
 function walk(dir: string): string[] {
