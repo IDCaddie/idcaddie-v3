@@ -1310,3 +1310,38 @@ production later; next gate is still **PR E** (read-only connector metadata UI).
 UI/UX parity is not complete. AI/API connector parity is not complete. Upload is not automatically production-ready.
 Hosted Auth/tenant-context is verified, but old-app replacement is not yet verified. RISK-001 remains OPEN. Cutover
 remains BLOCKED.** No doc 17 §5 box is ticked by this verification.
+
+---
+
+## 41. IMPLEMENTATION — PR E: read-only connector metadata UI (PR #108)
+
+**Read-only connector metadata UI is added** (doc 42 §30) — the §20 PR E gate, the first connector *surface*.
+**Only safe connector and connector run metadata is shown. Connector secret material is not queried or
+displayed.** A new authenticated route `/connectors` (route count 16 → 17) + the nav "Connectors" item flipped
+from "Not built yet" to `/connectors`; it mirrors the read-only `/files`/`/reports`/`/admin` pattern
+(user-scoped client, RLS is the authority, fail-closed).
+
+- **`src/lib/data/connectors.ts`** (server-only, READ-ONLY): `listConnectorsForCurrentUser()` does two
+  RLS-scoped reads of the **Tier-1 tables only** — `connectors` (safe subset: provider/display_name/status/
+  granted_scopes_safe/timestamps) + `connector_runs` (latest run per connector: status/timestamps/safe
+  failure_code+label/safe counters). It **never queries `connector_secrets`** and never selects `tenant_id`,
+  `organization_id`, `connected_by`, `health`, or `last_sync_at`. No service-role, no write. Fails closed on
+  the connectors read; a failed runs read is non-fatal (lastRun null).
+- **Page `/connectors`**: the safe table + empty state + an explicit **"Not built yet"** list (connect a
+  provider, store credentials, OAuth callback, API key / PAT entry, run sync, provider connectors,
+  disconnect / revoke, manual run, scheduled run, real connector health). No credential form, no
+  connect/reconnect/disconnect button, no sync button.
+
++7 app tests (151 → 158; build 16 → 17 routes; RLS suite unchanged **327**, no migration, types 0-diff):
+empty/fail-closed/safe-DTO (every forbidden column provably absent)/latest-run/non-fatal-runs/status
+helpers + the nav "Connectors is linkable" assertion + a static scan proving no `connector_secrets` query and
+no secret-shaped column string in the page/data code (reads only `connectors`/`connector_runs`). **No
+connector credentials are stored. No connector sync is implemented. No provider connector is implemented. No
+OAuth callback is implemented. No credential form is implemented. No connect/reconnect/disconnect action is
+implemented. No manual or scheduled run action is implemented. No service-role request path is added. No
+production data was touched. No hosted commands were run. Connector vault is still not usable for real
+credentials until the remaining gated PRs are complete** (next: PR F OAuth callback skeleton → PR G first
+connector). **Connector implementation remains blocked. Old-app parity is not complete. UI/UX parity is not
+complete. AI/API connector parity is not complete. Upload is not automatically production-ready. Hosted
+Auth/tenant-context is verified, but old-app replacement is not yet verified. RISK-001 remains OPEN. Cutover
+remains BLOCKED.** No doc 17 §5 box is ticked by this PR.
