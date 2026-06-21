@@ -569,3 +569,60 @@ connector). **Connector implementation remains blocked. Old-app parity is not co
 complete. AI/API connector parity is not complete. Upload is not automatically production-ready. Hosted
 Auth/tenant-context is verified, but old-app replacement is not yet verified. RISK-001 remains OPEN. Cutover
 remains BLOCKED.** No doc 17 §5 box is ticked by this PR.
+
+## 31. Implementation — PR F: OAuth callback validation skeleton (PR #109)
+
+**OAuth callback skeleton is added. OAuth state/nonce validation is implemented.** The §20 **PR F** gate — the
+CSRF/replay validation infrastructure (docs/42 §7/§16) that must exist BEFORE any provider is wired. It is
+PURE validation only: **no OAuth code is exchanged for tokens, no access token is stored, no refresh token is
+stored, no `connector_secrets` is read or written, no provider is contacted.** The vault stays NOT usable for
+real credentials.
+
+**State model (`src/lib/server/connector-vault/oauth-state.ts`, server-only, PURE — only import is
+`node:crypto`).** A stateless, **HMAC-SHA256-signed** `state` binds the callback to `{tenant_id, provider,
+connector_id?, subject?, redirect_intent, nonce, exp}`. `createOAuthState(ctx, {signer, ttlSeconds, now})`
+mints it; `validateOAuthState(state, expectedContext?, {signer, now, consumedNonces?})` verifies the HMAC
+over the exact signed bytes **before trusting any field** (constant-time compare), then checks
+nonce-presence, expiry, optional tenant/provider/connector binding, and optional single-use replay. It
+returns a typed result with a **safe reason CODE** (`bad_signature` / `tenant_mismatch` / `expired` /
+`missing_nonce` / `replayed` / …) — **never** a secret, nonce, token, code, or provider payload. The signing
+key is held by an **injected signer** (`OAuthStateSigner`; a server-only secret / KMS in production — NOT in
+this PR; a test-only in-memory HMAC signer in tests). The module is server-only (runtime browser sentinel +
+the `no-client-import` guard) and reads NO `process.env`.
+
+**Replay model.** Single-use replay rejection is supported via an injected `ConsumedNonceStore`; an in-memory
+store is used in tests. The **production replay store (the DB-backed single-use `oauth_pending`, §4/§16)
+remains a gate** — this PR does not add it (no DB write), so a real deployment must wire it before relying on
+single-use semantics.
+
+**Inert callback route (`/connectors/oauth/callback`, route count 17 → 18).** A server-only route handler
+that parses `provider/code/state/error`, builds the signer from a **server-only env secret that this PR does
+not set** (so the signer is `null` and every callback is inert "not configured" by default), calls the pure
+`handleOAuthCallback`, and returns a **safe plain-text inert response** (`no-store`). It **never exchanges the
+`code`** (the value is never read, returned, or logged), never calls a provider endpoint, never writes
+`connector_secrets`, never marks a connector connected, and never persists the query params. Outcomes:
+`provider_error` (a `?error=` from the provider — its value is never surfaced), `not_configured` (default),
+`invalid` (bad/missing/expired/tampered state → 400), `received` (valid state → 200, but STOPS — no exchange).
+
+**Tests** (+26 app tests, 158 → 184; build 17 → 18 routes; RLS suite unchanged **327**, no migration, types
+0-diff): valid-state-validates; tampered-state / wrong-tenant / wrong-provider / wrong-connector / expired /
+missing-nonce / wrong-signing-key all fail with the right reason; missing/malformed state; replay rejected
+(and a rejected state does not burn the nonce); results never contain the secret/nonce; the callback handler
+rejects missing/tampered state, does not exchange the code (the code value never appears in the outcome), and
+returns inert statuses; a static scan proving the module + route do **no `fetch` (no token endpoint), no
+`createClient`, no `process.env` (module), no `connector_secrets`, no `service_role`, no `access_token` /
+`refresh_token` / `token_endpoint` / `grant_type`**; the server-only no-client-import guard now covers
+oauth-state (the inert route is the only allowed `src/app` importer); and the existing connector metadata UI
+still queries no `connector_secrets`.
+
+**No OAuth code is exchanged for tokens. No access token is stored. No refresh token is stored. No connector
+credentials are stored. No connector secret material is inserted, updated, or deleted. No connector sync is
+implemented. No provider connector is implemented. No credential form is implemented. No connect/reconnect/
+disconnect action is implemented. No manual or scheduled run action is implemented. No service-role request
+path is added. No production data was touched. No hosted commands were run. Connector vault is still not usable
+for real credentials until the remaining gated PRs are complete** (next: PR G first connector — only after the
+production signer/KMS secret + the single-use `oauth_pending` replay store are wired and tested; §17 open
+question). **Connector implementation remains blocked. Old-app parity is not complete. UI/UX parity is not
+complete. AI/API connector parity is not complete. Upload is not automatically production-ready. Hosted
+Auth/tenant-context is verified, but old-app replacement is not yet verified. RISK-001 remains OPEN. Cutover
+remains BLOCKED.** No doc 17 §5 box is ticked by this PR.

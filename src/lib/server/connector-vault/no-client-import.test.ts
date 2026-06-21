@@ -68,3 +68,38 @@ describe("connector vault crypto is server-only (no client/app import path)", ()
     expect(src).toMatch(/globalThis[^\n]*window/); // the browser-detection sentinel
   });
 });
+
+// The OAuth state module (PR F) is server-only TOO, but UNLIKE crypto/run-lifecycle it is legitimately
+// imported by ONE src/app file — the inert server-only callback route handler (a route.ts is server code,
+// never client/browser code). So its guard forbids any "use client" importer and pins the single allowed
+// src/app importer to that route handler (so a future page/client file can't start importing it).
+const OAUTH_REL_HINTS = ["connector-vault/oauth-state", "server/connector-vault/oauth-state", "lib/server/connector-vault/oauth-state"];
+const CALLBACK_ROUTE = path.join(SRC, "app", "(authenticated)", "connectors", "oauth", "callback", "route.ts");
+
+describe("connector vault oauth-state is server-only (only the inert callback route may import it)", () => {
+  const files = walk(SRC).filter((f) => !f.includes(path.join("server", "connector-vault")));
+  const importsOauth = (src: string) => OAUTH_REL_HINTS.some((h) => src.includes(h));
+
+  it("no \"use client\" file imports the oauth-state module", () => {
+    const offenders = files.filter((f) => {
+      const src = fs.readFileSync(f, "utf8");
+      return /^\s*["']use client["']/m.test(src) && importsOauth(src);
+    });
+    expect(offenders).toEqual([]);
+  });
+
+  it("the ONLY src/app file importing oauth-state is the inert callback route handler", () => {
+    const appDir = path.join(SRC, "app");
+    const offenders = files
+      .filter((f) => f.startsWith(appDir))
+      .filter((f) => importsOauth(fs.readFileSync(f, "utf8")))
+      .filter((f) => f !== CALLBACK_ROUTE);
+    expect(offenders).toEqual([]);
+  });
+
+  it("the oauth-state module declares its server-only runtime sentinel", () => {
+    const src = fs.readFileSync(path.join(SRC, "lib", "server", "connector-vault", "oauth-state.ts"), "utf8");
+    expect(src).toMatch(/server-only/);
+    expect(src).toMatch(/globalThis[^\n]*window/);
+  });
+});
