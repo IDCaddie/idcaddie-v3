@@ -97,7 +97,7 @@ describe("buildConnectorRunRecord (safe metadata only)", () => {
       buildConnectorRunRecord({ tenantId: TENANT, connectorId: CONNECTOR, status: "running", accessToken: "x" }),
     ).toThrow(ConnectorLifecycleError);
     expect(() =>
-      // @ts-expect-error
+      // @ts-expect-error — refresh_token is not a valid field and must be rejected at runtime
       buildConnectorRunRecord({ tenantId: TENANT, connectorId: CONNECTOR, status: "running", refresh_token: "x" }),
     ).toThrow(ConnectorLifecycleError);
   });
