@@ -21,6 +21,9 @@ const CRYPTO_REL_HINTS = [
   "connector-vault/run-lifecycle",
   "server/connector-vault/run-lifecycle",
   "lib/server/connector-vault/run-lifecycle",
+  "connector-vault/oauth-pending",
+  "server/connector-vault/oauth-pending",
+  "lib/server/connector-vault/oauth-pending",
 ];
 
 function walk(dir: string): string[] {

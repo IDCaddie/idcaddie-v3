@@ -25,7 +25,7 @@ Before building UI, prove these pass against local Supabase.
 
 Cases 1–8 plus the org/cross-tenant/escalation matrix are enforced by
 `supabase/migrations/0002_org_scoped_rls.sql` and `0003_org_access_union.sql`,
-covered by the runnable suite `supabase/tests/org_rls_test.sql` (T1–T41, 327 assertions; T38/T39 cover the
+covered by the runnable suite `supabase/tests/org_rls_test.sql` (T1–T42, 352 assertions; T38/T39 cover the
 connector-vault schema foundation (`0017`) — T38 = `connectors`/`connector_runs` tenant-member read + no
 request-path write; T39 = `connector_secrets` deny-all (RLS-enabled, zero policies, `authenticated`/`anon`
 hold zero privilege) + the no-secret-column-leak structural check; **T40 = the hardened grant surface
@@ -37,6 +37,11 @@ SELECT still works + cross-tenant SELECT still RLS-denied; **T41 = the `connecto
 out-of-set status rejected + the renamed/added safe columns (completed_at, records_seen/imported/failed,
 failure_code, failure_label) present with the old names gone + no secret column + grant shape unchanged
 (authenticated `[SELECT]` only, anon zero, no write policy, audit still reuses append-only `audit_logs`);
+**T42 = the `oauth_pending` single-use replay store (`0020`)** — near-Tier-2 deny-all: RLS-enabled + ZERO
+policies + `authenticated`/`anon` hold EXACTLY zero privilege (no read/insert/update/delete, no
+TRUNCATE) + structural posture (`expires_at` NOT NULL, UNIQUE `state_jti`/`nonce_hash` single-use, a
+cross-tenant connector binding blocked by the composite FK, no raw nonce/state/code/token/secret column) +
+`connector_secrets` and the Tier-1 grant surface unchanged by `0020`;
 the later tests cover the `files` foundation/policies — T33 `0012`, T34 `0013` SELECT/INSERT (+ T34c DELETE
 denied at the privilege layer), T35 `0014` storage-auth helpers, **T36 `0016` the uploader-finalize
 UPDATE policy** (uploader may set `upload_status` on their OWN row; cross-tenant / cross-user updates and
