@@ -1321,3 +1321,53 @@ remaining gated PRs are complete. Connector implementation remains blocked. Old-
 UI/UX parity is not complete. AI/API connector parity is not complete. Upload is not automatically
 production-ready. Hosted Auth/tenant-context is verified, but old-app replacement is not yet verified. RISK-001
 remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is ticked by this verification.
+## 42. Implementation — runner-only `oauth_pending` executor wiring (PR #120)
+
+**Runner-only oauth_pending executor wiring is added. The executor is server-only. The executor is not
+exposed to browser request paths.** `src/lib/server/connector-vault/oauth-pending-executor.ts` is the
+concrete `OAuthPendingConsumer` (the PR #116 boundary) backed by an INJECTED runner DB client — the wiring a
+FUTURE connector runner uses to run the atomic single-use consume through the `connector_runner` role (`0021`,
+T43, staging-verified §41). It stores nothing; it is wired to nothing in this PR.
+
+### 42.1 Shape
+- `RunnerDbClient` — the minimal injected boundary: `run(sql, params) → { rows }`, a parameterized statement
+  runner the future runner backs with a server-only Postgres connection bound to `connector_runner` (NOLOGIN
+  + BYPASSRLS, narrow grants). **It is explicitly INJECTED — the module creates NO global service-role /
+  admin client.** Tests inject a mock, so there is **no live DB call and no credentials in tests.**
+- `createOAuthPendingExecutor(client): OAuthPendingConsumer` — **fails closed** (throws
+  `OAuthPendingExecutorError`) when the client is missing/invalid. `runAtomicConsume` issues ONE parameterized
+  statement that matches on tenant_id/provider/state_jti/nonce_hash/connector_id (null-safe) + `consumed_at is
+  null` + `expires_at > now`, and updates **ONLY `consumed_at`** (within the `0021` 3-column grant; the
+  immutable identity columns are never set). `readPendingState` is the read-only classify lookup. Composed
+  with PR #116's pure `consumeOAuthPending`, the two give the single-use consume.
+- **Redaction:** a DB failure throws a typed error with a fixed safe message — never the raw DB error, a raw
+  nonce, raw state, OAuth code, provider payload, token, or secret. The nonce HASH + ids are bound parameters
+  (never inlined / logged); nothing logs. Results carry only safe labels (a reason code or `{stateJti,
+  consumedAt}`).
+
+### 42.2 Posture (unchanged)
+Server-only (sentinel + `no-client-import` guard; its only import is the `./oauth-pending-consume` TYPES,
+erased at runtime). **No app route / server action / browser path calls the executor** (a static scan asserts
+the `/connectors/oauth/callback` route is still inert — no `fetch`, no executor import, no token exchange).
+**Oauth_pending remains not directly readable or writable by anon or authenticated users. Connector secret
+material remains inaccessible to anon and authenticated users.** No migration; RLS suite unchanged **387**.
+
+### 42.3 Tests (+12; app 241 → 253)
+fail-closed on a missing client; the consume UPDATE shape + bound params (sets only `consumed_at`; null-safe
+connector; `consumed_at is null` + `expires_at > $1`); the classify SELECT shape; the FULL chain through
+`consumeOAuthPending` with a mock that genuinely models the atomic single-use semantics (consume-exactly-once,
+second → already_consumed, fresh-connect null, every mismatch/expired/not_found → its safe reason); both DB
+errors redacted; module purity (only the consume types; no createClient/process.env/fetch/connector_secrets/
+service_role/token); and the OAuth callback route still inert.
+
+A FUTURE PR wires the real `RunnerDbClient` (a server-only `connector_runner` connection in the runner
+process) + the IAM/KMS grant → PR G. **No OAuth code is exchanged for tokens. No access token is stored. No
+refresh token is stored. No connector credentials are stored. No connector secret material is inserted,
+updated, deleted, or read. No connector sync is implemented. No provider connector is implemented. No
+credential form is implemented. No connect/reconnect/disconnect action is implemented. No manual or scheduled
+run action is implemented. No browser-accessible service-role request path is added. No production data was
+touched. No hosted commands were run. Connector vault is still not usable for real credentials until the
+remaining gated PRs are complete. Connector implementation remains blocked. Old-app parity is not complete.
+UI/UX parity is not complete. AI/API connector parity is not complete. Upload is not automatically
+production-ready. Hosted Auth/tenant-context is verified, but old-app replacement is not yet verified. RISK-001
+remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is ticked by this PR.
