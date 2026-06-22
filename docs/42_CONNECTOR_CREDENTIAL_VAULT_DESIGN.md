@@ -1512,3 +1512,61 @@ implementation remains blocked. Old-app parity is not complete. UI/UX parity is 
 parity is not complete. Upload is not automatically production-ready. Hosted Auth/tenant-context is verified,
 but old-app replacement is not yet verified. RISK-001 remains OPEN. Cutover remains BLOCKED.** No doc 17 §5
 box is ticked by this PR.
+## 45. Operator procedure — human-run connector-vault staging dry run (PR #123)
+
+**Human-run staging dry-run procedure is recorded.** This is the exact, ordered checklist a human operator
+follows to run the §44 verifier (`scripts/verify-staging-connector-vault-dry-run.mjs`) on staging and capture
+the no-real-token evidence — the §43.5 gate before any first connector. Docs-only. **No hosted commands were
+run by the agent. No production data was touched.** The agent authored this checklist; a human executes it.
+
+### 45.1 Preconditions (operator confirms locally — no mutation)
+1. **Confirm the staging ref is `ycdpzduxugdsffjqyoai`** — `cat supabase/.temp/project-ref` returns exactly
+   `ycdpzduxugdsffjqyoai` (or you pass `--ref ycdpzduxugdsffjqyoai`).
+2. **Confirm production is NOT linked** — the linked ref is NOT `dzbfxulvxchdemcettrx`. (The verifier hard-
+   refuses production; this is a belt-and-suspenders check before you start.)
+
+### 45.2 Provision OUTSIDE the repo (operator; never committed)
+3. **Provision the runner DB connection as `connector_runner`** — a server-only Postgres connection bound to
+   the `connector_runner` role (NOLOGIN + BYPASSRLS, ONLY `oauth_pending` SELECT + the 3-column UPDATE —
+   `0021`/T43/§41). Keep the connection string ONLY in the runner host's secret manager / your shell; never
+   commit it, never put it in an app env or a client bundle.
+4. **Provision the staging AWS IAM / KMS / KEK alias** — a staging KEK alias
+   (`alias/idcaddie-connector-vault-kek-staging`) + an IAM role granted ONLY `kms:GenerateDataKey` +
+   `kms:Decrypt` scoped to that KEK (no `kms:*`, no `Resource: *`); no static AWS keys (prefer the instance/
+   task role via the default provider chain). Distinct from production.
+5. **Export the required env vars locally, WITHOUT committing them** — in your shell only (e.g. a sourced
+   untracked file): `CONNECTOR_RUNNER_DB_URL`, `CONNECTOR_VAULT_AWS_KMS_REGION`, `CONNECTOR_VAULT_KMS_KEY_ID`
+   (optional `CONNECTOR_VAULT_SETUP_DB_URL`, `CONNECTOR_OAUTH_STATE_SECRET`). The verifier reads only their
+   PRESENCE and never prints their values.
+
+### 45.3 Run the verifier (operator)
+6. **Run the dry-run verifier with the explicit confirmation phrase:**
+   `CONNECTOR_VAULT_DRY_RUN_CONFIRM="RUN CONNECTOR VAULT STAGING DRY RUN" node scripts/verify-staging-connector-vault-dry-run.mjs`
+   It prints the ordered runbook (it connects to nothing); execute each runbook step against staging in your
+   shell, using the synthetic non-secret payload `synthetic-vault-dry-run-not-a-token` only — **no real
+   provider token**.
+
+### 45.4 Capture evidence (operator records PASS/FAIL per item — no secrets/URLs/DEKs/ciphertext)
+7. Capture, item by item:
+   - the verifier **refused production** (run it once with the production ref / `--ref dzbfxulvxchdemcettrx`
+     and confirm it exits non-zero);
+   - the verifier **confirmed staging** (`ycdpzduxugdsffjqyoai`);
+   - the runner **consume path succeeds exactly once** (one synthetic `oauth_pending` row → 1 row consumed);
+   - a **second consume fails** (0 rows — single-use);
+   - **mismatch cases fail safely** (wrong nonce / state / tenant / provider → 0 rows each);
+   - **`connector_secrets` remains inaccessible** (the runner is denied; anon/authenticated deny-all holds);
+   - **no real provider token was used** (only the synthetic sentinel);
+   - **no OAuth code was exchanged**; **no access token was stored**; **no refresh token was stored**;
+   - **no connector sync ran**; **no browser route invoked runner operations**.
+8. **Record the evidence in the next docs-only verification PR** (PASS/FAIL, table by table; redact all
+   secrets/URLs). That recorded green run is the §43.5 evidence; it does NOT store real credentials, does NOT
+   close RISK-001, and does NOT unblock cutover.
+
+**No real provider token is used. No OAuth code is exchanged for tokens. No access token is stored. No refresh
+token is stored. No connector credentials are stored. No connector secret material is inserted, updated,
+deleted, or read. No connector sync is implemented. No provider connector is implemented. No credential form is
+implemented. No browser-accessible service-role request path is added. Connector implementation remains blocked
+until human-run staging dry-run evidence is recorded. Old-app parity is not complete. UI/UX parity is not
+complete. AI/API connector parity is not complete. Upload is not automatically production-ready. Hosted
+Auth/tenant-context is verified, but old-app replacement is not yet verified. RISK-001 remains OPEN. Cutover
+remains BLOCKED.** No doc 17 §5 box is ticked by this PR.
