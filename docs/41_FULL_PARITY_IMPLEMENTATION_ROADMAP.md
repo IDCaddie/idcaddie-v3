@@ -1660,3 +1660,56 @@ remains blocked. Old-app parity is not complete. UI/UX parity is not complete. A
 complete. Upload is not automatically production-ready. Hosted Auth/tenant-context is verified, but old-app
 replacement is not yet verified. RISK-001 remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is ticked
 by this PR.
+
+---
+
+## 50. PROVISIONING PLAN — runner identity / DB grants / OAuth consume / KMS-IAM / staging verification (PR #117)
+
+**Runner identity provisioning plan is recorded. KMS/IAM provisioning plan is recorded. OAuth consume
+execution plan is recorded** (doc 42 §39). Docs/design-only provisioning PR — it implements nothing (no
+migration, no env secret, no code). It records what the built code primitives (PR #101–#116) require before
+any real credential storage or provider connector. **No runner identity is implemented by this PR. No runner
+DB grants are added by this PR. No real KMS/IAM grant is configured by this PR.**
+
+- **Runner identity (§39.1):** a single dedicated server-side "connector runner" principal (a worker/job, NOT
+  a request handler) executes the privileged vault actions — reached ONLY from server-only
+  `connector-vault/*` modules via the runner entrypoint, NEVER a browser/route/server-action. It is a
+  **narrow dedicated identity** (its own DB role + a narrow AWS IAM identity), NOT the broad `service_role`
+  on a request path; the user request path stays RLS-deny-all on `oauth_pending`/`connector_secrets`.
+- **DB privileges (§39.2, least privilege, none added here):** runner = `oauth_pending`
+  SELECT+INSERT+UPDATE(consumed_at)+expiry-sweep; `connector_secrets` INSERT+SELECT+UPDATE(is_active/revoked)
+  (no DELETE — tombstone/version); `connectors`/`connector_runs` narrow metadata write (the `authenticated`
+  `[SELECT]`-only surface unchanged). **No anon, no normal-authenticated direct access, no
+  TRUNCATE/REFERENCES/TRIGGER**; every privileged action audits to append-only `audit_logs` (safe metadata
+  only).
+- **OAuth consume (§39.3):** runner-only atomic single-use consume (PR #116); expired/reused/mismatched fail
+  closed; raw nonce/state/code never persisted/logged; no token exchange until the consume path is implemented
+  + staging-verified.
+- **KMS/IAM (§39.4):** per-env KEK alias (`alias/idcaddie-connector-vault-kek-{staging,prod}`); region from a
+  server-only env var; the runner IAM identity granted ONLY `kms:GenerateDataKey`+`kms:Decrypt` scoped to the
+  single KEK (no `kms:*`, no `Resource: *`); rotation by alias; staging/prod separation; **no committed
+  credentials** (prefer an IAM role via the default provider chain → no AWS keys in app env at all).
+- **Env/config (§39.5):** server-only conceptual vars (`CONNECTOR_VAULT_AWS_KMS_REGION`,
+  `CONNECTOR_VAULT_KMS_KEY_ID`/`_PREVIOUS_KEY_IDS`, `CONNECTOR_OAUTH_STATE_SECRET`/`_KEY_ID`, the runner DB
+  connection) — never in a client bundle (no `NEXT_PUBLIC_*`), fail-closed when missing (every reader already
+  returns null/throws). **This PR sets none.**
+- **Staging verification (§39.6, human-executed):** apply the future runner-grant migration to staging first;
+  verify `oauth_pending`/`connector_secrets` still inaccessible to anon/authenticated; verify the runner role
+  holds EXACTLY the §39.2 privileges; verify no browser path invokes runner ops; verify the KMS path with a
+  staging-safe/non-production key; record evidence (a docs-only verification PR) before any connector work.
+- **Gates (§39.7):** no real credential storage before runner DB grants + KMS IAM are implemented +
+  staging-verified; no provider connector before runner consume + KMS path are implemented + staging-verified;
+  no production credential flow before the production migration + IAM/KMS are applied + verified; RISK-001
+  stays OPEN until the full flow is built/verified and the doc 17 §5 cutover criteria are met.
+
+RLS suite unchanged (**352**), no migration, no code, no env secret. **No OAuth code is exchanged for tokens.
+No access token is stored. No refresh token is stored. No connector credentials are stored. No connector secret
+material is inserted, updated, deleted, or read. No connector sync is implemented. No provider connector is
+implemented. No credential form is implemented. No connect/reconnect/disconnect action is implemented. No
+manual or scheduled run action is implemented. No browser-accessible service-role path is added. No production
+data was touched. No hosted commands were run. Connector vault is still not usable for real credentials until
+the remaining gated PRs are complete. Connector implementation remains blocked. Old-app parity is not complete.
+UI/UX parity is not complete. AI/API connector parity is not complete. Upload is not automatically
+production-ready. Hosted Auth/tenant-context is verified, but old-app
+replacement is not yet verified. RISK-001 remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is ticked
+by this PR.
