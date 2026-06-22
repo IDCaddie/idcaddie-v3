@@ -2003,3 +2003,39 @@ production data was touched. Old-app parity is not complete. UI/UX parity is not
 parity is not complete. Upload is not automatically production-ready. Hosted Auth/tenant-context is verified,
 but old-app replacement is not yet verified. RISK-001 remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box
 is ticked by this PR.
+---
+
+## 59. IMPLEMENTATION — connector provider registry skeleton (PR #126)
+
+**Connector provider registry skeleton is added. The registry is generic for future SaaS app connectors.
+Slack is added as the first inert provider skeleton** (doc 42 §48). The first connector implementation step
+after the §58 no-real-token dry-run gate cleared — the provider abstraction for many future SaaS connectors,
+proven now with ONE inert entry. **No provider connector is functional yet.**
+`src/lib/server/connector-vault/provider-registry.ts` is PURE, SAFE METADATA only.
+
+- **Definition** (safe display/metadata only): id / displayName / category / authKind (oauth2|api_key, a
+  label) / capabilities (read_users/read_apps/read_groups/read_audit/read_usage, display) / status
+  (skeleton/not_connected/disabled/future) / reviewGate / riskLevel / requiredScopes (DISPLAY-ONLY) /
+  helpCopy / enabled (default false). No token/secret/authorize-URL field. Generic id space (slack,
+  google_workspace, okta, microsoft_entra, zoom, atlassian, github); one DEFINED entry now.
+- **Slack (inert):** `slack` / Slack / collaboration / oauth2 / skeleton / enabled:false / low /
+  reviewGate:provider-specific-reviewed-pr; capabilities + scopes metadata only; no OAuth URL, no exchange,
+  no storage, no API call.
+- **Helpers:** listConnectorProviders / getConnectorProvider / isSupportedConnectorProvider /
+  getProviderCapabilities / isConnectorProviderReady. **Fail closed:** unknown id → null/[]/false; no
+  connect/exchange/sync/store function exists; `isConnectorProviderReady` is true ONLY for enabled +
+  not_connected (every entry is inert skeleton → false). **Real token storage remains gated behind a later
+  provider-specific reviewed PR.**
+
+**+7 tests (266 → 273; RLS unchanged 387, no migration, no dependency, types 0-diff):** safe-metadata-only;
+Slack inert; supported-check + capabilities; unknown fails closed; none ready; module purity; callback route
+still inert. Server-only (sentinel + no-client-import guard, zero imports); no UI change (the `/connectors`
+page already says "coming soon / not built"); not imported by any app route. **No OAuth code is exchanged for
+tokens. No access token is stored. No refresh token is stored. No connector credentials are stored. No
+connector secret material is inserted, updated, deleted, or read. No connector sync is implemented. No
+provider API call is made. No credential form is implemented. No connect/reconnect/disconnect action is
+implemented. No browser-accessible service-role request path is added. No production data was touched. No
+hosted commands were run. Connector implementation remains blocked. Old-app parity is not complete. UI/UX
+parity is not complete. AI/API connector parity is not complete. Upload is not automatically production-ready.
+Hosted Auth/tenant-context is verified, but old-app replacement is not yet verified. RISK-001 remains OPEN.
+Cutover remains BLOCKED.** No doc 17 §5 box is ticked by this PR.
