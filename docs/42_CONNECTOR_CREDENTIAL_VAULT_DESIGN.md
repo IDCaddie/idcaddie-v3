@@ -1371,3 +1371,88 @@ remaining gated PRs are complete. Connector implementation remains blocked. Old-
 UI/UX parity is not complete. AI/API connector parity is not complete. Upload is not automatically
 production-ready. Hosted Auth/tenant-context is verified, but old-app replacement is not yet verified. RISK-001
 remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is ticked by this PR.
+## 43. Hosted provisioning plan — runner DB / AWS KMS wiring + no-real-token staging verification (PR #121)
+
+**Hosted runner/KMS wiring plan is recorded.** The connector-vault primitives now exist (PR #101–#120) but the
+HOSTED runner/KMS path is not provisioned or verified. This is a docs/design PR — it implements NOTHING (no
+hosted runner, no IAM/KMS grant, no migration, no env secret, no code). It records what a human operator must
+provision + verify before any real provider connector or real token storage, so it is done deliberately.
+**No hosted runner is implemented by this PR. No real KMS/IAM grant is configured by this PR.**
+
+### 43.1 Hosted runner DB wiring plan
+- **How the runner connects.** The connector runner (a server-only background worker/job, NOT a request
+  handler) opens a direct Postgres connection to the Supabase DB and authenticates AS the `connector_runner`
+  role (NOLOGIN today — provisioning gives it a login secret OR a member login role that `set role
+  connector_runner`s; `0021`/T43/§41). It fills the `RunnerDbClient` boundary (PR #120) — the only DB seam
+  the executor uses.
+- **How credentials are provisioned (outside the repo).** The runner's DB connection string / password lives
+  ONLY in the runner host's secret manager (or an injected runtime secret), set by a human — **never** in the
+  repo, an app env, or a client bundle. No static DB secret is committed.
+- **Why this is NOT a browser/request service-role path.** The runner is a separate server-side principal
+  reached only from the runner entrypoint; its connection never exists in a Next.js route, server action, or
+  browser bundle (the `no-client-import` guard + the standing "no service-role on request paths" rule hold).
+  `connector_runner` is a NARROW role (not `service_role`): its ONLY grant is `oauth_pending`.
+- **Exact tables/actions the runner can perform.** ONLY `oauth_pending`: `SELECT` (classify) + a column-scoped
+  `UPDATE` on `consumed_at`/`attempt_count`/`last_rejected_code` (the single-use consume sets `consumed_at`) —
+  the §38/§42 consume shape, `0021`.
+- **What the runner still CANNOT do.** No `oauth_pending` INSERT/DELETE/row-purge; no UPDATE of the immutable
+  identity columns; **no grant at all on `connector_secrets`/`connectors`/`connector_runs`** (deferred to
+  later gated PRs). It cannot read or write any secret.
+
+### 43.2 Hosted AWS KMS wiring plan
+- **KEK alias naming:** `alias/idcaddie-connector-vault-kek-staging` and `alias/idcaddie-connector-vault-kek-prod`
+  (the non-secret handle the SDK sender / key provider take as `kekId` — PR #113/#114/#115).
+- **Staging vs production KEK separation:** distinct keys / aliases / IAM principals / regions (distinct
+  accounts where feasible); a staging credential can never decrypt a production secret, or vice versa.
+- **IAM principal:** the runner host's IAM identity (an instance/task role or OIDC federation — NOT a static
+  user).
+- **Allowed actions: `kms:GenerateDataKey` + `kms:Decrypt` ONLY**, scoped by `Resource` to the single
+  connector-vault KEK alias/ARN. **No `kms:*`** (no `CreateKey`/`ScheduleKeyDeletion`/`PutKeyPolicy`/…) and
+  **no `Resource: *`**.
+- **No static AWS keys in the repo;** **no AWS keys in any browser/client env** (no `NEXT_PUBLIC_*`). With an
+  IAM role the SDK resolves credentials from the default provider chain (PR #115) — preferred, so no AWS keys
+  live in app env at all.
+
+### 43.3 Environment / config checklist (server-only; this PR sets none)
+- Conceptual server-only vars (already documented §39.5): `CONNECTOR_VAULT_AWS_KMS_REGION`,
+  `CONNECTOR_VAULT_KMS_KEY_ID` (+ `_PREVIOUS_KEY_IDS`), `CONNECTOR_OAUTH_STATE_SECRET` (+ `_KEY_ID`), and the
+  runner DB connection secret.
+- **Server-only** — never `NEXT_PUBLIC_*`, never imported by a `"use client"`/`src/app` path.
+- **Staging vs production separation** — distinct values per environment, set by a human on the runner host.
+- **Fail-closed when missing** — every reader already returns null / throws a typed redacted error
+  (`kmsKeyProviderConfigFromEnv`, `awsKmsConfigFromEnv`, `createAwsKmsSdkSenderFromEnv`,
+  `createOAuthPendingExecutor`); an unconfigured deploy is inert, never a weak default.
+
+### 43.4 No-real-token staging verification checklist (human-executed; an agent runs nothing hosted)
+1. Verify the runner DB connection (as `connector_runner`) can consume `oauth_pending` ONLY — SELECT + the
+   3-column UPDATE; it cannot INSERT/DELETE it or touch `connector_secrets`/`connectors`/`connector_runs`.
+2. Verify `oauth_pending` stays deny-all to `anon`/`authenticated` (zero privilege, zero policies — T42/T43).
+3. Verify `connector_secrets` stays deny-all to `anon`/`authenticated` (zero privilege, zero policies — T39).
+4. Verify the KMS path with a **mock / staging-safe dry-run** (a staging KEK alias or an in-memory fake) — a
+   wrap/unwrap round-trip under the runner's staging IAM — **without any provider token**.
+5. Verify **no token exchange** happens anywhere in the dry run (the callback route stays inert; no `fetch`).
+6. Verify **no credential storage** — nothing is written to `connector_secrets`; no access/refresh token persists.
+7. Verify **no browser path can invoke runner operations** (`authenticated`/`anon` cannot consume
+   `oauth_pending` or reach the runner; the runner entrypoint is not a route).
+8. Verify **no KMS SDK bundle ships to the browser** (`@aws-sdk/client-kms` stays server-only; absent from any
+   client bundle).
+   Record the evidence (a docs-only verification PR) BEFORE any provider-connector work.
+
+### 43.5 Gates before the first connector
+1. The hosted runner DB wiring is implemented AND staging-verified (§43.1/§43.4).
+2. The AWS KMS / IAM / KEK staging path is implemented AND staging-verified (§43.2/§43.4).
+3. The no-real-token full vault chain (state → consume → KMS dry-run) is verified end-to-end.
+4. ONLY THEN may a first low-risk connector skeleton be started.
+
+### 43.6 Explicit non-approval
+This plan does **not** approve real token storage; does **not** approve connector sync; does **not** approve
+production; does **not** close RISK-001; does **not** unblock cutover. **No OAuth code is exchanged for tokens.
+No access token is stored. No refresh token is stored. No connector credentials are stored. No connector secret
+material is inserted, updated, deleted, or read. No connector sync is implemented. No provider connector is
+implemented. No credential form is implemented. No connect/reconnect/disconnect action is implemented. No
+manual or scheduled run action is implemented. No browser-accessible service-role request path is added. No
+production data was touched. No hosted commands were run. Connector vault is still not usable for real
+credentials until hosted runner/KMS verification is complete. Connector implementation remains blocked.
+Old-app parity is not complete. UI/UX parity is not complete. AI/API connector parity is not complete. Upload
+is not automatically production-ready. Hosted Auth/tenant-context is verified, but old-app replacement is not
+yet verified. RISK-001 remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is ticked by this PR.
