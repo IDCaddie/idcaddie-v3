@@ -2039,3 +2039,40 @@ hosted commands were run. Connector implementation remains blocked. Old-app pari
 parity is not complete. AI/API connector parity is not complete. Upload is not automatically production-ready.
 Hosted Auth/tenant-context is verified, but old-app replacement is not yet verified. RISK-001 remains OPEN.
 Cutover remains BLOCKED.** No doc 17 §5 box is ticked by this PR.
+---
+
+## 60. IMPLEMENTATION — Slack OAuth authorize/callback skeleton (PR #127)
+
+**Slack OAuth authorize/callback skeleton is added. The Slack provider remains non-functional for real
+connections** (doc 42 §49). The first provider-specific connector module —
+`src/lib/server/connector-vault/providers/slack-oauth.ts` — builds the Slack authorize-redirect URL and
+classifies the Slack callback, integrating the existing `oauth-state` signer + `oauth_pending` replay shape +
+the registry (§59). No code exchange, no token/credential storage, no `connector_secrets`, no Slack API call,
+no connector marked connected.
+
+- **`buildSlackAuthorizeUrl`** → `{ ok, url, stateJti, nonceHash, expiresAt } | { ok:false, reason }`:
+  `https://slack.com/oauth/v2/authorize?client_id&scope&redirect_uri&state` with a SIGNED state
+  (`createOAuthState`). client_id INJECTED (never hardcoded / env-read here); redirect_uri validated
+  (HTTPS-only); scopes default to the registry's display scopes. Returns oauth_pending alignment hashes
+  `stateJti=sha256(state)`, `nonceHash=sha256(nonce)` (one-way; raw nonce/state never persisted). The Slack
+  token endpoint is never built/called. Fail-closed reasons on bad config.
+- **`classifySlackCallback`** → safe outcome (`provider_error`/`not_configured`/`invalid[reason]`/`received`).
+  Validates the signed state via `validateOAuthState`; checks `code` PRESENCE only (value never read); **NO
+  token exchange, NO Slack call, NO connector_secrets write, NO connector marked connected.** `received`
+  returns only the future-consume keys (one-way hashes).
+
+**+15 tests (273 → 288; RLS unchanged 387, no migration, no dependency, types 0-diff):** authorize URL
+host/path + safe params; state/nonce bound via the existing signer + alignment hashes; fail-closed on missing
+config / unsafe redirect_uri / non-slack provider; callback valid-but-no-exchange; error/cancel safe;
+fail-closed on missing code / missing/invalid/tampered state / wrong provider; module purity; callback route
+still inert. Server-only (sentinel + no-client-import guard); the live `/connectors/oauth/callback` route is
+unchanged + inert; no connect button / no UI change; the registry still lists Slack inert (skeleton,
+enabled:false). **No Slack OAuth code is exchanged for tokens. No Slack access token is stored. No Slack
+refresh token is stored. No connector credentials are stored. No connector secret material is inserted,
+updated, deleted, or read. No Slack API call is made. No connector sync is implemented. No credential form is
+implemented. No connect/reconnect/disconnect action is exposed to users. No browser-accessible service-role
+request path is added. Real token storage remains gated behind a later provider-specific reviewed PR. No
+production data was touched. No hosted commands were run. Connector implementation remains blocked. Old-app
+parity is not complete. UI/UX parity is not complete. AI/API connector parity is not complete. Upload is not
+automatically production-ready. Hosted Auth/tenant-context is verified, but old-app replacement is not yet
+verified. RISK-001 remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is ticked by this PR.
