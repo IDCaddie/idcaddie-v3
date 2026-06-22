@@ -1861,3 +1861,43 @@ credentials until hosted runner/KMS verification is complete. Connector implemen
 Old-app parity is not complete. UI/UX parity is not complete. AI/API connector parity is not complete. Upload
 is not automatically production-ready. Hosted Auth/tenant-context is verified, but old-app replacement is not
 yet verified. RISK-001 remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is ticked by this PR.
+---
+
+## 55. TOOLING — connector-vault staging dry-run verifier (PR #122)
+
+**Hosted runner/KMS no-real-token verifier is added. The verifier is human-run only. The agent did not run
+hosted commands** (doc 42 §44). `scripts/verify-staging-connector-vault-dry-run.mjs` — the executable §43.4
+checklist a human runs to prove the hosted runner DB connection (as `connector_runner`) + the AWS KMS path
+work WITHOUT storing any real credential. Same safety model as `verify-staging-rls-suite.mjs`: connects to
+NOTHING, prints NO secret values, performs NO hosted mutation — the confirmed path only PRINTS a runbook.
+
+- **The verifier refuses production**; requires staging (`ycdpzduxugdsffjqyoai`) via the linked file or
+  `--ref`; requires an explicit confirmation phrase before emitting the runbook (default refuses; `--help`
+  prints usage); requires hosted secrets/config via ENV (names only — never read/printed); **the verifier
+  does not use real provider tokens** (only the synthetic sentinel `synthetic-vault-dry-run-not-a-token`).
+- **Runbook proves (human-run):** consume one synthetic `oauth_pending` row exactly once as `connector_runner`;
+  second consume + every mismatch → 0 rows; runner DENIED on `connector_secrets`; `oauth_pending`/
+  `connector_secrets` deny-all to anon/authenticated; KMS wrap/unwrap of the synthetic payload (GenerateDataKey
+  + Decrypt only); narrow cleanup; no browser route involved.
+- **+13 tests (253 → 266; RLS unchanged 387, no migration, no dependency, types 0-diff):** mocks only, no
+  hosted call — refuses production / off-staging / no confirmation / missing env; emits the runbook only when
+  confirmed + staging + env (still opens no connection); redacts secrets; synthetic payload only; no
+  `connector_secrets` write printed; `--help` exits 0; source imports only `node:fs`.
+
+A human runs this on staging next + records the evidence; the agent runs only `node --check` + the mock tests.
+**The verifier does not exchange OAuth codes for tokens. The verifier does not store access tokens. The
+verifier does not store refresh tokens. The verifier does not store connector credentials. The verifier does
+not insert, update, delete, or read connector secret material. The verifier does not implement connector sync.
+The verifier does not implement provider connectors. The verifier does not implement credential forms. The
+verifier does not add connect/reconnect/disconnect actions. The verifier does not add manual or scheduled run
+actions. The verifier does not add browser-accessible service-role request paths. No OAuth code is exchanged
+for tokens. No access token is stored. No refresh token is stored. No connector credentials are stored. No
+connector secret material is inserted, updated, deleted, or read. No connector sync is implemented. No provider
+connector is implemented. No credential form is implemented. No connect/reconnect/disconnect action is
+implemented. No manual or scheduled run action is implemented. No browser-accessible service-role request path
+is added. No production data was touched. No hosted commands were run by the agent. Connector vault is still
+not usable for real credentials until the human-run staging dry run is executed and recorded. Connector
+implementation remains blocked. Old-app parity is not complete. UI/UX parity is not complete. AI/API connector
+parity is not complete. Upload is not automatically production-ready. Hosted Auth/tenant-context is verified,
+but old-app replacement is not yet verified. RISK-001 remains OPEN. Cutover remains BLOCKED.** No doc 17 §5
+box is ticked by this PR.
