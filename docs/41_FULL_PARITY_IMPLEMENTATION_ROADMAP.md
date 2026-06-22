@@ -2076,3 +2076,43 @@ production data was touched. No hosted commands were run. Connector implementati
 parity is not complete. UI/UX parity is not complete. AI/API connector parity is not complete. Upload is not
 automatically production-ready. Hosted Auth/tenant-context is verified, but old-app replacement is not yet
 verified. RISK-001 remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is ticked by this PR.
+---
+
+## 61. IMPLEMENTATION — Slack authorize-time oauth_pending persist (PR #128)
+
+**Slack authorize-time oauth_pending persistence is added. Slack authorize creates a replay-protection row
+for a future callback consume step** (doc 42 §50). `src/lib/server/connector-vault/providers/slack-authorize-pending.ts`
+composes the §60 Slack authorize-URL builder with the `oauth_pending` replay shape — at authorize-time it
+creates the single-use row a future callback PR consumes exactly once. **Slack remains non-functional for
+real connections.** No code exchange, no token/credential storage, no `connector_secrets`, no Slack API call,
+no connector marked connected, no sync run. Library-only (no route / server action / connect button).
+
+- **Injected INSERT seam (no migration, no service-role client):** `oauth_pending` is deny-all to anon/
+  authenticated (`0020`) and `connector_runner` has SELECT+UPDATE but NOT INSERT (`0021` deferred it), so the
+  privileged INSERT is delegated to an injected `SlackPendingInserter` (the runner-identity-backed inserter +
+  its future INSERT grant is a later PR); tests inject a mock (no live DB write, no credentials). RLS suite
+  unchanged **387**.
+- **`persistSlackAuthorizePending(input, inserter)`** → `{ ok, url, stateJti, expiresAt } | { ok:false,
+  reason }`: validates inserter present / provider supported / tenant context (tenant required; org/subject
+  optional, nullable per `0020`); builds the authorize URL (validating clientId/redirectUri[https]/signer/
+  scopes); inserts ONE row `{ tenant_id, organization_id?, provider:'slack', connector_id?, subject?,
+  state_jti=sha256(state), nonce_hash=sha256(nonce), intent:'connect', expires_at }`. **Raw nonce is not
+  stored. Raw state is not stored** (the raw nonce is never materialized — the builder returns only hashes).
+- **Fail closed:** missing inserter / unsupported provider / missing tenant(org/subject) / bad config / unsafe
+  redirect / duplicate(state_jti|nonce_hash) → duplicate_pending / DB error → persist_failed; no partial row.
+
+**+12 tests (288 → 300; RLS unchanged 387, no migration, no dependency, types 0-diff):** persists exactly one
+row (provider slack, ids, intent, hashes); stores state_jti/nonce_hash never raw state/nonce; fresh-connect
+null vs re-auth connector_id; fail-closed on duplicate/DB-error/missing-inserter/missing-tenant/missing-config/
+unsafe-redirect; module purity; callback route still inert. Server-only (sentinel + no-client-import guard);
+the live `/connectors/oauth/callback` route UNCHANGED + inert; no connect button / no UI change; the registry
+still lists Slack inert (skeleton, enabled:false). **No Slack OAuth code is exchanged for tokens. No Slack
+access token is stored. No Slack refresh token is stored. No connector credentials are stored. No connector
+secret material is inserted, updated, deleted, or read. No Slack API call is made. No connector sync is
+implemented. No credential form is implemented. No connect/reconnect/disconnect action is exposed to users. No
+browser-accessible service-role request path is added. Real token storage remains gated behind a later
+provider-specific reviewed PR. No production data was touched. No hosted commands were run. Connector
+implementation remains blocked. Old-app parity is not complete. UI/UX parity is not complete. AI/API connector
+parity is not complete. Upload is not automatically production-ready. Hosted Auth/tenant-context is verified,
+but old-app replacement is not yet verified. RISK-001 remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box
+is ticked by this PR.

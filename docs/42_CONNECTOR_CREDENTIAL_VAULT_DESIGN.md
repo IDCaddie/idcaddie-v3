@@ -1765,3 +1765,59 @@ touched. No hosted commands were run. Connector implementation remains blocked. 
 complete. UI/UX parity is not complete. AI/API connector parity is not complete. Upload is not automatically
 production-ready. Hosted Auth/tenant-context is verified, but old-app replacement is not yet verified. RISK-001
 remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is ticked by this PR.
+## 50. Implementation — Slack authorize-time oauth_pending persist (PR #128)
+
+**Slack authorize-time oauth_pending persistence is added. Slack authorize creates a replay-protection row
+for a future callback consume step.** It composes the §49 Slack authorize-URL builder with the `oauth_pending`
+replay-store shape: at authorize-time it creates the single-use row a FUTURE callback PR consumes exactly
+once (§38, PR #116/#120). **Slack remains non-functional for real connections.** It exchanges NO code, stores
+NO token/credential, touches NO `connector_secrets`, calls NO Slack API, marks NO connector connected, and
+creates NO sync run. `src/lib/server/connector-vault/providers/slack-authorize-pending.ts` — library-only (no
+route / server action / connect button).
+
+### 50.1 The INSERT is an injected seam (not a request-path write, no migration)
+`oauth_pending` is Tier-2 deny-all to anon/authenticated (`0020`), and `connector_runner` was granted
+SELECT + UPDATE but **deliberately NOT INSERT** (`0021` deferred authorize-time create). So a request-path
+Supabase client CANNOT write this row — and this PR adds **NO migration and NO global service-role client**.
+Instead the privileged INSERT is delegated to an injected `SlackPendingInserter` (the runner-identity-backed
+inserter, with the future INSERT grant, is a later gated PR). Tests inject a mock — NO live DB write, NO
+credentials in tests. (RLS suite unchanged **387**; the deny-all posture is untouched.)
+
+### 50.2 `persistSlackAuthorizePending(input, inserter)`
+→ `{ ok:true, url, stateJti, expiresAt } | { ok:false, reason }`. It validates the inserter is present, the
+Slack provider is supported (registry), and the tenant context (tenant required; organization_id/subject
+optional + validated if present — matching the nullable `0020` columns); builds the authorize URL via
+`buildSlackAuthorizeUrl` (which validates clientId/redirectUri[https-only]/signer/scopes and returns the
+one-way hashes); then inserts ONE row `{ tenant_id, organization_id?, provider:'slack', connector_id?,
+subject?, state_jti = sha256(state), nonce_hash = sha256(nonce), intent:'connect', expires_at }`.
+**Raw nonce is not stored. Raw state is not stored** — the raw nonce is NEVER materialized here (the builder
+returns only hashes), so it can never be stored, returned, or logged; the result returns the authorize URL
+(the signed `state` is the intended redirect carrier) + safe metadata only.
+
+### 50.3 Fail closed
+Raw nonce is not stored. Raw state is not stored.
+Missing inserter → `missing_inserter`; unsupported provider → `unsupported_provider`; missing/garbage tenant
+(or org/subject) → `missing_tenant`; bad config (client_id/redirect_uri/signer/scopes/unsafe redirect) → the
+builder's safe reason (never reaching the insert); a UNIQUE(state_jti|nonce_hash) conflict → `duplicate_pending`;
+any other DB failure → `persist_failed`. No partial row on any failure.
+
+### 50.4 Posture (unchanged) + tests (+12; app 288 → 300)
+Server-only (sentinel + `no-client-import` guard; imports only `./slack-oauth`, `../provider-registry`,
+`../oauth-state` types — no DB client, no `node:crypto`). The live `/connectors/oauth/callback` route is
+UNCHANGED + still inert. No connect button / no UI change. The registry still lists Slack as an inert
+`skeleton`/`enabled:false` (this persist step does not flip it). Tests: persists exactly one row (provider
+slack, ids, intent connect, hashes); stores `state_jti`/`nonce_hash` — never the raw state/nonce (asserts the
+raw nonce + raw state string are absent from the row + result); fresh-connect null vs re-auth connector_id;
+fail-closed on duplicate / DB error / missing inserter / missing tenant / missing config / unsafe redirect;
+module purity (no fetch/createClient/process.env/connector_secrets/service_role/access_token/refresh_token/
+client_secret/grant_type/oauth.v2.access/kms/@supabase); callback route still inert.
+
+**No Slack OAuth code is exchanged for tokens. No Slack access token is stored. No Slack refresh token is
+stored. No connector credentials are stored. No connector secret material is inserted, updated, deleted, or
+read. No Slack API call is made. No connector sync is implemented. No credential form is implemented. No
+connect/reconnect/disconnect action is exposed to users. No browser-accessible service-role request path is
+added. Real token storage remains gated behind a later provider-specific reviewed PR. No production data was
+touched. No hosted commands were run. Connector implementation remains blocked. Old-app parity is not
+complete. UI/UX parity is not complete. AI/API connector parity is not complete. Upload is not automatically
+production-ready. Hosted Auth/tenant-context is verified, but old-app replacement is not yet verified. RISK-001
+remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is ticked by this PR.

@@ -45,6 +45,9 @@ const CRYPTO_REL_HINTS = [
   "connector-vault/providers/slack-oauth",
   "server/connector-vault/providers/slack-oauth",
   "lib/server/connector-vault/providers/slack-oauth",
+  "connector-vault/providers/slack-authorize-pending",
+  "server/connector-vault/providers/slack-authorize-pending",
+  "lib/server/connector-vault/providers/slack-authorize-pending",
 ];
 
 function walk(dir: string): string[] {
