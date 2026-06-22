@@ -25,7 +25,7 @@ Before building UI, prove these pass against local Supabase.
 
 Cases 1–8 plus the org/cross-tenant/escalation matrix are enforced by
 `supabase/migrations/0002_org_scoped_rls.sql` and `0003_org_access_union.sql`,
-covered by the runnable suite `supabase/tests/org_rls_test.sql` (T1–T42, 352 assertions; T38/T39 cover the
+covered by the runnable suite `supabase/tests/org_rls_test.sql` (T1–T43, 387 assertions; T38/T39 cover the
 connector-vault schema foundation (`0017`) — T38 = `connectors`/`connector_runs` tenant-member read + no
 request-path write; T39 = `connector_secrets` deny-all (RLS-enabled, zero policies, `authenticated`/`anon`
 hold zero privilege) + the no-secret-column-leak structural check; **T40 = the hardened grant surface
@@ -42,6 +42,14 @@ policies + `authenticated`/`anon` hold EXACTLY zero privilege (no read/insert/up
 TRUNCATE) + structural posture (`expires_at` NOT NULL, UNIQUE `state_jti`/`nonce_hash` single-use, a
 cross-tenant connector binding blocked by the composite FK, no raw nonce/state/code/token/secret column) +
 `connector_secrets` and the Tier-1 grant surface unchanged by `0020`;
+**T43 = the `connector_runner` DB grant foundation (`0021`)** — a dedicated NOLOGIN BYPASSRLS server-only
+runner role granted ONLY `oauth_pending` SELECT + a column-level UPDATE on EXACTLY
+{consumed_at, attempt_count, last_rejected_code} (no INSERT/DELETE/TRUNCATE/REFERENCES/TRIGGER, no UPDATE on
+the immutable identity columns), ZERO privilege on connector_secrets/connectors/connector_runs (deferred) +
+a functional proof (the runner can SELECT + set `consumed_at` (the §38 consume shape) but cannot
+delete/insert/update-identity-columns/read connector_secrets) + anon/authenticated deny-all unchanged
+(zero on oauth_pending/connector_secrets, `[SELECT]`-only on connectors/connector_runs, oauth_pending still
+zero policies; a normal authenticated user still cannot consume oauth_pending or touch connector_secrets);
 the later tests cover the `files` foundation/policies — T33 `0012`, T34 `0013` SELECT/INSERT (+ T34c DELETE
 denied at the privilege layer), T35 `0014` storage-auth helpers, **T36 `0016` the uploader-finalize
 UPDATE policy** (uploader may set `upload_status` on their OWN row; cross-tenant / cross-user updates and

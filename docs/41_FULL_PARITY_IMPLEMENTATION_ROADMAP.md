@@ -1713,3 +1713,42 @@ UI/UX parity is not complete. AI/API connector parity is not complete. Upload is
 production-ready. Hosted Auth/tenant-context is verified, but old-app
 replacement is not yet verified. RISK-001 remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is ticked
 by this PR.
+
+
+---
+
+## 51. IMPLEMENTATION — connector_runner DB grant foundation (PR #118)
+
+**Runner DB grant foundation is added. Runner privileges are least-privilege and not granted to anon or
+authenticated users** (doc 42 §40) — migration `0021_connector_runner_grants.sql`, the §39.2 grant foundation:
+a dedicated server-side `connector_runner` DB principal with the minimum grant the OAuth `oauth_pending`
+consume (PR #116) needs, and nothing else. No app request path wired to the runner; no credential stored.
+
+- **Role:** `create role connector_runner nologin bypassrls` (idempotent). NOLOGIN (a privilege role, not a
+  login). BYPASSRLS justified + constrained (§39.1): `oauth_pending` is RLS deny-all so a plain grant alone
+  is RLS-denied; the runner is the trusted server principal whose tenant-bound query contract (PR #116)
+  excludes cross-tenant rows in the WHERE; it is NOT the broad `service_role`, reached only from the runner
+  entrypoint (no `src/`/`src/app` reference).
+- **Grants (least privilege, oauth_pending only):** `SELECT` + a column-level `UPDATE (consumed_at,
+  attempt_count, last_rejected_code)`. No INSERT, no row delete/purge, no REFERENCES, no TRIGGER, no UPDATE on
+  the immutable identity columns. **DEFERRED (no grant here):** `connector_secrets` (secret read/write is a
+  later PR — tombstone/version) and `connectors`/`connector_runs` (lifecycle write is a later PR).
+- **Browser roles unchanged:** `anon`/`authenticated` deny-all on `oauth_pending`/`connector_secrets`
+  preserved (re-asserted), `[SELECT]`-only on the Tier-1 tables, no browser-role policy added; **no
+  browser-accessible service-role path is added.**
+
+**T43** (RLS suite **352 → 387**, grant-only — types 0-diff, no app change): proves the runner exists,
+BYPASSRLS+NOLOGIN, EXACTLY SELECT + the 3-column UPDATE (no INSERT/DELETE/TRUNCATE/REFERENCES/TRIGGER, no
+identity-column UPDATE), ZERO on connector_secrets/connectors/connector_runs; functionally can consume
+(SELECT + set consumed_at) but not delete/insert/update-identity/read-secrets; anon/authenticated deny-all
+unchanged (a normal authenticated user still cannot consume oauth_pending or touch connector_secrets). A human
+applies `0021` to staging then production later + records the §39.6 verification before connector work. **No
+OAuth code is exchanged for tokens. No access token is stored. No refresh token is stored. No connector
+credentials are stored. No connector secret material is inserted, updated, deleted, or read by app code. No
+connector sync is implemented. No provider connector is implemented. No credential form is implemented. No
+connect/reconnect/disconnect action is implemented. No manual or scheduled run action is implemented. No
+production data was touched. No hosted commands were run. Connector vault is still not usable for real
+credentials until the remaining gated PRs are complete. Connector implementation remains blocked. Old-app
+parity is not complete. UI/UX parity is not complete. AI/API connector parity is not complete. Upload is not
+automatically production-ready. Hosted Auth/tenant-context is verified, but old-app replacement is not yet
+verified. RISK-001 remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is ticked by this PR.

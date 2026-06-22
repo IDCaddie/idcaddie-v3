@@ -2127,4 +2127,118 @@ do $$ begin
 end $$;
 reset role;
 
+-- ── Test 43: connector_runner DB grant foundation (migration 0021) ───────────────────────────────────
+-- The dedicated server-side runner role gets a NARROW least-privilege grant: ONLY oauth_pending SELECT +
+-- a 3-column UPDATE. It is BYPASSRLS (a trusted server principal constrained by its grants + a tenant-bound
+-- query contract — docs/42 §39.1/§39.2), NOT the broad service_role, and is granted NOTHING on
+-- connector_secrets/connectors/connector_runs (deferred). anon/authenticated keep their deny-all surface.
+reset role;
+-- 43a: the role exists and is BYPASSRLS + NOLOGIN (a privilege role, not a login).
+do $$ begin
+  assert exists (select 1 from pg_roles where rolname='connector_runner'), 'T43 connector_runner role must exist (0021)';
+  assert (select rolbypassrls from pg_roles where rolname='connector_runner'), 'T43 connector_runner must be BYPASSRLS (trusted server principal — docs/42 §39.1)';
+  assert not (select rolcanlogin from pg_roles where rolname='connector_runner'), 'T43 connector_runner must be NOLOGIN';
+end $$;
+-- 43b: EXACT privilege surface on oauth_pending — SELECT (table) + UPDATE on EXACTLY 3 columns; nothing else.
+do $$ begin
+  assert has_table_privilege('connector_runner','public.oauth_pending','SELECT'), 'T43 runner must have SELECT on oauth_pending';
+  -- the UPDATE column grant is EXACTLY {consumed_at, attempt_count, last_rejected_code}.
+  assert (select coalesce(array_agg(distinct column_name::text order by column_name::text), array[]::text[])
+          from information_schema.role_column_grants
+          where grantee='connector_runner' and table_schema='public' and table_name='oauth_pending' and privilege_type='UPDATE')
+         = array['attempt_count','consumed_at','last_rejected_code'],
+         'T43 runner UPDATE columns on oauth_pending must be EXACTLY {consumed_at, attempt_count, last_rejected_code}';
+  assert     has_column_privilege('connector_runner','public.oauth_pending','consumed_at','UPDATE'),      'T43 runner updates consumed_at';
+  assert     has_column_privilege('connector_runner','public.oauth_pending','attempt_count','UPDATE'),    'T43 runner updates attempt_count';
+  assert     has_column_privilege('connector_runner','public.oauth_pending','last_rejected_code','UPDATE'),'T43 runner updates last_rejected_code';
+  -- the IMMUTABLE identity columns are NOT updatable by the runner.
+  assert not has_column_privilege('connector_runner','public.oauth_pending','tenant_id','UPDATE'),  'T43 runner must NOT update tenant_id';
+  assert not has_column_privilege('connector_runner','public.oauth_pending','state_jti','UPDATE'),  'T43 runner must NOT update state_jti';
+  assert not has_column_privilege('connector_runner','public.oauth_pending','nonce_hash','UPDATE'), 'T43 runner must NOT update nonce_hash';
+  assert not has_column_privilege('connector_runner','public.oauth_pending','provider','UPDATE'),   'T43 runner must NOT update provider';
+  assert not has_column_privilege('connector_runner','public.oauth_pending','expires_at','UPDATE'), 'T43 runner must NOT update expires_at';
+  -- no broad verbs.
+  assert not has_table_privilege('connector_runner','public.oauth_pending','INSERT'),    'T43 runner must NOT INSERT oauth_pending (later PR)';
+  assert not has_table_privilege('connector_runner','public.oauth_pending','DELETE'),    'T43 runner must NOT DELETE oauth_pending (later PR)';
+  assert not has_table_privilege('connector_runner','public.oauth_pending','TRUNCATE'),  'T43 runner must NOT have row-purge on oauth_pending';
+  assert not has_table_privilege('connector_runner','public.oauth_pending','REFERENCES'),'T43 runner must NOT REFERENCES oauth_pending';
+  assert not has_table_privilege('connector_runner','public.oauth_pending','TRIGGER'),   'T43 runner must NOT TRIGGER oauth_pending';
+end $$;
+-- 43c: the runner has ZERO privilege on connector_secrets / connectors / connector_runs (deferred grants).
+do $$ begin
+  assert (select coalesce(array_agg(distinct privilege_type::text), array[]::text[]) from information_schema.role_table_grants
+          where grantee='connector_runner' and table_schema='public' and table_name='connector_secrets') = array[]::text[],
+         'T43 runner must hold ZERO privilege on connector_secrets (deferred — docs/42 §39.2)';
+  assert (select coalesce(array_agg(distinct privilege_type::text), array[]::text[]) from information_schema.role_table_grants
+          where grantee='connector_runner' and table_schema='public' and table_name='connectors') = array[]::text[],
+         'T43 runner must hold ZERO privilege on connectors (deferred)';
+  assert (select coalesce(array_agg(distinct privilege_type::text), array[]::text[]) from information_schema.role_table_grants
+          where grantee='connector_runner' and table_schema='public' and table_name='connector_runs') = array[]::text[],
+         'T43 runner must hold ZERO privilege on connector_runs (deferred)';
+  -- and zero UPDATE columns on connector_secrets.
+  assert (select count(*) from information_schema.role_column_grants
+          where grantee='connector_runner' and table_schema='public' and table_name='connector_secrets') = 0,
+         'T43 runner must hold ZERO column privilege on connector_secrets';
+end $$;
+-- 43d: FUNCTIONAL — the runner can consume (SELECT + UPDATE consumed_at, the §38 shape) but nothing else.
+insert into public.oauth_pending (id, tenant_id, connector_id, provider, state_jti, nonce_hash, intent, expires_at)
+  values ('43a00000-0000-0000-0000-0000000000a1','11111111-1111-1111-1111-111111111111','17000000-0000-0000-0000-0000000000a1','github','jti-runner','hash-runner','connect', now() + interval '10 min');
+set role connector_runner;
+do $$ begin
+  -- can read (BYPASSRLS skips the deny-all RLS; the SELECT grant applies).
+  assert (select count(*) from public.oauth_pending where state_jti='jti-runner') = 1, 'T43 runner can SELECT oauth_pending';
+  -- can perform the atomic consume update shape (set consumed_at).
+  update public.oauth_pending set consumed_at = now() where state_jti='jti-runner' and consumed_at is null and expires_at > now();
+  assert (select consumed_at is not null from public.oauth_pending where state_jti='jti-runner'), 'T43 runner can set consumed_at (consume)';
+end $$;
+do $$ declare ok boolean := false; begin
+  begin update public.oauth_pending set tenant_id='22222222-2222-2222-2222-222222222222' where state_jti='jti-runner'; ok := false;
+  exception when insufficient_privilege then ok := true; end;
+  assert ok, 'T43 runner must NOT update an immutable identity column (tenant_id)';
+end $$;
+do $$ declare ok boolean := false; begin
+  begin delete from public.oauth_pending where state_jti='jti-runner'; ok := false;
+  exception when insufficient_privilege then ok := true; end;
+  assert ok, 'T43 runner must NOT DELETE oauth_pending';
+end $$;
+do $$ declare ok boolean := false; begin
+  begin insert into public.oauth_pending (tenant_id, provider, state_jti, nonce_hash, intent, expires_at)
+    values ('11111111-1111-1111-1111-111111111111','github','jti-x2','hash-x2','connect', now() + interval '10 min'); ok := false;
+  exception when insufficient_privilege then ok := true; end;
+  assert ok, 'T43 runner must NOT INSERT oauth_pending (later PR)';
+end $$;
+do $$ declare ok boolean := false; begin
+  begin perform 1 from public.connector_secrets; ok := false; exception when insufficient_privilege then ok := true; end;
+  assert ok, 'T43 runner must NOT read connector_secrets (no grant — deferred)';
+end $$;
+reset role;
+-- 43e: anon/authenticated deny-all surface UNCHANGED after 0021.
+do $$ begin
+  assert (select coalesce(array_agg(distinct privilege_type::text), array[]::text[]) from information_schema.role_table_grants
+          where grantee='authenticated' and table_schema='public' and table_name='oauth_pending') = array[]::text[],
+         'T43 authenticated must STILL hold zero privilege on oauth_pending after 0021';
+  assert (select coalesce(array_agg(distinct privilege_type::text), array[]::text[]) from information_schema.role_table_grants
+          where grantee='authenticated' and table_schema='public' and table_name='connector_secrets') = array[]::text[],
+         'T43 authenticated must STILL hold zero privilege on connector_secrets after 0021';
+  assert (select coalesce(array_agg(distinct privilege_type::text), array[]::text[]) from information_schema.role_table_grants
+          where grantee='anon' and table_schema='public' and table_name='oauth_pending') = array[]::text[],
+         'T43 anon must STILL hold zero privilege on oauth_pending after 0021';
+  assert (select coalesce(array_agg(distinct privilege_type::text order by privilege_type::text), array[]::text[]) from information_schema.role_table_grants
+          where grantee='authenticated' and table_schema='public' and table_name='connectors') = array['SELECT'],
+         'T43 authenticated must STILL hold EXACTLY [SELECT] on connectors after 0021';
+  assert (select count(*) from pg_policies where schemaname='public' and tablename='oauth_pending') = 0,
+         'T43 oauth_pending must STILL have ZERO policies after 0021 (no browser-role policy added)';
+end $$;
+-- 43f: a normal authenticated user STILL cannot consume oauth_pending or touch connector_secrets.
+select set_config('request.jwt.claims','{"sub":"0a000000-0000-0000-0000-000000000001"}',false); set role authenticated; -- owner_a
+do $$ declare ok boolean := false; begin
+  begin update public.oauth_pending set consumed_at = now(); ok := false; exception when insufficient_privilege then ok := true; end;
+  assert ok, 'T43 authenticated must STILL NOT consume oauth_pending after 0021';
+end $$;
+do $$ declare ok boolean := false; begin
+  begin perform 1 from public.connector_secrets; ok := false; exception when insufficient_privilege then ok := true; end;
+  assert ok, 'T43 authenticated must STILL NOT read connector_secrets after 0021';
+end $$;
+reset role;
+
 do $$ begin raise notice 'ALL ORG-RLS ASSERTIONS PASSED'; end $$;
