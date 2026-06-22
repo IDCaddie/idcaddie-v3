@@ -1215,3 +1215,67 @@ implementation remains blocked. Old-app parity is not complete. UI/UX parity is 
 parity is not complete. Upload is not automatically production-ready. Hosted Auth/tenant-context is verified, but
 old-app replacement is not yet verified. RISK-001 remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is
 ticked by this PR.
+
+## 40. Implementation — connector_runner DB grant foundation (PR #118)
+
+**Runner DB grant foundation is added. Runner privileges are least-privilege and not granted to anon or
+authenticated users.** This lands the §39.2 grant FOUNDATION as migration `0021_connector_runner_grants.sql`
+— a dedicated server-side DB principal with the minimum grant the OAuth `oauth_pending` consume (PR #116)
+needs, and **nothing else**. No app request path is wired to the runner; no credential is stored; no
+`connector_secrets` is read/written by app code. **The vault stays NOT usable for real credentials.**
+
+### 40.1 The role
+`create role connector_runner nologin bypassrls` (idempotent). **NOLOGIN** — a privilege-holding role like
+`anon`/`authenticated`, not a login (the real runner connection/login wiring is a later ops/PR concern).
+**BYPASSRLS, justified + constrained (§39.1):** `oauth_pending` is RLS-enabled with ZERO policies (deny-all
+to every non-bypass role — `0020`), so a plain grant alone would still be RLS-denied; the runner is the §3
+trusted server principal whose **tenant-bound query contract** (PR #116's `update … where tenant_id = $tid
+and state_jti = $jti and nonce_hash = $nh and consumed_at is null and expires_at > now()`) excludes
+cross-tenant rows in the WHERE, not via RLS. It is **NOT the broad `service_role`** on a request path — it is
+a narrow role reached only from the server-only runner entrypoint, never request/browser code (T43 proves the
+exact privilege surface + the constrained query shape; the role is referenced by no `src/`/`src/app` code).
+
+### 40.2 The grants (least privilege; oauth_pending only)
+Defensive `revoke all` first, then ONLY:
+- `grant select on public.oauth_pending to connector_runner` — the read-only classify lookup.
+- `grant update (consumed_at, attempt_count, last_rejected_code) on public.oauth_pending to connector_runner`
+  — a **column-level** UPDATE on exactly the single-use / attempt columns the consume sets / a rejected
+  attempt records. The immutable identity columns (`tenant_id`/`state_jti`/`nonce_hash`/`provider`/
+  `expires_at`/…) are **NOT** updatable by the runner.
+- **No INSERT** (authorize-time create is a later PR), **no row delete / no row purge** (the expiry sweep is a
+  later PR), **no REFERENCES, no TRIGGER**.
+- **DEFERRED (no grant in this PR — §39.2/§39.7):** the runner gets **NO grant on `connector_secrets`** (secret
+  read/write is a later, separately-reviewed PR — tombstone/version, never a row delete) and **NO grant on
+  `connectors`/`connector_runs`** (the lifecycle metadata write is a later PR). The runner can touch ONLY
+  `oauth_pending`, and only as above.
+
+### 40.3 Browser roles unchanged (deny-all preserved)
+`anon`/`authenticated` privileges are NOT changed: **Oauth_pending remains not directly readable or writable by
+anon or authenticated users. Connector secret material remains inaccessible to anon and authenticated users.**
+The secret-table deny-all is re-asserted defensively (idempotent — the `0017`/`0018` pattern). **No policy is
+added for any browser role**, so `oauth_pending` keeps its zero-policy deny-all (T42/T43); `connectors`/
+`connector_runs` keep `authenticated` = `[SELECT]` only (`0018`/T40). **No browser-accessible service-role path
+is added.**
+
+### 40.4 Tests (T43; RLS suite **352 → 387**, grant-only — types 0-diff, no app change)
+T43 proves: `connector_runner` exists, is BYPASSRLS + NOLOGIN; its `oauth_pending` privilege is EXACTLY
+SELECT + a column-UPDATE on `{consumed_at, attempt_count, last_rejected_code}` (no INSERT/DELETE/TRUNCATE/
+REFERENCES/TRIGGER, no UPDATE on the identity columns); it holds ZERO privilege on `connector_secrets`/
+`connectors`/`connector_runs`; **functionally** it can `SELECT` + set `consumed_at` (the §38 consume shape)
+but CANNOT delete/insert/update-an-identity-column/read `connector_secrets`; and `anon`/`authenticated` keep
+their deny-all surface (zero on `oauth_pending`/`connector_secrets`, `[SELECT]`-only on the Tier-1 tables,
+`oauth_pending` still zero policies, a normal authenticated user still cannot consume `oauth_pending` or touch
+`connector_secrets`). The `test-rls.sh` harness applies `0021` (creating the role); its blanket grant /
+re-assert touch only `authenticated`/`anon`, so the runner's privileges reflect EXACTLY `0021`.
+
+A human applies `0021` to staging then production in a future step (an agent never runs hosted commands), and
+records the staging verification (§39.6) BEFORE any provider-connector work. **No OAuth code is exchanged for
+tokens. No access token is stored. No refresh token is stored. No connector credentials are stored. No
+connector secret material is inserted, updated, deleted, or read by app code. No connector sync is implemented.
+No provider connector is implemented. No credential form is implemented. No connect/reconnect/disconnect action
+is implemented. No manual or scheduled run action is implemented. No production data was touched. No hosted
+commands were run. Connector vault is still not usable for real credentials until the remaining gated PRs are
+complete. Connector implementation remains blocked. Old-app parity is not complete. UI/UX parity is not
+complete. AI/API connector parity is not complete. Upload is not automatically production-ready. Hosted
+Auth/tenant-context is verified, but old-app replacement is not yet verified. RISK-001 remains OPEN. Cutover
+remains BLOCKED.** No doc 17 §5 box is ticked by this PR.
