@@ -1279,3 +1279,45 @@ complete. Connector implementation remains blocked. Old-app parity is not comple
 complete. AI/API connector parity is not complete. Upload is not automatically production-ready. Hosted
 Auth/tenant-context is verified, but old-app replacement is not yet verified. RISK-001 remains OPEN. Cutover
 remains BLOCKED.** No doc 17 §5 box is ticked by this PR.
+## 41. Staging verification — `0021` connector_runner DB grants (PR #119)
+
+**Connector runner DB grant migration 0021 has been applied and verified on staging.** A human applied
+`0021` to the staging project `ycdpzduxugdsffjqyoai` and queried the live role / privilege / policy surface.
+**The agent ran nothing — no hosted command, no staging mutation, no secrets. No production data was touched.**
+
+### 41.1 Observed — PASS
+The remote migration list showed `0021` **absent** before push; `supabase db push --linked` applied
+`0021_connector_runner_grants.sql`; the list then showed `0021` **present** on Remote. The linked project ref
+remained `ycdpzduxugdsffjqyoai`. The role query confirmed `connector_runner` exists with `rolcanlogin = false`
+and `rolbypassrls = true` — **Connector_runner is NOLOGIN. Connector_runner has BYPASSRLS only for the narrow
+runner consume path.** The table-privilege query returned **exactly three rows** — `authenticated |
+connector_runs | SELECT`, `authenticated | connectors | SELECT`, and `connector_runner | oauth_pending |
+SELECT` — with **no anon rows, no connector_secrets rows, and no connector_runner privilege on
+connectors/connector_runs**: **Connector_runner has SELECT on oauth_pending. Connector_runner has no
+connectors or connector_runs privileges.** The column-privilege query for `connector_runner` on
+`oauth_pending` returned SELECT on the columns the consume classification reads, and **UPDATE only on
+`consumed_at`, only on `attempt_count`, and only on `last_rejected_code`** — **Connector_runner has
+column-scoped UPDATE only on consumed_at, attempt_count, and last_rejected_code. Connector_runner has no
+connector_secrets privileges.** `pg_policies` returned exactly the two tenant-member SELECT policies
+(`connectors` → "members read tenant connectors", SELECT; `connector_runs` → "members read tenant connector
+runs", SELECT); **`connector_secrets` has no policies** and **Oauth_pending has no policies.** This matches
+the `0021` intent + the local `org_rls_test.sql` T43 proof — the narrow runner grant landed and the deny-all
+surface is intact: **Oauth_pending remains not directly readable or writable by anon or authenticated users.
+Connector secret material remains inaccessible to anon and authenticated users. Connector metadata tables
+expose authenticated SELECT only. Anon has no connector vault table privileges. No broad INSERT, UPDATE,
+DELETE, TRUNCATE, REFERENCES, or TRIGGER grants remain on connector vault tables for anon or authenticated.**
+
+### 41.2 Scope / guardrails
+This verifies only the `0021` role / grant / policy surface on staging — not any connector behavior (there
+is none; the runner role is granted but no runner process or app path uses it). **No OAuth code is exchanged
+for tokens. No access token is stored. No refresh token is stored. No connector credentials are stored. No
+connector secret material is inserted, updated, deleted, or read. No connector sync is implemented. No
+provider connector is implemented. No credential form is implemented. No connect/reconnect/disconnect action
+is implemented. No manual or scheduled run action is implemented. No browser-accessible service-role request
+path is added. No production data was touched.** A human re-applies `0021` to production in a future step (an
+agent never runs hosted commands); next are the runner-identity-backed executors + the KMS/IAM provisioning
+(§39.4/§39.7) → PR G first connector. **Connector vault is still not usable for real credentials until the
+remaining gated PRs are complete. Connector implementation remains blocked. Old-app parity is not complete.
+UI/UX parity is not complete. AI/API connector parity is not complete. Upload is not automatically
+production-ready. Hosted Auth/tenant-context is verified, but old-app replacement is not yet verified. RISK-001
+remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is ticked by this verification.
