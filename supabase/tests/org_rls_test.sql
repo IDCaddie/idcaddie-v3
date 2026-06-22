@@ -2157,8 +2157,9 @@ do $$ begin
   assert not has_column_privilege('connector_runner','public.oauth_pending','nonce_hash','UPDATE'), 'T43 runner must NOT update nonce_hash';
   assert not has_column_privilege('connector_runner','public.oauth_pending','provider','UPDATE'),   'T43 runner must NOT update provider';
   assert not has_column_privilege('connector_runner','public.oauth_pending','expires_at','UPDATE'), 'T43 runner must NOT update expires_at';
-  -- no broad verbs.
-  assert not has_table_privilege('connector_runner','public.oauth_pending','INSERT'),    'T43 runner must NOT INSERT oauth_pending (later PR)';
+  -- INSERT is now granted COLUMN-scoped by 0022 (has_table_privilege stays false for a column grant — proved
+  -- in detail by T44 via has_column_privilege + role_column_grants).
+  assert     has_column_privilege('connector_runner','public.oauth_pending','tenant_id','INSERT'), 'T43 runner now HAS column-scoped INSERT on oauth_pending (0022 — see T44)';
   assert not has_table_privilege('connector_runner','public.oauth_pending','DELETE'),    'T43 runner must NOT DELETE oauth_pending (later PR)';
   assert not has_table_privilege('connector_runner','public.oauth_pending','TRUNCATE'),  'T43 runner must NOT have row-purge on oauth_pending';
   assert not has_table_privilege('connector_runner','public.oauth_pending','REFERENCES'),'T43 runner must NOT REFERENCES oauth_pending';
@@ -2201,12 +2202,7 @@ do $$ declare ok boolean := false; begin
   exception when insufficient_privilege then ok := true; end;
   assert ok, 'T43 runner must NOT DELETE oauth_pending';
 end $$;
-do $$ declare ok boolean := false; begin
-  begin insert into public.oauth_pending (tenant_id, provider, state_jti, nonce_hash, intent, expires_at)
-    values ('11111111-1111-1111-1111-111111111111','github','jti-x2','hash-x2','connect', now() + interval '10 min'); ok := false;
-  exception when insufficient_privilege then ok := true; end;
-  assert ok, 'T43 runner must NOT INSERT oauth_pending (later PR)';
-end $$;
+-- (43d INSERT coverage moved to T44 — the runner now HAS column-scoped INSERT via 0022.)
 do $$ declare ok boolean := false; begin
   begin perform 1 from public.connector_secrets; ok := false; exception when insufficient_privilege then ok := true; end;
   assert ok, 'T43 runner must NOT read connector_secrets (no grant — deferred)';
@@ -2240,5 +2236,93 @@ do $$ declare ok boolean := false; begin
   assert ok, 'T43 authenticated must STILL NOT read connector_secrets after 0021';
 end $$;
 reset role;
+
+-- ── Test 44: connector_runner authorize-time oauth_pending INSERT grant (migration 0022) ─────────────
+-- 0022 grants connector_runner a COLUMN-LEVEL INSERT on oauth_pending — ONLY the 9 §50 authorize-time
+-- columns. It can create a replay row but cannot supply consumed_at/attempt_count/last_rejected_code on
+-- INSERT, cannot DELETE/row-purge, and gains NOTHING on connector_secrets/connectors/connector_runs. anon/
+-- authenticated stay deny-all; no policy is added.
+reset role;
+-- 44a: the runner's INSERT column grant on oauth_pending is EXACTLY the 9 authorize-time columns.
+do $$ begin
+  assert (select coalesce(array_agg(distinct column_name::text order by column_name::text), array[]::text[])
+          from information_schema.role_column_grants
+          where grantee='connector_runner' and table_schema='public' and table_name='oauth_pending' and privilege_type='INSERT')
+         = array['connector_id','expires_at','intent','nonce_hash','organization_id','provider','state_jti','subject','tenant_id'],
+         'T44 runner INSERT columns on oauth_pending must be EXACTLY the 9 authorize-time columns (0022)';
+  -- the runner can INSERT the allowed columns, but NOT the consume/counter columns.
+  assert     has_column_privilege('connector_runner','public.oauth_pending','tenant_id','INSERT'),   'T44 runner can INSERT tenant_id';
+  assert     has_column_privilege('connector_runner','public.oauth_pending','state_jti','INSERT'),   'T44 runner can INSERT state_jti';
+  assert     has_column_privilege('connector_runner','public.oauth_pending','nonce_hash','INSERT'),  'T44 runner can INSERT nonce_hash';
+  assert     has_column_privilege('connector_runner','public.oauth_pending','expires_at','INSERT'),  'T44 runner can INSERT expires_at';
+  -- the grant is COLUMN-level only: the runner holds NO table-level INSERT (catches a future over-grant).
+  assert not has_table_privilege('connector_runner','public.oauth_pending','INSERT'), 'T44 runner must NOT hold table-level INSERT on oauth_pending (column grant only)';
+  assert not has_column_privilege('connector_runner','public.oauth_pending','consumed_at','INSERT'),       'T44 runner must NOT INSERT consumed_at';
+  assert not has_column_privilege('connector_runner','public.oauth_pending','attempt_count','INSERT'),     'T44 runner must NOT INSERT attempt_count';
+  assert not has_column_privilege('connector_runner','public.oauth_pending','last_rejected_code','INSERT'),'T44 runner must NOT INSERT last_rejected_code';
+  -- the existing surface is unchanged: SELECT kept; UPDATE columns still EXACTLY the 3 consume columns.
+  assert has_table_privilege('connector_runner','public.oauth_pending','SELECT'), 'T44 runner keeps SELECT on oauth_pending';
+  assert (select coalesce(array_agg(distinct column_name::text order by column_name::text), array[]::text[])
+          from information_schema.role_column_grants
+          where grantee='connector_runner' and table_schema='public' and table_name='oauth_pending' and privilege_type='UPDATE')
+         = array['attempt_count','consumed_at','last_rejected_code'],
+         'T44 runner UPDATE columns on oauth_pending stay EXACTLY {consumed_at, attempt_count, last_rejected_code}';
+  -- still no broad verbs.
+  assert not has_table_privilege('connector_runner','public.oauth_pending','DELETE'),    'T44 runner must NOT DELETE oauth_pending';
+  assert not has_table_privilege('connector_runner','public.oauth_pending','TRUNCATE'),  'T44 runner must NOT row-purge oauth_pending';
+  assert not has_table_privilege('connector_runner','public.oauth_pending','REFERENCES'),'T44 runner must NOT REFERENCES oauth_pending';
+  assert not has_table_privilege('connector_runner','public.oauth_pending','TRIGGER'),   'T44 runner must NOT TRIGGER oauth_pending';
+end $$;
+-- 44b: FUNCTIONAL — the runner can INSERT a row supplying only the allowed columns, but NOT a disallowed one.
+set role connector_runner;
+do $$ begin
+  insert into public.oauth_pending (tenant_id, organization_id, connector_id, provider, subject, state_jti, nonce_hash, intent, expires_at)
+    values ('11111111-1111-1111-1111-111111111111', null, null, 'slack', null, 'jti-0022-insert', 'hash-0022-insert', 'connect', now() + interval '10 min');
+  assert (select count(*) from public.oauth_pending where state_jti='jti-0022-insert') = 1, 'T44 runner can INSERT an authorize-time row';
+end $$;
+do $$ declare ok boolean := false; begin
+  -- supplying a NON-granted column (consumed_at) on INSERT is permission-denied.
+  begin
+    insert into public.oauth_pending (tenant_id, provider, state_jti, nonce_hash, intent, expires_at, consumed_at)
+      values ('11111111-1111-1111-1111-111111111111','slack','jti-0022-bad','hash-0022-bad','connect', now() + interval '10 min', now());
+    ok := false;
+  exception when insufficient_privilege then ok := true; end;
+  assert ok, 'T44 runner must NOT INSERT a non-granted column (consumed_at)';
+end $$;
+reset role;
+-- 44c: the runner STILL holds ZERO privilege on connector_secrets / connectors / connector_runs.
+do $$ begin
+  assert (select coalesce(array_agg(distinct privilege_type::text), array[]::text[]) from information_schema.role_table_grants
+          where grantee='connector_runner' and table_schema='public' and table_name='connector_secrets') = array[]::text[],
+         'T44 runner must STILL hold ZERO privilege on connector_secrets';
+  assert (select count(*) from information_schema.role_column_grants
+          where grantee='connector_runner' and table_schema='public' and table_name='connector_secrets') = 0,
+         'T44 runner must STILL hold ZERO column privilege on connector_secrets';
+  assert (select coalesce(array_agg(distinct privilege_type::text), array[]::text[]) from information_schema.role_table_grants
+          where grantee='connector_runner' and table_schema='public' and table_name='connectors') = array[]::text[],
+         'T44 runner must STILL hold ZERO privilege on connectors';
+  assert (select coalesce(array_agg(distinct privilege_type::text), array[]::text[]) from information_schema.role_table_grants
+          where grantee='connector_runner' and table_schema='public' and table_name='connector_runs') = array[]::text[],
+         'T44 runner must STILL hold ZERO privilege on connector_runs';
+end $$;
+-- 44d: anon/authenticated deny-all + zero-policy posture UNCHANGED after 0022.
+do $$ begin
+  assert (select coalesce(array_agg(distinct privilege_type::text), array[]::text[]) from information_schema.role_table_grants
+          where grantee='authenticated' and table_schema='public' and table_name='oauth_pending') = array[]::text[],
+         'T44 authenticated must STILL hold zero privilege on oauth_pending after 0022';
+  assert (select coalesce(array_agg(distinct privilege_type::text), array[]::text[]) from information_schema.role_table_grants
+          where grantee='anon' and table_schema='public' and table_name='oauth_pending') = array[]::text[],
+         'T44 anon must STILL hold zero privilege on oauth_pending after 0022';
+  assert (select coalesce(array_agg(distinct privilege_type::text), array[]::text[]) from information_schema.role_table_grants
+          where grantee='authenticated' and table_schema='public' and table_name='connector_secrets') = array[]::text[],
+         'T44 authenticated must STILL hold zero privilege on connector_secrets after 0022';
+  assert (select coalesce(array_agg(distinct privilege_type::text), array[]::text[]) from information_schema.role_table_grants
+          where grantee='anon' and table_schema='public' and table_name='connector_secrets') = array[]::text[],
+         'T44 anon must STILL hold zero privilege on connector_secrets after 0022';
+  assert (select count(*) from pg_policies where schemaname='public' and tablename='oauth_pending') = 0,
+         'T44 oauth_pending must STILL have ZERO policies after 0022';
+  assert (select count(*) from pg_policies where schemaname='public' and tablename='connector_secrets') = 0,
+         'T44 connector_secrets must STILL have ZERO policies after 0022';
+end $$;
 
 do $$ begin raise notice 'ALL ORG-RLS ASSERTIONS PASSED'; end $$;

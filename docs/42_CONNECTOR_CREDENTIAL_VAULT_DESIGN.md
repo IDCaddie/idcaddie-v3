@@ -1821,3 +1821,47 @@ touched. No hosted commands were run. Connector implementation remains blocked. 
 complete. UI/UX parity is not complete. AI/API connector parity is not complete. Upload is not automatically
 production-ready. Hosted Auth/tenant-context is verified, but old-app replacement is not yet verified. RISK-001
 remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is ticked by this PR.
+## 51. Implementation — connector_runner oauth_pending INSERT grant (PR #129)
+
+**connector_runner oauth_pending INSERT grant is added. The grant is limited to authorize-time replay
+protection rows.** Migration `0022_connector_runner_oauth_pending_insert.sql` grants `connector_runner` a
+COLUMN-LEVEL INSERT on `public.oauth_pending` — ONLY the 9 §50 authorize-time columns — so the future
+runner-backed inserter (PR #128 seam) can create the single-use replay row. This is the grant `0021`
+DELIBERATELY DEFERRED ("NO INSERT — authorize-time create is a later PR"); this is that later PR. No Slack
+code / app change; no token exchange, no `connector_secrets`, no Slack API, no sync.
+
+### 51.1 The grant (least privilege)
+`grant insert (tenant_id, organization_id, connector_id, provider, subject, state_jti, nonce_hash, intent,
+expires_at) on public.oauth_pending to connector_runner`. The runner can supply ONLY those 9 columns on
+INSERT; `id`/`created_at`/`attempt_count` fall back to DEFAULTs and `consumed_at`/`last_rejected_code` to
+NULL, and supplying a NON-granted column (e.g. `consumed_at`, `attempt_count`) on INSERT is permission-denied.
+The existing surface is UNCHANGED: SELECT + the 3-column UPDATE (consumed_at/attempt_count/last_rejected_code)
+from `0021`; **still NO DELETE / no row-purge / no REFERENCES / no TRIGGER**.
+
+### 51.2 What is NOT granted (unchanged)
+No oauth_pending policy is added. No connector_secrets policy is added.
+**connector_runner still has no connector_secrets privileges. connector_runner still has no connectors or
+connector_runs privileges.** **Anon and authenticated roles still have no oauth_pending write access. Anon and
+authenticated roles still have no connector_secrets access.** **No oauth_pending policy is added. No
+connector_secrets policy is added** — both stay RLS-on, zero-policy deny-all. `0022` re-asserts the secret-
+table deny-all defensively (idempotent — the `0017`/`0018`/`0021` pattern).
+
+### 51.3 Tests (T44; RLS suite **387 → 413**, grant-only — types 0-diff, no app change)
+T43's stale "no INSERT" assertions are updated (INSERT is now granted column-scoped — `has_table_privilege`
+stays false for a column grant, so the proof uses `has_column_privilege` + `role_column_grants`). New **T44**
+proves: the runner's `oauth_pending` INSERT column grant is EXACTLY the 9 authorize-time columns; the runner
+can INSERT them but NOT `consumed_at`/`attempt_count`/`last_rejected_code`; **functionally** the runner inserts
+an authorize-time row supplying the allowed columns, and a non-granted column (`consumed_at`) on INSERT is
+permission-denied; SELECT kept; UPDATE columns still EXACTLY the 3 consume columns; still no DELETE/TRUNCATE/
+REFERENCES/TRIGGER; ZERO on connector_secrets/connectors/connector_runs; anon/authenticated deny-all + zero
+policies on oauth_pending/connector_secrets unchanged after `0022`.
+
+A human applies `0022` to staging then production in a future step (an agent runs nothing hosted) + records
+verification before wiring the real runner inserter. **No Slack OAuth code is exchanged for tokens. No Slack
+access token is stored. No Slack refresh token is stored. No connector credentials are stored. No connector
+secret material is inserted, updated, deleted, or read. No Slack API call is made. No connector sync is
+implemented. Real token storage remains gated behind a later provider-specific reviewed PR. No production data
+was touched. No hosted commands were run. Connector implementation remains blocked. Old-app parity is not
+complete. UI/UX parity is not complete. AI/API connector parity is not complete. Upload is not automatically
+production-ready. Hosted Auth/tenant-context is verified, but old-app replacement is not yet verified. RISK-001
+remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is ticked by this PR.
