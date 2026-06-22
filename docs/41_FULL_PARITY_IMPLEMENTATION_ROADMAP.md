@@ -1969,3 +1969,37 @@ no-real-token dry run is executed from an IPv6-capable runner host and the evide
 parity is not complete. UI/UX parity is not complete. AI/API connector parity is not complete. Upload is not
 automatically production-ready. Hosted Auth/tenant-context is verified, but old-app replacement is not yet
 verified. RISK-001 remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is ticked by this PR.
+---
+
+## 58. STAGING DRY-RUN — PASS (no-real-token evidence) (PR #125)
+
+**Human-run no-real-token staging dry run was executed** and PASSED (doc 42 §47). Docs-only — records the
+operator's successful run of the §44/§45 runbook against staging (`ycdpzduxugdsffjqyoai`; production
+`dzbfxulvxchdemcettrx` not touched; main `d3a5289` / PR #124). **No production data was touched. No hosted
+commands were run by the agent.**
+
+- **IPv6 resolved:** **The dry run was executed from an IPv6-capable EC2 host. The staging DB IPv6
+  connectivity blocker (§57) was resolved by running from the EC2 host** — it resolved the DB AAAA record and
+  connected to `db.ycdpzduxugdsffjqyoai.supabase.co:5432` (EC2 `i-00335d464d6f7c299`; role
+  `arn:aws:sts::833822972703:assumed-role/idc-runner-role/i-00335d464d6f7c299`).
+- **Runner DB — PASS:** **connector_runner_login connected successfully. connector_runner_login successfully
+  SET ROLE connector_runner. connector_runner_login had zero direct table grants. connector_runner was denied
+  access to connector_secrets.** **A synthetic oauth_pending row was inserted for Tenant A**
+  (`aaaa1111-1111-1111-1111-111111111111`; state_jti `dryrun-state-jti-tenant-a`, provider `dryrun`, sentinel
+  `synthetic-vault-dry-run-not-a-token`). **The first connector_runner consume returned exactly one row. The
+  second connector_runner consume returned zero rows. The synthetic dry-run oauth_pending row was cleaned up.**
+- **KMS — PASS (least privilege):** alias `alias/idcaddie-staging-connector-vault`. **KMS GenerateDataKey
+  succeeded from the EC2 runner role. KMS Decrypt succeeded from the EC2 runner role. KMS DescribeKey was
+  denied from the EC2 runner role as expected least-privilege behavior** (policy allows only GenerateDataKey +
+  Decrypt). Synthetic envelope round trip passed (`PASS_DEK_UNWRAP`, `PASS_SYNTHETIC_PAYLOAD_ROUNDTRIP`,
+  `PASS_KMS_SYNTHETIC_NO_REAL_TOKEN_DRY_RUN`).
+
+**First low-risk connector skeleton is now unblocked, but real token storage remains gated until a
+provider-specific connector PR is reviewed and verified.** RLS suite unchanged (**387**), no migration, no
+code. **No real provider token was used. No OAuth code was exchanged for tokens. No access token was stored.
+No refresh token was stored. No connector credentials are stored. No connector secret material was inserted,
+updated, deleted, or read. No connector sync was implemented. No provider connector was implemented. No
+production data was touched. Old-app parity is not complete. UI/UX parity is not complete. AI/API connector
+parity is not complete. Upload is not automatically production-ready. Hosted Auth/tenant-context is verified,
+but old-app replacement is not yet verified. RISK-001 remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box
+is ticked by this PR.
