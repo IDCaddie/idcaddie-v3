@@ -39,6 +39,9 @@ const CRYPTO_REL_HINTS = [
   "connector-vault/oauth-pending-executor",
   "server/connector-vault/oauth-pending-executor",
   "lib/server/connector-vault/oauth-pending-executor",
+  "connector-vault/provider-registry",
+  "server/connector-vault/provider-registry",
+  "lib/server/connector-vault/provider-registry",
 ];
 
 function walk(dir: string): string[] {
