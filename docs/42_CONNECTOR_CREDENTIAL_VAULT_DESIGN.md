@@ -1570,3 +1570,49 @@ until human-run staging dry-run evidence is recorded. Old-app parity is not comp
 complete. AI/API connector parity is not complete. Upload is not automatically production-ready. Hosted
 Auth/tenant-context is verified, but old-app replacement is not yet verified. RISK-001 remains OPEN. Cutover
 remains BLOCKED.** No doc 17 §5 box is ticked by this PR.
+## 46. Staging dry-run preflight — BLOCKED on IPv6-only DB host (PR #124)
+
+**Human-run staging dry-run preflight was attempted.** The operator began the §45 procedure against staging
+(`ycdpzduxugdsffjqyoai`; production `dzbfxulvxchdemcettrx` not touched; main `46254e9` / PR #123) and hit a
+network blocker before any dry-run step ran. This records the attempt + the blocker. Docs-only. **No
+production data was touched. No hosted commands were run by the agent** (the agent recorded the operator's
+report; it ran nothing hosted).
+
+### 46.1 What the operator provisioned (staging only)
+- **connector_runner_login was created on staging** — a LOGIN role for the runner to authenticate as.
+  **connector_runner_login is LOGIN and NOINHERIT. connector_runner_login is not BYPASSRLS.**
+  **connector_runner remains NOLOGIN and BYPASSRLS** (`0021`/T43/§41 — unchanged). **connector_runner_login
+  is granted connector_runner** (so the login role `set role connector_runner`s to get the narrow,
+  BYPASSRLS-constrained consume privileges; it does NOT inherit them ambiently — NOINHERIT). The login role
+  itself holds no direct table privilege and is not BYPASSRLS, so an un-`set role` session has nothing.
+
+### 46.2 The blocker — IPv6-only direct DB host
+- **The staging direct DB host resolves only to IPv6 from the operator environment.** `db.ycdpzduxugdsffjqyoai.supabase.co`
+  has **no IPv4 A record** from the operator network and **has an IPv6 AAAA record** only.
+- **The Supabase IPv4 add-on was not enabled** (the operator chose not to). So `psql` connectivity from the
+  operator Mac is blocked by DNS/network reachability (no IPv4 route; the local network/path is not
+  IPv6-capable to that host).
+- Consequence: the direct-DB steps of the dry run cannot run from the operator's current environment.
+
+### 46.3 What did NOT happen (the dry run did not run)
+**The dry-run was not executed.** The dry-run verifier was not executed against staging.
+**No dry-run oauth_pending seed was inserted.** No `oauth_pending` row was inserted by the dry run.
+**No runner consume was executed.** No second-consume check was executed. No mismatch consume checks were
+executed. **No KMS dry-run was executed.** No `connector_secrets` access was attempted through the dry run.
+**No real provider token was used. No OAuth code was exchanged for tokens. No access token was stored. No
+refresh token was stored. No connector credentials are stored. No connector secret material was inserted,
+updated, deleted, or read. No connector sync was implemented. No provider connector was implemented.**
+
+### 46.4 Resolution path
+The Supabase IPv4 add-on was not enabled. connector_runner_login is granted connector_runner. The dry-run must be executed from an IPv6-capable runner host or environment.
+**The dry-run must be executed from an IPv6-capable runner host or environment** — i.e. run the §44 verifier
+runbook from a host that can reach `db.ycdpzduxugdsffjqyoai.supabase.co` over IPv6 (a runner box / CI / cloud
+shell with IPv6, or the Supabase pooler/IPv4 add-on if the operator later opts in), then record the evidence
+in the next docs-only verification PR. This does not change the verifier, the runner role model, or any
+deny-all posture — it is purely where the human runs it from.
+
+**Connector implementation remains blocked** until the no-real-token dry run is executed from an IPv6-capable
+runner host and the evidence is recorded. **Old-app parity is not complete. UI/UX parity is not complete.
+AI/API connector parity is not complete. Upload is not automatically production-ready. Hosted Auth/tenant-
+context is verified, but old-app replacement is not yet verified. RISK-001 remains OPEN. Cutover remains
+BLOCKED.** RLS suite unchanged (**387**); no migration; no code. No doc 17 §5 box is ticked by this PR.
