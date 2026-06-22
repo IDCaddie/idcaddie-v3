@@ -1752,3 +1752,37 @@ credentials until the remaining gated PRs are complete. Connector implementation
 parity is not complete. UI/UX parity is not complete. AI/API connector parity is not complete. Upload is not
 automatically production-ready. Hosted Auth/tenant-context is verified, but old-app replacement is not yet
 verified. RISK-001 remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is ticked by this PR.
+---
+
+## 52. STAGING VERIFICATION — `0021` connector_runner DB grants (PR #119)
+
+**Connector runner DB grant migration 0021 has been applied and verified on staging** (doc 42 §41). A human
+applied `0021` to staging (`ycdpzduxugdsffjqyoai`): the remote list showed `0021` absent before push,
+`supabase db push --linked` applied it, the list then showed `0021` **present**; linked ref remained
+`ycdpzduxugdsffjqyoai`. The role query confirmed `connector_runner` with `rolcanlogin = false` /
+`rolbypassrls = true` — **Connector_runner is NOLOGIN. Connector_runner has BYPASSRLS only for the narrow
+runner consume path.** The table-privilege query returned **exactly three rows** (`authenticated |
+connector_runs | SELECT`, `authenticated | connectors | SELECT`, `connector_runner | oauth_pending | SELECT`)
+— no anon rows, no connector_secrets rows, no connector_runner privilege on connectors/connector_runs:
+**Connector_runner has SELECT on oauth_pending. Connector_runner has no connectors or connector_runs
+privileges.** The column-privilege query returned **UPDATE only on `consumed_at`, `attempt_count`, and
+`last_rejected_code`** (+ SELECT on the consume-classification columns) — **Connector_runner has column-scoped
+UPDATE only on consumed_at, attempt_count, and last_rejected_code. Connector_runner has no connector_secrets
+privileges.** `pg_policies` = exactly the two tenant-member SELECT policies; **`connector_secrets` has no
+policies** and **Oauth_pending has no policies.** **Oauth_pending remains not directly readable or writable by
+anon or authenticated users. Connector secret material remains inaccessible to anon and authenticated users.
+Connector metadata tables expose authenticated SELECT only. Anon has no connector vault table privileges. No
+broad INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, or TRIGGER grants remain on connector vault tables for
+anon or authenticated** — matching T43.
+
+**The agent ran nothing — no hosted command, no staging mutation; production untouched. No OAuth code is
+exchanged for tokens. No access token is stored. No refresh token is stored. No connector credentials are
+stored. No connector secret material is inserted, updated, deleted, or read. No connector sync is implemented.
+No provider connector is implemented. No credential form is implemented. No connect/reconnect/disconnect action
+is implemented. No manual or scheduled run action is implemented. No browser-accessible service-role request
+path is added. No production data was touched.** A human re-applies `0021` to production later; next are the
+runner-identity-backed executors + the KMS/IAM provisioning → PR G. **Connector vault is still not usable for
+real credentials until the remaining gated PRs are complete. Connector implementation remains blocked. Old-app
+parity is not complete. UI/UX parity is not complete. AI/API connector parity is not complete. Upload is not
+automatically production-ready. Hosted Auth/tenant-context is verified, but old-app replacement is not yet
+verified. RISK-001 remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is ticked by this verification.
