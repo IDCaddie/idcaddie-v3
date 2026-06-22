@@ -1936,3 +1936,36 @@ evidence is recorded. Old-app parity is not complete. UI/UX parity is not comple
 not complete. Upload is not automatically production-ready. Hosted Auth/tenant-context is verified, but old-app
 replacement is not yet verified. RISK-001 remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is ticked
 by this PR.
+---
+
+## 57. STAGING DRY-RUN PREFLIGHT — BLOCKED on IPv6-only DB host (PR #124)
+
+**Human-run staging dry-run preflight was attempted** (doc 42 §46). Docs-only — records the operator's attempt
+to run the §45 procedure against staging (`ycdpzduxugdsffjqyoai`; production `dzbfxulvxchdemcettrx` not
+touched; main `46254e9` / PR #123) and the network blocker hit before any dry-run step. **No production data
+was touched. No hosted commands were run by the agent.**
+
+- **Provisioned (staging only):** **connector_runner_login was created on staging. connector_runner_login is
+  LOGIN and NOINHERIT. connector_runner_login is not BYPASSRLS. connector_runner remains NOLOGIN and
+  BYPASSRLS. connector_runner_login is granted connector_runner** (the login role `set role`s to the narrow
+  consume privileges; NOINHERIT = no ambient inheritance; the login role itself holds no direct privilege and
+  is not BYPASSRLS).
+- **Blocker:** **The staging direct DB host resolves only to IPv6 from the operator environment**
+  (`db.ycdpzduxugdsffjqyoai.supabase.co` has no IPv4 A record, only an IPv6 AAAA record). **The Supabase IPv4
+  add-on was not enabled.** psql connectivity from the operator Mac is blocked by DNS/network reachability.
+- **The dry-run was not executed.** No dry-run oauth_pending seed was inserted; no runner consume was executed
+  (nor second-consume / mismatch checks); no KMS dry-run was executed; no connector_secrets access was
+  attempted. **No real provider token was used. No OAuth code was exchanged for tokens. No access token was
+  stored. No refresh token was stored. No connector credentials are stored. No connector secret material was
+  inserted, updated, deleted, or read. No connector sync was implemented. No provider connector was
+  implemented.**
+- **Resolution: the dry-run must be executed from an IPv6-capable runner host or environment** (a runner box /
+  CI / cloud shell with IPv6 to the DB host, or the pooler/IPv4 add-on if the operator opts in later), then
+  record the evidence in the next docs-only verification PR. The verifier, runner role model, and deny-all
+  posture are unchanged.
+
+RLS suite unchanged (**387**), no migration, no code. **Connector implementation remains blocked** until the
+no-real-token dry run is executed from an IPv6-capable runner host and the evidence is recorded. **Old-app
+parity is not complete. UI/UX parity is not complete. AI/API connector parity is not complete. Upload is not
+automatically production-ready. Hosted Auth/tenant-context is verified, but old-app replacement is not yet
+verified. RISK-001 remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is ticked by this PR.
