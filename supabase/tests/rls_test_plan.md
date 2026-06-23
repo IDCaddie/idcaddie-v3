@@ -25,7 +25,7 @@ Before building UI, prove these pass against local Supabase.
 
 Cases 1–8 plus the org/cross-tenant/escalation matrix are enforced by
 `supabase/migrations/0002_org_scoped_rls.sql` and `0003_org_access_union.sql`,
-covered by the runnable suite `supabase/tests/org_rls_test.sql` (T1–T48, 478 assertions; T38/T39 cover the
+covered by the runnable suite `supabase/tests/org_rls_test.sql` (T1–T49, 492 assertions; T38/T39 cover the
 connector-vault schema foundation (`0017`) — T38 = `connectors`/`connector_runs` tenant-member read + no
 request-path write; T39 = `connector_secrets` deny-all (RLS-enabled, zero policies, `authenticated`/`anon`
 hold zero privilege) + the no-secret-column-leak structural check; **T40 = the hardened grant surface
@@ -97,6 +97,19 @@ apps rows (no collapse); unmerge is NON-destructive (clearing `canonical_app_id`
 `app_users`/`contracts`/`invoices` intact); repoint is an UPDATE (no alias-count change, no deletes); and a
 Tenant B member cannot read Tenant A's resolver-written aliases (RLS). A CONFLICTING alias key (already resolving to a different product) is NOT overwritten — ON CONFLICT DO NOTHING keeps the original target (the false-merge guard, proven on real Postgres). Fixtures are T48-namespaced to stay
 isolated from T46;
+**T49 = the deterministic app_user → person identity-match write (`0027`)** — `0027` adds the write surface to
+`app_user_identity_matches` (editors INSERT + editors UPDATE, **NO DELETE** — the `0004` directive), so the
+deterministic identity-match helper can write through the authenticated RLS path. Proven at the persisted-state
+(real-Postgres) layer: the policy set is EXACTLY {SELECT, INSERT, UPDATE} (no DELETE/ALL); re-inserting the SAME
+`(tenant_id, app_user_id)` match does NOT increase the row count (the `0028` `UNIQUE(tenant_id, app_user_id)`,
+`ON CONFLICT DO NOTHING`, 1:1 deterministic) — and a SECOND match for the same `(tenant, app_user)` to a
+DIFFERENT person is REJECTED (`unique_violation`, the false-double-match guard the editor INSERT policy must
+not be able to violate), the original preserved; repoint is an UPDATE that changes `person_id` to the correct person WITHOUT changing the
+row count and WITHOUT deleting the app_user / person / app / match (non-destructive correction); and a Tenant B
+member can neither READ a Tenant A match nor INSERT one (RLS `with check`). Fixtures are T49-namespaced. The
+helper additionally (in TS) writes ONLY on deterministic evidence (exact normalized email / exact provider
+external id), fails closed on no-evidence / multiple-people / tenant-mismatch / existing-different-person, and
+writes no app graph / app_alias / vendor / product row;
 the later tests cover the `files` foundation/policies — T33 `0012`, T34 `0013` SELECT/INSERT (+ T34c DELETE
 denied at the privilege layer), T35 `0014` storage-auth helpers, **T36 `0016` the uploader-finalize
 UPDATE policy** (uploader may set `upload_status` on their OWN row; cross-tenant / cross-user updates and

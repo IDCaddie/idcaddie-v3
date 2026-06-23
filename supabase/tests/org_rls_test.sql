@@ -2669,4 +2669,87 @@ do $$ begin
 end $$;
 reset role;
 
+-- ── Test 49: deterministic app_user → person identity-match write (migration 0027) ──────────────────
+-- 0027 adds the write surface (editors INSERT + editors UPDATE, NO DELETE) so the deterministic identity-match
+-- helper can write `app_user_identity_matches` through the authenticated RLS path. This proves at the
+-- persisted-state (real-Postgres) layer: the policy set is EXACTLY {SELECT, INSERT, UPDATE} (no DELETE/ALL —
+-- the 0004 directive); re-inserting the SAME (app_user_id, person_id) match does NOT increase the row count
+-- (the 0001 UNIQUE); repoint is an UPDATE that changes person_id WITHOUT deleting the app_user/person/match;
+-- and a Tenant B member cannot read or insert a Tenant A match. Fixtures are T49-namespaced.
+reset role;
+-- 49a: exactly {SELECT, INSERT, UPDATE} policies on app_user_identity_matches — NO DELETE, NO ALL (0027 + 0004)
+-- AND the tenant-scoped app_user uniqueness constraint UNIQUE(tenant_id, app_user_id) exists (0028).
+do $$ begin
+  assert (select coalesce(array_agg(distinct cmd::text order by cmd::text), array[]::text[])
+          from pg_policies where schemaname='public' and tablename='app_user_identity_matches') = array['INSERT','SELECT','UPDATE'],
+         'T49 app_user_identity_matches must have EXACTLY {SELECT, INSERT, UPDATE} policies (no DELETE/ALL — 0004 directive)';
+  assert exists (select 1 from pg_constraint where conname = 'app_user_identity_matches_tenant_app_user_key'),
+         'T49 app_user_identity_matches must have UNIQUE(tenant_id, app_user_id) (0028 — the false-double-match guard)';
+end $$;
+-- seed a Tenant A app instance + two people + an app_user (historical evidence that repoint must preserve).
+insert into public.apps (id, tenant_id, name)
+  values ('49000000-0000-0000-0000-0000000a0001','11111111-1111-1111-1111-111111111111','Acme SSO (T49)');
+insert into public.people (id, tenant_id, primary_email)
+  values ('49000000-0000-0000-0000-0000000b0001','11111111-1111-1111-1111-111111111111','jane49@acme.test'),
+         ('49000000-0000-0000-0000-0000000b0002','11111111-1111-1111-1111-111111111111','jane49.correct@acme.test');
+insert into public.app_users (id, tenant_id, app_id, email)
+  values ('49000000-0000-0000-0000-0000000c0001','11111111-1111-1111-1111-111111111111','49000000-0000-0000-0000-0000000a0001','jane49@acme.test');
+
+-- 49b: idempotency — insert the SAME deterministic match twice on the (tenant_id, app_user_id) natural key.
+do $$ declare n1 int; begin
+  insert into public.app_user_identity_matches (tenant_id, app_user_id, person_id, match_method)
+    values ('11111111-1111-1111-1111-111111111111','49000000-0000-0000-0000-0000000c0001','49000000-0000-0000-0000-0000000b0001','auto_exact_email')
+    on conflict (tenant_id, app_user_id) do nothing;
+  select count(*) into n1 from public.app_user_identity_matches where app_user_id = '49000000-0000-0000-0000-0000000c0001';
+  insert into public.app_user_identity_matches (tenant_id, app_user_id, person_id, match_method)
+    values ('11111111-1111-1111-1111-111111111111','49000000-0000-0000-0000-0000000c0001','49000000-0000-0000-0000-0000000b0001','auto_exact_email')
+    on conflict (tenant_id, app_user_id) do nothing; -- re-run the EXACT same match
+  assert (select count(*) from public.app_user_identity_matches where app_user_id = '49000000-0000-0000-0000-0000000c0001') = n1,
+         'T49 re-running the same deterministic match must NOT increase app_user_identity_matches row count';
+  assert n1 = 1, 'T49 exactly one match row for the app_user (deterministic 1:1)';
+end $$;
+-- 49b2: a SECOND match for the same (tenant, app_user) to a DIFFERENT person is BLOCKED at the DB layer (the
+-- false-double-match guard — UNIQUE(tenant_id, app_user_id), 0028). This is the invariant the editor INSERT
+-- policy (0027) MUST NOT be able to violate. The existing match (→ b0001) is kept; no second row is created.
+do $$ declare blocked boolean := false; begin
+  begin
+    insert into public.app_user_identity_matches (tenant_id, app_user_id, person_id, match_method)
+      values ('11111111-1111-1111-1111-111111111111','49000000-0000-0000-0000-0000000c0001','49000000-0000-0000-0000-0000000b0002','auto_exact_email');
+    blocked := false;
+  exception when unique_violation then blocked := true; end;
+  assert blocked, 'T49 a second match for the same (tenant, app_user) to a DIFFERENT person must be REJECTED (unique_violation)';
+  assert (select count(*) from public.app_user_identity_matches where app_user_id = '49000000-0000-0000-0000-0000000c0001') = 1,
+         'T49 the blocked second match must NOT create a row — still exactly one match for the app_user';
+  assert (select person_id from public.app_user_identity_matches where app_user_id = '49000000-0000-0000-0000-0000000c0001') = '49000000-0000-0000-0000-0000000b0001',
+         'T49 the original deterministic match (→ b0001) is preserved — no false double-match';
+end $$;
+-- 49c: repoint — UPDATE person_id to the correct person; row count unchanged; app_users/people/app NOT deleted.
+do $$ declare c_before int; begin
+  select count(*) into c_before from public.app_user_identity_matches where app_user_id = '49000000-0000-0000-0000-0000000c0001';
+  update public.app_user_identity_matches set person_id = '49000000-0000-0000-0000-0000000b0002'
+    where app_user_id = '49000000-0000-0000-0000-0000000c0001' and person_id = '49000000-0000-0000-0000-0000000b0001';
+  assert (select count(*) from public.app_user_identity_matches where app_user_id = '49000000-0000-0000-0000-0000000c0001') = c_before,
+         'T49 repoint is an UPDATE — it must NOT change the match row count';
+  assert (select person_id from public.app_user_identity_matches where app_user_id = '49000000-0000-0000-0000-0000000c0001') = '49000000-0000-0000-0000-0000000b0002',
+         'T49 repoint changes person_id to the correct person';
+  assert exists (select 1 from public.app_users where id = '49000000-0000-0000-0000-0000000c0001'), 'T49 repoint must NOT delete the app_user';
+  assert exists (select 1 from public.people where id = '49000000-0000-0000-0000-0000000b0001'), 'T49 repoint must NOT delete the (old) person';
+  assert exists (select 1 from public.apps where id = '49000000-0000-0000-0000-0000000a0001'), 'T49 repoint must NOT delete the app';
+end $$;
+-- 49d: tenant isolation — a Tenant B member cannot read Tenant A's match, and cannot INSERT one for Tenant A.
+select set_config('request.jwt.claims','{"sub":"0b000000-0000-0000-0000-000000000001"}',false); set role authenticated;
+do $$ begin
+  assert (select count(*) from public.app_user_identity_matches where app_user_id = '49000000-0000-0000-0000-0000000c0001') = 0,
+         'T49 Tenant B member must NOT read a Tenant A identity match';
+end $$;
+do $$ declare blocked boolean := false; begin
+  begin
+    insert into public.app_user_identity_matches (tenant_id, app_user_id, person_id, match_method)
+      values ('11111111-1111-1111-1111-111111111111','49000000-0000-0000-0000-0000000c0001','49000000-0000-0000-0000-0000000b0001','auto_exact_email');
+    blocked := false;
+  exception when others then blocked := true; end;
+  assert blocked, 'T49 Tenant B member must NOT INSERT a Tenant A identity match (RLS with check)';
+end $$;
+reset role;
+
 do $$ begin raise notice 'ALL ORG-RLS ASSERTIONS PASSED'; end $$;

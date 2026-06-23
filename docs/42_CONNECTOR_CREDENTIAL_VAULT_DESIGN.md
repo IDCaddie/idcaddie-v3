@@ -2885,3 +2885,69 @@ touched. Connector implementation remains blocked. Old-app parity is not complet
 complete. AI/API connector parity is not complete. Upload is not automatically production-ready. Hosted
 Auth/tenant-context is verified, but old-app replacement is not yet verified. RISK-001 remains OPEN. RISK-007
 remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is ticked by this verification.
+## 72. Implementation — deterministic identity-match write path (PR #150)
+
+**Deterministic app_user to person identity-match write path is added. This is the first canonical user
+matching write path** (migrations `0027`+`0028` + `identity-match-write.ts`, `src/lib/server/connector-vault/`). It
+connects an app_user to a person ONLY on deterministic, tenant-safe evidence, so canonical user rollups can
+count DISTINCT people instead of raw app accounts. This stays separate from provider sync, probabilistic
+matching, and human-review promotion.
+
+### 72.1 The write surface (0027)
+Deterministic app_user to person identity-match write path is added. This is the first canonical user matching write path.
+`app_user_identity_matches` had RLS enabled with ONLY a SELECT policy (default-deny for writes). Migration
+`0027` adds the `0004`-hardened write surface — editors INSERT + editors UPDATE, and **NO DELETE policy** (the
+`0004` directive for this table: future write policies must omit DELETE). The helper writes ONLY through the
+authenticated user-scoped (RLS) path — **No service-role client is added.** Migration `0028` adds the tenant-scoped app_user uniqueness constraint
+`UNIQUE(tenant_id, app_user_id)` — the integrity guard that makes the new editor INSERT policy safe (one
+app_user resolves to AT MOST ONE person per tenant; a false double-match is rejected at the DB layer).
+(Constraint/policy only — generated types are unaffected.)
+
+### 72.2 Deterministic-only, fail closed
+**Only deterministic identity evidence may write. Exact normalized email matches may write. Exact
+provider/external identity matches may write where tenant-bound.** `applyDeterministicIdentityMatches` matches
+an app_user to a person on: an exact normalized email (app_user.email == person.primary_email, or ==
+identity_accounts.email tied to a person); or an exact provider external-user-id tied to a person. **Display-
+name-only matches do not write. Domain-only matches do not write. Probabilistic matches do not auto-write.
+Ambiguous matches do not auto-write. Multiple candidate people route to review/no-write. Existing conflicting
+matches are not overwritten.** No email/external id, multiple candidate people, a tenant mismatch, an existing
+match to a different person, or malformed input all fail closed to review (a false person-merge is more
+expensive than leaving an app_user unmatched). The deterministic AUTO match is recorded with a `match_method`
+(`auto_exact_email` / `auto_identity_account_email` / `auto_external_id`) that distinguishes it from a future
+human-confirmed match (a different `match_method` + `reviewed_by`).
+
+### 72.3 Idempotent + tenant-scoped
+**Identity matching is tenant-scoped. Repeated deterministic identity match runs are idempotent. Repeated runs
+do not create duplicate app_user_identity_matches.** The write upserts on the natural key
+`(tenant_id, app_user_id)` (UNIQUE from `0028`) — `ON CONFLICT (tenant_id, app_user_id) DO NOTHING` — so a
+re-run adds no rows. The `0001` `UNIQUE(app_user_id, person_id)` is kept, but **`(tenant_id, app_user_id)` is
+the constraint that backs the write/idempotency invariant and prevents false person double-matches** — the DB
+itself REJECTS a second match for the same app_user to a DIFFERENT person (a `unique_violation`), not only the
+helper's in-code conflict check (the editor INSERT policy from `0027` cannot violate this). Tenant scoping
+comes from the authenticated `tenantId` + RLS (writes nothing without an authenticated tenant); a candidate
+claiming a different tenant is never matched.
+
+### 72.4 Non-destructive correction
+**Unmatch/repoint is modeled and non-destructive. Unmatch/repoint does not delete app_users, people,
+identity_accounts, apps, contracts, invoices, or audit history.** `repointIdentityMatch` UPDATEs a match's
+`person_id` to the correct person — it deletes nothing. Because `app_user_identity_matches` has NO DELETE policy
+(the `0004` directive), a wrong match is repointed, never erased. (A soft "unmatched" status would need a future
+status column — intentionally NOT invented here; this PR stays minimal and documents the limitation.)
+
+### 72.5 Scope + tests (T49 + identity-match-write.test.ts; RLS suite **478 → 492**; types **1828** 0-diff)
+**No app graph write is implemented in this PR. No app_alias write is implemented in this PR.** The helper
+writes ONLY `app_user_identity_matches` — never a vendor/product/alias/canonical row. T49 proves the
+persisted-state guarantees on real Postgres (the {SELECT, INSERT, UPDATE}-only/no-DELETE policy surface,
+re-insert → unchanged count, repoint as a non-destructive UPDATE, Tenant B cannot read/insert a Tenant A match);
+the helper tests prove the deterministic-evidence/fail-closed/conflict/idempotency/tenant-isolation behaviors
+and the no-app-graph/no-service-role/no-secret/no-route surface.
+
+**No provider API call is made. No OAuth code is exchanged for tokens. No access token is stored. No refresh
+token is stored. No API key is stored. No connector credentials are stored. No connector secret material is
+inserted, updated, deleted, or read. No connector sync is implemented. No credential form is implemented. No
+connect/reconnect/disconnect action is exposed to users. No browser-accessible service-role request path is
+added. No production data was touched. No hosted commands were run. Connector implementation remains blocked.
+Old-app parity is not complete. UI/UX parity is not complete. AI/API connector parity is not complete. Upload
+is not automatically production-ready. Hosted Auth/tenant-context is verified, but old-app replacement is not
+yet verified. RISK-001 remains OPEN. RISK-007 remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is
+ticked by this PR.

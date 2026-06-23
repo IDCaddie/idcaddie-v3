@@ -2857,3 +2857,41 @@ implementation remains blocked. Old-app parity is not complete. UI/UX parity is 
 parity is not complete. Upload is not automatically production-ready. Hosted Auth/tenant-context is verified,
 but old-app replacement is not yet verified. RISK-001 remains OPEN. RISK-007 remains OPEN. Cutover remains
 BLOCKED.** No doc 17 §5 box is ticked by this PR.
+---
+
+## 83. IMPLEMENTATION — deterministic identity-match write path (PR #150)
+
+**Deterministic app_user to person identity-match write path is added. This is the first canonical user
+matching write path** (doc 42 §72). Migrations `0027` (editors INSERT + editors UPDATE write policies on
+`app_user_identity_matches`, **NO DELETE** — the `0004` directive) + `0028` (the `UNIQUE(tenant_id, app_user_id)`
+integrity constraint — one app_user → at most one person per tenant) + `identity-match-write.ts` connect an
+app_user to a person on deterministic, tenant-safe evidence only.
+
+- **Only deterministic identity evidence may write. Exact normalized email matches may write. Exact
+  provider/external identity matches may write where tenant-bound. Display-name-only matches do not write.
+  Domain-only matches do not write. Probabilistic matches do not auto-write. Ambiguous matches do not
+  auto-write. Multiple candidate people route to review/no-write. Existing conflicting matches are not
+  overwritten.** A false person-merge is more expensive than leaving an app_user unmatched.
+- **Identity matching is tenant-scoped. Repeated deterministic identity match runs are idempotent. Repeated
+  runs do not create duplicate app_user_identity_matches** (natural-key `(tenant_id, app_user_id)` upsert,
+  UNIQUE from `0028` — the constraint that backs the invariant and prevents false person double-matches; a
+  second match for the same app_user to a DIFFERENT person is rejected at the DB layer, not only by the
+  helper). The helper writes ONLY through the injected user-scoped (RLS) store — **No service-role client.**
+- **Unmatch/repoint is modeled and non-destructive. Unmatch/repoint does not delete app_users, people,
+  identity_accounts, apps, contracts, invoices, or audit history** (`repointIdentityMatch` UPDATEs person_id;
+  `app_user_identity_matches` has no DELETE policy). **No app graph write is implemented in this PR. No app_alias
+  write is implemented in this PR.**
+
+T49 (RLS suite **478 → 492**; types 1828 0-diff; migration-safety passes) proves the persisted-state guarantees
+on real Postgres ({SELECT, INSERT, UPDATE}-only/no-DELETE surface, re-insert → unchanged count, non-destructive
+repoint, Tenant B cannot read/insert a Tenant A match); the helper tests prove deterministic-evidence /
+fail-closed / conflict / idempotency / tenant-isolation + the no-app-graph/no-service-role/no-secret/no-route
+surface. **No provider API call is made. No OAuth code is exchanged for tokens. No access token is stored. No
+refresh token is stored. No API key is stored. No connector credentials are stored. No connector secret
+material is inserted, updated, deleted, or read. No connector sync is implemented. No credential form is
+implemented. No connect/reconnect/disconnect action is exposed to users. No browser-accessible service-role
+request path is added. No production data was touched. No hosted commands were run. Connector implementation
+remains blocked. Old-app parity is not complete. UI/UX parity is not complete. AI/API connector parity is not
+complete. Upload is not automatically production-ready. Hosted Auth/tenant-context is verified, but old-app
+replacement is not yet verified. RISK-001 remains OPEN. RISK-007 remains OPEN. Cutover remains BLOCKED.** No
+doc 17 §5 box is ticked by this PR.
