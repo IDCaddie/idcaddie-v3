@@ -2504,3 +2504,44 @@ touched. Connector implementation remains blocked. Old-app parity is not complet
 complete. AI/API connector parity is not complete. Upload is not automatically production-ready. Hosted
 Auth/tenant-context is verified, but old-app replacement is not yet verified. RISK-001 remains OPEN. RISK-007
 remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is ticked by this PR.
+---
+
+## 73. DESIGN — resolver + identity-matching engine (PR #140)
+
+**Resolver and identity-matching design is recorded** (doc 42 §62). **The canonical graph schema exists, but
+the resolver does not exist yet. Nothing populates apps.canonical_app_id yet.** **The resolver is the moat
+engine that will assemble validated discovery signals into the canonical app graph.** Design + pure
+types/helpers only (`resolution.ts`): **No live resolver job is implemented. No app graph writes are
+implemented. No canonical_app_id write is implemented. No app_alias write is implemented. No app_user to person
+match write is implemented.**
+
+- **Future flow (none runs yet):** validated discovery signals → deterministic resolver → low-confidence human
+  review → canonical_app_id assignment → app_user→person matching → baseline metrics → canonical/vendor/product
+  rollups → recommendations.
+- **Resolver matching is deterministic-first and probabilistic-second.** Deterministic keys (instance_domain,
+  external_instance_id, instance_url, provider app id, OAuth client id, SSO app id, known domain, explicit
+  vendor/product identifiers) may auto-assign; fuzzy similarity (vendor/product/domain/contract-vendor) never
+  auto-merges. **Low-confidence matches route to human review.** Unknown/ambiguous fails closed to
+  `human_review`.
+- **Idempotency:** **Discovery re-runs must be idempotent. Runners must upsert on natural keys, not blindly
+  insert.** **instance_domain and external_instance_id are future merge/no-merge keys. Same vendor/product does
+  not mean same operational app instance. Distinct app instances must not be collapsed into one app row.
+  Atlassian/Jira/Flywheel and Atlassian/Jira/Perpetua must remain distinct app instances.**
+- **Identity matching:** **app_user_identity_matches links app_user_id to person_id. There is no
+  identity_account_id on app_user_identity_matches. No identity_account_id is introduced.** Deterministic-first
+  (exact normalized email / verified external id) then secondary hints → review. **Canonical user rollups must
+  count distinct person_id after identity matching, not sum app_users naively. Per-instance counts may use
+  app_users.**
+
+Pure helpers (`classifyResolutionConfidence`/`explainResolutionDecision`/`sameOperationalInstance`/
+`identityMatchSignals`) tested (deterministic > name-similarity; distinct instance_domain → no auto-merge;
+unknown → human_review; no identity_account_id; no client imports; no provider API/fetch; no connector_secrets).
+No migration, no schema change → RLS suite **446** and generated types **1744** unchanged. **No provider API
+call is made. No OAuth code is exchanged for tokens. No access token is stored. No refresh token is stored. No
+connector credentials are stored. No connector secret material is inserted, updated, deleted, or read. No
+connector sync is implemented. No credential form is implemented. No connect/reconnect/disconnect action is
+exposed to users. No browser-accessible service-role request path is added. No production data was touched. No
+hosted commands were run. Connector implementation remains blocked. Old-app parity is not complete. UI/UX
+parity is not complete. AI/API connector parity is not complete. Upload is not automatically production-ready.
+Hosted Auth/tenant-context is verified, but old-app replacement is not yet verified. RISK-001 remains OPEN.
+RISK-007 remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is ticked by this PR.
