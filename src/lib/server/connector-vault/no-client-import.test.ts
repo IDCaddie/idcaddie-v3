@@ -51,6 +51,9 @@ const CRYPTO_REL_HINTS = [
   "connector-vault/runner-db-client",
   "server/connector-vault/runner-db-client",
   "lib/server/connector-vault/runner-db-client",
+  "connector-vault/app-discovery",
+  "server/connector-vault/app-discovery",
+  "lib/server/connector-vault/app-discovery",
 ];
 
 function walk(dir: string): string[] {

@@ -9,7 +9,7 @@ import {
 } from "./provider-registry";
 
 const SAFE_FIELDS = new Set([
-  "id", "displayName", "category", "authKind", "capabilities", "status", "reviewGate", "riskLevel", "requiredScopes", "helpCopy", "enabled",
+  "id", "displayName", "category", "authKind", "kind", "capabilities", "discoveryCapabilities", "status", "reviewGate", "riskLevel", "requiredScopes", "helpCopy", "enabled",
 ]);
 
 describe("connector provider registry — safe metadata only", () => {
@@ -56,7 +56,7 @@ describe("connector provider registry — safe metadata only", () => {
     expect(getConnectorProvider("")).toBeNull();
     // @ts-expect-error — non-string
     expect(getConnectorProvider(null)).toBeNull();
-    expect(isSupportedConnectorProvider("google_workspace")).toBe(false); // in the type space but NOT defined yet
+    expect(isSupportedConnectorProvider("zoom")).toBe(false); // in the type space but NOT defined yet
     expect(getProviderCapabilities("nope")).toEqual([]);
     expect(isConnectorProviderReady("nope")).toBe(false);
     expect(isConnectorProviderReady("google_workspace")).toBe(false);
@@ -91,8 +91,9 @@ describe("provider-registry module is server-safe + scoped (no secrets/tokens/ap
     for (const tok of ["access_token", "refresh_token", "token_endpoint", "grant_type", "client_secret", "oauth/authorize", "https://"]) {
       expect(code).not.toContain(tok);
     }
-    // no sync / API-call function lives in this metadata module
-    expect(code).not.toMatch(/function\s+\w*[Ss]ync/);
+    // no sync-EXECUTION function lives in this metadata module (the deep-sync TAXONOMY helpers
+    // listDeepSyncProviders/isDeepSyncProvider are classification accessors, not sync runners).
+    expect(code).not.toMatch(/function\s+(run|start|execute|perform|do)[A-Za-z]*[Ss]ync/);
   });
 
   it("the OAuth callback route is still inert — no token exchange, no registry-driven connect", async () => {

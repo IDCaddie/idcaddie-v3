@@ -2262,3 +2262,46 @@ were run. Connector implementation remains blocked. Old-app parity is not comple
 complete. AI/API connector parity is not complete. Upload is not automatically production-ready. Hosted
 Auth/tenant-context is verified, but old-app replacement is not yet verified. RISK-001 remains OPEN. Cutover
 remains BLOCKED.** No doc 17 §5 box is ticked by this PR.
+---
+
+## 66. ARCHITECTURE — app discovery connectors + app-graph normalization (PR #133)
+
+**App discovery connector architecture is recorded. Discovery connectors are modeled separately from deep
+provider sync runners. App graph normalization is the bridge between discovery signals and ID Caddie app
+records** (doc 42 §55). Shifts the connector roadmap from one-provider Slack plumbing to the broader
+"connect many apps quickly" discovery architecture. **Discovery connectors are intended to discover many SaaS
+apps quickly through identity and core systems; deep provider sync runners remain provider-specific and will
+be added one at a time. The old scraper model is being replaced with discovery connectors plus provider sync
+runners.** Safe metadata / types + a pure helper ONLY — no provider is functional.
+
+- **Three layers:** (1) discovery connectors (kinds: identity_provider_discovery / spend_invoice_discovery /
+  import_source / browser_extension_discovery / manual_source; discovery capabilities discover_apps /
+  discover_assigned_users / discover_groups / discover_login_activity / discover_domains / discover_owners /
+  discover_sso_metadata / discover_usage_signals / discover_spend_signals / import_app_inventory); (2)
+  app-graph normalization (the bridge → NormalizedAppCandidate); (3) deep provider sync runners
+  (deep_provider_sync, one reviewed PR at a time; Slack is the first skeleton).
+- **Registry taxonomy (`provider-registry.ts`):** `ConnectorProviderDefinition` gains `kind` +
+  `discoveryCapabilities`. **Okta is added as an inert future identity-provider discovery connector. Google
+  Workspace is added as an inert future identity-provider discovery connector. Microsoft Entra is added as an
+  inert future identity-provider discovery connector** (status `future`, disabled, NO code/URL/token/API).
+  Slack stays a deep-sync skeleton. Helpers fail closed: listDiscoveryProviders / listDeepSyncProviders /
+  getProviderDiscoveryCapabilities / isDiscoveryProvider / isDeepSyncProvider. No provider is ready.
+- **Normalization (`app-discovery.ts`):** types (DiscoveredAppSignal / AppMatchStatus / NormalizedAppCandidate)
+  + ONE pure helper `normalizeDiscoveredAppSignals` (groups by domain-else-name, merges sources/ids, naive
+  confidence + match status). **Writes NO DB / no app-graph row, calls NO provider, stores NO credential.**
+
+**+12 tests (313 → 325; RLS unchanged 413, no migration, no dependency, types 0-diff):** the 3 inert
+identity-discovery entries; discovery vs deep-sync classified separately + disjoint; Slack stays a
+non-functional deep-sync skeleton; no provider ready; safe-metadata-only; unknown fails closed; the normalizer
+merges/keeps-distinct/fail-soft, imports nothing, writes no DB; registry purity. Server-only (sentinel +
+no-client-import guard); not imported by any app route. **No Okta connector is functional. No Google Workspace
+connector is functional. No Microsoft Entra connector is functional. No OAuth code is exchanged for tokens. No
+access token is stored. No refresh token is stored. No connector credentials are stored. No connector secret
+material is inserted, updated, deleted, or read. No provider API call is made. No connector sync is
+implemented. No app graph write is implemented. No credential form is implemented. No connect/reconnect/
+disconnect action is exposed to users. No browser-accessible service-role request path is added. Real token
+storage remains gated behind later provider-specific reviewed PRs. No production data was touched. No hosted
+commands were run. Connector implementation remains blocked. Old-app parity is not complete. UI/UX parity is
+not complete. AI/API connector parity is not complete. Upload is not automatically production-ready. Hosted
+Auth/tenant-context is verified, but old-app replacement is not yet verified. RISK-001 remains OPEN. Cutover
+remains BLOCKED.** No doc 17 §5 box is ticked by this PR.
