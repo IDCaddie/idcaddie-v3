@@ -2445,3 +2445,55 @@ Old-app parity is not complete. UI/UX parity is not complete. AI/API connector p
 is not automatically production-ready. Hosted Auth/tenant-context is verified, but old-app replacement is not
 yet verified. RISK-001 remains OPEN. RISK-007 remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is
 ticked by this PR.
+## 63. Schema — discovery signal / standard fact contract (PR #141)
+
+**Discovery signal fact schema is added. The schema is versioned.** `discovery-facts.ts`
+(`src/lib/server/connector-vault/`) adds the first versioned standard-fact contract. **The schema defines
+standardized inputs for discovery connectors, deep sync runners, contract intelligence, invoice/spend imports,
+and future browser/import sources.** **The schema is the future input contract for the resolver** (PR #140's
+pure resolver consumes validated facts; this defines what "validated" means). **The resolver remains
+non-live.** Schema + types + tests only — runtime enforcement is zod `safeParse` (zod was already a dependency;
+no new dependency added). The only import is `zod`; no DB / Supabase / provider client / fetch /
+connector_secrets.
+
+### 63.1 The contract
+Every fact carries the core fields: `schema_version` (versioned — required), `signal_id`, `tenant_id`,
+`source_type`, `source_provider`, `source_run_id?`, `source_record_id?`, `observed_at`, `confidence` (0..1),
+`provenance?` (safe scalars), `review_status?`, `raw_source_ref?` (a non-secret reference, never secret
+material). The `fact_type` discriminator covers the 13 required categories: app discovery, app instance
+identity, vendor/product, app user/account, person identity candidate, license, usage/activity, role/admin,
+group/team membership, contract, invoice/spend, risk/completeness, recommendation evidence.
+
+### 63.2 Safe by construction
+Unknown or ambiguous source data fails closed to review.
+Every fact schema is STRICT — an unknown key is REJECTED at parse time, so **Signal facts must not contain
+token or connector secret material**: access/refresh tokens, API keys, client secrets, `connector_secrets`,
+service-role/provider credentials are not valid fields and fail `safeParse`. `raw_source_ref` /
+`source_file_id` / `source_clause_text` are references/provenance only — never secret payloads. A
+defense-in-depth `hasForbiddenFactKey()` guard also detects token/secret-like keys pre-parse.
+**Unknown or ambiguous source data fails closed to review** — an unrecognized `source_type` maps to
+`unknown_source` (`classifySourceType()` fails closed) and an unknown `fact_type` fails `safeParse`. Ambiguous
+app-instance identity does NOT auto-resolve: `appInstanceCandidateKey()` keys on instance_domain else
+external_instance_id, so distinct values stay SEPARATE instance candidates (Flywheel ≠ Perpetua). An
+invoice/spend fact carries only CANDIDATE app linkage (`app_candidate_name`) — never a resolved `app_id`.
+**Old scraper behavior is a reference to verify, not a source of truth** (provider APIs may have changed). No
+LLM is on the runtime ingestion hot path — the contract is a deterministic structural schema only.
+
+### 63.3 Tests + posture (discovery-facts.test.ts; no schema → RLS **446**, types **1744**, both unchanged)
+A valid fixture per category parses; missing/wrong `schema_version` fails; an unknown `fact_type` fails closed;
+a token-like field and `connector_secrets` are rejected by the strict schema; distinct instance_domain values
+stay separate; a contract fact supports `source_clause_text`; an invoice fact does not imply final app linkage;
+no Supabase/client imports (only `zod`); no fetch/provider API; no DB writes; no service-role. No migration, no
+schema change — RLS suite and generated types unchanged.
+
+**No signal ingestion job is implemented. No database write is implemented. No app graph write is implemented.
+No canonical_app_id write is implemented. No app_alias write is implemented. No app_user to person match write
+is implemented. No provider API call is made. No OAuth code is exchanged for tokens. No access token is stored.
+No refresh token is stored. No API key is stored. No connector credentials are stored. No connector secret
+material is inserted, updated, deleted, or read. No connector sync is implemented. No credential form is
+implemented. No connect/reconnect/disconnect action is exposed to users. No browser-accessible service-role
+request path is added. No production data was touched. No hosted commands were run. Connector implementation
+remains blocked. Old-app parity is not complete. UI/UX parity is not complete. AI/API connector parity is not
+complete. Upload is not automatically production-ready. Hosted Auth/tenant-context is verified, but old-app
+replacement is not yet verified. RISK-001 remains OPEN. RISK-007 remains OPEN. Cutover remains BLOCKED.** No
+doc 17 §5 box is ticked by this PR.
