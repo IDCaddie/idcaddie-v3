@@ -2687,3 +2687,35 @@ was added. No production data was touched. Connector implementation remains bloc
 complete. UI/UX parity is not complete. AI/API connector parity is not complete. Upload is not automatically
 production-ready. Hosted Auth/tenant-context is verified, but old-app replacement is not yet verified. RISK-001
 remains OPEN. RISK-007 remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is ticked by this PR.
+---
+
+## 78. IMPLEMENTATION — discovery fact request adapter (PR #145)
+
+**Discovery fact request adapter is added** (doc 42 §67). `discovery-fact-adapter.ts` is the reviewed
+server-only seam wiring the existing pieces — SafeParse contract (#141) → staging helper (#142) → read-only
+resolver preview (#140). No migration, no schema change.
+
+- **The adapter stages only SafeParse-validated facts. Invalid facts are rejected before persistence.
+  Token-bearing facts are rejected before persistence. Secret-bearing facts are rejected before persistence.
+  The adapter uses the authenticated user-scoped/RLS path** (the injected `DiscoveryFactStagingStore`). **No
+  service-role client is added. No browser-accessible service-role request path is added. No unauthenticated
+  public fact ingestion route is added** — no HTTP route lives here; a future authenticated handler injects the
+  store.
+- **A read-only resolver preview may be returned. Resolver preview output is not persisted.** It predicts
+  action/confidence/reasons in memory from the fact's own content, writes no graph, never auto-assigns, and
+  fails closed to `human_review` without a deterministic instance key.
+
+Tested (valid fact stages via mocked authenticated store; invalid/token/secret/wrong-tenant rejected before
+store; deterministic instance → read-only preview; ambiguous → human_review; preview persists nothing + no
+canonical-graph field; adapter imports only sibling server-only modules — no createClient/service-role/
+connector_secrets/fetch/route). No migration, no schema change → RLS suite **458** and generated types **1828**
+unchanged. **The live resolver write path is not implemented. No canonical app graph write is implemented. No
+apps.canonical_app_id write is implemented. No app_alias write is implemented. No app_user to person match
+write is implemented. No provider API call is made. No OAuth code is exchanged for tokens. No access token is
+stored. No refresh token is stored. No API key is stored. No connector credentials are stored. No connector
+secret material is inserted, updated, deleted, or read. No connector sync is implemented. No credential form is
+implemented. No connect/reconnect/disconnect action is exposed to users. No production data was touched. No
+hosted commands were run. Connector implementation remains blocked. Old-app parity is not complete. UI/UX
+parity is not complete. AI/API connector parity is not complete. Upload is not automatically production-ready.
+Hosted Auth/tenant-context is verified, but old-app replacement is not yet verified. RISK-001 remains OPEN.
+RISK-007 remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is ticked by this PR.

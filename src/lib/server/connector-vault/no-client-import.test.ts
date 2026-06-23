@@ -63,6 +63,9 @@ const CRYPTO_REL_HINTS = [
   "connector-vault/discovery-fact-staging",
   "server/connector-vault/discovery-fact-staging",
   "lib/server/connector-vault/discovery-fact-staging",
+  "connector-vault/discovery-fact-adapter",
+  "server/connector-vault/discovery-fact-adapter",
+  "lib/server/connector-vault/discovery-fact-adapter",
 ];
 
 function walk(dir: string): string[] {
