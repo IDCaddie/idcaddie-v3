@@ -2821,3 +2821,39 @@ added. No production data was touched. Connector implementation remains blocked.
 UI/UX parity is not complete. AI/API connector parity is not complete. Upload is not automatically
 production-ready. Hosted Auth/tenant-context is verified, but old-app replacement is not yet verified. RISK-001
 remains OPEN. RISK-007 remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is ticked by this PR.
+---
+
+## 82. PRODUCTION VERIFICATION — resolver natural key `0026` (PR #149)
+
+**Resolver natural-key constraint is applied and verified on production** (doc 42 §71). A human applied `0026`
+to PRODUCTION (`dzbfxulvxchdemcettrx`; staging `ycdpzduxugdsffjqyoai`; local/main `d9b9f5e` — PR #148), then
+relinked local back to staging. **The production apply and verification were human-run; this PR only records
+the evidence — the agent did not touch production and ran no hosted command.**
+
+- `0026` was MISSING on production before the push; `supabase db push --linked` applied it successfully;
+  **Production is aligned through migration 0026** (`migration list --linked` shows production aligned through
+  `0026`). **The app_aliases_tenant_type_value_key constraint is present on production. The app_aliases natural
+  key is UNIQUE (tenant_id, alias_type, alias_value). The database enforces tenant-scoped alias idempotency on
+  production.** **Staging and production are aligned through migration 0026.**
+- **Local Supabase link was returned to staging after production verification. Final linked ref was
+  ycdpzduxugdsffjqyoai.**
+- **The resolver write helper uses the same natural-key model. Local persisted-state fixture tests prove
+  repeated deterministic resolver runs do not increase vendors, products, or aliases. Deterministic resolver
+  writes are idempotent for the staged fixture cases. This is not a claim that all resolver behavior is
+  complete. Probabilistic-only facts do not write canonical graph data. Ambiguous/name-only facts do not write
+  canonical graph data. Conflicting canonical assignments are not overwritten. Jira Flywheel and Jira Perpetua
+  remain separate app rows. Unmerge/repoint is non-destructive.**
+
+Local validation after the #148 merge: 425 tests passed; RLS migration tests passed (assertions **478**); lint/
+typecheck/build/auth-safety/migration-safety passed; generated database types remained 1828 lines. RLS suite
+unchanged (**478**), no migration, no code, no generated-types change. **No app_user to person match write is
+implemented. No app code changed. No schema changed in this verification PR. No migration changed in this
+verification PR. No connector behavior changed. No provider API call was made. No OAuth code was exchanged for
+tokens. No access token was stored. No refresh token was stored. No API key was stored. No connector
+credentials were stored. No connector secret material was inserted, updated, deleted, or read. No connector
+sync was implemented. No credential form was implemented. No connect/reconnect/disconnect action was exposed to
+users. No browser-accessible service-role request path was added. No production data was touched. Connector
+implementation remains blocked. Old-app parity is not complete. UI/UX parity is not complete. AI/API connector
+parity is not complete. Upload is not automatically production-ready. Hosted Auth/tenant-context is verified,
+but old-app replacement is not yet verified. RISK-001 remains OPEN. RISK-007 remains OPEN. Cutover remains
+BLOCKED.** No doc 17 §5 box is ticked by this PR.

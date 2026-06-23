@@ -2838,3 +2838,50 @@ touched. Connector implementation remains blocked. Old-app parity is not complet
 complete. AI/API connector parity is not complete. Upload is not automatically production-ready. Hosted
 Auth/tenant-context is verified, but old-app replacement is not yet verified. RISK-001 remains OPEN. RISK-007
 remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is ticked by this verification.
+## 71. Production verification — resolver natural key `0026` (PR #149)
+
+**Resolver natural-key constraint is applied and verified on production.** A human applied
+`0026_app_alias_natural_key.sql` to the PRODUCTION project `dzbfxulvxchdemcettrx` (staging is
+`ycdpzduxugdsffjqyoai`; local/main `d9b9f5e` — PR #148), verified the live constraint, then relinked local back
+to staging. **The production apply and verification were human-run; this PR only records the evidence — the
+agent did not touch production, ran no hosted command, and made no staging/production mutation.**
+
+### 71.1 Observed — PASS
+Production is aligned through migration 0026.
+`0026` was MISSING on production before the push; `supabase db push --linked` applied it successfully to
+production; **Production is aligned through migration 0026** — `supabase migration list --linked` showed
+production aligned through `0026` after the push. **The app_aliases_tenant_type_value_key constraint is present
+on production. The app_aliases natural key is UNIQUE (tenant_id, alias_type, alias_value). The database enforces
+tenant-scoped alias idempotency on production.** **Staging and production are aligned through migration 0026** —
+this matches the §70 staging verification.
+
+### 71.2 Link safety
+**Local Supabase link was returned to staging after production verification. Final linked ref was
+ycdpzduxugdsffjqyoai** (the production link was used only for the human's apply/verify, then reverted, so no
+later command can accidentally hit production).
+
+### 71.3 Code ↔ constraint alignment (the verified claim, precisely scoped)
+**The resolver write helper uses the same natural-key model** — tenant + alias_type + alias_value — so the
+in-code upsert and the production DB constraint agree. **Local persisted-state fixture tests prove repeated
+deterministic resolver runs do not increase vendors, products, or aliases. Deterministic resolver writes are
+idempotent for the staged fixture cases. This is not a claim that all resolver behavior is complete.**
+**Probabilistic-only facts do not write canonical graph data. Ambiguous/name-only facts do not write canonical
+graph data. Conflicting canonical assignments are not overwritten. Jira Flywheel and Jira Perpetua remain
+separate app rows. Unmerge/repoint is non-destructive.**
+
+### 71.4 Local validation (after the #148 merge)
+425 tests passed; the RLS migration tests passed (RLS assertions **478**, `ALL ORG-RLS ASSERTIONS PASSED`);
+lint, typecheck, build, auth-safety, and migration-safety all passed; generated database types remained 1828
+lines.
+
+### 71.5 Scope / status
+**No app_user to person match write is implemented. No app code changed. No schema changed in this verification
+PR. No migration changed in this verification PR. No connector behavior changed. No provider API call was made.
+No OAuth code was exchanged for tokens. No access token was stored. No refresh token was stored. No API key was
+stored. No connector credentials were stored. No connector secret material was inserted, updated, deleted, or
+read. No connector sync was implemented. No credential form was implemented. No connect/reconnect/disconnect
+action was exposed to users. No browser-accessible service-role request path was added. No production data was
+touched. Connector implementation remains blocked. Old-app parity is not complete. UI/UX parity is not
+complete. AI/API connector parity is not complete. Upload is not automatically production-ready. Hosted
+Auth/tenant-context is verified, but old-app replacement is not yet verified. RISK-001 remains OPEN. RISK-007
+remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is ticked by this verification.
