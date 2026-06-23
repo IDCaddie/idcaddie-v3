@@ -2183,3 +2183,40 @@ added. No production data was touched. Connector implementation remains blocked.
 complete. UI/UX parity is not complete. AI/API connector parity is not complete. Upload is not automatically
 production-ready. Hosted Auth/tenant-context is verified, but old-app replacement is not yet verified. RISK-001
 remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is ticked by this verification.
+## 58. Production verification — graph-scale discovery indexes `0023` (PR #136)
+
+**Graph-scale discovery indexes are applied and verified on production.** A human applied
+`0023_graph_scale_discovery_indexes.sql` to the PRODUCTION project `dzbfxulvxchdemcettrx` (staging is
+`ycdpzduxugdsffjqyoai`; local/main `76c68fe` — PR #135), verified the live index set, then relinked local back
+to staging. **The production apply and verification were human-run; this PR only records the evidence — the
+agent did not touch production, ran no hosted command, and made no staging/production mutation.**
+
+### 58.1 Observed — PASS
+Production is aligned through migration 0023. All 36 expected graph-scale indexes were present on production after verification.
+`0023` was MISSING on production before the push; `supabase db push --linked` applied it successfully to
+production; **Production is aligned through migration 0023** — `supabase migration list --linked` showed
+production aligned through `0023` after the push. **All 36 expected graph-scale indexes were present on
+production after verification** — the production index-verification query returned `expected_index_count = 36`.
+**The indexes support tenant-scoped RLS hot paths, high-volume discovery, and app/user/account matching** (the
+`lower(email)`/`lower(primary_email)`/`lower(name)`/`lower(vendor_name)` functional indexes, the `*_person_idx`
+app_user→person + identity_account→person match indexes, the tenant/status RLS hot-path indexes, and the
+owning-org joins). This matches the §57 staging verification + the local `org_rls_test.sql` T45 proof —
+production now mirrors staging + the local schema through `0023`.
+
+### 58.2 Link safety
+**Local Supabase link was returned to staging after production verification. Final linked ref was
+ycdpzduxugdsffjqyoai** (the production link was used only for the human's apply/verify, then reverted, so no
+later command can accidentally hit production).
+
+### 58.3 Scope / status
+This verifies only that `0023` applied + the 36 indexes exist on production — not any connector behavior
+(there is none; the indexes are inert until discovery data lands). **No app code changed. No schema changed in
+this verification PR. No migration changed in this verification PR. No connector behavior changed. No provider
+API call was made. No OAuth code was exchanged for tokens. No access token was stored. No refresh token was
+stored. No connector credentials were stored. No connector secret material was inserted, updated, deleted, or
+read. No connector sync was implemented. No credential form was implemented. No connect/reconnect/disconnect
+action was exposed to users. No browser-accessible service-role request path was added. Connector
+implementation remains blocked. Old-app parity is not complete. UI/UX parity is not complete. AI/API connector
+parity is not complete. Upload is not automatically production-ready. Hosted Auth/tenant-context is verified,
+but old-app replacement is not yet verified. RISK-001 remains OPEN. RISK-007 remains OPEN. Cutover remains
+BLOCKED.** No doc 17 §5 box is ticked by this verification.
