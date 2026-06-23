@@ -25,7 +25,7 @@ Before building UI, prove these pass against local Supabase.
 
 Cases 1–8 plus the org/cross-tenant/escalation matrix are enforced by
 `supabase/migrations/0002_org_scoped_rls.sql` and `0003_org_access_union.sql`,
-covered by the runnable suite `supabase/tests/org_rls_test.sql` (T1–T47, 458 assertions; T38/T39 cover the
+covered by the runnable suite `supabase/tests/org_rls_test.sql` (T1–T48, 478 assertions; T38/T39 cover the
 connector-vault schema foundation (`0017`) — T38 = `connectors`/`connector_runs` tenant-member read + no
 request-path write; T39 = `connector_secrets` deny-all (RLS-enabled, zero policies, `authenticated`/`anon`
 hold zero privilege) + the no-secret-column-leak structural check; **T40 = the hardened grant surface
@@ -87,6 +87,16 @@ scopes to ZERO rows and the row stays `pending`) + the staging columns + `review
 `fact_json` NOT NULL + `connector_secrets` STILL zero policies and **NO `connector_runner` grant on
 `discovery_facts`** (the helper inserts only through the user-scoped authenticated RLS context, never
 service-role);
+**T48 = the deterministic resolver write — persisted-state idempotency (`0026`)** — the FIRST canonical-graph
+mutation path upserts `app_aliases` / `apps.canonical_app_id` on NATURAL KEYS, proven at the persisted-state
+(real-Postgres) layer: the alias natural-key `UNIQUE(tenant_id, alias_type, alias_value)` exists (`0026`);
+re-running the EXACT same deterministic write (vendor/product/alias upserts + canonical_app_id set) a second
+time does NOT increase the app_alias / app_products / vendors row counts (`ON CONFLICT DO NOTHING`); two
+distinct `instance_domain` values (Flywheel + Perpetua) stay TWO aliases under ONE product and TWO separate
+apps rows (no collapse); unmerge is NON-destructive (clearing `canonical_app_id` leaves the apps row + its
+`app_users`/`contracts`/`invoices` intact); repoint is an UPDATE (no alias-count change, no deletes); and a
+Tenant B member cannot read Tenant A's resolver-written aliases (RLS). A CONFLICTING alias key (already resolving to a different product) is NOT overwritten — ON CONFLICT DO NOTHING keeps the original target (the false-merge guard, proven on real Postgres). Fixtures are T48-namespaced to stay
+isolated from T46;
 the later tests cover the `files` foundation/policies — T33 `0012`, T34 `0013` SELECT/INSERT (+ T34c DELETE
 denied at the privilege layer), T35 `0014` storage-auth helpers, **T36 `0016` the uploader-finalize
 UPDATE policy** (uploader may set `upload_status` on their OWN row; cross-tenant / cross-user updates and

@@ -2735,3 +2735,59 @@ remains blocked. Old-app parity is not complete. UI/UX parity is not complete. A
 complete. Upload is not automatically production-ready. Hosted Auth/tenant-context is verified, but old-app
 replacement is not yet verified. RISK-001 remains OPEN. RISK-007 remains OPEN. Cutover remains BLOCKED.** No
 doc 17 §5 box is ticked by this PR.
+## 69. Implementation — deterministic resolver write path (PR #147)
+
+**Deterministic resolver write path is added. This is the first canonical graph mutation path** (migration
+`0026` + `resolver-write.ts`, `src/lib/server/connector-vault/`). It reads staged `discovery_facts`, runs the
+pure PR #140 resolver logic, and writes ONLY deterministic, high-confidence outputs into the canonical graph.
+
+### 69.1 Deterministic-only, fail closed
+Deterministic resolver write path is added. This is the first canonical graph mutation path.
+**Only deterministic resolver outputs may write. Probabilistic matches do not auto-write. Ambiguous matches do
+not auto-write. Low-confidence matches remain reviewable. False splits are safer than false merges.**
+`applyDeterministicResolution` writes a fact ONLY when the pure resolver returns `auto_assign` (a deterministic
+instance key) AND a vendor+product+instance discriminator is present. A missing discriminator, a probabilistic/
+name-only signal, or a CONFLICT (the alias natural key already resolves to a different product, or the instance
+already has a different `canonical_app_id`) all leave the fact in review — never an overwrite or blind re-merge.
+
+### 69.2 Idempotent natural-key upserts
+**Resolver writes are idempotent. Repeated staged fact runs do not create duplicate app_alias rows. Repeated
+staged fact runs do not create duplicate vendor/product/app records. Runners must upsert on natural keys, not
+blindly insert.** Migration `0026` adds the alias natural key `UNIQUE(tenant_id, alias_type, alias_value)`
+(vendor + product natural keys already exist from `0024`), so the whole write is `ON CONFLICT DO NOTHING`
+idempotent. **Arrival order must not change persisted resolver state.**
+
+### 69.3 Multi-instance + convergence
+**Distinct app instances must not be collapsed into one app row. Jira Flywheel and Jira Perpetua remain
+separate app rows** (two distinct `instance_domain` aliases under ONE Jira product, two apps rows). **Slack
+multi-source facts converge without duplicate aliases when deterministic evidence is sufficient** (one product;
+each deterministic key — domain / external id — is one alias, repeats are no-ops). **A weak signal followed by
+deterministic evidence must not create a parallel app** (the weak signal stays reviewable; the later
+deterministic signal reuses the same product via the natural key).
+
+### 69.4 Non-destructive unmerge / repoint
+**Unmerge/repoint is modeled for deterministic assignments. Unmerge/repoint does not delete historical users,
+contracts, or invoices.** `revertCanonicalAppAssignment` clears `apps.canonical_app_id` (un-links the instance)
+and `repointAppAlias` changes an alias's target product — both REPOINT only; they never delete the apps row or
+its `app_users`/`contracts`/`invoices`.
+
+### 69.5 Safety surface + tests (T48 + resolver-write.test.ts; RLS suite **458 → 478**; types **1828** 0-diff)
+The only DB access is through the INJECTED `CanonicalGraphWriteStore`, backed by the authenticated user-scoped
+(RLS) client when wired — **No service-role client is added**, no provider call, no token/credential, no
+`connector_secrets`, no HTTP/public route. Tenant scoping comes from the authenticated `tenantId` + RLS (writes
+nothing without an authenticated tenant). **No app_user to person match write is implemented** (this PR never
+touches `app_user_identity_matches`). The migration `0026` is a CONSTRAINT only (types unchanged). T48 proves
+persisted-state idempotency on real Postgres (re-run → unchanged counts), the Flywheel ≠ Perpetua split, and
+non-destructive unmerge/repoint; the helper tests prove deterministic-only writes, conflict→review,
+convergence, arrival-order independence, weak-then-deterministic, tenant isolation, and the no-secret/no-route
+surface.
+
+**No provider API call is made. No OAuth code is exchanged for tokens. No access token is stored. No refresh
+token is stored. No API key is stored. No connector credentials are stored. No connector secret material is
+inserted, updated, deleted, or read. No connector sync is implemented. No credential form is implemented. No
+connect/reconnect/disconnect action is exposed to users. No browser-accessible service-role request path is
+added. No production data was touched. No hosted commands were run. Connector implementation remains blocked.
+Old-app parity is not complete. UI/UX parity is not complete. AI/API connector parity is not complete. Upload
+is not automatically production-ready. Hosted Auth/tenant-context is verified, but old-app replacement is not
+yet verified. RISK-001 remains OPEN. RISK-007 remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is
+ticked by this PR.

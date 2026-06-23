@@ -2752,3 +2752,37 @@ remains blocked. Old-app parity is not complete. UI/UX parity is not complete. A
 complete. Upload is not automatically production-ready. Hosted Auth/tenant-context is verified, but old-app
 replacement is not yet verified. RISK-001 remains OPEN. RISK-007 remains OPEN. Cutover remains BLOCKED.** No
 doc 17 §5 box is ticked by this PR.
+---
+
+## 80. IMPLEMENTATION — deterministic resolver write path (PR #147)
+
+**Deterministic resolver write path is added. This is the first canonical graph mutation path** (doc 42 §69).
+Migration `0026` (alias natural key) + `resolver-write.ts` read staged `discovery_facts`, run the pure #140
+logic, and write ONLY deterministic outputs.
+
+- **Only deterministic resolver outputs may write. Probabilistic matches do not auto-write. Ambiguous matches
+  do not auto-write. Low-confidence matches remain reviewable. False splits are safer than false merges.** A
+  missing instance discriminator, a probabilistic/name-only signal, or a conflict → review (never overwrite).
+- **Resolver writes are idempotent. Repeated staged fact runs do not create duplicate app_alias rows. Repeated
+  staged fact runs do not create duplicate vendor/product/app records. Runners must upsert on natural keys, not
+  blindly insert.** (`0026` adds `UNIQUE(tenant_id, alias_type, alias_value)`; vendor/product keys from `0024`.)
+  **Arrival order must not change persisted resolver state.**
+- **Distinct app instances must not be collapsed into one app row. Jira Flywheel and Jira Perpetua remain
+  separate app rows. Slack multi-source facts converge without duplicate aliases when deterministic evidence is
+  sufficient. A weak signal followed by deterministic evidence must not create a parallel app.**
+- **Unmerge/repoint is modeled for deterministic assignments. Unmerge/repoint does not delete historical users,
+  contracts, or invoices** (`revertCanonicalAppAssignment` / `repointAppAlias` repoint only).
+
+The only DB access is the injected user-scoped (RLS) write store — **No service-role client is added**; tenant
+scoping is from the authenticated context + RLS. **No app_user to person match write is implemented.** T48
+(RLS **458 → 478**; types 1828 0-diff) proves persisted-state idempotency on real Postgres + the Flywheel ≠
+Perpetua split + non-destructive unmerge/repoint; helper tests prove deterministic-only/conflict→review/
+convergence/order-independence/weak-then-deterministic/tenant-isolation. **No provider API call is made. No
+OAuth code is exchanged for tokens. No access token is stored. No refresh token is stored. No API key is
+stored. No connector credentials are stored. No connector secret material is inserted, updated, deleted, or
+read. No connector sync is implemented. No credential form is implemented. No connect/reconnect/disconnect
+action is exposed to users. No browser-accessible service-role request path is added. No production data was
+touched. No hosted commands were run. Connector implementation remains blocked. Old-app parity is not complete.
+UI/UX parity is not complete. AI/API connector parity is not complete. Upload is not automatically
+production-ready. Hosted Auth/tenant-context is verified, but old-app replacement is not yet verified. RISK-001
+remains OPEN. RISK-007 remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is ticked by this PR.

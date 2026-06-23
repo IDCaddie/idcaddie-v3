@@ -2551,4 +2551,122 @@ reset role;
 do $$ begin assert (select review_status from public.discovery_facts where id='df250000-0000-0000-0000-0000000000a1') = 'pending',
        'T47 the Tenant A fact must be untouched by the cross-tenant update'; end $$;
 
+-- ── Test 48: deterministic resolver write — persisted-state idempotency (migration 0026) ─────────────
+-- The first canonical-graph mutation path upserts app_aliases / canonical_app_id on NATURAL KEYS. This proves
+-- at the PERSISTED-STATE layer (real Postgres): the alias natural-key UNIQUE exists (0026); re-running the
+-- exact same deterministic write does NOT increase app_alias / app_products / vendors row counts (ON CONFLICT
+-- DO NOTHING); distinct instance_domain values stay separate aliases under ONE product (Flywheel ≠ Perpetua);
+-- and unmerge/repoint is NON-destructive (clearing canonical_app_id / repointing an alias never deletes the
+-- apps row or its app_users / contracts / invoices). Fixtures are T48-namespaced to stay isolated from T46.
+reset role;
+-- 48a: the alias natural-key UNIQUE(tenant_id, alias_type, alias_value) exists (0026).
+do $$ begin
+  assert exists (select 1 from pg_constraint where conname = 'app_aliases_tenant_type_value_key'),
+         'T48 app_aliases natural-key UNIQUE(tenant_id, alias_type, alias_value) must exist (0026)';
+end $$;
+-- seed a Tenant A canonical graph + two instances + historical evidence (app_user / contract / invoice).
+insert into public.vendors (id, tenant_id, name, normalized_name)
+  values ('48000000-0000-0000-0000-0000000a0001','11111111-1111-1111-1111-111111111111','Atlassian (T48)','atlassian48');
+insert into public.app_products (id, tenant_id, vendor_id, name, normalized_name)
+  values ('48000000-0000-0000-0000-0000000b0001','11111111-1111-1111-1111-111111111111','48000000-0000-0000-0000-0000000a0001','Jira','jira48'),
+         ('48000000-0000-0000-0000-0000000b0002','11111111-1111-1111-1111-111111111111','48000000-0000-0000-0000-0000000a0001','Jira (alt)','jira48-alt');
+insert into public.apps (id, tenant_id, name, instance_domain)
+  values ('48000000-0000-0000-0000-0000000c0001','11111111-1111-1111-1111-111111111111','Jira Flywheel','flywheel48.atlassian.net'),
+         ('48000000-0000-0000-0000-0000000c0002','11111111-1111-1111-1111-111111111111','Jira Perpetua','perpetua48.atlassian.net');
+insert into public.app_users (id, tenant_id, app_id, email)
+  values ('48000000-0000-0000-0000-0000000d0001','11111111-1111-1111-1111-111111111111','48000000-0000-0000-0000-0000000c0001','u@flywheel48.test');
+insert into public.contracts (id, tenant_id, contract_name)
+  values ('48000000-0000-0000-0000-0000000e0001','11111111-1111-1111-1111-111111111111','Atlassian Master Agreement (T48)');
+insert into public.app_contracts (app_id, contract_id, tenant_id)
+  values ('48000000-0000-0000-0000-0000000c0001','48000000-0000-0000-0000-0000000e0001','11111111-1111-1111-1111-111111111111');
+insert into public.invoices (id, tenant_id, app_id, vendor_name, amount)
+  values ('48000000-0000-0000-0000-0000000f0001','11111111-1111-1111-1111-111111111111','48000000-0000-0000-0000-0000000c0001','Atlassian',1000.00);
+
+-- the deterministic write, expressed as natural-key upserts (what the RLS-scoped helper does), re-runnable.
+create or replace function pg_temp.t48_write() returns void language plpgsql as $f$
+begin
+  insert into public.vendors (tenant_id, name, normalized_name)
+    values ('11111111-1111-1111-1111-111111111111','Atlassian (T48)','atlassian48')
+    on conflict (tenant_id, normalized_name) do nothing;
+  insert into public.app_products (tenant_id, vendor_id, name, normalized_name)
+    values ('11111111-1111-1111-1111-111111111111','48000000-0000-0000-0000-0000000a0001','Jira','jira48')
+    on conflict (tenant_id, vendor_id, normalized_name) do nothing;
+  insert into public.app_aliases (tenant_id, app_product_id, alias_type, alias_value) values
+    ('11111111-1111-1111-1111-111111111111','48000000-0000-0000-0000-0000000b0001','instance_domain','flywheel48.atlassian.net'),
+    ('11111111-1111-1111-1111-111111111111','48000000-0000-0000-0000-0000000b0001','instance_domain','perpetua48.atlassian.net')
+    on conflict (tenant_id, alias_type, alias_value) do nothing;
+  update public.apps set canonical_app_id = '48000000-0000-0000-0000-0000000b0001'
+    where id in ('48000000-0000-0000-0000-0000000c0001','48000000-0000-0000-0000-0000000c0002');
+end $f$;
+
+-- 48b: idempotency — run the deterministic write TWICE; T48's persisted counts must be unchanged.
+do $$ declare a1 int; p1 int; v1 int; begin
+  perform pg_temp.t48_write();
+  select count(*) into a1 from public.app_aliases where alias_value in ('flywheel48.atlassian.net','perpetua48.atlassian.net');
+  select count(*) into p1 from public.app_products where vendor_id = '48000000-0000-0000-0000-0000000a0001';
+  select count(*) into v1 from public.vendors where normalized_name = 'atlassian48';
+  perform pg_temp.t48_write(); -- re-run the EXACT same write
+  assert (select count(*) from public.app_aliases where alias_value in ('flywheel48.atlassian.net','perpetua48.atlassian.net')) = a1,
+         'T48 re-running the same staged fact set must NOT increase the app_alias row count';
+  assert (select count(*) from public.app_products where vendor_id = '48000000-0000-0000-0000-0000000a0001') = p1,
+         'T48 re-run must NOT create duplicate app_product rows';
+  assert (select count(*) from public.vendors where normalized_name = 'atlassian48') = v1,
+         'T48 re-run must NOT create duplicate vendor rows';
+  assert a1 = 2, 'T48 the two distinct instance_domain values (Flywheel + Perpetua) are two aliases, not collapsed';
+  assert v1 = 1, 'T48 exactly one Atlassian vendor (idempotent)';
+end $$;
+-- 48c: multi-instance — distinct apps rows group under the SAME product but stay separate.
+do $$ begin
+  assert (select canonical_app_id from public.apps where id = '48000000-0000-0000-0000-0000000c0001') = '48000000-0000-0000-0000-0000000b0001',
+         'T48 Jira Flywheel groups under the Jira product';
+  assert (select canonical_app_id from public.apps where id = '48000000-0000-0000-0000-0000000c0002') = '48000000-0000-0000-0000-0000000b0001',
+         'T48 Jira Perpetua groups under the Jira product';
+  assert (select count(*) from public.apps where id in ('48000000-0000-0000-0000-0000000c0001','48000000-0000-0000-0000-0000000c0002')) = 2,
+         'T48 Jira Flywheel and Jira Perpetua remain SEPARATE apps rows';
+end $$;
+-- 48d: unmerge — clearing canonical_app_id is NON-destructive (apps + app_users/contracts/invoices survive).
+update public.apps set canonical_app_id = null where id = '48000000-0000-0000-0000-0000000c0001';
+do $$ begin
+  assert (select canonical_app_id from public.apps where id = '48000000-0000-0000-0000-0000000c0001') is null,
+         'T48 revert clears canonical_app_id';
+  assert exists (select 1 from public.apps where id = '48000000-0000-0000-0000-0000000c0001'), 'T48 revert must NOT delete the apps row';
+  assert exists (select 1 from public.app_users where id = '48000000-0000-0000-0000-0000000d0001'), 'T48 revert must NOT delete app_users';
+  assert exists (select 1 from public.contracts where id = '48000000-0000-0000-0000-0000000e0001'), 'T48 revert must NOT delete contracts';
+  assert exists (select 1 from public.invoices where id = '48000000-0000-0000-0000-0000000f0001'), 'T48 revert must NOT delete invoices';
+end $$;
+-- 48e: repoint — changing an alias's product is an UPDATE (no count change) and non-destructive.
+do $$ declare a_before int; begin
+  select count(*) into a_before from public.app_aliases where alias_value in ('flywheel48.atlassian.net','perpetua48.atlassian.net');
+  update public.app_aliases set app_product_id = '48000000-0000-0000-0000-0000000b0002'
+    where tenant_id = '11111111-1111-1111-1111-111111111111' and alias_type = 'instance_domain' and alias_value = 'flywheel48.atlassian.net';
+  assert (select count(*) from public.app_aliases where alias_value in ('flywheel48.atlassian.net','perpetua48.atlassian.net')) = a_before,
+         'T48 repoint is an UPDATE — it must NOT change the alias row count';
+  assert (select app_product_id from public.app_aliases where tenant_id='11111111-1111-1111-1111-111111111111' and alias_type='instance_domain' and alias_value='flywheel48.atlassian.net') = '48000000-0000-0000-0000-0000000b0002',
+         'T48 repoint changes the alias target product';
+  assert exists (select 1 from public.app_users where id = '48000000-0000-0000-0000-0000000d0001'), 'T48 repoint must NOT delete app_users';
+end $$;
+-- 48g: conflict — an alias natural key that already resolves to a DIFFERENT product is NOT overwritten at the
+-- persisted layer (ON CONFLICT DO NOTHING preserves the original target → the resolver routes to review). This
+-- is the load-bearing FALSE-MERGE guard proven on real Postgres.
+insert into public.app_aliases (tenant_id, app_product_id, alias_type, alias_value)
+  values ('11111111-1111-1111-1111-111111111111','48000000-0000-0000-0000-0000000b0002','instance_domain','conflict48.atlassian.net');
+do $$ declare a_before int; begin
+  select count(*) into a_before from public.app_aliases where alias_value = 'conflict48.atlassian.net';
+  -- a second deterministic write tries to map the SAME key to a DIFFERENT product (0b0001) — must NOT overwrite
+  insert into public.app_aliases (tenant_id, app_product_id, alias_type, alias_value)
+    values ('11111111-1111-1111-1111-111111111111','48000000-0000-0000-0000-0000000b0001','instance_domain','conflict48.atlassian.net')
+    on conflict (tenant_id, alias_type, alias_value) do nothing;
+  assert (select count(*) from public.app_aliases where alias_value = 'conflict48.atlassian.net') = a_before,
+         'T48 a conflicting alias key must NOT create a second row (ON CONFLICT DO NOTHING)';
+  assert (select app_product_id from public.app_aliases where tenant_id='11111111-1111-1111-1111-111111111111' and alias_type='instance_domain' and alias_value='conflict48.atlassian.net') = '48000000-0000-0000-0000-0000000b0002',
+         'T48 a conflicting alias key must KEEP its original product (no false-merge overwrite)';
+end $$;
+-- 48f: tenant isolation — a Tenant B member cannot read Tenant A's resolver-written aliases.
+select set_config('request.jwt.claims','{"sub":"0b000000-0000-0000-0000-000000000001"}',false); set role authenticated;
+do $$ begin
+  assert (select count(*) from public.app_aliases where alias_value in ('flywheel48.atlassian.net','perpetua48.atlassian.net')) = 0,
+         'T48 Tenant B member must NOT read Tenant A resolver-written aliases';
+end $$;
+reset role;
+
 do $$ begin raise notice 'ALL ORG-RLS ASSERTIONS PASSED'; end $$;
