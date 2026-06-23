@@ -1962,3 +1962,61 @@ provider-specific reviewed PR. Connector implementation remains blocked. Old-app
 parity is not complete. AI/API connector parity is not complete. Upload is not automatically production-ready.
 Hosted Auth/tenant-context is verified, but old-app replacement is not yet verified. RISK-001 remains OPEN.
 Cutover remains BLOCKED.** No doc 17 §5 box is ticked by this verification.
+## 54. Implementation — runner-backed Slack oauth_pending seams (PR #132)
+
+**Runner-backed Slack oauth_pending seams are wired.** This connects the PR #128 `SlackPendingInserter`
+(authorize-time INSERT) and the PR #120/#116 `OAuthPendingConsumer` (callback consume) to a REAL runner DB
+execution boundary, using the staging+production-verified `0021`/`0022` `connector_runner` grants (§52/§53).
+**Slack remains non-functional for real connections.** It exchanges NO code, stores NO token/credential,
+touches NO `connector_secrets`, calls NO Slack API, runs NO sync. `src/lib/server/connector-vault/runner-db-client.ts`
+— library/server-only (no route / connect button / browser path).
+
+### 54.1 The runner DB client (injected connection; no DB driver dep, no service-role client)
+**The runner DB client uses connector_runner_login with SET ROLE connector_runner.** The runner connects as
+`connector_runner_login` (LOGIN + NOINHERIT, no direct grants — §53) and `SET ROLE connector_runner`s into the
+narrow grants. The actual connection (a server-only Postgres session bound to `connector_runner_login`) is the
+FUTURE hosted runner's concern — provided via an INJECTED `RunnerConnection` seam (`runSequence(statements)`
+runs parameterized statements in order on ONE connection). This module owns only the SET-ROLE-wrapping + the
+statement shapes; **no DB-driver dependency is added, no global/service-role client is created, and tests
+inject a mock** (no live DB call, no credentials). `createRunnerDbClient` / `createRunnerPendingInserter` /
+`createRunnerOAuthPendingConsumer` all fail closed (typed `RunnerDbError`) on a missing/invalid connection.
+
+### 54.2 Authorize-time inserter
+The authorize-time inserter uses only column-level oauth_pending INSERT grants. The callback consumer uses the existing connector_runner consume grant.
+`createRunnerPendingInserter(conn)` is the real `SlackPendingInserter`: it issues `SET ROLE connector_runner`
+then a parameterized INSERT. **The authorize-time inserter uses only column-level oauth_pending INSERT grants**
+— the INSERT names EXACTLY the 9 `0022`-granted columns `(tenant_id, organization_id, connector_id, provider,
+subject, state_jti, nonce_hash, intent, expires_at)`, as bound params. **The authorize-time inserter does not
+insert consumed_at, attempt_count, or last_rejected_code** (they fall to their defaults / are set only by the
+consume path). It fails closed: a UNIQUE(state_jti|nonce_hash) conflict → `duplicate`; any other failure →
+`db_error` — a SAFE reason only, never a raw DB error/value.
+
+### 54.3 Callback consumer
+`createRunnerOAuthPendingConsumer(conn)` reuses the §38 `createOAuthPendingExecutor` over the SET-ROLE-wrapping
+client — so **the callback consumer uses the existing connector_runner consume grant**: SELECT + the
+`consumed_at`/`attempt_count`/`last_rejected_code` UPDATE only, the atomic single-use consume + read-only
+classify, each running as `connector_runner`. It returns safe labels only; it does NOT exchange a code, store
+a token, or call Slack.
+
+### 54.4 Posture (unchanged) + tests (+13; app 300 → 313)
+Server-only (sentinel + `no-client-import` guard; imports only `./oauth-pending-executor`,
+`./oauth-pending-consume`, `./providers/slack-authorize-pending`). The live `/connectors/oauth/callback` route
+is UNCHANGED + still inert (no `runner-db-client` import). No connect button / no UI change. The registry still
+lists Slack as an inert `skeleton`/`enabled:false` (this wiring does not flip it). No migration; RLS suite
+unchanged **413**. Tests: inserter emits SET ROLE + a parameterized INSERT of ONLY the 9 columns (never
+consumed_at/attempt_count/last_rejected_code); duplicate → fail-closed; DB error redacted; missing connection
+fails closed; the run client prepends SET ROLE + redacts errors; the FULL chain (persist authorize row →
+runner consume exactly once → second consume `already_consumed`; duplicate persist `duplicate_pending`) over a
+mock in-memory connection; the consumer issues SET ROLE before consuming; module purity (no fetch/createClient/
+process.env/connector_secrets/service_role/access_token/refresh_token/client_secret/grant_type/oauth.v2.access/
+kms/@supabase/pg); callback route still inert.
+
+**No Slack OAuth code is exchanged for tokens. No Slack access token is stored. No Slack refresh token is
+stored. No connector credentials are stored. No connector secret material is inserted, updated, deleted, or
+read. No Slack API call is made. No connector sync is implemented. No credential form is implemented. No
+connect/reconnect/disconnect action is exposed to users. No browser-accessible service-role request path is
+added. Real token storage remains gated behind a later provider-specific reviewed PR. No production data was
+touched. No hosted commands were run. Connector implementation remains blocked. Old-app parity is not complete.
+UI/UX parity is not complete. AI/API connector parity is not complete. Upload is not automatically
+production-ready. Hosted Auth/tenant-context is verified, but old-app replacement is not yet verified. RISK-001
+remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is ticked by this PR.

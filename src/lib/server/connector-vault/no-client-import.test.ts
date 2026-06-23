@@ -48,6 +48,9 @@ const CRYPTO_REL_HINTS = [
   "connector-vault/providers/slack-authorize-pending",
   "server/connector-vault/providers/slack-authorize-pending",
   "lib/server/connector-vault/providers/slack-authorize-pending",
+  "connector-vault/runner-db-client",
+  "server/connector-vault/runner-db-client",
+  "lib/server/connector-vault/runner-db-client",
 ];
 
 function walk(dir: string): string[] {
