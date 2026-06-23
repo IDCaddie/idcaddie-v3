@@ -2084,3 +2084,58 @@ PRs. No production data was touched. No hosted commands were run. Connector impl
 Old-app parity is not complete. UI/UX parity is not complete. AI/API connector parity is not complete. Upload
 is not automatically production-ready. Hosted Auth/tenant-context is verified, but old-app replacement is not
 yet verified. RISK-001 remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is ticked by this PR.
+## 56. Implementation — graph-scale discovery indexes (PR #134)
+
+**Graph-scale discovery indexes are added. The indexes are schema-grounded against the current 0001 core
+graph tables.** Migration `0023_graph_scale_discovery_indexes.sql` adds 36 indexes preparing the core graph
+tables for high-volume Okta/Google/Microsoft discovery data BEFORE those connectors write real volume — index
+plumbing only: no column/schema change, no grant, no policy, no RLS-behavior change, no app-graph write, no
+canonical vendor/app table.
+
+### 56.1 What the indexes support
+Summary (verbatim): The indexes support tenant-scoped RLS hot paths. The indexes support high-volume app_users discovery data. The indexes support app-user and identity-account matching. The indexes support case-insensitive email matching through lower(email) and lower(primary_email). The indexes support vendor/app-name normalization through lower(vendor_name) and lower(name). The app_user_identity_matches model is app_user to person, not app_user to identity_account. No identity_account_id column is introduced. No canonical vendor/app registry is implemented in this PR.
+**The indexes support tenant-scoped RLS hot paths** (`tenant_memberships_user_tenant_status_idx`; every graph
+table's `tenant_id` / `(tenant_id, status)`). **The indexes support high-volume app_users discovery data**
+(`app_users` tenant/app, status, external_user_id). **The indexes support app-user and identity-account
+matching** — on `person_id` (`app_user_identity_matches_person_idx`, `identity_accounts_person_idx`), because
+**the app_user_identity_matches model is app_user to person, not app_user to identity_account** (and
+identity_account → person via `person_id`). **The indexes support case-insensitive email matching through
+lower(email) and lower(primary_email)** (`app_users_email_lower_idx`, `identity_accounts_email_lower_idx`,
+`people_primary_email_lower_idx`). **The indexes support vendor/app-name normalization through
+lower(vendor_name) and lower(name)** (`apps_vendor_name_lower_idx`, `apps_name_lower_idx`,
+`contracts_vendor_name_lower_idx`). Plus owning-org joins (apps `procurement_owner_org_id`/`paying_org_id`/
+`responsible_org_id`; contracts `procurement_org_id`/`paying_org_id`) + invoices/app_contracts/license rollups.
+
+### 56.2 Schema-grounding (verified against `0001`)
+Graph tables have NO `organization_id` (apps use procurement_owner_org_id/paying_org_id/responsible_org_id;
+contracts use procurement_org_id/paying_org_id); email columns differ (people.primary_email / app_users.email
+/ identity_accounts.email); external-id columns differ (app_users.external_user_id /
+identity_accounts.external_id). **No identity_account_id column is introduced** — there is none, so no index
+references it. `app_user_identity_matches` already has UNIQUE(app_user_id, person_id), so only the tenant +
+person_id indexes are added (no duplicate of that leading-app_user_id unique). **No canonical vendor/app
+registry is implemented in this PR** (that is the next design/schema PR). **No app graph write is
+implemented.**
+
+### 56.3 Concurrency note
+Plain (non-CONCURRENT) `CREATE INDEX` is correct HERE because the graph tables are currently near-empty and
+this lands before discovery volume. **If these indexes are ever deferred until AFTER discovery data loads, a
+future index migration MUST use `CREATE INDEX CONCURRENTLY`** (which CANNOT run inside a transaction block) to
+avoid long write locks.
+
+### 56.4 Tests + posture (T45; RLS suite **413 → 424**; types 0-diff, 1553 lines)
+New **T45** re-asserts a representative sample of the 36 indexes exists (RLS hot path, app_users/
+identity_accounts discovery, the `*_person_idx` match indexes, the lower(email)/lower(name)/lower(primary_email)
+FUNCTIONAL indexes, lower(vendor_name) normalization, owning-org joins, invoices/app_contracts/license) +
+the schema-grounding guards (NO `identity_account_id` column on `app_user_identity_matches`; the match graph
+is app_user → person; identity_accounts → person via person_id). Migration-safety passes (index-only). No
+app/UI/route change; generated DB types unchanged (indexes don't affect types).
+
+**No OAuth code is exchanged for tokens. No access token is stored. No refresh token is stored. No connector
+credentials are stored. No connector secret material is inserted, updated, deleted, or read. No provider API
+call is made. No connector sync is implemented. No credential form is implemented. No connect/reconnect/
+disconnect action is exposed to users. No browser-accessible service-role request path is added. Real token
+storage remains gated behind later provider-specific reviewed PRs. No production data was touched. No hosted
+commands were run. Connector implementation remains blocked. Old-app parity is not complete. UI/UX parity is
+not complete. AI/API connector parity is not complete. Upload is not automatically production-ready. Hosted
+Auth/tenant-context is verified, but old-app replacement is not yet verified. RISK-001 remains OPEN. Cutover
+remains BLOCKED.** No doc 17 §5 box is ticked by this PR.
