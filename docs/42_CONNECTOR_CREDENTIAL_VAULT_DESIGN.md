@@ -2791,3 +2791,50 @@ Old-app parity is not complete. UI/UX parity is not complete. AI/API connector p
 is not automatically production-ready. Hosted Auth/tenant-context is verified, but old-app replacement is not
 yet verified. RISK-001 remains OPEN. RISK-007 remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is
 ticked by this PR.
+## 70. Staging verification — resolver natural key `0026` (PR #148)
+
+**Resolver natural-key constraint is applied and verified on staging.** A human applied
+`0026_app_alias_natural_key.sql` to the staging project `ycdpzduxugdsffjqyoai` (local/main `99f68ee` —
+PR #147) and verified the live schema. **The staging apply and verification were human-run; this PR only
+records the evidence — the agent did not touch staging, ran no hosted command, and made no staging/production
+mutation.**
+
+### 70.1 Observed — PASS
+Staging is aligned through migration 0026. No production migration was run for 0026.
+`0026` was MISSING on staging before the push; `supabase db push --linked` applied it successfully to staging;
+**Staging is aligned through migration 0026** — `supabase migration list --linked` showed staging aligned
+through `0026` after the push. The canonical-graph tables are present on staging: **The app_aliases table is
+present on staging. The app_products table is present on staging. The vendors table is present on staging. The
+discovery_facts table is present on staging.** **The app_aliases_tenant_type_value_key constraint is present on
+staging. The app_aliases natural key is UNIQUE (tenant_id, alias_type, alias_value).** The surrounding
+app_aliases constraints (alias_type CHECK, review_status CHECK, same-tenant app FK, same-tenant product FK) are
+present. **The database enforces tenant-scoped alias idempotency.**
+
+### 70.2 Code ↔ constraint alignment (the verified claim, precisely scoped)
+**The resolver write helper uses the same natural-key model** — tenant + alias_type + alias_value — so the
+in-code upsert and the DB constraint agree. **Local persisted-state fixture tests prove repeated deterministic
+resolver runs do not increase vendors, products, or aliases. Deterministic resolver writes are idempotent for
+the staged fixture cases.** **Probabilistic-only facts do not write canonical graph data. Ambiguous/name-only
+facts do not write canonical graph data. Conflicting canonical assignments are not overwritten. Jira Flywheel
+and Jira Perpetua remain separate app rows. Unmerge/repoint is non-destructive.** **The deterministic resolver
+write path exists in code.** (Precise claim: the DB constraint enforces alias natural-key uniqueness and the
+deterministic writes are idempotent for the VERIFIED staged fixture cases — this is NOT a claim that all
+resolver behavior is complete.)
+
+### 70.3 Local validation (before the staging apply)
+425 tests passed; the RLS migration tests passed (RLS assertions **478**, `ALL ORG-RLS ASSERTIONS PASSED`);
+lint, typecheck, build, auth-safety, and migration-safety all passed; generated database types remained 1828
+lines.
+
+### 70.4 Scope / status
+**The deterministic resolver write path is not yet verified on production. Production is not verified for 0026.
+No production migration was run for 0026** (a human applies it to production in a future step; the agent never
+runs hosted commands). **No app_user to person match write is implemented. No provider API call was made. No
+OAuth code was exchanged for tokens. No access token was stored. No refresh token was stored. No API key was
+stored. No connector credentials were stored. No connector secret material was inserted, updated, deleted, or
+read. No connector sync was implemented. No credential form was implemented. No connect/reconnect/disconnect
+action was exposed to users. No browser-accessible service-role request path was added. No production data was
+touched. Connector implementation remains blocked. Old-app parity is not complete. UI/UX parity is not
+complete. AI/API connector parity is not complete. Upload is not automatically production-ready. Hosted
+Auth/tenant-context is verified, but old-app replacement is not yet verified. RISK-001 remains OPEN. RISK-007
+remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is ticked by this verification.
