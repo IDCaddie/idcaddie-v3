@@ -2293,3 +2293,49 @@ remains blocked. Old-app parity is not complete. UI/UX parity is not complete. A
 complete. Upload is not automatically production-ready. Hosted Auth/tenant-context is verified, but old-app
 replacement is not yet verified. RISK-001 remains OPEN. RISK-007 remains OPEN. Cutover remains BLOCKED.** No
 doc 17 §5 box is ticked by this PR.
+## 60. Staging verification — canonical app graph `0024` (PR #138)
+
+**Canonical app graph schema is applied and verified on staging.** A human applied
+`0024_canonical_app_instance_graph.sql` to the staging project `ycdpzduxugdsffjqyoai` (local/main `400eafa` —
+PR #137) and verified the live schema. **The staging apply and verification were human-run; this PR only
+records the evidence — the agent did not touch staging, ran no hosted command, and made no staging/production
+mutation.**
+
+### 60.1 Observed — PASS
+Staging is aligned through migration 0024. Production is not verified for 0024.
+`0024` was MISSING on staging before the push; `supabase db push --linked` applied it successfully to staging;
+**Staging is aligned through migration 0024** — `supabase migration list --linked` showed staging aligned
+through `0024` after the push. Staging verification confirmed the three canonical graph tables and the new
+`apps` columns are present:
+- **The vendors table is present on staging.**
+- **The app_products table is present on staging.**
+- **The app_aliases table is present on staging.**
+- **apps.canonical_app_id is present on staging.**
+- **apps.instance_domain is present on staging.**
+- **apps.external_instance_id is present on staging.**
+- **apps.instance_url is present on staging.**
+
+This matches the §59 design + the local `org_rls_test.sql` T46 proof; staging now mirrors the local schema
+through `0024`. **apps remains the operational app instance/site/workspace row. The canonical graph groups
+related apps without erasing instance boundaries. Distinct app instances must not be collapsed into one app
+row. Existing app_contracts remains the contract-to-app-instance linking model.**
+
+### 60.2 Local validation (before the staging apply)
+325 tests passed; the RLS migration tests passed (RLS assertions **446**, `ALL ORG-RLS ASSERTIONS PASSED`);
+lint, typecheck, build, auth-safety, and migration-safety all passed; generated database types updated to 1744
+lines.
+
+### 60.3 Scope / status
+This verifies only that `0024` applied + the canonical tables/columns exist on staging — not any resolver or
+connector behavior (there is none). **No resolver is implemented. No app graph writes are implemented. No
+production migration was run for 0024. Production is not verified for 0024** (a human applies it to production
+in a future step; the agent never runs hosted commands). **No app code changed. No schema changed in this
+verification PR. No migration changed in this verification PR. No connector behavior changed. No provider API
+call was made. No OAuth code was exchanged for tokens. No access token was stored. No refresh token was stored.
+No connector credentials were stored. No connector secret material was inserted, updated, deleted, or read. No
+connector sync was implemented. No credential form was implemented. No connect/reconnect/disconnect action was
+exposed to users. No browser-accessible service-role request path was added. No production data was touched.
+Connector implementation remains blocked. Old-app parity is not complete. UI/UX parity is not complete. AI/API
+connector parity is not complete. Upload is not automatically production-ready. Hosted Auth/tenant-context is
+verified, but old-app replacement is not yet verified. RISK-001 remains OPEN. RISK-007 remains OPEN. Cutover
+remains BLOCKED.** No doc 17 §5 box is ticked by this verification.

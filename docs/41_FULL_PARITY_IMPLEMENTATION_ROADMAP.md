@@ -2439,3 +2439,35 @@ Old-app parity is not complete. UI/UX parity is not complete. AI/API connector p
 is not automatically production-ready. Hosted Auth/tenant-context is verified, but old-app replacement is not
 yet verified. RISK-001 remains OPEN. RISK-007 remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is
 ticked by this PR.
+---
+
+## 71. STAGING VERIFICATION — canonical app graph `0024` (PR #138)
+
+**Canonical app graph schema is applied and verified on staging** (doc 42 §60). A human applied `0024` to
+staging (`ycdpzduxugdsffjqyoai`; local/main `400eafa` — PR #137): `0024` was missing before the push,
+`supabase db push --linked` applied it, and **Staging is aligned through migration 0024** (`migration list
+--linked` shows staging aligned through `0024`). **The staging apply and verification were human-run; this PR
+only records the evidence — the agent did not touch staging and ran no hosted command.**
+
+Staging verification confirmed: **The vendors table is present on staging. The app_products table is present
+on staging. The app_aliases table is present on staging. apps.canonical_app_id is present on staging.
+apps.instance_domain is present on staging. apps.external_instance_id is present on staging. apps.instance_url
+is present on staging.** Matches the §70 design + T46. **apps remains the operational app instance/site/
+workspace row. The canonical graph groups related apps without erasing instance boundaries. Distinct app
+instances must not be collapsed into one app row. Existing app_contracts remains the contract-to-app-instance
+linking model.**
+
+Local validation before the apply: 325 tests passed; RLS migration tests passed (assertions **446**); lint/
+typecheck/build/auth-safety/migration-safety passed; generated database types updated to 1744 lines. RLS suite
+unchanged (**446**), no migration, no code, no generated-types change. **No resolver is implemented. No app
+graph writes are implemented. No production migration was run for 0024. Production is not verified for 0024** (a
+human applies it to production in a future step). **No app code changed. No schema changed in this verification
+PR. No migration changed in this verification PR. No connector behavior changed. No provider API call was made.
+No OAuth code was exchanged for tokens. No access token was stored. No refresh token was stored. No connector
+credentials were stored. No connector secret material was inserted, updated, deleted, or read. No connector
+sync was implemented. No credential form was implemented. No connect/reconnect/disconnect action was exposed to
+users. No browser-accessible service-role request path was added. No production data was touched. Connector
+implementation remains blocked. Old-app parity is not complete. UI/UX parity is not complete. AI/API connector
+parity is not complete. Upload is not automatically production-ready. Hosted Auth/tenant-context is verified,
+but old-app replacement is not yet verified. RISK-001 remains OPEN. RISK-007 remains OPEN. Cutover remains
+BLOCKED.** No doc 17 §5 box is ticked by this PR.
