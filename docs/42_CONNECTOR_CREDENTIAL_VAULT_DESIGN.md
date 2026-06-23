@@ -1907,3 +1907,58 @@ implementation remains blocked. Old-app parity is not complete. UI/UX parity is 
 parity is not complete. Upload is not automatically production-ready. Hosted Auth/tenant-context is verified,
 but old-app replacement is not yet verified. RISK-001 remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box
 is ticked by this verification.
+## 53. Production verification — connector-vault migrations 0016–0022 (PR #131)
+
+**Production was behind from migration 0016 through 0022. Migrations 0016 through 0022 were applied to
+production. Production migration list shows 0001 through 0022 present.** A human applied the connector-vault
+migration backlog to the PRODUCTION project `dzbfxulvxchdemcettrx` (staging is `ycdpzduxugdsffjqyoai`), then
+returned the local repo to staging. This records the production schema/grant verification. **The agent ran
+nothing — no hosted command, no staging/production mutation, no secrets. No production data was touched** (the
+agent recorded the operator's report).
+
+### 53.1 What was applied (production was behind)
+Before the push, production had `0001`–`0015` remote and was MISSING `0016`–`0022`. The human applied, in
+order: `0016_files_uploader_finalize_update.sql`, `0017_connector_vault_schema_foundation.sql`,
+`0018_harden_connector_vault_grants.sql`, `0019_connector_run_audit_lifecycle.sql`,
+`0020_oauth_pending_replay_store.sql`, `0021_connector_runner_grants.sql`,
+`0022_connector_runner_oauth_pending_insert.sql`. After the push, `supabase migration list --linked` showed
+`0001`–`0022` present on BOTH Local and Remote. The local repo was returned to staging after verification.
+
+### 53.2 Observed on production — PASS
+Production connector_runner_login was created as LOGIN and NOINHERIT. Production connector_runner_login is not BYPASSRLS. Production connector_runner_login has no direct table grants. Production connector_runner can INSERT only authorize-time replay columns.
+**Production connector_runner oauth_pending INSERT grant is verified.** Roles: production `connector_runner`
+exists, is NOLOGIN + BYPASSRLS; **Production connector_runner_login was created as LOGIN and NOINHERIT**
+(by the human operator after the push), **is not BYPASSRLS**, is granted `connector_runner`, and **has no
+direct table grants**.
+- **The production INSERT grant is column-level, not table-level. Production connector_runner does not have
+  table-level INSERT on oauth_pending. Production connector_runner_login does not have table-level INSERT on
+  oauth_pending. Production connector_runner can INSERT only authorize-time replay columns** — the column-level
+  INSERT is on EXACTLY `connector_id, expires_at, intent, nonce_hash, organization_id, provider, state_jti,
+  subject, tenant_id`. `connector_runner` keeps table-level SELECT on `oauth_pending`. **Production
+  connector_runner can UPDATE only consumed_at, attempt_count, and last_rejected_code.**
+- **Production connector_runner still has no connector_secrets privileges. Production connector_runner still
+  has no connectors or connector_runs privileges.** Production `authenticated` has SELECT on `connectors` and
+  `connector_runs` only.
+- **Production anon and authenticated roles still have no oauth_pending write access. Production anon and
+  authenticated roles still have no connector_secrets access.** Production `anon` has no connector-vault
+  grants. **No oauth_pending policy is added. No connector_secrets policy is added** — `pg_policies` shows zero
+  on both; `connectors`/`connector_runs` retain only their tenant-member SELECT policies.
+
+This matches the `0016`–`0022` intent + the local `org_rls_test.sql` (T1–T44, 413 assertions) — production
+schema/grants now mirror staging.
+
+### 53.3 What did NOT happen
+**No production dry-run seed was inserted. No production runner consume was executed. No production KMS dry-run
+was executed.** No production `oauth_pending` seed; no production `connector_secrets` material was read or
+written. **No Slack OAuth code is exchanged for tokens. No Slack access token is stored. No Slack refresh token
+is stored. No connector credentials are stored. No connector secret material is inserted, updated, deleted, or
+read. No Slack API call is made. No connector sync is implemented.** This was a schema/grant alignment only.
+
+### 53.4 Scope / status
+**Production schema/grants are now aligned for the connector-vault foundation, but production connector use
+remains blocked.** The grant is in place but no runner process or app path uses it, and the no-real-token
+dry-run was run on STAGING only (§47), not production. **Real token storage remains gated behind a later
+provider-specific reviewed PR. Connector implementation remains blocked. Old-app parity is not complete. UI/UX
+parity is not complete. AI/API connector parity is not complete. Upload is not automatically production-ready.
+Hosted Auth/tenant-context is verified, but old-app replacement is not yet verified. RISK-001 remains OPEN.
+Cutover remains BLOCKED.** No doc 17 §5 box is ticked by this verification.
