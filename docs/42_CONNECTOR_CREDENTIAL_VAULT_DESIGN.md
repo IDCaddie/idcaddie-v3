@@ -2643,3 +2643,51 @@ blocked. Old-app parity is not complete. UI/UX parity is not complete. AI/API co
 Upload is not automatically production-ready. Hosted Auth/tenant-context is verified, but old-app replacement
 is not yet verified. RISK-001 remains OPEN. RISK-007 remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box
 is ticked by this verification.
+## 67. Implementation — discovery fact request adapter (PR #145)
+
+**Discovery fact request adapter is added** (`discovery-fact-adapter.ts`, `src/lib/server/connector-vault/`).
+The reviewed server-only seam that wires the existing pieces: a future authenticated request handler calls it
+to STAGE an untrusted discovery fact through the SafeParse + RLS-backed `discovery_facts` path (PR #141
+contract → PR #142 staging helper), and may optionally get a READ-ONLY resolver preview (PR #140 pure logic).
+It wires existing pieces only — no migration, no schema change, no new table.
+
+### 67.1 Staging seam
+Discovery fact request adapter is added. The adapter uses the authenticated user-scoped/RLS path. No unauthenticated public fact ingestion route is added.
+`submitDiscoveryFactForReview()` / `submitDiscoveryFactsForReview()` delegate to `stageDiscoveryFactForReview`.
+**The adapter stages only SafeParse-validated facts. Invalid facts are rejected before persistence.
+Token-bearing facts are rejected before persistence. Secret-bearing facts are rejected before persistence**
+(a mismatched tenant is rejected too). **The adapter uses the authenticated user-scoped/RLS path** — the
+insert runs through the injected user-scoped (authenticated, RLS-enforced) `DiscoveryFactStagingStore`. **No
+service-role client is added. No browser-accessible service-role request path is added. No unauthenticated
+public fact ingestion route is added** — this module exposes NO HTTP route; a future AUTHENTICATED route
+handler injects the store and calls the adapter. It imports no Supabase client, calls no provider, calls no
+fetch, and reads/writes no `connector_secrets`.
+
+### 67.2 Read-only resolver preview
+**A read-only resolver preview may be returned.** `previewDiscoveryFactResolution()` validates the fact then
+predicts an action/confidence/reasons in memory from the fact's own content (mapping the deterministic instance
+discriminators to `DiscoveryResolutionInput`, then `explainResolutionDecision`). **Resolver preview output is
+not persisted.** The preview takes NO store, writes NO graph, and updates NO staged review_status; it is a
+prediction only and never auto-assigns. Because it has no in-memory corpus to run similarity against, a fact
+without a deterministic instance key fails closed to `human_review` (the no-blind-merge posture).
+`stageAndPreviewDiscoveryFact()` stages a fact AND returns the read-only preview alongside — the preview is
+computed in memory and persisted nowhere (the staged row never carries the decision).
+
+### 67.3 Tests + posture (discovery-fact-adapter.test.ts; no schema → RLS **458**, types **1828**, unchanged)
+A valid fact stages through the adapter (mocked authenticated store); invalid / access_token / refresh_token /
+connector_secrets / wrong-tenant inputs are rejected BEFORE the store call; a deterministic instance signal
+returns a read-only preview (deterministic) while an ambiguous fact returns `human_review`; the preview surface
+is exactly `{ decision }` (no canonical_app_id / app_alias / match / persisted field) and the staged row never
+carries the preview; the adapter imports only sibling server-only modules (no createClient / service-role /
+connector_secrets / fetch / Next route handler).
+
+**The live resolver write path is not implemented. No canonical app graph write is implemented. No
+apps.canonical_app_id write is implemented. No app_alias write is implemented. No app_user to person match
+write is implemented. No provider API call is made. No OAuth code is exchanged for tokens. No access token is
+stored. No refresh token is stored. No API key is stored. No connector credentials are stored. No connector
+secret material is inserted, updated, deleted, or read. No connector sync is implemented. No credential form is
+implemented. No connect/reconnect/disconnect action is exposed to users. No production data was touched. No
+hosted commands were run. Connector implementation remains blocked. Old-app parity is not complete. UI/UX
+parity is not complete. AI/API connector parity is not complete. Upload is not automatically production-ready.
+Hosted Auth/tenant-context is verified, but old-app replacement is not yet verified. RISK-001 remains OPEN.
+RISK-007 remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is ticked by this PR.
