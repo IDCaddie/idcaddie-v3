@@ -2384,3 +2384,64 @@ complete. UI/UX parity is not complete. AI/API connector parity is not complete.
 production-ready. Hosted Auth/tenant-context is verified, but old-app replacement is not yet verified. RISK-001
 remains OPEN. RISK-007 remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is ticked by this
 verification.
+## 62. Design — resolver + identity-matching engine (PR #140)
+
+**Resolver and identity-matching design is recorded.** **The canonical graph schema exists, but the resolver
+does not exist yet. Nothing populates apps.canonical_app_id yet.** This records + safely models how future
+validated discovery signals will resolve into canonical vendor/product/app-instance assignments and how
+app_users will match to people. **The resolver is the moat engine that will assemble validated discovery
+signals into the canonical app graph.** Design + pure types/helpers only (`resolution.ts` —
+`src/lib/server/connector-vault/`): **No live resolver job is implemented. No app graph writes are implemented.
+No canonical_app_id write is implemented. No app_alias write is implemented. No app_user to person match write
+is implemented.** The helpers are pure + in-memory (no DB / Supabase / provider client / fetch /
+connector_secrets).
+
+### 62.1 The future flow (none of it runs yet)
+validated discovery signals → DETERMINISTIC resolver → low-confidence HUMAN REVIEW → canonical_app_id
+assignment → app_user→person matching → baseline metrics → canonical/vendor/product rollups →
+recommendations.
+
+### 62.2 Resolver — deterministic-first, probabilistic-second, fail closed
+**Resolver matching is deterministic-first and probabilistic-second.**
+- **Deterministic-first** (a structured key uniquely identifies the instance/product): `instance_domain`,
+  `external_instance_id`, `instance_url`, provider app id, OAuth client id, SSO app id, known domain, explicit
+  vendor/product identifiers. A deterministic match may auto-assign.
+- **Probabilistic-second** (fuzzy): vendor-name / product-name / domain / contract-invoice vendor similarity.
+  These never auto-merge on their own. **Low-confidence matches route to human review** — approve, reject, or
+  repoint aliases/`canonical_app_id`; **low-confidence matches must not auto-merge.**
+- `classifyResolutionConfidence()` → `deterministic` > `probabilistic_high` > `probabilistic_low` >
+  `human_review` (the fail-closed floor); `explainResolutionDecision()` → only `deterministic` auto-assigns,
+  everything else (incl. no-match) routes to `human_review`. Unknown/ambiguous input fails closed.
+
+### 62.3 Idempotency + no blind merging
+**Discovery re-runs must be idempotent. Runners must upsert on natural keys, not blindly insert.**
+**instance_domain and external_instance_id are future merge/no-merge keys.** **Same vendor/product does not
+mean same operational app instance.** **Distinct app instances must not be collapsed into one app row** —
+`sameOperationalInstance()` returns false when a present merge key (or owning org) differs.
+**Atlassian/Jira/Flywheel and Atlassian/Jira/Perpetua must remain distinct app instances** (same product, two
+`apps` rows under one `app_product`). Owner/paying/responsible org influences merge/no-merge.
+
+### 62.4 Identity matching — app_user → person
+**app_user_identity_matches links app_user_id to person_id.** **There is no identity_account_id on
+app_user_identity_matches** (identity_accounts link to person via `person_id`). **No identity_account_id is
+introduced** — the `IdentityMatchCandidate` type carries `appUserId` → `personId`, never an
+identity_account_id. Matching is deterministic-first (exact normalized email, verified external ids), then
+secondary hints (aliases / manager / HR fields, later) routing to review; low confidence → human review.
+**Canonical user rollups must count distinct person_id after identity matching, not sum app_users naively.**
+**Per-instance counts may use app_users.**
+
+### 62.5 Tests + posture (resolution.test.ts; no schema → RLS **446**, types **1744**, both unchanged)
+The pure helpers are tested: deterministic confidence outranks name-similarity; distinct `instance_domain`
+values do not auto-merge (Flywheel vs Perpetua stay distinct); unknown/ambiguous routes to `human_review`; no
+`identity_account_id` appears in the helper types; no client imports; no provider API/fetch; no
+`connector_secrets` references. No migration, no schema change — RLS suite and generated types unchanged.
+
+**No provider API call is made. No OAuth code is exchanged for tokens. No access token is stored. No refresh
+token is stored. No connector credentials are stored. No connector secret material is inserted, updated,
+deleted, or read. No connector sync is implemented. No credential form is implemented. No
+connect/reconnect/disconnect action is exposed to users. No browser-accessible service-role request path is
+added. No production data was touched. No hosted commands were run. Connector implementation remains blocked.
+Old-app parity is not complete. UI/UX parity is not complete. AI/API connector parity is not complete. Upload
+is not automatically production-ready. Hosted Auth/tenant-context is verified, but old-app replacement is not
+yet verified. RISK-001 remains OPEN. RISK-007 remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is
+ticked by this PR.
