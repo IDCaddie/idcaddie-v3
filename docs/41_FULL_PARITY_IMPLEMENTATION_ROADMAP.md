@@ -2719,3 +2719,36 @@ hosted commands were run. Connector implementation remains blocked. Old-app pari
 parity is not complete. AI/API connector parity is not complete. Upload is not automatically production-ready.
 Hosted Auth/tenant-context is verified, but old-app replacement is not yet verified. RISK-001 remains OPEN.
 RISK-007 remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is ticked by this PR.
+---
+
+## 79. IMPLEMENTATION — resolver read path for staged facts (PR #146)
+
+**Resolver read path for staged facts is added** (doc 42 §68). `discovery-fact-read.ts` is a server-only
+READ-ONLY preview over already-staged `discovery_facts` rows — wiring the staged table (#142) to the pure
+resolver logic (#140). No migration, no schema change.
+
+- **The resolver preview reads staged discovery_facts** through the injected user-scoped (authenticated,
+  RLS-enforced) `DiscoveryFactReadStore` — never service-role. Tenant scoping comes from the authenticated
+  context + RLS, not a trusted payload tenant_id: the read functions return `[]` WITHOUT querying when there is
+  no authenticated tenant.
+- **Resolver preview output is read-only. Resolver preview output is not persisted.** The read store has no
+  write/update method; the preview updates no review_status and writes no graph. **Unknown or ambiguous staged
+  facts route to human_review** (a row with no deterministic instance key, or a malformed `fact_json`, fails
+  closed).
+
+Functions: `listStagedDiscoveryFactsForCurrentUser` / `mapDiscoveryFactRowToResolutionInput` /
+`previewDiscoveryFactResolutionFromRows` / `previewStagedDiscoveryFacts`. Tested (reads via injected store; no
+store call without tenant context; deterministic → preview; ambiguous/malformed → human_review; preview
+persists nothing + no canonical-graph field; imports only `./resolution`). No migration, no schema change →
+RLS suite **458** (existing T47 covers `discovery_facts` SELECT isolation) and generated types **1828**
+unchanged. **The live resolver write path is not implemented. No canonical app graph write is implemented. No
+apps.canonical_app_id write is implemented. No app_alias write is implemented. No app_user to person match
+write is implemented. No provider API call is made. No OAuth code is exchanged for tokens. No access token is
+stored. No refresh token is stored. No API key is stored. No connector credentials are stored. No connector
+secret material is inserted, updated, deleted, or read. No connector sync is implemented. No credential form is
+implemented. No connect/reconnect/disconnect action is exposed to users. No browser-accessible service-role
+request path is added. No production data was touched. No hosted commands were run. Connector implementation
+remains blocked. Old-app parity is not complete. UI/UX parity is not complete. AI/API connector parity is not
+complete. Upload is not automatically production-ready. Hosted Auth/tenant-context is verified, but old-app
+replacement is not yet verified. RISK-001 remains OPEN. RISK-007 remains OPEN. Cutover remains BLOCKED.** No
+doc 17 §5 box is ticked by this PR.

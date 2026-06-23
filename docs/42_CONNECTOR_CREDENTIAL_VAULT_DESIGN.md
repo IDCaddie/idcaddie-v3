@@ -2691,3 +2691,47 @@ hosted commands were run. Connector implementation remains blocked. Old-app pari
 parity is not complete. AI/API connector parity is not complete. Upload is not automatically production-ready.
 Hosted Auth/tenant-context is verified, but old-app replacement is not yet verified. RISK-001 remains OPEN.
 RISK-007 remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is ticked by this PR.
+## 68. Implementation — resolver read path for staged facts (PR #146)
+
+**Resolver read path for staged facts is added** (`discovery-fact-read.ts`, `src/lib/server/connector-vault/`).
+A READ-ONLY preview over ALREADY-STAGED `discovery_facts` rows: it lists staged facts for the current
+authenticated tenant (through the user-scoped, RLS-enforced read store) and computes what the resolver WOULD do
+using the pure PR #140 logic — without mutating anything. This is NOT the resolver write path.
+
+### 68.1 The read path
+Resolver read path for staged facts is added. Unknown or ambiguous staged facts route to human_review.
+**The resolver preview reads staged discovery_facts.** `listStagedDiscoveryFactsForCurrentUser()` reads through
+the injected `DiscoveryFactReadStore` (backed by the authenticated user-scoped, RLS-enforced client when wired
+— never service-role). Tenant scoping comes from the authenticated context + RLS, NOT a trusted payload
+tenant_id: the read functions return `[]` WITHOUT querying the store when there is no authenticated tenant.
+`mapDiscoveryFactRowToResolutionInput()` defensively extracts the deterministic instance discriminators from a
+row's `fact_json`, and `previewDiscoveryFactResolutionFromRows()` / `previewStagedDiscoveryFacts()` compute
+preview decisions in memory via `appResolutionSignals` + `explainResolutionDecision`.
+
+### 68.2 Read-only — persists nothing
+**Resolver preview output is read-only. Resolver preview output is not persisted.** The read store exposes only
+`listStagedFacts()` (no update/insert) — the preview updates NO `discovery_facts.review_status` and writes NO
+canonical app graph. **Unknown or ambiguous staged facts route to human_review** — a row whose `fact_json`
+carries no deterministic instance key (or is malformed/missing) yields no signals and fails closed to
+`human_review` (no in-memory similarity corpus is consulted). A preview carries only `{ factId, factType,
+decision }` — never a persisted/canonical-graph field.
+
+### 68.3 Tests + posture (discovery-fact-read.test.ts; no schema → RLS **458**, types **1828**, unchanged)
+Reads staged facts through the injected authenticated store; does NOT call the store when tenant context is
+missing (null/undefined/empty → `[]`); a deterministic instance fact previews `deterministic` while an
+ambiguous / malformed fact previews `human_review`; the read store has no write/update method and a preview
+carries no persisted/canonical-graph field; the module imports only `./resolution` (no createClient /
+service-role / connector_secrets / fetch / Next route handler). Existing T47 already proves `discovery_facts`
+SELECT tenant isolation, so RLS stays **458**.
+
+**The live resolver write path is not implemented. No canonical app graph write is implemented. No
+apps.canonical_app_id write is implemented. No app_alias write is implemented. No app_user to person match
+write is implemented. No provider API call is made. No OAuth code is exchanged for tokens. No access token is
+stored. No refresh token is stored. No API key is stored. No connector credentials are stored. No connector
+secret material is inserted, updated, deleted, or read. No connector sync is implemented. No credential form is
+implemented. No connect/reconnect/disconnect action is exposed to users. No browser-accessible service-role
+request path is added. No production data was touched. No hosted commands were run. Connector implementation
+remains blocked. Old-app parity is not complete. UI/UX parity is not complete. AI/API connector parity is not
+complete. Upload is not automatically production-ready. Hosted Auth/tenant-context is verified, but old-app
+replacement is not yet verified. RISK-001 remains OPEN. RISK-007 remains OPEN. Cutover remains BLOCKED.** No
+doc 17 §5 box is ticked by this PR.
