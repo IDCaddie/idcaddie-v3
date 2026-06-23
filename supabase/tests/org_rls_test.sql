@@ -2490,4 +2490,65 @@ select set_config('request.jwt.claims','{"sub":"0b000000-0000-0000-0000-00000000
 do $$ begin assert (select count(*) from public.app_aliases where id='da240000-0000-0000-0000-0000000000c1') = 0, 'T46 Tenant B member must NOT read Tenant A app_alias'; end $$;
 reset role;
 
+-- ── Test 47: discovery_facts ingestion staging boundary (migration 0025) ─────────────────────────────
+-- 0025 adds the tenant-scoped, RLS-protected staging table for validated discovery facts. This proves: the
+-- table is RLS-enabled with the members-read + editors-insert/update (NO DELETE — durable review records)
+-- pattern; tenant isolation holds for read/insert/update; the structural shape (review_status default + check,
+-- the staging columns); connector_secrets is untouched and NO connector_runner privilege was added.
+reset role;
+-- 47a: structural — RLS enabled, EXACTLY {SELECT, INSERT, UPDATE} policies (no DELETE/ALL), columns + default.
+do $$ declare v_col text; begin
+  assert (select relrowsecurity from pg_class where relname = 'discovery_facts' and relnamespace = 'public'::regnamespace),
+         'T47 discovery_facts must have RLS enabled';
+  assert (select coalesce(array_agg(distinct cmd::text order by cmd::text), array[]::text[])
+          from pg_policies where schemaname = 'public' and tablename = 'discovery_facts') = array['INSERT','SELECT','UPDATE'],
+         'T47 discovery_facts must have EXACTLY {SELECT, INSERT, UPDATE} policies (no DELETE/ALL — durable records)';
+  foreach v_col in array array['tenant_id','schema_version','fact_type','source_type','source_provider','observed_at','review_status','fact_json','provenance_json','natural_key','source_run_id','reviewed_by','reviewed_at','rejected_reason']
+  loop
+    assert exists (select 1 from information_schema.columns where table_schema='public' and table_name='discovery_facts' and column_name = v_col),
+           format('T47 discovery_facts must have column %s', v_col);
+  end loop;
+  assert (select column_default from information_schema.columns where table_schema='public' and table_name='discovery_facts' and column_name='review_status') like '%pending%',
+         'T47 discovery_facts.review_status must default to pending';
+  -- fact_json is NOT NULL (a staged fact always carries its validated payload).
+  assert (select is_nullable from information_schema.columns where table_schema='public' and table_name='discovery_facts' and column_name='fact_json') = 'NO',
+         'T47 discovery_facts.fact_json must be NOT NULL';
+end $$;
+-- 47b: connector_secrets untouched + NO connector_runner privilege was granted on discovery_facts by 0025.
+do $$ begin
+  assert (select count(*) from pg_policies where schemaname='public' and tablename='connector_secrets') = 0,
+         'T47 connector_secrets must STILL have zero policies after 0025';
+  assert not exists (
+    select 1 from information_schema.role_table_grants
+    where table_schema='public' and table_name='discovery_facts' and grantee='connector_runner'),
+         'T47 connector_runner must have NO grant on discovery_facts';
+end $$;
+-- 47c: FUNCTIONAL tenant isolation — seed a Tenant A fact (superuser), then prove RLS scopes read/insert/update.
+insert into public.discovery_facts (id, tenant_id, schema_version, fact_type, source_type, source_provider, observed_at, fact_json)
+  values ('df250000-0000-0000-0000-0000000000a1','11111111-1111-1111-1111-111111111111','1','app_discovery','identity_provider_discovery','okta', now(), '{"fact_type":"app_discovery"}'::jsonb);
+-- a Tenant A member reads its fact; a Tenant B member reads zero (tenant A cannot read tenant B, and vice versa).
+select set_config('request.jwt.claims','{"sub":"0a000000-0000-0000-0000-000000000001"}',false); set role authenticated;
+do $$ begin assert (select count(*) from public.discovery_facts where id='df250000-0000-0000-0000-0000000000a1') = 1, 'T47 Tenant A member reads Tenant A fact'; end $$;
+-- a Tenant A editor cannot INSERT a Tenant B fact (cross-tenant insert denied by RLS with check).
+do $$ declare blocked boolean := false; begin
+  begin
+    insert into public.discovery_facts (tenant_id, schema_version, fact_type, source_type, source_provider, observed_at, fact_json)
+      values ('22222222-2222-2222-2222-222222222222','1','app_discovery','identity_provider_discovery','okta', now(), '{}'::jsonb);
+    blocked := false;
+  exception when others then blocked := true; end;
+  assert blocked, 'T47 Tenant A member must NOT INSERT a Tenant B discovery_fact (RLS with check)';
+end $$;
+reset role;
+-- a Tenant B member cannot read the Tenant A fact, and cannot UPDATE it (cross-tenant update affects 0 rows).
+select set_config('request.jwt.claims','{"sub":"0b000000-0000-0000-0000-000000000001"}',false); set role authenticated;
+do $$ begin
+  assert (select count(*) from public.discovery_facts where id='df250000-0000-0000-0000-0000000000a1') = 0, 'T47 Tenant B member must NOT read Tenant A fact';
+  update public.discovery_facts set review_status='confirmed' where id='df250000-0000-0000-0000-0000000000a1';
+  assert not found, 'T47 Tenant B member must NOT UPDATE a Tenant A fact (RLS scopes the update to zero rows)';
+end $$;
+reset role;
+-- the Tenant A fact is still pending (the cross-tenant update touched nothing).
+do $$ begin assert (select review_status from public.discovery_facts where id='df250000-0000-0000-0000-0000000000a1') = 'pending',
+       'T47 the Tenant A fact must be untouched by the cross-tenant update'; end $$;
+
 do $$ begin raise notice 'ALL ORG-RLS ASSERTIONS PASSED'; end $$;

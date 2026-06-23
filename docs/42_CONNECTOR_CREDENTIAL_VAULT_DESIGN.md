@@ -2497,3 +2497,56 @@ remains blocked. Old-app parity is not complete. UI/UX parity is not complete. A
 complete. Upload is not automatically production-ready. Hosted Auth/tenant-context is verified, but old-app
 replacement is not yet verified. RISK-001 remains OPEN. RISK-007 remains OPEN. Cutover remains BLOCKED.** No
 doc 17 §5 box is ticked by this PR.
+## 64. Implementation — fact ingestion staging boundary (PR #142)
+
+**Fact ingestion staging boundary is added.** The first safe, RLS-backed write path for validated discovery
+facts — migration `0025_discovery_facts_staging.sql` adds a tenant-scoped `discovery_facts` table and a
+server-only ingestion helper (`discovery-fact-staging.ts`) that accepts unknown input, validates it against the
+PR #141 zod contract, and stages only clean, validated facts for later resolver / human review. This is NOT a
+provider connector, NOT a live resolver, NOT a sync.
+
+### 64.1 The boundary
+**Only safeParse-validated facts may be staged. Invalid facts are rejected before persistence. Token-bearing
+facts are rejected before persistence. Secret-bearing facts are rejected before persistence.**
+`validateDiscoveryFact()` runs the token/secret deny-list (`hasForbiddenFactKey`) FIRST, then PR #141
+`safeParse` — anything that is not a clean valid fact is rejected with NO DB call.
+`stageDiscoveryFactForReview()` / `stageDiscoveryFactsForReview()` then bind the row to the authenticated
+tenant (rejecting a fact that claims a different tenant) and insert through an INJECTED
+`DiscoveryFactStagingStore` — backed by the user-scoped (authenticated, RLS-enforced) DAL when wired, **never a
+service-role client**. The helper imports no Supabase client; **No service-role client is added.** It stages
+ONLY `discovery_facts` columns and stores the original validated fact as `fact_json`.
+
+### 64.2 The table
+**The staged fact table is tenant-scoped. The staged fact table is RLS-protected.** `discovery_facts`
+(tenant_id FK + UNIQUE(id, tenant_id)) carries schema_version / fact_type / source_type / source_provider /
+source_run_id / source_record_id / signal_id / natural_key (deterministic, non-secret) / observed_at /
+confidence / review_status (default `pending`, checked) / reviewed_by / reviewed_at / fact_json (NOT NULL) /
+provenance_json / rejected_reason. RLS is the `0004`-hardened posture — members read + editors INSERT + editors
+UPDATE, **NO DELETE policy** (staged facts are durable review records; a rejected fact is marked
+`review_status='rejected'` with `rejected_reason`, never deleted). Indexes on tenant_id, (tenant_id, fact_type),
+(tenant_id, source_provider), (tenant_id, review_status), (tenant_id, natural_key), source_run_id. **No
+`connector_runner` grant** and no service-role path were added.
+
+### 64.3 Scope — staged facts are inputs, nothing is resolved
+**Staged facts are reviewable inputs for the future resolver. The live resolver is not implemented.** The
+helper writes ONLY the staging row: **No canonical app graph write is implemented. No apps.canonical_app_id
+write is implemented. No app_alias write is implemented. No app_user to person match write is implemented.**
+
+### 64.4 Tests + posture (T47 + discovery-fact-staging.test.ts; RLS suite **446 → 458**; types 1744 → 1828)
+T47 proves the table is RLS-enabled with EXACTLY {SELECT, INSERT, UPDATE} policies (no DELETE/ALL), functional
+tenant isolation (tenant A cannot read/insert/update tenant B; a Tenant B update of a Tenant A fact scopes to
+zero rows), the staging columns + `review_status` default + `fact_json` NOT NULL, `connector_secrets`
+untouched, and NO `connector_runner` grant. The helper tests prove a valid fact stages (mocked DB), and
+invalid / access_token / refresh_token / connector_secrets / nested-provenance-secret / unknown-fact-type /
+wrong-tenant inputs are all rejected BEFORE any insert, and the staged row never carries canonical/alias/match
+fields; only-`./discovery-facts` import, no fetch/provider API, no service-role, no connector_secrets.
+
+**No provider API call is made. No OAuth code is exchanged for tokens. No access token is stored. No refresh
+token is stored. No API key is stored. No connector credentials are stored. No connector secret material is
+inserted, updated, deleted, or read. No connector sync is implemented. No credential form is implemented. No
+connect/reconnect/disconnect action is exposed to users. No browser-accessible service-role request path is
+added. No production data was touched. No hosted commands were run. Connector implementation remains blocked.
+Old-app parity is not complete. UI/UX parity is not complete. AI/API connector parity is not complete. Upload
+is not automatically production-ready. Hosted Auth/tenant-context is verified, but old-app replacement is not
+yet verified. RISK-001 remains OPEN. RISK-007 remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is
+ticked by this PR.
