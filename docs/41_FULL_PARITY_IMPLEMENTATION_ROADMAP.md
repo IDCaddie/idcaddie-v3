@@ -2895,3 +2895,44 @@ remains blocked. Old-app parity is not complete. UI/UX parity is not complete. A
 complete. Upload is not automatically production-ready. Hosted Auth/tenant-context is verified, but old-app
 replacement is not yet verified. RISK-001 remains OPEN. RISK-007 remains OPEN. Cutover remains BLOCKED.** No
 doc 17 §5 box is ticked by this PR.
+---
+
+## 84. STAGING VERIFICATION — identity match `0027`+`0028` (PR #151)
+
+**Identity match write policies are applied and verified on staging. Identity match tenant app_user uniqueness
+is applied and verified on staging** (doc 42 §73). A human applied `0027` + `0028` to staging
+(`ycdpzduxugdsffjqyoai`; current main `3f596ba` — PR #150): before the push staging was missing both, the
+human-run `supabase db push` applied them, and **Staging is aligned through migration 0028** (`migration list
+--linked` shows staging aligned through `0028`). **The staging apply and verification were human-run; this PR
+only records the evidence — the agent did not touch staging and ran no hosted command.**
+
+- **The app_user_identity_matches_tenant_app_user_key constraint is present on staging. The app_user
+  identity-match natural key is UNIQUE (tenant_id, app_user_id). The database enforces one app_user to at most
+  one person per tenant on staging. The existing pair constraint UNIQUE (app_user_id, person_id) remains
+  present. The pair constraint prevents duplicate pairs, but the tenant/app_user constraint prevents false
+  person double-matches.**
+- **The app_user_identity_matches INSERT policy is present on staging. The app_user_identity_matches SELECT
+  policy is present on staging. The app_user_identity_matches UPDATE policy is present on staging. No DELETE
+  policy is present for app_user_identity_matches. Correction is repoint/update, not delete.**
+- **The deterministic identity-match write helper uses the same tenant/app_user natural-key model. Local
+  fixture tests prove repeated deterministic identity-match runs do not increase app_user_identity_matches row
+  count. Local tests prove duplicate candidate people route to review/no-write. Local tests prove plus/dot
+  email variants do not match. Local tests prove display-name-only and domain-only candidates do not write.
+  This is not a claim that all identity matching behavior is complete.**
+
+Local validation after the #150 merge: 446 tests passed; RLS migration tests passed (assertions **492**); lint/
+typecheck/build/auth-safety/migration-safety passed; generated database types remained 1828 lines. RLS suite
+unchanged (**492**), no migration, no code, no generated-types change. **The deterministic identity-match write
+path is not yet verified on production. Production is not verified for 0027 or 0028. No production migration was
+run for 0027 or 0028** (a human applies them to production in a future step). **Before production apply, a
+duplicate preflight query must be run against production and return zero rows** (the `(tenant_id, app_user_id)`
+HAVING count(*) > 1 check `0028` embeds). **No app graph write is implemented in this verification PR. No
+app_alias write is implemented in this verification PR. No provider API call was made. No OAuth code was
+exchanged for tokens. No access token was stored. No refresh token was stored. No API key was stored. No
+connector credentials were stored. No connector secret material was inserted, updated, deleted, or read. No
+connector sync was implemented. No credential form was implemented. No connect/reconnect/disconnect action was
+exposed to users. No browser-accessible service-role request path was added. No production data was touched.
+Connector implementation remains blocked. Old-app parity is not complete. UI/UX parity is not complete. AI/API
+connector parity is not complete. Upload is not automatically production-ready. Hosted Auth/tenant-context is
+verified, but old-app replacement is not yet verified. RISK-001 remains OPEN. RISK-007 remains OPEN. Cutover
+remains BLOCKED.** No doc 17 §5 box is ticked by this PR.

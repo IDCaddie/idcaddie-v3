@@ -2951,3 +2951,60 @@ Old-app parity is not complete. UI/UX parity is not complete. AI/API connector p
 is not automatically production-ready. Hosted Auth/tenant-context is verified, but old-app replacement is not
 yet verified. RISK-001 remains OPEN. RISK-007 remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is
 ticked by this PR.
+## 73. Staging verification — identity match `0027`+`0028` (PR #151)
+
+**Identity match write policies are applied and verified on staging. Identity match tenant app_user uniqueness
+is applied and verified on staging.** A human applied `0027_app_user_identity_match_write_policies.sql` and
+`0028_app_user_identity_match_tenant_unique.sql` to the staging project `ycdpzduxugdsffjqyoai` (current main
+`3f596ba` — PR #150) and verified the live constraints + policies. **The staging apply and verification were
+human-run; this PR only records the evidence — the agent did not touch staging, ran no hosted command, and made
+no staging/production mutation.**
+
+### 73.1 Observed — PASS
+Staging is aligned through migration 0028.
+Before the push, staging was missing `0027` and `0028`; the human-run `supabase db push` applied both;
+**Staging is aligned through migration 0028** — `supabase migration list --linked` showed staging aligned
+through `0028` after the push.
+
+Constraint verification: **The app_user_identity_matches_tenant_app_user_key constraint is present on staging.
+The app_user identity-match natural key is UNIQUE (tenant_id, app_user_id). The database enforces one app_user
+to at most one person per tenant on staging.** **The existing pair constraint UNIQUE (app_user_id, person_id)
+remains present** (`app_user_identity_matches_app_user_id_person_id_key`). **The pair constraint prevents
+duplicate pairs, but the tenant/app_user constraint prevents false person double-matches.**
+
+Policy verification: **The app_user_identity_matches INSERT policy is present on staging** (editors insert
+app_user_identity_matches). **The app_user_identity_matches SELECT policy is present on staging** (org members
+read related app_user_identity_matches). **The app_user_identity_matches UPDATE policy is present on staging**
+(editors update app_user_identity_matches). **No DELETE policy is present for app_user_identity_matches.
+Correction is repoint/update, not delete.**
+
+### 73.2 Code ↔ constraint alignment (the verified claim, precisely scoped)
+**The deterministic identity-match write helper uses the same tenant/app_user natural-key model** — it upserts
+ON CONFLICT (tenant_id, app_user_id). **Local fixture tests prove repeated deterministic identity-match runs do
+not increase app_user_identity_matches row count. Local tests prove duplicate candidate people route to
+review/no-write. Local tests prove plus/dot email variants do not match. Local tests prove display-name-only
+and domain-only candidates do not write.** **This is not a claim that all identity matching behavior is
+complete** — the precise claim is that deterministic identity-match writes are idempotent for the verified
+fixture cases, and the staging DB constraints/policies now enforce the tenant/app_user write invariant.
+
+### 73.3 Local validation (after the #150 merge)
+446 tests passed; the RLS migration tests passed (RLS assertions **492**, `ALL ORG-RLS ASSERTIONS PASSED`);
+lint, typecheck, build, auth-safety, and migration-safety all passed; generated database types remained 1828
+lines.
+
+### 73.4 Scope / status — production NOT verified; preflight required first
+No production migration was run for 0027 or 0028. Before production apply, a duplicate preflight query must be run against production and return zero rows.
+**The deterministic identity-match write path is not yet verified on production. Production is not verified for
+0027 or 0028. No production migration was run for 0027 or 0028** (a human applies them to production in a future
+step; the agent never runs hosted commands). **Before production apply, a duplicate preflight query must be run
+against production and return zero rows** (the same `(tenant_id, app_user_id)` HAVING count(*) > 1 check that
+`0028` embeds — production must have NO existing duplicate before the UNIQUE is added). **No app graph write is
+implemented in this verification PR. No app_alias write is implemented in this verification PR. No provider API
+call was made. No OAuth code was exchanged for tokens. No access token was stored. No refresh token was stored.
+No API key was stored. No connector credentials were stored. No connector secret material was inserted,
+updated, deleted, or read. No connector sync was implemented. No credential form was implemented. No
+connect/reconnect/disconnect action was exposed to users. No browser-accessible service-role request path was
+added. No production data was touched. Connector implementation remains blocked. Old-app parity is not
+complete. UI/UX parity is not complete. AI/API connector parity is not complete. Upload is not automatically
+production-ready. Hosted Auth/tenant-context is verified, but old-app replacement is not yet verified. RISK-001
+remains OPEN. RISK-007 remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is ticked by this verification.
