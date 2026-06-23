@@ -2396,3 +2396,46 @@ parity is not complete. UI/UX parity is not complete. AI/API connector parity is
 automatically production-ready. Hosted Auth/tenant-context is verified, but old-app replacement is not yet
 verified. RISK-001 remains OPEN. RISK-007 remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is ticked
 by this PR.
+---
+
+## 70. DESIGN — canonical vendor/product/app-instance graph (PR #137)
+
+**Canonical vendor/product/instance graph design is added. This is net-new moat work, not old-app parity
+restoration** (doc 42 §59). Migration `0024_canonical_app_instance_graph.sql` adds the first schema/design
+foundation for canonical vendor → product → app-instance modeling. **The old app was also flat at the
+app-document level. The old app had manual overlap-analysis grouping, not automatic canonical app resolution**
+(old manual overlap groups may need inventory/port later if OMC depends on them — separate future task).
+
+- **Hierarchy:** vendor → canonical app/product → app instance/site/workspace → users/contracts/invoices/
+  license facts/metrics. **apps remains the operational app instance/site/workspace row. Distinct app
+  instances must not be collapsed into one app row. Canonical matching groups related apps for roll-up
+  reporting without erasing instance boundaries.**
+- **Schema (`0024`):** three tenant-scoped tables (same-tenant integrity, RLS = members read + editors INSERT/
+  UPDATE, no DELETE) — `vendors`, `app_products` (canonical), `app_aliases` (provenance + the audit/review
+  fields reusing the app_user_identity_matches pattern: confidence/review_status/reviewed_by/reviewed_at).
+  **Structured instance identity fields are added to apps:** nullable `canonical_app_id` + `instance_domain` +
+  `external_instance_id` + `instance_url`. **instance_domain and external_instance_id are future merge/no-merge
+  discriminators.** Indexes for the new tables + apps canonical/instance fields.
+- **Multi-instance (Atlassian):** Atlassian → Jira/Confluence/Bitbucket → Jira/Flywheel, Jira/Perpetua,
+  Confluence/Flywheel — separate apps rows under one canonical product. **Existing app_contracts already
+  supports one contract linked to many app instances. No replacement for app_contracts is added. One-invoice-
+  split-across-orgs is documented as future work only.**
+- **Metrics + resolver (documented, NOT implemented):** **Canonical user rollups must count distinct person_id
+  after identity matching, not sum app_users naively. Canonical rollups depend on the app_user to person
+  matching engine.** Future resolver = deterministic keys first (instance_domain/external_instance_id/domain/
+  provider-app-id/oauth-client-id/sso-app-id), owner/paying/responsible org influences merge, same product but
+  different instance discriminator stays separate apps, low confidence → human review, unmerge by repointing
+  aliases/canonical_app_id (not rewriting history). **No automatic resolver is implemented.**
+
+**T46** (RLS suite **424 → 446**; types 1553 → 1744; migration-safety passes): the 3 new tables RLS-enabled
+with {SELECT, INSERT, UPDATE} only; functional tenant isolation; the apps canonical/instance columns exist;
+app_contracts unchanged; **No identity_account_id is introduced**; connector_secrets untouched. **No app graph
+writes are implemented. No provider API call is made. No OAuth code is exchanged for tokens. No access token is
+stored. No refresh token is stored. No connector credentials are stored. No connector secret material is
+inserted, updated, deleted, or read. No connector sync is implemented. No credential form is implemented. No
+connect/reconnect/disconnect action is exposed to users. No browser-accessible service-role request path is
+added. No production data was touched. No hosted commands were run. Connector implementation remains blocked.
+Old-app parity is not complete. UI/UX parity is not complete. AI/API connector parity is not complete. Upload
+is not automatically production-ready. Hosted Auth/tenant-context is verified, but old-app replacement is not
+yet verified. RISK-001 remains OPEN. RISK-007 remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is
+ticked by this PR.

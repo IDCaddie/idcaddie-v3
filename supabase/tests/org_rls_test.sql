@@ -2392,4 +2392,102 @@ do $$ begin
          'T45 app_users must NOT have an organization_id column';
 end $$;
 
+-- ── Test 46: canonical vendor/product/app-instance graph (migration 0024) ────────────────────────────
+-- 0024 adds tenant-scoped vendors / app_products / app_aliases + nullable apps.canonical_app_id + instance
+-- identity fields. This proves: the new tables are RLS-enabled with the members-read + editors-insert/update
+-- (NO DELETE) hardened pattern; tenant isolation holds; the apps columns exist; app_contracts is unchanged;
+-- NO identity_account_id is introduced; connector_secrets is untouched.
+reset role;
+-- 46a: the 3 new tables are RLS-enabled with EXACTLY {SELECT, INSERT, UPDATE} policies — no DELETE, no ALL.
+do $$
+  declare t text;
+begin
+  foreach t in array array['vendors','app_products','app_aliases'] loop
+    assert (select relrowsecurity from pg_class where relname = t and relnamespace = 'public'::regnamespace),
+           format('T46 %s must have RLS enabled', t);
+    assert (select coalesce(array_agg(distinct cmd::text order by cmd::text), array[]::text[])
+            from pg_policies where schemaname = 'public' and tablename = t) = array['INSERT','SELECT','UPDATE'],
+           format('T46 %s must have EXACTLY {SELECT, INSERT, UPDATE} policies (no DELETE/ALL — 0004-hardened)', t);
+  end loop;
+end $$;
+-- 46b: apps gains the nullable canonical link + the 3 instance-identity discriminators; app_contracts is
+-- unchanged (same composite PK, no canonical/instance columns).
+do $$ begin
+  assert exists (select 1 from information_schema.columns where table_schema='public' and table_name='apps' and column_name='canonical_app_id'), 'T46 apps must have canonical_app_id';
+  assert exists (select 1 from information_schema.columns where table_schema='public' and table_name='apps' and column_name='instance_domain'), 'T46 apps must have instance_domain';
+  assert exists (select 1 from information_schema.columns where table_schema='public' and table_name='apps' and column_name='external_instance_id'), 'T46 apps must have external_instance_id';
+  assert exists (select 1 from information_schema.columns where table_schema='public' and table_name='apps' and column_name='instance_url'), 'T46 apps must have instance_url';
+  -- app_contracts unchanged: composite PK (app_id, contract_id), no canonical/instance columns added.
+  assert (select count(*) from information_schema.table_constraints tc join information_schema.key_column_usage k
+            on tc.constraint_name = k.constraint_name
+          where tc.table_schema='public' and tc.table_name='app_contracts' and tc.constraint_type='PRIMARY KEY') = 2,
+         'T46 app_contracts PK must STILL be the (app_id, contract_id) composite';
+  assert not exists (select 1 from information_schema.columns where table_schema='public' and table_name='app_contracts' and column_name in ('canonical_app_id','instance_domain')),
+         'T46 app_contracts must be unchanged (no canonical/instance columns)';
+  -- NO identity_account_id is introduced anywhere by 0024.
+  assert not exists (select 1 from information_schema.columns where table_schema='public'
+                     and table_name in ('vendors','app_products','app_aliases','apps') and column_name='identity_account_id'),
+         'T46 0024 must NOT introduce an identity_account_id column';
+  -- the audit/review fields reuse the app_user_identity_matches pattern on app_aliases.
+  assert exists (select 1 from information_schema.columns where table_schema='public' and table_name='app_aliases' and column_name='confidence'), 'T46 app_aliases must have confidence';
+  assert exists (select 1 from information_schema.columns where table_schema='public' and table_name='app_aliases' and column_name='reviewed_by'), 'T46 app_aliases must have reviewed_by';
+  assert exists (select 1 from information_schema.columns where table_schema='public' and table_name='app_aliases' and column_name='review_status'), 'T46 app_aliases must have review_status';
+end $$;
+-- 46c: connector_secrets is untouched by 0024 (still zero policies — deny-all preserved).
+do $$ begin
+  assert (select count(*) from pg_policies where schemaname='public' and tablename='connector_secrets') = 0,
+         'T46 connector_secrets must STILL have zero policies after 0024';
+end $$;
+-- 46d: FUNCTIONAL tenant isolation — seed a Tenant A vendor (superuser), then prove RLS scopes reads/writes.
+insert into public.vendors (id, tenant_id, name, normalized_name, source)
+  values ('da240000-0000-0000-0000-0000000000a1','11111111-1111-1111-1111-111111111111','Atlassian','atlassian','manual');
+insert into public.app_products (id, tenant_id, vendor_id, name, normalized_name)
+  values ('da240000-0000-0000-0000-0000000000b1','11111111-1111-1111-1111-111111111111','da240000-0000-0000-0000-0000000000a1','Jira','jira');
+-- a Tenant A member (owner_a) can read the Tenant A vendor/product.
+select set_config('request.jwt.claims','{"sub":"0a000000-0000-0000-0000-000000000001"}',false); set role authenticated;
+do $$ begin
+  assert (select count(*) from public.vendors where id='da240000-0000-0000-0000-0000000000a1') = 1, 'T46 Tenant A member reads Tenant A vendor';
+  assert (select count(*) from public.app_products where id='da240000-0000-0000-0000-0000000000b1') = 1, 'T46 Tenant A member reads Tenant A product';
+end $$;
+-- an editor/owner of Tenant A can INSERT a canonical row; a cross-tenant write is denied.
+do $$ declare ok boolean := false; begin
+  insert into public.vendors (tenant_id, name, normalized_name) values ('11111111-1111-1111-1111-111111111111','Zoom','zoom');
+  ok := true;
+  exception when others then ok := false;
+  assert ok, 'T46 Tenant A editor can INSERT a Tenant A vendor';
+end $$;
+do $$ declare ok boolean := false; begin
+  begin insert into public.vendors (tenant_id, name, normalized_name) values ('22222222-2222-2222-2222-222222222222','Sneaky','sneaky'); ok := false;
+  exception when others then ok := true; end;
+  assert ok, 'T46 Tenant A member must NOT INSERT a Tenant B vendor (RLS with check)';
+end $$;
+reset role;
+-- a Tenant B member (owner_b) cannot read the Tenant A vendor/product (tenant isolation).
+select set_config('request.jwt.claims','{"sub":"0b000000-0000-0000-0000-000000000001"}',false); set role authenticated;
+do $$ begin
+  assert (select count(*) from public.vendors where id='da240000-0000-0000-0000-0000000000a1') = 0, 'T46 Tenant B member must NOT read Tenant A vendor';
+  assert (select count(*) from public.app_products where id='da240000-0000-0000-0000-0000000000b1') = 0, 'T46 Tenant B member must NOT read Tenant A product';
+end $$;
+reset role;
+-- 46e: the same-tenant composite FK actually REJECTS a cross-tenant link (functional, mirrors T26/T38), and
+-- app_aliases isolation holds functionally. Seed a Tenant B vendor, then point a Tenant A product at it.
+insert into public.vendors (id, tenant_id, name, normalized_name)
+  values ('da240000-0000-0000-0000-0000000000b9','22222222-2222-2222-2222-222222222222','Atlassian','atlassian');
+do $$ declare blocked boolean := false; begin
+  begin
+    insert into public.app_products (tenant_id, vendor_id, name, normalized_name)
+      values ('11111111-1111-1111-1111-111111111111','da240000-0000-0000-0000-0000000000b9','Jira','jira'); -- Tenant A product → Tenant B vendor
+  exception when foreign_key_violation then blocked := true; end;
+  assert blocked, 'T46 cross-tenant app_products.vendor_id must be rejected by the same-tenant composite FK';
+end $$;
+-- app_aliases functional isolation: seed a Tenant A alias, then prove RLS scopes the read.
+insert into public.app_aliases (id, tenant_id, app_product_id, alias_type, alias_value)
+  values ('da240000-0000-0000-0000-0000000000c1','11111111-1111-1111-1111-111111111111','da240000-0000-0000-0000-0000000000b1','instance_domain','flywheel.atlassian.net');
+select set_config('request.jwt.claims','{"sub":"0a000000-0000-0000-0000-000000000001"}',false); set role authenticated;
+do $$ begin assert (select count(*) from public.app_aliases where id='da240000-0000-0000-0000-0000000000c1') = 1, 'T46 Tenant A member reads Tenant A app_alias'; end $$;
+reset role;
+select set_config('request.jwt.claims','{"sub":"0b000000-0000-0000-0000-000000000001"}',false); set role authenticated;
+do $$ begin assert (select count(*) from public.app_aliases where id='da240000-0000-0000-0000-0000000000c1') = 0, 'T46 Tenant B member must NOT read Tenant A app_alias'; end $$;
+reset role;
+
 do $$ begin raise notice 'ALL ORG-RLS ASSERTIONS PASSED'; end $$;
