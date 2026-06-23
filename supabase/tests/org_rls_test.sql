@@ -2325,4 +2325,71 @@ do $$ begin
          'T44 connector_secrets must STILL have ZERO policies after 0022';
 end $$;
 
+-- ── Test 45: graph-scale discovery indexes (migration 0023) ──────────────────────────────────────────
+-- 0023 adds schema-grounded indexes for discovery / matching / RLS hot paths / app-graph normalization.
+-- This re-asserts a representative sample exists (incl. the lower(email)/lower(name) functional indexes and
+-- the person_id match indexes), plus the schema-grounding guards (no identity_account_id column; the match
+-- graph is app_user → person). Index-only — no grant/policy/RLS-behavior change.
+reset role;
+do $$
+  declare want text;
+  declare missing text[] := array[]::text[];
+begin
+  -- a representative sample across the key shapes: RLS hot path, discovery volume, matching, functional
+  -- case-insensitive email/name, and owning-org joins.
+  foreach want in array array[
+    'tenant_memberships_user_tenant_status_idx',
+    'app_users_tenant_app_idx', 'app_users_email_lower_idx', 'app_users_external_user_id_idx',
+    'identity_accounts_person_idx', 'identity_accounts_email_lower_idx',
+    'people_primary_email_lower_idx',
+    'app_user_identity_matches_person_idx', 'app_user_identity_matches_tenant_idx',
+    'apps_tenant_status_idx', 'apps_vendor_name_lower_idx', 'apps_name_lower_idx', 'apps_paying_org_idx',
+    'contracts_vendor_name_lower_idx', 'contracts_renewal_date_idx',
+    'invoices_tenant_invoice_date_idx', 'app_contracts_contract_idx',
+    'license_evaluations_app_user_idx', 'license_rules_app_active_idx'
+  ]
+  loop
+    if not exists (select 1 from pg_indexes where schemaname = 'public' and indexname = want) then
+      missing := missing || want;
+    end if;
+  end loop;
+  assert missing = array[]::text[], 'T45 expected graph-scale indexes are missing: ' || array_to_string(missing, ', ');
+end $$;
+-- the lower(email)/lower(name) indexes are FUNCTIONAL (expression) indexes — confirm via pg_indexes defs.
+do $$ begin
+  assert (select indexdef ilike '%lower(email)%' from pg_indexes where indexname = 'app_users_email_lower_idx'),
+         'T45 app_users_email_lower_idx must be a lower(email) functional index';
+  assert (select indexdef ilike '%lower(name)%' from pg_indexes where indexname = 'apps_name_lower_idx'),
+         'T45 apps_name_lower_idx must be a lower(name) functional index';
+  assert (select indexdef ilike '%lower(primary_email)%' from pg_indexes where indexname = 'people_primary_email_lower_idx'),
+         'T45 people_primary_email_lower_idx must be a lower(primary_email) functional index';
+end $$;
+-- schema-grounding guards: NO identity_account_id column is introduced; the match graph is app_user → person.
+do $$ begin
+  assert not exists (select 1 from information_schema.columns
+                     where table_schema = 'public' and table_name = 'app_user_identity_matches' and column_name = 'identity_account_id'),
+         'T45 app_user_identity_matches must NOT have an identity_account_id column';
+  assert exists (select 1 from information_schema.columns
+                 where table_schema = 'public' and table_name = 'app_user_identity_matches' and column_name = 'app_user_id'),
+         'T45 app_user_identity_matches must link app_user_id';
+  assert exists (select 1 from information_schema.columns
+                 where table_schema = 'public' and table_name = 'app_user_identity_matches' and column_name = 'person_id'),
+         'T45 app_user_identity_matches must link person_id (app_user → person)';
+  assert exists (select 1 from information_schema.columns
+                 where table_schema = 'public' and table_name = 'identity_accounts' and column_name = 'person_id'),
+         'T45 identity_accounts must link to person via person_id';
+  -- the graph tables must NOT have invented an `organization_id` column (the owning-org columns differ per
+  -- table: apps use procurement_owner_org_id/paying_org_id/responsible_org_id; contracts use
+  -- procurement_org_id/paying_org_id). 0023 indexes those real columns; it never introduces organization_id.
+  assert not exists (select 1 from information_schema.columns
+                     where table_schema = 'public' and table_name = 'apps' and column_name = 'organization_id'),
+         'T45 apps must NOT have an organization_id column (use procurement_owner_org_id/paying_org_id/responsible_org_id)';
+  assert not exists (select 1 from information_schema.columns
+                     where table_schema = 'public' and table_name = 'contracts' and column_name = 'organization_id'),
+         'T45 contracts must NOT have an organization_id column (use procurement_org_id/paying_org_id)';
+  assert not exists (select 1 from information_schema.columns
+                     where table_schema = 'public' and table_name = 'app_users' and column_name = 'organization_id'),
+         'T45 app_users must NOT have an organization_id column';
+end $$;
+
 do $$ begin raise notice 'ALL ORG-RLS ASSERTIONS PASSED'; end $$;

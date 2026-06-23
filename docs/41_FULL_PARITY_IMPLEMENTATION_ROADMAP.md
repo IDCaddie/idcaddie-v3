@@ -2305,3 +2305,39 @@ commands were run. Connector implementation remains blocked. Old-app parity is n
 not complete. AI/API connector parity is not complete. Upload is not automatically production-ready. Hosted
 Auth/tenant-context is verified, but old-app replacement is not yet verified. RISK-001 remains OPEN. Cutover
 remains BLOCKED.** No doc 17 §5 box is ticked by this PR.
+---
+
+## 67. IMPLEMENTATION — graph-scale discovery indexes (PR #134)
+
+**Graph-scale discovery indexes are added. The indexes are schema-grounded against the current 0001 core
+graph tables** (doc 42 §56). Migration `0023_graph_scale_discovery_indexes.sql` adds 36 indexes preparing the
+core graph tables for high-volume Okta/Google/Microsoft discovery data before those connectors write real
+volume — index plumbing only (no column/schema change, no grant, no policy, no RLS-behavior change).
+
+- **The indexes support tenant-scoped RLS hot paths** (tenant_memberships + every graph table's
+  tenant/status). **The indexes support high-volume app_users discovery data.** **The indexes support
+  app-user and identity-account matching** on person_id — **the app_user_identity_matches model is app_user
+  to person, not app_user to identity_account.** **The indexes support case-insensitive email matching through
+  lower(email) and lower(primary_email).** **The indexes support vendor/app-name normalization through
+  lower(vendor_name) and lower(name).** Plus owning-org joins + invoices/app_contracts/license rollups.
+- **Schema-grounded:** no organization_id on graph tables (apps use procurement_owner_org_id/paying_org_id/
+  responsible_org_id; contracts use procurement_org_id/paying_org_id); **No identity_account_id column is
+  introduced**; `app_user_identity_matches` already has UNIQUE(app_user_id, person_id) so only tenant +
+  person_id indexes are added. **No canonical vendor/app registry is implemented in this PR. No app graph
+  write is implemented.**
+- **Concurrency note:** plain (non-CONCURRENT) CREATE INDEX is correct here (tables near-empty, lands before
+  volume); if ever deferred until after discovery data loads, a future index migration MUST use CREATE INDEX
+  CONCURRENTLY (cannot run in a transaction block).
+
+**T45** (RLS suite **413 → 424**; types 0-diff, 1553 lines, migration-safety passes): re-asserts a
+representative sample of the 36 indexes exists + the lower() functional indexes + the schema-grounding guards
+(no identity_account_id; app_user → person; identity_accounts → person via person_id). No app/UI/route change.
+**No OAuth code is exchanged for tokens. No access token is stored. No refresh token is stored. No connector
+credentials are stored. No connector secret material is inserted, updated, deleted, or read. No provider API
+call is made. No connector sync is implemented. No credential form is implemented. No connect/reconnect/
+disconnect action is exposed to users. No browser-accessible service-role request path is added. Real token
+storage remains gated behind later provider-specific reviewed PRs. No production data was touched. No hosted
+commands were run. Connector implementation remains blocked. Old-app parity is not complete. UI/UX parity is
+not complete. AI/API connector parity is not complete. Upload is not automatically production-ready. Hosted
+Auth/tenant-context is verified, but old-app replacement is not yet verified. RISK-001 remains OPEN. Cutover
+remains BLOCKED.** No doc 17 §5 box is ticked by this PR.
