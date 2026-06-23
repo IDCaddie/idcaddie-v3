@@ -2648,3 +2648,42 @@ Connector implementation remains blocked. Old-app parity is not complete. UI/UX 
 connector parity is not complete. Upload is not automatically production-ready. Hosted Auth/tenant-context is
 verified, but old-app replacement is not yet verified. RISK-001 remains OPEN. RISK-007 remains OPEN. Cutover
 remains BLOCKED.** No doc 17 §5 box is ticked by this PR.
+---
+
+## 77. PRODUCTION VERIFICATION — discovery facts staging `0025` (PR #144)
+
+**Discovery facts staging table is applied and verified on production** (doc 42 §66). A human applied `0025` to
+PRODUCTION (`dzbfxulvxchdemcettrx`; staging `ycdpzduxugdsffjqyoai`; local/main `9f4b8b6` — PR #143), then
+relinked local back to staging. **The production apply and verification were human-run; this PR only records
+the evidence — the agent did not touch production and ran no hosted command.**
+
+- `0025` was MISSING on production before the push; `supabase db push --linked` applied it successfully;
+  **Production is aligned through migration 0025** (`migration list --linked` shows production aligned through
+  `0025`). **The discovery_facts table is present on production. The discovery_facts table columns are present
+  on production** (id, tenant_id, schema_version, fact_type, source_type, source_provider, source_run_id,
+  source_record_id, signal_id, natural_key, observed_at, confidence, review_status, reviewed_by, reviewed_at,
+  fact_json, provenance_json, rejected_reason, created_at, updated_at). **Staging and production are aligned
+  through migration 0025.** Matches the §76 staging verification + T47. **The discovery_facts table is
+  tenant-scoped and RLS-protected.**
+- **A transient Supabase CLI/login-role 504 occurred during verification and the verification was retried
+  successfully** (a transient login-role read; the column verification was retried and returned the full
+  column set — no data affected).
+- **Local Supabase link was returned to staging after production verification. Final linked ref was
+  ycdpzduxugdsffjqyoai.**
+
+**The fact ingestion boundary stages only safeParse-validated facts. Invalid facts are rejected before
+persistence. Token-bearing facts are rejected before persistence. Secret-bearing facts are rejected before
+persistence. Staged facts are reviewable inputs for the future resolver.** The staging table exists on
+production, but nothing resolves facts into the canonical graph yet. RLS suite unchanged (**458**), no
+migration, no code, no generated-types change. **The live resolver is not implemented. No canonical app graph
+write is implemented. No apps.canonical_app_id write is implemented. No app_alias write is implemented. No
+app_user to person match write is implemented. No app code changed. No schema changed in this verification PR.
+No migration changed in this verification PR. No connector behavior changed. No provider API call was made. No
+OAuth code was exchanged for tokens. No access token was stored. No refresh token was stored. No API key was
+stored. No connector credentials were stored. No connector secret material was inserted, updated, deleted, or
+read. No connector sync was implemented. No credential form was implemented. No connect/reconnect/disconnect
+action was exposed to users. No browser-accessible service-role request path was added. No service-role client
+was added. No production data was touched. Connector implementation remains blocked. Old-app parity is not
+complete. UI/UX parity is not complete. AI/API connector parity is not complete. Upload is not automatically
+production-ready. Hosted Auth/tenant-context is verified, but old-app replacement is not yet verified. RISK-001
+remains OPEN. RISK-007 remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is ticked by this PR.
