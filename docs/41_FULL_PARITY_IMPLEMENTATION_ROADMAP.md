@@ -2582,3 +2582,37 @@ Old-app parity is not complete. UI/UX parity is not complete. AI/API connector p
 is not automatically production-ready. Hosted Auth/tenant-context is verified, but old-app replacement is not
 yet verified. RISK-001 remains OPEN. RISK-007 remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is
 ticked by this PR.
+---
+
+## 75. IMPLEMENTATION — fact ingestion staging boundary (PR #142)
+
+**Fact ingestion staging boundary is added** (doc 42 §64). Migration `0025_discovery_facts_staging.sql` adds a
+tenant-scoped `discovery_facts` table + a server-only ingestion helper (`discovery-fact-staging.ts`) — the
+first safe, RLS-backed write path for validated discovery facts.
+
+- **Only safeParse-validated facts may be staged. Invalid facts are rejected before persistence. Token-bearing
+  facts are rejected before persistence. Secret-bearing facts are rejected before persistence.** The helper
+  runs the token/secret deny-list then PR #141 `safeParse`, binds the row to the authenticated tenant, and
+  inserts through an injected store backed by the user-scoped (authenticated, RLS) DAL — **No service-role
+  client is added.**
+- **The staged fact table is tenant-scoped. The staged fact table is RLS-protected.** RLS = members read +
+  editors INSERT + editors UPDATE, **NO DELETE** (durable review records); indexes on tenant_id +
+  (tenant_id, fact_type/source_provider/review_status/natural_key) + source_run_id; review_status default
+  `pending`; fact_json NOT NULL; **no `connector_runner` grant**.
+- **Staged facts are reviewable inputs for the future resolver. The live resolver is not implemented. No
+  canonical app graph write is implemented. No apps.canonical_app_id write is implemented. No app_alias write
+  is implemented. No app_user to person match write is implemented.**
+
+**T47** (RLS suite **446 → 458**; types 1744 → 1828; migration-safety passes): RLS-enabled {SELECT, INSERT,
+UPDATE}-only; tenant isolation for read/insert/update (tenant A cannot touch tenant B); staging columns +
+defaults; connector_secrets untouched; no connector_runner grant. Helper tests: valid fact stages (mock DB);
+invalid/token/secret/wrong-tenant rejected before insert; staged row never carries canonical/alias/match
+fields. **No provider API call is made. No OAuth code is exchanged for tokens. No access token is stored. No
+refresh token is stored. No API key is stored. No connector credentials are stored. No connector secret
+material is inserted, updated, deleted, or read. No connector sync is implemented. No credential form is
+implemented. No connect/reconnect/disconnect action is exposed to users. No browser-accessible service-role
+request path is added. No production data was touched. No hosted commands were run. Connector implementation
+remains blocked. Old-app parity is not complete. UI/UX parity is not complete. AI/API connector parity is not
+complete. Upload is not automatically production-ready. Hosted Auth/tenant-context is verified, but old-app
+replacement is not yet verified. RISK-001 remains OPEN. RISK-007 remains OPEN. Cutover remains BLOCKED.** No
+doc 17 §5 box is ticked by this PR.

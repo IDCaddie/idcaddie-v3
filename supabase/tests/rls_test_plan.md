@@ -25,7 +25,7 @@ Before building UI, prove these pass against local Supabase.
 
 Cases 1–8 plus the org/cross-tenant/escalation matrix are enforced by
 `supabase/migrations/0002_org_scoped_rls.sql` and `0003_org_access_union.sql`,
-covered by the runnable suite `supabase/tests/org_rls_test.sql` (T1–T46, 446 assertions; T38/T39 cover the
+covered by the runnable suite `supabase/tests/org_rls_test.sql` (T1–T47, 458 assertions; T38/T39 cover the
 connector-vault schema foundation (`0017`) — T38 = `connectors`/`connector_runs` tenant-member read + no
 request-path write; T39 = `connector_secrets` deny-all (RLS-enabled, zero policies, `authenticated`/`anon`
 hold zero privilege) + the no-secret-column-leak structural check; **T40 = the hardened grant surface
@@ -78,6 +78,15 @@ composite FK — the `0005` pattern, mirroring T26/T38) + the new `apps` columns
 contract_id)` PK intact, no canonical/instance columns) + NO `identity_account_id` column is introduced + the
 `app_aliases` audit/review fields (confidence/review_status/reviewed_by/reviewed_at) exist + `connector_secrets`
 still has zero policies (untouched by `0024`);
+**T47 = the discovery_facts ingestion staging boundary (`0025`)** — the tenant-scoped validated-fact staging
+table is RLS-enabled with EXACTLY {SELECT, INSERT, UPDATE} policies (the `0004`-hardened members-read +
+editors-insert/update posture, **NO DELETE** — staged facts are DURABLE review records) + FUNCTIONAL tenant
+isolation (a Tenant A member reads its fact; a Tenant B member reads ZERO — tenant A cannot read tenant B; a
+Tenant A editor's cross-tenant INSERT is RLS-`with check`-denied; a Tenant B member's UPDATE of a Tenant A fact
+scopes to ZERO rows and the row stays `pending`) + the staging columns + `review_status` default `pending` +
+`fact_json` NOT NULL + `connector_secrets` STILL zero policies and **NO `connector_runner` grant on
+`discovery_facts`** (the helper inserts only through the user-scoped authenticated RLS context, never
+service-role);
 the later tests cover the `files` foundation/policies — T33 `0012`, T34 `0013` SELECT/INSERT (+ T34c DELETE
 denied at the privilege layer), T35 `0014` storage-auth helpers, **T36 `0016` the uploader-finalize
 UPDATE policy** (uploader may set `upload_status` on their OWN row; cross-tenant / cross-user updates and

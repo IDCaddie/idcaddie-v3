@@ -831,6 +831,90 @@ export type Database = {
           },
         ]
       }
+      discovery_facts: {
+        Row: {
+          confidence: number | null
+          created_at: string
+          fact_json: Json
+          fact_type: string
+          id: string
+          natural_key: string | null
+          observed_at: string
+          provenance_json: Json | null
+          rejected_reason: string | null
+          review_status: string
+          reviewed_at: string | null
+          reviewed_by: string | null
+          schema_version: string
+          signal_id: string | null
+          source_provider: string
+          source_record_id: string | null
+          source_run_id: string | null
+          source_type: string
+          tenant_id: string
+          updated_at: string
+        }
+        Insert: {
+          confidence?: number | null
+          created_at?: string
+          fact_json: Json
+          fact_type: string
+          id?: string
+          natural_key?: string | null
+          observed_at: string
+          provenance_json?: Json | null
+          rejected_reason?: string | null
+          review_status?: string
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          schema_version: string
+          signal_id?: string | null
+          source_provider: string
+          source_record_id?: string | null
+          source_run_id?: string | null
+          source_type: string
+          tenant_id: string
+          updated_at?: string
+        }
+        Update: {
+          confidence?: number | null
+          created_at?: string
+          fact_json?: Json
+          fact_type?: string
+          id?: string
+          natural_key?: string | null
+          observed_at?: string
+          provenance_json?: Json | null
+          rejected_reason?: string | null
+          review_status?: string
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          schema_version?: string
+          signal_id?: string | null
+          source_provider?: string
+          source_record_id?: string | null
+          source_run_id?: string | null
+          source_type?: string
+          tenant_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "discovery_facts_reviewed_by_fkey"
+            columns: ["reviewed_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "discovery_facts_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       files: {
         Row: {
           byte_size: number | null
