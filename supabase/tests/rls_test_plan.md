@@ -25,7 +25,7 @@ Before building UI, prove these pass against local Supabase.
 
 Cases 1–8 plus the org/cross-tenant/escalation matrix are enforced by
 `supabase/migrations/0002_org_scoped_rls.sql` and `0003_org_access_union.sql`,
-covered by the runnable suite `supabase/tests/org_rls_test.sql` (T1–T45, 424 assertions; T38/T39 cover the
+covered by the runnable suite `supabase/tests/org_rls_test.sql` (T1–T46, 446 assertions; T38/T39 cover the
 connector-vault schema foundation (`0017`) — T38 = `connectors`/`connector_runs` tenant-member read + no
 request-path write; T39 = `connector_secrets` deny-all (RLS-enabled, zero policies, `authenticated`/`anon`
 hold zero privilege) + the no-secret-column-leak structural check; **T40 = the hardened grant surface
@@ -68,6 +68,16 @@ indexes exists (the RLS-hot-path `tenant_memberships_user_tenant_status_idx`, th
 license indexes) + the schema-grounding guards (NO `identity_account_id` column on `app_user_identity_matches`;
 the match graph is app_user → person and identity_account → person via `person_id`). Index-only — no
 grant/policy/RLS-behavior change;
+**T46 = the canonical vendor/product/app-instance graph (`0024`)** — the three new tenant-scoped tables
+(`vendors`/`app_products`/`app_aliases`) are RLS-enabled with EXACTLY {SELECT, INSERT, UPDATE} policies (the
+`0004`-hardened members-read + editors-insert/update posture, NO DELETE/ALL) + FUNCTIONAL tenant isolation (a
+Tenant A member reads its vendor/product/alias, a Tenant B member reads zero, a non-editor cross-tenant INSERT
+is RLS-`with check`-denied, and a cross-tenant `app_products.vendor_id` link is rejected by the same-tenant
+composite FK — the `0005` pattern, mirroring T26/T38) + the new `apps` columns exist (`canonical_app_id`,
+`instance_domain`, `external_instance_id`, `instance_url`) + `app_contracts` is UNCHANGED (its `(app_id,
+contract_id)` PK intact, no canonical/instance columns) + NO `identity_account_id` column is introduced + the
+`app_aliases` audit/review fields (confidence/review_status/reviewed_by/reviewed_at) exist + `connector_secrets`
+still has zero policies (untouched by `0024`);
 the later tests cover the `files` foundation/policies — T33 `0012`, T34 `0013` SELECT/INSERT (+ T34c DELETE
 denied at the privilege layer), T35 `0014` storage-auth helpers, **T36 `0016` the uploader-finalize
 UPDATE policy** (uploader may set `upload_status` on their OWN row; cross-tenant / cross-user updates and

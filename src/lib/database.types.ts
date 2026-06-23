@@ -12,6 +12,86 @@ export type Json =
 export type Database = {
   public: {
     Tables: {
+      app_aliases: {
+        Row: {
+          alias_type: string
+          alias_value: string
+          app_id: string | null
+          app_product_id: string
+          confidence: number | null
+          created_at: string
+          id: string
+          provenance: Json | null
+          review_status: string
+          reviewed_at: string | null
+          reviewed_by: string | null
+          source: string | null
+          tenant_id: string
+          updated_at: string
+        }
+        Insert: {
+          alias_type: string
+          alias_value: string
+          app_id?: string | null
+          app_product_id: string
+          confidence?: number | null
+          created_at?: string
+          id?: string
+          provenance?: Json | null
+          review_status?: string
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          source?: string | null
+          tenant_id: string
+          updated_at?: string
+        }
+        Update: {
+          alias_type?: string
+          alias_value?: string
+          app_id?: string | null
+          app_product_id?: string
+          confidence?: number | null
+          created_at?: string
+          id?: string
+          provenance?: Json | null
+          review_status?: string
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          source?: string | null
+          tenant_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "app_aliases_app_same_tenant"
+            columns: ["app_id", "tenant_id"]
+            isOneToOne: false
+            referencedRelation: "apps"
+            referencedColumns: ["id", "tenant_id"]
+          },
+          {
+            foreignKeyName: "app_aliases_product_same_tenant"
+            columns: ["app_product_id", "tenant_id"]
+            isOneToOne: false
+            referencedRelation: "app_products"
+            referencedColumns: ["id", "tenant_id"]
+          },
+          {
+            foreignKeyName: "app_aliases_reviewed_by_fkey"
+            columns: ["reviewed_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "app_aliases_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       app_contracts: {
         Row: {
           app_id: string
@@ -69,6 +149,57 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "tenants"
             referencedColumns: ["id"]
+          },
+        ]
+      }
+      app_products: {
+        Row: {
+          category: string | null
+          created_at: string
+          id: string
+          name: string
+          normalized_name: string
+          source: string | null
+          tenant_id: string
+          updated_at: string
+          vendor_id: string | null
+        }
+        Insert: {
+          category?: string | null
+          created_at?: string
+          id?: string
+          name: string
+          normalized_name: string
+          source?: string | null
+          tenant_id: string
+          updated_at?: string
+          vendor_id?: string | null
+        }
+        Update: {
+          category?: string | null
+          created_at?: string
+          id?: string
+          name?: string
+          normalized_name?: string
+          source?: string | null
+          tenant_id?: string
+          updated_at?: string
+          vendor_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "app_products_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "app_products_vendor_same_tenant"
+            columns: ["vendor_id", "tenant_id"]
+            isOneToOne: false
+            referencedRelation: "vendors"
+            referencedColumns: ["id", "tenant_id"]
           },
         ]
       }
@@ -224,9 +355,13 @@ export type Database = {
       apps: {
         Row: {
           business_owner_user_id: string | null
+          canonical_app_id: string | null
           category: string | null
           created_at: string
+          external_instance_id: string | null
           id: string
+          instance_domain: string | null
+          instance_url: string | null
           name: string
           notes: string | null
           paying_org_id: string | null
@@ -241,9 +376,13 @@ export type Database = {
         }
         Insert: {
           business_owner_user_id?: string | null
+          canonical_app_id?: string | null
           category?: string | null
           created_at?: string
+          external_instance_id?: string | null
           id?: string
+          instance_domain?: string | null
+          instance_url?: string | null
           name: string
           notes?: string | null
           paying_org_id?: string | null
@@ -258,9 +397,13 @@ export type Database = {
         }
         Update: {
           business_owner_user_id?: string | null
+          canonical_app_id?: string | null
           category?: string | null
           created_at?: string
+          external_instance_id?: string | null
           id?: string
+          instance_domain?: string | null
+          instance_url?: string | null
           name?: string
           notes?: string | null
           paying_org_id?: string | null
@@ -280,6 +423,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "profiles"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "apps_canonical_app_same_tenant"
+            columns: ["canonical_app_id", "tenant_id"]
+            isOneToOne: false
+            referencedRelation: "app_products"
+            referencedColumns: ["id", "tenant_id"]
           },
           {
             foreignKeyName: "apps_paying_org_id_fkey"
@@ -1371,6 +1521,47 @@ export type Database = {
           updated_at?: string
         }
         Relationships: []
+      }
+      vendors: {
+        Row: {
+          created_at: string
+          id: string
+          name: string
+          normalized_name: string
+          source: string | null
+          tenant_id: string
+          updated_at: string
+          website_domain: string | null
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          name: string
+          normalized_name: string
+          source?: string | null
+          tenant_id: string
+          updated_at?: string
+          website_domain?: string | null
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          name?: string
+          normalized_name?: string
+          source?: string | null
+          tenant_id?: string
+          updated_at?: string
+          website_domain?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "vendors_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
       }
     }
     Views: {

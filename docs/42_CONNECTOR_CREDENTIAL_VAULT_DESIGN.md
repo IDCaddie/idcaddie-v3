@@ -2220,3 +2220,76 @@ implementation remains blocked. Old-app parity is not complete. UI/UX parity is 
 parity is not complete. Upload is not automatically production-ready. Hosted Auth/tenant-context is verified,
 but old-app replacement is not yet verified. RISK-001 remains OPEN. RISK-007 remains OPEN. Cutover remains
 BLOCKED.** No doc 17 §5 box is ticked by this verification.
+## 59. Design — canonical vendor/product/app-instance graph (PR #137)
+
+**Canonical vendor/product/instance graph design is added. This is net-new moat work, not old-app parity
+restoration.** Migration `0024_canonical_app_instance_graph.sql` adds the first schema/design foundation for
+canonical vendor → product → app-instance modeling. **The old app was also flat at the app-document level. The
+old app had manual overlap-analysis grouping, not automatic canonical app resolution** — so this is net-new
+product moat, not a parity restoration. (Note: old manual overlap groups may need to be inventoried/ported
+later if OMC depends on them — a separate future task.)
+
+### 59.1 The hierarchy — normalize by grouping, not erasing
+`vendor → canonical app/product → app instance/site/workspace → users/contracts/invoices/license facts/
+metrics`. **`apps` remains the operational app instance/site/workspace row.** Canonical grouping is layered
+ABOVE `apps` via `vendors` / `app_products` (canonical) / `app_aliases` (provenance) + a nullable
+`apps.canonical_app_id`. **Distinct app instances must not be collapsed into one app row. Canonical matching
+groups related apps for roll-up reporting without erasing instance boundaries.**
+
+### 59.2 Schema added (`0024`)
+The old app had manual overlap-analysis grouping, not automatic canonical app resolution. Structured instance identity fields are added to apps.
+Three tenant-scoped tables (same-tenant integrity via UNIQUE(id, tenant_id) + composite MATCH-SIMPLE FKs, the
+`0005` pattern; RLS = members read + editors INSERT + editors UPDATE, **NO DELETE policy** — the `0004`-
+hardened evidence-table posture, since canonical groupings are repointed, not erased):
+- **`vendors`** — the vendor family (e.g. "Atlassian"); `name`/`normalized_name`/`website_domain`/`source`.
+- **`app_products`** — the CANONICAL app/product (e.g. "Jira"/"Confluence"/"Bitbucket"); `vendor_id` (same-
+  tenant composite FK), `name`/`normalized_name`/`category`.
+- **`app_aliases`** — source/provenance/alias mapping + the resolver's review record: `app_product_id`,
+  `app_id` (the operational instance it came from), `alias_type` (domain/instance_domain/external_instance_id/
+  provider_app_id/oauth_client_id/sso_app_id/name), `alias_value`, `source`, and the audit/review fields
+  reusing the `app_user_identity_matches` pattern — `confidence numeric(5,2)`, `review_status`, `reviewed_by`,
+  `reviewed_at`, `provenance jsonb`.
+
+**Structured instance identity fields are added to apps:** `canonical_app_id` (nullable, same-tenant FK to
+`app_products`), `instance_domain`, `external_instance_id`, `instance_url`. **instance_domain and
+external_instance_id are future merge/no-merge discriminators** (the current v3 `apps` row had no safe
+instance discriminator). Indexes for the new tables + the new `apps` canonical/instance fields.
+
+### 59.3 Multi-instance support (Atlassian)
+Vendor **Atlassian** → canonical products **Jira / Confluence / Bitbucket** → instances **Jira/Flywheel
+(flywheel.atlassian.net), Jira/Perpetua (perpetua.atlassian.net), Confluence/Flywheel
+(flywheel.atlassian.net/wiki)** — each a separate `apps` row grouped under one `app_product`, never collapsed.
+**Existing app_contracts already supports one contract linked to many app instances** (its `(app_id,
+contract_id)` many-to-many PK) — **no replacement for app_contracts is added.** Separate invoices per instance
+already work (`invoices.app_id` + `apps.paying_org_id`). **One-invoice-split-across-orgs is documented as
+future work only** (a secondary gap; no invoice-allocation rows in this PR).
+
+### 59.4 Metrics + resolver (documented; not implemented)
+- **Canonical user rollups must count distinct person_id after identity matching, not sum app_users naively**
+  — per-instance counts may use `app_users`, but at the canonical/vendor level a user is distinct `person_id`
+  once the app_user→person matching engine exists. **Canonical rollups depend on the app_user to person
+  matching engine.**
+- **Future resolver (NOT implemented):** deterministic keys first (`instance_domain`, `external_instance_id`,
+  `domain`, provider app id, OAuth client id, SSO app id); owner/paying/responsible org influences merge/
+  no-merge; same vendor/product but a different `instance_domain`/`external_instance_id` groups under the same
+  canonical app but stays separate `apps` rows; low confidence → human review (reusing confidence/reviewed_by/
+  reviewed_at); unmerge by repointing aliases/`canonical_app_id`, NOT by rewriting historical users/contracts/
+  invoices. **No automatic resolver is implemented.**
+
+### 59.5 Tests + posture (T46; RLS suite **424 → 446**; types 1553 → 1744)
+T46 proves: the 3 new tables are RLS-enabled with EXACTLY {SELECT, INSERT, UPDATE} policies (no DELETE/ALL);
+functional tenant isolation (a Tenant A member reads its vendor/product, a Tenant B member cannot, a
+cross-tenant insert is RLS-denied); the `apps` canonical/instance columns exist; `app_contracts` is unchanged
+(its `(app_id, contract_id)` PK intact, no canonical/instance columns); **No identity_account_id is
+introduced** (none on any new table or `apps`); the `app_aliases` audit fields exist; `connector_secrets`
+still has zero policies (untouched). Migration-safety passes; generated types update for the new schema.
+
+**No app graph writes are implemented. No provider API call is made. No OAuth code is exchanged for tokens. No
+access token is stored. No refresh token is stored. No connector credentials are stored. No connector secret
+material is inserted, updated, deleted, or read. No connector sync is implemented. No credential form is
+implemented. No connect/reconnect/disconnect action is exposed to users. No browser-accessible service-role
+request path is added. No production data was touched. No hosted commands were run. Connector implementation
+remains blocked. Old-app parity is not complete. UI/UX parity is not complete. AI/API connector parity is not
+complete. Upload is not automatically production-ready. Hosted Auth/tenant-context is verified, but old-app
+replacement is not yet verified. RISK-001 remains OPEN. RISK-007 remains OPEN. Cutover remains BLOCKED.** No
+doc 17 §5 box is ticked by this PR.
