@@ -2139,3 +2139,47 @@ commands were run. Connector implementation remains blocked. Old-app parity is n
 not complete. AI/API connector parity is not complete. Upload is not automatically production-ready. Hosted
 Auth/tenant-context is verified, but old-app replacement is not yet verified. RISK-001 remains OPEN. Cutover
 remains BLOCKED.** No doc 17 §5 box is ticked by this PR.
+## 57. Staging verification — graph-scale discovery indexes `0023` (PR #135)
+
+**Graph-scale discovery indexes are applied and verified on staging.** A human applied
+`0023_graph_scale_discovery_indexes.sql` to the staging project `ycdpzduxugdsffjqyoai` (local/main at
+`b8acc06` — PR #134) and verified the live index set. **The agent ran nothing — no hosted command, no
+staging mutation, no secrets. No production migration was run.**
+
+### 57.1 Observed — PASS
+Staging is aligned through migration 0023. The indexes support tenant-scoped RLS hot paths, high-volume discovery, and app/user/account matching. Production is not verified for 0023.
+`0023` was MISSING on staging before the push; `supabase db push --linked` applied it successfully; **Staging
+is aligned through migration 0023** — `supabase migration list --linked` showed `0001` through `0023` aligned
+(Local and Remote). **All 36 expected graph-scale indexes were present on staging after verification** (the
+index-verification query returned exactly): tenant_memberships_user_tenant_status_idx, app_users_tenant_app_idx, app_users_email_lower_idx,
+app_users_external_user_id_idx, app_users_tenant_status_idx, identity_accounts_tenant_idx,
+identity_accounts_person_idx, identity_accounts_email_lower_idx, identity_accounts_external_id_idx,
+identity_accounts_tenant_provider_idx, people_tenant_idx, people_primary_email_lower_idx,
+people_tenant_employee_status_idx, app_user_identity_matches_tenant_idx, app_user_identity_matches_person_idx,
+apps_tenant_status_idx, apps_vendor_name_lower_idx, apps_name_lower_idx, apps_procurement_owner_org_idx,
+apps_paying_org_idx, apps_responsible_org_idx, contracts_tenant_status_idx, contracts_vendor_name_lower_idx,
+contracts_renewal_date_idx, contracts_procurement_org_idx, contracts_paying_org_idx, invoices_tenant_idx,
+invoices_app_idx, invoices_contract_idx, invoices_tenant_invoice_date_idx, app_contracts_contract_idx,
+license_evaluations_tenant_idx, license_evaluations_app_user_idx, license_evaluations_app_idx,
+license_rules_tenant_idx, license_rules_app_active_idx. **The indexes support tenant-scoped RLS hot paths,
+high-volume discovery, and app/user/account matching** — the `lower(email)`/`lower(primary_email)`/
+`lower(name)`/`lower(vendor_name)` functional indexes, the `*_person_idx` app_user→person + identity_account→
+person match indexes, and the owning-org joins all landed. This matches the `0023` intent + the local
+`org_rls_test.sql` T45 proof; staging now mirrors the local schema.
+
+### 57.2 Local validation (before the staging apply)
+325 tests passed; the RLS migration tests passed (RLS assertions **424**, `ALL ORG-RLS ASSERTIONS PASSED`);
+lint, typecheck, build, auth-safety, and migration-safety all passed; generated DB types remained 1553 lines.
+
+### 57.3 Scope / status
+This verifies only that `0023` applied + the 36 indexes exist on staging — not any connector behavior (there
+is none). **Production is not verified for 0023** (a human applies it to production in a future step; the agent
+never runs hosted commands). **No app code changed. No schema changed in this verification PR. No connector
+behavior changed. No provider API call was made. No OAuth code was exchanged for tokens. No access token was
+stored. No refresh token was stored. No connector credentials were stored. No connector secret material was
+inserted, updated, deleted, or read. No connector sync was implemented. No credential form was implemented. No
+connect/reconnect/disconnect action was exposed to users. No browser-accessible service-role request path was
+added. No production data was touched. Connector implementation remains blocked. Old-app parity is not
+complete. UI/UX parity is not complete. AI/API connector parity is not complete. Upload is not automatically
+production-ready. Hosted Auth/tenant-context is verified, but old-app replacement is not yet verified. RISK-001
+remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is ticked by this verification.

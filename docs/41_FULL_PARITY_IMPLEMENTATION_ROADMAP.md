@@ -2341,3 +2341,29 @@ commands were run. Connector implementation remains blocked. Old-app parity is n
 not complete. AI/API connector parity is not complete. Upload is not automatically production-ready. Hosted
 Auth/tenant-context is verified, but old-app replacement is not yet verified. RISK-001 remains OPEN. Cutover
 remains BLOCKED.** No doc 17 §5 box is ticked by this PR.
+---
+
+## 68. STAGING VERIFICATION — graph-scale discovery indexes `0023` (PR #135)
+
+**Graph-scale discovery indexes are applied and verified on staging** (doc 42 §57). A human applied `0023`
+to staging (`ycdpzduxugdsffjqyoai`; local/main `b8acc06` — PR #134): `0023` was missing before the push,
+`supabase db push --linked` applied it, and **Staging is aligned through migration 0023** (`migration list
+--linked` shows `0001`–`0023` aligned, Local + Remote). **All 36 expected graph-scale indexes were present on
+staging after verification** (the lower(email)/lower(primary_email)/lower(name)/lower(vendor_name) functional
+indexes, the `*_person_idx` app_user→person + identity_account→person match indexes, the tenant/status RLS
+hot-path indexes, the owning-org joins, and the invoices/app_contracts/license rollups). **The indexes support
+tenant-scoped RLS hot paths, high-volume discovery, and app/user/account matching.** Matches T45.
+
+Local validation before the apply: 325 tests passed; RLS migration tests passed (assertions **424**); lint/
+typecheck/build/auth-safety/migration-safety passed; generated types remained 1553 lines. **The agent ran
+nothing hosted. No production migration was run. Production is not verified for 0023** (a human applies it to
+production in a future step). RLS suite unchanged (**424**), no migration, no code. **No app code changed. No
+schema changed in this verification PR. No connector behavior changed. No provider API call was made. No OAuth
+code was exchanged for tokens. No access token was stored. No refresh token was stored. No connector
+credentials were stored. No connector secret material was inserted, updated, deleted, or read. No connector
+sync was implemented. No credential form was implemented. No connect/reconnect/disconnect action was exposed
+to users. No browser-accessible service-role request path was added. No production data was touched. Connector
+implementation remains blocked. Old-app parity is not complete. UI/UX parity is not complete. AI/API connector
+parity is not complete. Upload is not automatically production-ready. Hosted Auth/tenant-context is verified,
+but old-app replacement is not yet verified. RISK-001 remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box
+is ticked by this PR.
