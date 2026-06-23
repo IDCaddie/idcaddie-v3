@@ -72,6 +72,9 @@ const CRYPTO_REL_HINTS = [
   "connector-vault/resolver-write",
   "server/connector-vault/resolver-write",
   "lib/server/connector-vault/resolver-write",
+  "connector-vault/identity-match-write",
+  "server/connector-vault/identity-match-write",
+  "lib/server/connector-vault/identity-match-write",
 ];
 
 function walk(dir: string): string[] {
