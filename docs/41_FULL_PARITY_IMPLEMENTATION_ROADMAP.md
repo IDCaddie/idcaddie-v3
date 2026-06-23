@@ -2936,3 +2936,45 @@ Connector implementation remains blocked. Old-app parity is not complete. UI/UX 
 connector parity is not complete. Upload is not automatically production-ready. Hosted Auth/tenant-context is
 verified, but old-app replacement is not yet verified. RISK-001 remains OPEN. RISK-007 remains OPEN. Cutover
 remains BLOCKED.** No doc 17 §5 box is ticked by this PR.
+---
+
+## 85. PRODUCTION VERIFICATION — identity match `0027`+`0028` (PR #152)
+
+**Identity match write policies are applied and verified on production. Identity match tenant app_user
+uniqueness is applied and verified on production** (doc 42 §74). A human applied `0027` + `0028` to production
+(`dzbfxulvxchdemcettrx`; current main `7c60a06` — PR #151): before the push production was missing both, **the
+production duplicate preflight returned zero duplicate groups before apply** (`duplicate_group_count = 0`), the
+human-run `supabase db push` applied them, and `migration list --linked` shows **Production is aligned through
+migration 0028. Staging and production are aligned through migration 0028.** **The production apply and
+verification were human-run; this PR only records the evidence — the agent did not touch production and ran no
+hosted command.**
+
+- **The app_user_identity_matches_tenant_app_user_key constraint is present on production. The app_user
+  identity-match natural key is UNIQUE (tenant_id, app_user_id). The database enforces one app_user to at most
+  one person per tenant on production. The existing pair constraint UNIQUE (app_user_id, person_id) remains
+  present. The pair constraint prevents duplicate pairs, but the tenant/app_user constraint prevents false
+  person double-matches.**
+- **The app_user_identity_matches INSERT policy is present on production. The app_user_identity_matches SELECT
+  policy is present on production. The app_user_identity_matches UPDATE policy is present on production. No
+  DELETE policy is present for app_user_identity_matches. Correction is repoint/update, not delete.**
+- **The deterministic identity-match write helper uses the same tenant/app_user natural-key model. Local
+  fixture tests prove repeated deterministic identity-match runs do not increase app_user_identity_matches row
+  count. Local tests prove duplicate candidate people route to review/no-write. Local tests prove plus/dot email
+  variants do not match. Local tests prove display-name-only and domain-only candidates do not write. This is
+  not a claim that all identity matching behavior is complete.**
+- **Local Supabase link was returned to staging after production verification. Final linked ref was
+  ycdpzduxugdsffjqyoai.**
+
+Local validation after the #151 merge: 446 tests passed; RLS migration tests passed (assertions **492**); lint/
+typecheck/build/auth-safety/migration-safety passed; generated database types remained 1828 lines. RLS suite
+unchanged (**492**), no migration, no code, no generated-types change. **No app code changed. No schema changed
+in this verification PR. No migration changed in this verification PR. No connector behavior changed. No app
+graph write is implemented in this verification PR. No app_alias write is implemented in this verification PR.
+No provider API call was made. No OAuth code was exchanged for tokens. No access token was stored. No refresh
+token was stored. No API key was stored. No connector credentials were stored. No connector secret material was
+inserted, updated, deleted, or read. No connector sync was implemented. No credential form was implemented. No
+connect/reconnect/disconnect action was exposed to users. No browser-accessible service-role request path was
+added. No production data was touched. Connector implementation remains blocked. Old-app parity is not
+complete. UI/UX parity is not complete. AI/API connector parity is not complete. Upload is not automatically
+production-ready. Hosted Auth/tenant-context is verified, but old-app replacement is not yet verified. RISK-001
+remains OPEN. RISK-007 remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is ticked by this PR.
