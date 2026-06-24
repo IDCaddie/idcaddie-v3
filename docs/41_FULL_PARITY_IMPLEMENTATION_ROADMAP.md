@@ -3214,3 +3214,29 @@ live connector, no request-path decrypt, no service-role path, no route, no UPDA
 Real credentials still blocked; rotation/revocation + real credential lifecycle remain missing. **RISK-001 remains
 OPEN. RISK-007 remains OPEN. Cutover remains BLOCKED. Connector credentials are not production-ready.** No doc 17
 §5 box is ticked by this PR.
+---
+
+## 94. CONNECTOR SECRET LIFECYCLE DATA MODEL — DECISION: Model B (PR #168, design/spec only)
+
+Resolves the connector-secret rotation/revocation/tombstone data model (doc 42 §85). **Design/spec ONLY — no
+migration, no code, no runtime event constant.** RISK-007 remains OPEN.
+
+- **Model B selected:** lifecycle state lives in a separate, INSERT-only `connector_secret_lifecycle_events`
+  table; **`connector_secrets` stays append-only (no UPDATE/DELETE, no new UPDATE grant)** — preserving the T50
+  invariant. Rotation = a new higher-`version` secret row; revocation/tombstone = an insert-only lifecycle event;
+  revoke-without-replacement supported.
+- **Monotonic** toward non-loadable: a `revoked`/`tombstoned` event permanently makes that version non-loadable;
+  no unrevoke/reactivate/restore; terminal event wins.
+- **Load = fail-closed latest-INTENT:** highest version across ALL rows first, then eligibility of THAT version
+  only; **no fallback to a lower version**; expiry treated as strictly as revocation. (Exact-version lookup
+  returns only if that exact version is eligible.)
+- **Grants/RLS/atomicity spec** handed to the implementation PR: narrow column-scoped runner INSERT+SELECT on the
+  lifecycle table (never UPDATE/DELETE), append-only trigger proven under the runner, tenant-isolation RLS, and
+  atomic lifecycle-event + audit-event commits (the §84 pattern; no compensating delete).
+- Lifecycle audit event names reserved in prose only; the #166 builder still supports only the nine store/load/
+  decrypt events; #167 wired only the six store/load events.
+
+Tests unchanged (**548**); RLS unchanged (**550**); types unchanged (**1837**); no migration. **No lifecycle
+behavior implemented. Real credentials still blocked; rotation/revocation + real credential lifecycle remain
+missing. RISK-001 remains OPEN. RISK-007 remains OPEN. Cutover remains BLOCKED. Connector credentials are not
+production-ready.** No doc 17 §5 box is ticked by this PR.
