@@ -3152,9 +3152,10 @@ proven by it.**
   `dzbfxulvxchdemcettrx`; requires staging `ycdpzduxugdsffjqyoai`; requires the confirmation phrase + identity/
   config by ENV NAME only; synthetic plaintext `synthetic-kms-dry-run-not-a-token` only; redacted output.
 - Tests (synthetic only): RUNNER POSITIVE (runner can GenerateDataKey/Encrypt/Decrypt); **WEB/REQUEST NEGATIVE
-  (load-bearing) — the web identity attempting `kms:Decrypt` must be DENIED**; web KMS surface confirmed; the
-  evidence distinction (DB shape proven by #163 vs KMS/IAM separation proven/not by this run vs real-credential
-  readiness still blocked); explicit safe failure states.
+  (load-bearing) — the web identity attempting `kms:Decrypt` must be DENIED** (if it SUCCEEDS the separation is
+  BROKEN → recorded as FAIL + a RISK-007 finding, not as proof); web KMS surface confirmed; the evidence
+  distinction (DB shape proven by #163 vs KMS/IAM separation proven/not by this run vs real-credential readiness
+  still blocked); explicit safe failure states.
 - KMS/IAM test ONLY — touches NO database, writes NO `connector_secrets`, broadens NO `connector_runner` grant;
   no migration, no RLS change, no app code, never makes the web/request runtime decrypt-capable.
 
