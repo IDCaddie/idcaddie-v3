@@ -3468,3 +3468,47 @@ to users. No browser-accessible service-role request path is added. No hosted st
 run by the agent. Connector implementation remains blocked. Old-app parity is not complete. Connector
 credentials are not production-ready. RISK-001 remains OPEN (no separate hosted evidence in this PR). RISK-007
 remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is ticked by this PR.
+## 80. Staging verification — connector secret store synthetic dry-run (PR #163)
+
+A human operator ran the PR #161 NO-REAL-TOKEN staging synthetic dry-run of the PR #160 runner-backed
+connector_secrets store adapter on staging `ycdpzduxugdsffjqyoai`, and it PASSED for the store-adapter DB SHAPE
+with SYNTHETIC data only. **The dry-run and its verification were human-run; this PR only records the non-secret
+evidence — the agent did not touch staging and ran no hosted command.** Recorded 2026-06-24.
+
+### 80.1 What ran
+- Script: `scripts/verify-staging-connector-secret-store-dry-run.mjs` — the #161 harness (`dc8abcc`,
+  sha256 `7048c678…b3eb82`), generated for staging only.
+- Staging ref used: `ycdpzduxugdsffjqyoai`. **Production ref `dzbfxulvxchdemcettrx` was NOT used.**
+- Synthetic sentinel `synthetic-vault-dry-run-not-a-token` only. No real provider token was used. No secret
+  values were printed.
+
+### 80.2 Observed — PASS (synthetic data only)
+- **`SET ROLE connector_runner`** was used for the runner path.
+- The adapter's **12-column INSERT** path returned **1 row** (writes only the allowed identity + envelope
+  columns).
+- The adapter's **active/non-expired SELECT** path returned **1 row**.
+- A **wrong tenant/connector/kind/version** SELECT returned **0 rows** (fail closed).
+- **Expired and revoked** rows were **excluded** from the active/non-expired SELECT.
+- **Cleanup was narrow and synthetic-keyed** (the synthetic tenant + `dryrun-kek-%` key prefix, on the
+  setup/admin connection; the runner holds no DELETE grant and none was added).
+
+### 80.3 The precise claim — what this does and does NOT prove
+This run proves the runner-backed store-adapter **DB grant SHAPE** on real hosted staging: the `0029`/`0030`
+COLUMN-scoped INSERT/SELECT under `SET ROLE connector_runner`, the active/non-expired filter, fail-closed on a
+wrong context, expired/revoked exclusion, and narrow synthetic-keyed cleanup — all with SYNTHETIC data only.
+
+It does **NOT**:
+- store a real connector credential (only the synthetic sentinel was used);
+- **prove hosted KMS/IAM separation** — the run did not exercise (or did not record) a real KMS Decrypt/unwrap
+  against a request-path-vs-runner IAM boundary, so the hosted KMS/IAM decrypt separation remains UNVERIFIED;
+- prove a full end-to-end real-secret encrypt→store→load→decrypt path against a real KMS;
+- permit real connector credential storage or use.
+
+### 80.4 Remaining RISK-007 work (still OPEN)
+Hosted KMS/IAM grant runtime separation (runner has `kms:Decrypt`, web does not — the real cryptographic decrypt
+boundary), audited secret access/use, revocation/rotation/tombstone, and real (non-synthetic) credential storage
+all remain. **No real KMS client is added. No live Okta sync is added. This PR stores no real customer token. No
+service-role path is added. No provider API call was made. No OAuth code was exchanged for tokens. No connector
+credential is stored. No hosted production commands were run. Connector implementation remains blocked. Old-app
+parity is not complete. Connector credentials are not production-ready. RISK-001 remains OPEN. RISK-007 remains
+OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is ticked by this PR.
