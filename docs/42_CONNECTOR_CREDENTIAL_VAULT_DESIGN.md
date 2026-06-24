@@ -3716,3 +3716,161 @@ narrow `0031` audit-INSERT grant (audit_logs only). **Real connector credential 
 rotation/revocation and the real credential lifecycle remain missing. Connector implementation remains blocked.
 Old-app parity is not complete. Connector credentials are not production-ready. RISK-001 remains OPEN. RISK-007
 remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is ticked by this PR.
+## 85. Connector secret lifecycle data model — DECISION: Model B (PR #168, design/spec only)
+
+**This is a design/spec PR. It resolves the connector-secret lifecycle (rotation / revocation / tombstone) data
+model and gives the next implementation PR exact instructions. NO lifecycle behavior, migration, code, or runtime
+event constant is added here.** RISK-007 remains OPEN.
+
+### 85.1 Decision — Model B (separate append-only lifecycle table)
+Lifecycle state lives in a **separate, INSERT-only `connector_secret_lifecycle_events` table**, NOT in a mutable
+`connector_secrets.status`. **`connector_secrets` stays append-only: no UPDATE, no DELETE, no new UPDATE grant.**
+
+**Why Model B (not "UPDATE connector_secrets.status"):**
+- Rotation is naturally insert-only — a new secret version is a NEW `connector_secrets` row (higher `version`).
+- Revocation must support **revoke-without-replacement**, which an insert-only event expresses cleanly.
+- Updating `connector_secrets.status` would require granting `connector_runner` **UPDATE** on the secret table —
+  weakening the exact append-only invariant RISK-007 has protected (T50 asserts no runner UPDATE/DELETE).
+- A separate lifecycle table keeps the encrypted-envelope rows **immutable** and lifecycle state **append-only**.
+- The load query gets more complex, but the complexity is contained, explicit, and testable (see §85.6).
+
+### 85.2 Data model — `connector_secret_lifecycle_events` (proposed; INSERT-only)
+A minimal append-only table. **All lifecycle writes are INSERT-only.** Proposed shape (the implementation PR
+finalizes exact types against the live schema):
+
+| column | notes |
+| --- | --- |
+| `id` | uuid pk, server default |
+| `tenant_id` | uuid not null, FK `tenants(id)` on delete cascade (tenant isolation key) |
+| `connector_id` | uuid not null, FK `connectors(id)` |
+| `secret_kind` | text not null (the bounded lower-snake kind, matching `connector_secrets`) |
+| `version` | integer not null (the targeted secret version) |
+| `lifecycle_event_type` | text not null, CHECK in (`revoked`, `tombstoned`, `superseded`) — `superseded` only if needed |
+| `reason_class` | text — a SAFE STATIC reason class only (a fixed allowlist; never free-form, never a raw error) |
+| `actor_type` | text — actor/runtime type if available (e.g. `connector_runner`) |
+| `correlation_id` | text — request/job/run id, grammar-safe only (uuid or `run-`/`job-`/… prefixed; see §83.3) |
+| `audit_log_id` | uuid null — optional reference to the paired `audit_logs` row, if useful |
+| `created_at` | timestamptz not null default `now()` (the DB owns the timestamp) |
+
+**Hard-prohibited columns/values (never stored):** plaintext, provider/access/refresh token, client secret,
+ciphertext, DEK / wrapped DEK / key material, AEAD tag, nonce/IV, `aad_digest`, KMS response, DB URL, env values,
+raw error object, or any arbitrary-metadata passthrough. The table holds ONLY non-secret lifecycle metadata.
+
+### 85.3 Lifecycle monotonicity (toward non-loadable; never reversible)
+Lifecycle events are **monotonic toward a non-loadable state**:
+- The presence of ANY `revoked` event for a `(tenant_id, connector_id, secret_kind, version)` **permanently** makes
+  that version non-loadable.
+- The presence of ANY `tombstoned` event for that key **permanently** makes that version non-loadable.
+- There is **NO** `unrevoked` / `reactivated` / `restored` / `untombstoned` (or equivalent) event — none is
+  defined, none may be added without a separate reviewed design change.
+- A later lifecycle event MUST NOT make a revoked/tombstoned version loadable again.
+- If multiple lifecycle events exist for the same version, **any terminal non-loadable event WINS** (revoked or
+  tombstoned dominates `superseded` and dominates the absence of events).
+
+### 85.4 Rotation semantics
+- INSERT a NEW `connector_secrets` row with a **higher `version`** (a new encrypted envelope).
+- The old version's row remains **immutable** — **no UPDATE, no DELETE** of the old secret row.
+- The old version MAY be marked `superseded` via an INSERT-only lifecycle event (optional; `superseded` alone is
+  NOT terminal — it does not by itself make a version non-loadable, but a higher eligible version will win the
+  latest-lookup per §85.6).
+- When implemented, the rotation new-secret INSERT + the `superseded` lifecycle event (if used) + the rotation
+  audit event **commit atomically** (§85.8).
+
+### 85.5 Revocation semantics
+- INSERT a lifecycle event row stating `(tenant_id, connector_id, secret_kind, version)` is `revoked`.
+- The revoked secret version is **no longer loadable** (§85.3, §85.6).
+- **Revoke-without-replacement is supported** (no new secret row is required).
+- **No UPDATE** to `connector_secrets`; **no DELETE** from `connector_secrets`.
+- When implemented, the revocation lifecycle event + its audit event **commit atomically** (§85.8).
+
+### 85.6 Load query semantics — fail-closed latest-intent (resolve the ugly cases EXPLICITLY)
+The load must be **fail-closed**. A version is **ELIGIBLE** iff: the exact `connector_secrets` row exists, is
+`status='active'`, is not expired (`expires_at is null or expires_at > now()`), its stored envelope is complete/
+well-formed, AND there is **NO** `revoked` and **NO** `tombstoned` lifecycle event for that exact version.
+
+**Exact-version lookup** (the current `findEncryptedSecret(tenant, connector, kind, version)`): return the secret
+**only if that exact version is ELIGIBLE**; otherwise return `null` / fail closed.
+
+**Latest-version lookup** (if/when added — NOT in the current adapter): this is **latest-INTENT, not
+highest-eligible**:
+1. Determine the **highest `version`** across ALL `connector_secrets` rows for `(tenant, connector, secret_kind)` —
+   **including** revoked, tombstoned, superseded, expired, and malformed rows.
+2. Evaluate **eligibility of that single highest version ONLY** (§ above).
+3. If that highest version is revoked / tombstoned / expired / malformed / inactive / otherwise ineligible →
+   return `null` / fail closed.
+4. **DO NOT** silently fall back to a lower valid version. **DO NOT** compute "highest ELIGIBLE version" — that
+   would silently skip a revoked/tombstoned/expired HIGHER version and violate the safety rule.
+- **Reason:** falling back to a lower version can **resurrect an old credential** after an intended revoke, a
+  failed rotation, or an expiry — which is unsafe.
+
+**Expiry is treated as strictly as revocation in this phase:** highest version expired + lower version valid →
+return `null` (deliberate fail-closed). Any future relaxation that allows expiry fallback MUST be a separate
+reviewed design change, **never an implementation accident**.
+
+**Explicit edge cases (all must be documented + tested when implemented):**
+- several active versions exist → the highest version wins **only if eligible**;
+- highest version expired, lower version valid → **null** (no fallback);
+- highest version revoked, lower version active → **null** (no fallback);
+- highest version tombstoned, lower version active → **null** (no fallback);
+- all versions revoked → **null**;
+- exact version revoked → **null**;
+- exact version expired → **null**;
+- tombstoned version → **null**;
+- multiple lifecycle events for a version (incl. revoked/tombstoned) → the **terminal non-loadable event wins**.
+
+### 85.7 Tombstone semantics
+- An explicit INSERT-only `tombstoned` lifecycle event.
+- Makes the secret version **non-loadable** (§85.3, §85.6).
+- Used for intentional, **non-destructive** retirement — **no hard delete** of the secret row.
+- When implemented, the tombstone lifecycle event + its audit event **commit atomically** (§85.8).
+
+### 85.8 Grants & RLS (spec for the implementation PR)
+- **`connector_secrets`:** NO UPDATE/DELETE grant — unchanged. Rotation = a new INSERT row (the existing 0029/0030
+  column INSERT/SELECT grant already covers it). T50 stays intact.
+- **`connector_secret_lifecycle_events`:** narrow, explicit grants only —
+  - `connector_runner` needs **column-scoped INSERT** (the non-secret lifecycle columns) for revoke/tombstone/
+    supersession events;
+  - `connector_runner` needs **column-scoped SELECT** (the eligibility columns: tenant/connector/kind/version/
+    `lifecycle_event_type`) so the load query can test revocation/tombstone state;
+  - `connector_runner` must **NOT** get UPDATE or DELETE on the lifecycle table;
+  - no broad grants; no grant to `anon`/`authenticated`/`public` beyond a tenant-member RLS read if desired;
+  - **no service-role request path; no public/API route.**
+- **Append-only protection:** an `audit_logs`-style `before update or delete` trigger (or equivalent) MUST reject
+  UPDATE/DELETE on the lifecycle table, **proven under `set role connector_runner`** (mirror T52).
+- **RLS/tests** must prove tenant isolation (a tenant cannot read another tenant's lifecycle events) and the runner
+  grant boundary (INSERT + SELECT only; no UPDATE/DELETE; column-scoped).
+
+### 85.9 Atomicity requirements (for the implementation PR)
+When implemented, each lifecycle mutation + its audit event **commit atomically in ONE runner transaction**
+(the §84 pattern; the audit writer enlists in the runner tx — no separate connection/role/RPC):
+- rotation: new-secret INSERT + (optional) `superseded` lifecycle event + the rotation audit event — atomic;
+- revocation: `revoked` lifecycle event + the revocation audit event — atomic;
+- tombstone: `tombstoned` lifecycle event + the tombstone audit event — atomic;
+- **audit failure rolls back the lifecycle change; lifecycle-write failure rolls back the audit write; NO
+  compensating DELETE.**
+
+**Real DB tests (under `set role connector_runner`) must prove:** audit failure leaves no lifecycle event;
+lifecycle failure leaves no audit event; rotation audit failure leaves no new secret row; revocation audit
+failure leaves no lifecycle event; tombstone audit failure leaves no lifecycle event; no hard delete exists;
+append-only enforcement holds under `connector_runner`.
+
+### 85.10 Audit event names — RESERVED in prose only (no runtime constants here)
+The lifecycle audit events below are **reserved by name** for the implementation PR. **Do NOT add these as
+runtime event constants until the behavior is implemented** (the #166 builder still supports ONLY the nine
+store/load/decrypt events; #167 wired ONLY the six store/load events; decrypt + these lifecycle events remain
+unwired):
+`connector_secret.rotation.{attempted,succeeded,failed}`,
+`connector_secret.revocation.{attempted,succeeded,failed}`,
+`connector_secret.tombstone.{attempted,succeeded,failed}`.
+
+### 85.11 Status — **RISK-007 remains OPEN**
+**Model B is the selected lifecycle model.** `connector_secrets` remains append-only; revocation/tombstone state
+will be INSERT-only in the separate `connector_secret_lifecycle_events` table; latest lookup computes the highest
+version across ALL rows first, then checks eligibility, with NO fallback to lower versions; lifecycle events are
+monotonic and revoked/tombstoned versions cannot be reactivated. **No lifecycle behavior, migration, code, or
+runtime event constant is implemented in this PR.** Store/load audit (the synthetic DB shape proven by #163, the
+KMS/IAM decrypt separation by #165, the audit scaffolding #166, and the atomic store/load audit wiring #167)
+stands; this PR only DESIGNS the lifecycle model on top of it. **Real connector credential storage/use is still
+NOT allowed; rotation/revocation behavior and the real credential lifecycle remain missing. Connector
+implementation remains blocked. Old-app parity is not complete. Connector credentials are not production-ready.
+RISK-001 remains OPEN. RISK-007 remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is ticked by this PR.
