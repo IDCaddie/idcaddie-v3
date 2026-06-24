@@ -2859,4 +2859,40 @@ do $$ declare ok boolean; begin
 end $$;
 reset role;
 
+-- ── Test 51: runner-backed connector_secrets store adapter — read query is grant-compatible + filters ─
+-- The connector-secret-store.ts adapter loads a secret with a SELECT that projects the granted envelope columns
+-- and filters to ONE active, non-expired row for (tenant, connector, kind, version). A TS mock cannot prove the
+-- literal query is grant-accessible to connector_runner; this runs the adapter's EXACT SELECT shape as the
+-- runner against real Postgres — proving every projected/filtered column (incl. status/expires_at) is readable
+-- under the 0029/0030 COLUMN grant, AND that the active/expiry/status filter is correct. It seeds rows as
+-- superuser (the runner has no status/expires_at INSERT grant) and does NOT modify T50.
+reset role;
+-- three rows for the SAME connector + kind, distinguished by status/expiry (all columns the runner may read).
+insert into public.connector_secrets (tenant_id, connector_id, secret_kind, version, status, expires_at, ciphertext, key_id, envelope_version, aead_alg)
+  values
+    ('11111111-1111-1111-1111-111111111111','17000000-0000-0000-0000-0000000000a1','api_key', 51, 'active',  null,                       '\xdead'::bytea, 'kek-51', 1, 'AES-256-GCM'),
+    ('11111111-1111-1111-1111-111111111111','17000000-0000-0000-0000-0000000000a1','api_key', 52, 'active',  now() - interval '1 day',   '\xdead'::bytea, 'kek-52', 1, 'AES-256-GCM'),
+    ('11111111-1111-1111-1111-111111111111','17000000-0000-0000-0000-0000000000a1','api_key', 53, 'revoked', null,                       '\xdead'::bytea, 'kek-53', 1, 'AES-256-GCM');
+set role connector_runner;
+do $$ begin
+  -- the adapter SELECT shape (projected/filtered columns) runs without permission error AND filters correctly:
+  -- v51 active + non-expired -> 1 row; v52 expired -> 0; v53 revoked -> 0.
+  assert (select count(*) from (
+            select id, ciphertext, dek_wrapped, aead_nonce, aad_digest, key_id, aead_tag, envelope_version, aead_alg
+            from public.connector_secrets
+            where tenant_id='11111111-1111-1111-1111-111111111111' and connector_id='17000000-0000-0000-0000-0000000000a1'
+              and secret_kind='api_key' and version=51 and status='active' and (expires_at is null or expires_at > now())
+          ) q) = 1,
+         'T51 runner adapter SELECT returns the active, non-expired secret (grant-compatible projection + filter)';
+  assert (select count(*) from public.connector_secrets
+          where tenant_id='11111111-1111-1111-1111-111111111111' and connector_id='17000000-0000-0000-0000-0000000000a1'
+            and secret_kind='api_key' and version=52 and status='active' and (expires_at is null or expires_at > now())) = 0,
+         'T51 runner adapter SELECT excludes an EXPIRED secret';
+  assert (select count(*) from public.connector_secrets
+          where tenant_id='11111111-1111-1111-1111-111111111111' and connector_id='17000000-0000-0000-0000-0000000000a1'
+            and secret_kind='api_key' and version=53 and status='active' and (expires_at is null or expires_at > now())) = 0,
+         'T51 runner adapter SELECT excludes a REVOKED secret';
+end $$;
+reset role;
+
 do $$ begin raise notice 'ALL ORG-RLS ASSERTIONS PASSED'; end $$;

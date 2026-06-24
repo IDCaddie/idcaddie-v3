@@ -3081,3 +3081,30 @@ separation (mock KMS only, no real `KmsClient`), audited secret access/use, revo
 staging verification of `0030`, production verification of `0030`, and live token storage all remain. **No real
 KMS client, no live Okta sync, no real customer token stored, no service-role path, no hosted command. RISK-001
 remains OPEN. RISK-007 remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is ticked by this PR.
+---
+
+## 89. IMPLEMENTATION — runner-backed connector_secrets store adapter (PR #160)
+
+Wires the vault save/load boundary to the real `connector_secrets` table over the complete `0030` encrypted
+envelope (doc 42 §78). `connector-secret-store.ts` (`createRunnerConnectorSecretStore`) implements the existing
+injected `ConnectorSecretWriteStore`/`ConnectorSecretReadStore` using the runner DB client path ONLY — every
+statement under `SET ROLE connector_runner` via the injected `RunnerConnection`. NO migration (uses the existing
+`0029`/`0030` grant + schema); NO real provider token is stored.
+
+- **SAVE** inserts ONLY the 12 granted write columns (identity + the complete envelope via
+  `encryptedSecretToColumns`), `RETURNING id`, fully parameterized; never `id`/`is_active`/`status`/`created_at`/
+  `revoked_at`. The result is the row id ONLY — no plaintext, no ciphertext.
+- **LOAD** selects ONLY granted columns, filters to one ACTIVE, non-expired row for (tenant, connector, kind,
+  version), reconstructs the complete envelope via `columnsToEncryptedSecret`. Fail-closed on no-id / ambiguous
+  (>1) / incomplete-or-unsupported envelope; `null` on no match.
+- **NO UPDATE, NO DELETE.** NO service-role client; NO browser/request-path access; NO public route; NO OAuth
+  exchange; NO Okta live client. Imports only `./runner-db-client` + `./secret-vault`.
+
+`connector-secret-store.test.ts` proves SET-ROLE + parameterized SQL, only-allowed-columns, no-plaintext/
+ciphertext result, complete-envelope round-trip + decrypt, fail-closed, and the no-service-role/client/fetch/env
+purity surface. **T51** proves the adapter SELECT is grant-compatible + filters active/non-expired as
+`connector_runner` on real Postgres; **T50 unchanged**. Tests **489 → 499**; RLS suite **522 → 525**; generated
+types unchanged (**1837**, 0-diff). **RISK-007 remains OPEN** — this is the DB read/write adapter only, NOT
+hosted KMS/IAM separation (mock KMS only, no real `KmsClient`), audit, rotation/revocation, live token storage,
+or cutover readiness. **No real provider token is stored. RISK-001 remains OPEN. RISK-007 remains OPEN. Cutover
+remains BLOCKED.** No doc 17 §5 box is ticked by this PR.
