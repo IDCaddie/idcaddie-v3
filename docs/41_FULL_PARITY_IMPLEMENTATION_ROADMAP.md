@@ -3138,3 +3138,30 @@ Tests **499 -> 514** (15 verifier guard tests); RLS suite unchanged (**525**); g
 NOT proven by it; real connector credential storage/use is still NOT allowed. No real provider token is used. No
 hosted staging/production command was run by the agent. RISK-001 remains OPEN. RISK-007 remains OPEN. Cutover
 remains BLOCKED. Connector credentials are not production-ready.** No doc 17 §5 box is ticked by this PR.
+---
+
+## 91. VERIFICATION HARNESS — hosted KMS/IAM separation synthetic dry-run (PR #164)
+
+Adds `scripts/verify-staging-kms-iam-separation-dry-run.mjs` (+ guard test) — a human-run, staging-only,
+SYNTHETIC-ONLY runbook emitter for the **key remaining RISK-007 boundary**: proving the hosted RUNNER runtime
+CAN `kms:Decrypt` and the WEB/REQUEST runtime CANNOT (doc 42 §81). **Still verification infrastructure — the
+agent does NOT run it; this PR includes NO direct human-run hosted evidence, so the KMS/IAM separation is NOT
+proven by it.**
+
+- Runbook EMITTER (connects to nothing, prints no secrets, no hosted action): refuses production
+  `dzbfxulvxchdemcettrx`; requires staging `ycdpzduxugdsffjqyoai`; requires the confirmation phrase + identity/
+  config by ENV NAME only; synthetic plaintext `synthetic-kms-dry-run-not-a-token` only; redacted output.
+- Tests (synthetic only): RUNNER POSITIVE (runner can GenerateDataKey/Encrypt/Decrypt); **WEB/REQUEST NEGATIVE
+  (load-bearing) — the web identity attempting `kms:Decrypt` must be DENIED** (if it SUCCEEDS the separation is
+  BROKEN → recorded as FAIL + a RISK-007 finding, not as proof); web KMS surface confirmed; the evidence
+  distinction (DB shape proven by #163 vs KMS/IAM separation proven/not by this run vs real-credential readiness
+  still blocked); explicit safe failure states.
+- KMS/IAM test ONLY — touches NO database, writes NO `connector_secrets`, broadens NO `connector_runner` grant;
+  no migration, no RLS change, no app code, never makes the web/request runtime decrypt-capable.
+
+Tests **514 → 528** (14 guard tests); RLS suite unchanged (**525**); generated types unchanged (**1837**); no
+migration. Even a green human-run dry run proves ONLY the KMS/IAM decrypt separation with synthetic material — it
+does NOT close RISK-007 (audit + rotation/revocation + lifecycle remain) and does NOT permit real credentials.
+**No real KMS client in app code, no live Okta, no real customer token, no service-role path, no public route to
+secrets, no hosted command by the agent. RISK-001 remains OPEN. RISK-007 remains OPEN. Cutover remains BLOCKED.
+Connector credentials are not production-ready.** No doc 17 §5 box is ticked by this PR.

@@ -3512,3 +3512,54 @@ service-role path is added. No provider API call was made. No OAuth code was exc
 credential is stored. No hosted production commands were run. Connector implementation remains blocked. Old-app
 parity is not complete. Connector credentials are not production-ready. RISK-001 remains OPEN. RISK-007 remains
 OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is ticked by this PR.
+## 81. Verification harness — hosted KMS/IAM separation synthetic dry-run (PR #164)
+
+Adds `scripts/verify-staging-kms-iam-separation-dry-run.mjs` (+ its guard test) — a **human-run, staging-only,
+SYNTHETIC-ONLY** runbook emitter for the **key remaining RISK-007 boundary**: proving that the hosted RUNNER
+runtime CAN `kms:Decrypt` and the WEB/REQUEST runtime CANNOT. **This PR adds the harness only; it includes NO
+direct human-run hosted evidence, so the KMS/IAM separation is NOT proven by it.** RISK-007 stays OPEN.
+
+### 81.1 What the harness is (and is not)
+A runbook EMITTER, same safety posture as the §79 store-adapter harness: it connects to NOTHING, performs NO
+hosted action itself, and prints NO secret values. The confirmed path only PRINTS an ordered runbook the human
+operator executes. It is a **KMS/IAM test ONLY** — it touches NO database, writes NO `connector_secrets` row, and
+**broadens NO `connector_runner` DB grant** (no migration, no RLS change). It calls NO provider API, exchanges NO
+OAuth code, stores NO real credential, and creates NO public route to secrets. It never grants the web/request
+runtime decrypt capability.
+
+### 81.2 Gates (fail closed)
+Refuses the PRODUCTION ref `dzbfxulvxchdemcettrx`; requires the STAGING ref `ycdpzduxugdsffjqyoai`; requires the
+confirmation phrase `RUN KMS IAM SEPARATION STAGING DRY RUN`; requires the hosted identity/config by ENV NAME
+only (`CONNECTOR_VAULT_AWS_KMS_REGION`, `CONNECTOR_VAULT_KMS_KEY_ID`, `CONNECTOR_VAULT_RUNNER_AWS_PROFILE`,
+`CONNECTOR_VAULT_WEB_AWS_PROFILE`); never reads/prints/interpolates an env VALUE. The only plaintext is the
+synthetic sentinel `synthetic-kms-dry-run-not-a-token`. Output is redacted — plaintext (after creation),
+ciphertext, data keys, wrapped DEKs, KMS response bodies, ARNs, and key material are NEVER printed; the operator
+records only PASS/FAIL + an error CLASS (e.g. `AccessDenied`).
+
+### 81.3 What the runbook tests (synthetic material only)
+1. **RUNNER POSITIVE** — as the runner IAM identity: `kms:GenerateDataKey` → DEK + wrapped DEK; AES-256-GCM
+   encrypt the synthetic sentinel; `kms:Decrypt` the wrapped DEK → recover the DEK → decrypt → assert it equals
+   the synthetic sentinel. Expect PASS (the runner CAN GenerateDataKey/Encrypt/Decrypt — requirement 1).
+2. **WEB/REQUEST NEGATIVE (the load-bearing proof)** — as the web/request IAM identity: attempt `kms:Decrypt` on
+   the wrapped DEK → **expect `AccessDeniedException`**. If it SUCCEEDS, the separation is BROKEN (the web
+   runtime can decrypt vault secrets) — recorded as FAIL + a RISK-007 finding, not as proof (requirement 2).
+3. **WEB SURFACE** — confirm the web identity's intended KMS scope (encrypt-only, or none); the only hard
+   requirement is that `kms:Decrypt` is DENIED.
+4. **EVIDENCE distinction** — a future human-run evidence PR must distinguish: (a) the DB grant SHAPE already
+   proven by #163; (b) KMS/IAM separation PROVEN by this run ONLY if step 1 = PASS AND step 2 = DENIED, else NOT
+   proven (or BROKEN); (c) real-credential readiness STILL blocked until audit + rotation/revocation + lifecycle
+   are complete.
+5. **FAILURE STATES (explicit + safe)** — runner cannot decrypt → vault crypto/IAM path broken (NOT proven);
+   web CAN decrypt → separation BROKEN (RISK-007 finding); a missing identity/KEK/permission setup →
+   INCONCLUSIVE (NOT proven; no false claim). No key material printed in any state.
+
+### 81.4 Status — **RISK-007 remains OPEN**
+This harness ADDS the test capability; it does NOT itself prove anything (the agent does not run it). Even a
+green human-run dry run would prove ONLY the **KMS/IAM decrypt separation** with SYNTHETIC material — it would
+NOT store a real credential and would NOT, on its own, close RISK-007: **audited secret access/use,
+revocation/rotation/tombstone, and the full real-credential lifecycle remain.** **No real KMS client is added to
+app code. No live Okta sync is added. This PR stores no real customer token. No service-role path is added. No
+provider API call is made. No OAuth code is exchanged for tokens. No connector credential is stored. No
+connector_runner DB grant is broadened. No hosted command was run by the agent. Connector implementation remains
+blocked. Old-app parity is not complete. Connector credentials are not production-ready. RISK-001 remains OPEN.
+RISK-007 remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is ticked by this PR.
