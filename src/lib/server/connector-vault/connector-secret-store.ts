@@ -1,29 +1,36 @@
-// Server-only RUNNER-BACKED connector_secrets STORE ADAPTER (docs/42 §78, RISK-007 foundation). It implements
-// the injected `ConnectorSecretWriteStore` / `ConnectorSecretReadStore` boundaries (secret-vault.ts) against the
-// real `connector_secrets` table, ONLY through the runner DB client path (`SET ROLE connector_runner` — the
-// narrow COLUMN-scoped 0029/0030 INSERT/SELECT grant). It persists/loads the COMPLETE encrypted envelope using
-// the secret-vault mappers, so a save/load round-trips every field of the `crypto.ts` payload.
+// Server-only RUNNER-BACKED connector_secrets STORE ADAPTER with ATOMIC, fail-closed AUDIT (docs/42 §78/§84,
+// RISK-007 foundation). It implements the injected `ConnectorSecretWriteStore` / `ConnectorSecretReadStore`
+// boundaries (secret-vault.ts) against the real `connector_secrets` table, ONLY through the runner DB connection
+// (`SET ROLE connector_runner` — the narrow COLUMN-scoped 0029/0030 INSERT/SELECT grant + the 0031 audit-INSERT
+// grant). It persists/loads the COMPLETE encrypted envelope via the secret-vault mappers, and emits a persisted
+// connector-secret lifecycle audit row (the #166 allowlist builder) for every store/load attempt/success/failure.
 //
-// SAFE BY CONSTRUCTION:
-//   * runner-only: every statement runs under `set role connector_runner` via the injected `RunnerConnection`
-//     (the same seam as runner-db-client.ts). NO service-role / global / request-path client; NO Supabase
-//     client import; NO `fetch`; NO `process.env`; NO route/UI. Tests inject a mock connection.
-//   * column-scoped: the INSERT names ONLY the 12 granted write columns (identity + the encrypted envelope) —
-//     never `id` (server default), never is_active/status/created_at/revoked_at. The SELECT reads ONLY granted
-//     columns and filters to one ACTIVE, non-expired row for (tenant, connector, kind, version). There is NO
-//     UPDATE and NO DELETE here (revocation/rotation is deferred — RISK-007). Every value is PARAMETERIZED.
-//   * fail closed: a missing insert id, MORE THAN ONE matching active row, or an INCOMPLETE/unsupported stored
-//     envelope (the secret-vault mapper rejects it) all throw a typed, secret-free error. The save RESULT is a
-//     row id only — NEVER plaintext, NEVER ciphertext.
+// FAIL-CLOSED AUDIT (the load-bearing semantics — docs/42 §84):
+//   * STORE is ATOMIC: the `connector_secrets` INSERT and its `connector_secret.store.succeeded` audit INSERT run
+//     in ONE runner transaction (`begin … commit`) on ONE connection as `connector_runner`. The secret row commits
+//     ONLY if its audit row commits; if the audit INSERT fails, the WHOLE transaction rolls back — there is NEVER
+//     an orphaned, unaudited secret, and there is NO compensating DELETE. (Proven under the runner role in T52.)
+//   * LOAD is fail-closed by ordering: a load returns the encrypted envelope ONLY after its
+//     `connector_secret.load.succeeded` audit row is written. If the audit write fails, the load throws and the
+//     caller receives NO secret/envelope. (A load is a read — there is no row to roll back.)
+//   * The `attempted` and `failed` audit rows are audit-only writes (no paired secret insert) — each fail-closed
+//     (a failed audit write throws and aborts the operation). NO best-effort audit; NO "insert then audit" outside
+//     the shared transaction.
+//
+// SAFE BY CONSTRUCTION: runner-only (every statement runs under `set role connector_runner` on the injected
+// `RunnerConnection`; NO service-role/global/request-path client; NO Supabase client; NO `fetch`; NO `process.env`;
+// NO route/UI). Column-scoped: the secret INSERT names ONLY the 12 granted write columns; the audit INSERT names
+// ONLY the four 0031-granted columns; the SELECT reads ONLY granted columns and filters to one ACTIVE, non-expired
+// row. There is NO UPDATE and NO DELETE on `connector_secrets` (rotation/revocation deferred — RISK-007). Audit
+// metadata is the #166 allowlist builder's output ONLY — NEVER plaintext/ciphertext/DEK/tag/nonce/aad_digest/raw
+// error; only a static error CLASS. Every value is PARAMETERIZED. Errors are redacted to a fixed static message.
 //
 // This stores NO real provider token (nothing calls it with one yet), exchanges NO OAuth code, calls NO provider
-// API, and does NOT decrypt (decrypt stays the runner-only KMS capability path in secret-vault.ts). RISK-007
-// remains OPEN: this is the DB read/write adapter only — NOT hosted KMS/IAM separation, audit, rotation, or live
-// token storage.
+// API, and does NOT decrypt. RISK-007 remains OPEN.
 //
 // SERVER-ONLY: under `src/lib/server/`, the runtime browser sentinel below, and `no-client-import.test.ts`.
 
-import { createRunnerDbClient, type RunnerConnection } from "./runner-db-client";
+import type { RunnerConnection } from "./runner-db-client";
 import {
   encryptedSecretToColumns,
   columnsToEncryptedSecret,
@@ -32,6 +39,12 @@ import {
   type StoredEncryptedSecret,
   type ConnectorSecretEnvelopeColumns,
 } from "./secret-vault";
+import {
+  buildConnectorSecretAuditEvent,
+  type ConnectorSecretAuditEvent,
+  type ConnectorSecretErrorClass,
+} from "./secret-audit";
+import { buildAuditInsertStatement, type RunnerStatement } from "./secret-audit-writer";
 
 // Runtime server-only sentinel — throw if evaluated in a browser.
 if (typeof (globalThis as { window?: unknown }).window !== "undefined") {
@@ -62,6 +75,11 @@ export const SELECT_SECRET_SQL =
   "where tenant_id = $1 and connector_id = $2 and secret_kind = $3 and version = $4 " +
   "and status = 'active' and (expires_at is null or expires_at > now()) limit 2";
 
+// Transaction control statements spliced into the runner `runSequence` (one connection, in order).
+const SET_ROLE: RunnerStatement = { sql: "set role connector_runner", params: [] };
+const BEGIN: RunnerStatement = { sql: "begin", params: [] };
+const COMMIT: RunnerStatement = { sql: "commit", params: [] };
+
 function asBuffer(v: unknown): Buffer | undefined {
   return Buffer.isBuffer(v) ? v : undefined;
 }
@@ -72,59 +90,151 @@ function asNumber(v: unknown): number | undefined {
   return typeof v === "number" ? v : undefined;
 }
 
-// Build the runner-backed store adapter. The injected `RunnerConnection` is wrapped by `createRunnerDbClient`,
-// which prepends `set role connector_runner` to every statement and redacts raw DB errors. Never service-role.
+// The identity an audit row needs — picked EXPLICITLY (allowlist) from the store input; never the whole input.
+type AuditIds = { tenantId: string; connectorId: string; dbSecretKind: string; version: number };
+
+// Build the #166 allowlist audit record (actor = the runner) and the audit_logs INSERT statement to enlist.
+function auditStatement(event: ConnectorSecretAuditEvent, ids: AuditIds, errorClass?: ConnectorSecretErrorClass): RunnerStatement {
+  const record = buildConnectorSecretAuditEvent({
+    event,
+    tenantId: ids.tenantId,
+    connectorId: ids.connectorId,
+    secretKind: ids.dbSecretKind,
+    version: ids.version,
+    actorType: "connector_runner",
+    ...(errorClass !== undefined ? { errorClass } : {}),
+  });
+  return buildAuditInsertStatement(record);
+}
+
+// Run an AUDIT-ONLY write (attempted / failed) as its own single-statement, auto-committed runner write. Throws a
+// redacted error on ANY failure — the caller treats that as a fail-closed abort (no unaudited store/load proceeds).
+async function emitAudit(conn: RunnerConnection, event: ConnectorSecretAuditEvent, ids: AuditIds, errorClass?: ConnectorSecretErrorClass): Promise<void> {
+  try {
+    await conn.runSequence([SET_ROLE, auditStatement(event, ids, errorClass)]);
+  } catch {
+    throw new ConnectorSecretStoreError("connector secret audit write failed");
+  }
+}
+
+// Build the runner-backed store adapter. The injected `RunnerConnection.runSequence` runs the given statements IN
+// ORDER on ONE connection — so a single sequence containing `begin … commit` is one transaction. Never service-role.
 export function createRunnerConnectorSecretStore(
   conn: RunnerConnection,
 ): ConnectorSecretWriteStore & ConnectorSecretReadStore {
-  const db = createRunnerDbClient(conn); // SET ROLE connector_runner + error redaction (runner DB client path)
-
   return {
     async insertEncryptedSecret(input): Promise<{ id: string }> {
+      const ids: AuditIds = {
+        tenantId: input.tenantId,
+        connectorId: input.connectorId,
+        dbSecretKind: input.dbSecretKind,
+        version: input.version,
+      };
+      // 1) store.attempted — fail-closed: no store proceeds unaudited.
+      await emitAudit(conn, "connector_secret.store.attempted", ids);
+
+      // 2) ATOMIC: the connector_secrets INSERT + the store.succeeded audit INSERT in ONE runner transaction.
+      //    The secret commits ONLY if its audit commits; if the audit INSERT fails, the whole tx rolls back.
       const cols = encryptedSecretToColumns(input.encrypted);
-      const { rows } = await db.run(INSERT_SECRET_SQL, [
-        input.tenantId,
-        input.connectorId,
-        input.dbSecretKind,
-        input.version,
-        cols.ciphertext,
-        cols.dek_wrapped,
-        cols.aead_nonce,
-        cols.aad_digest,
-        cols.key_id,
-        cols.aead_tag,
-        cols.envelope_version,
-        cols.aead_alg,
-      ]);
-      const id = asString(rows[0]?.id);
+      const sequence: RunnerStatement[] = [
+        SET_ROLE,
+        BEGIN,
+        {
+          sql: INSERT_SECRET_SQL,
+          params: [
+            input.tenantId, input.connectorId, input.dbSecretKind, input.version,
+            cols.ciphertext, cols.dek_wrapped, cols.aead_nonce, cols.aad_digest,
+            cols.key_id, cols.aead_tag, cols.envelope_version, cols.aead_alg,
+          ],
+        },
+        auditStatement("connector_secret.store.succeeded", ids),
+        COMMIT,
+      ];
+      let results: Array<{ rows: ReadonlyArray<Record<string, unknown>> }>;
+      try {
+        results = await conn.runSequence(sequence);
+      } catch {
+        // The atomic transaction failed (secret INSERT or its audit INSERT) → rolled back → NO secret committed,
+        // NO compensating DELETE. Record the failure (its own audit write, also fail-closed) and abort.
+        await emitAudit(conn, "connector_secret.store.failed", ids, "store_failed");
+        throw new ConnectorSecretStoreError("connector secret store failed");
+      }
+      // results indexes: 0=set role, 1=begin, 2=INSERT … RETURNING id, 3=audit INSERT, 4=commit.
+      const id = asString(results[2]?.rows[0]?.id);
       if (!id) throw new ConnectorSecretStoreError("connector secret insert did not return a row id");
       return { id }; // REDACTED: row id only — never plaintext, never ciphertext
     },
 
     async findEncryptedSecret(input): Promise<StoredEncryptedSecret | null> {
-      const { rows } = await db.run(SELECT_SECRET_SQL, [
-        input.tenantId,
-        input.connectorId,
-        input.dbSecretKind,
-        input.version,
-      ]);
-      if (rows.length === 0) return null;
-      if (rows.length > 1) throw new ConnectorSecretStoreError("ambiguous active connector secret (multiple matching rows)");
-      const row = rows[0];
-      const id = asString(row.id);
-      if (!id) throw new ConnectorSecretStoreError("connector secret row is missing its id");
-      const cols: Partial<ConnectorSecretEnvelopeColumns> = {
-        ciphertext: asBuffer(row.ciphertext),
-        dek_wrapped: asBuffer(row.dek_wrapped),
-        aead_nonce: asBuffer(row.aead_nonce),
-        aead_tag: asBuffer(row.aead_tag),
-        aad_digest: asString(row.aad_digest),
-        key_id: asString(row.key_id),
-        envelope_version: asNumber(row.envelope_version),
-        aead_alg: asString(row.aead_alg),
+      const ids: AuditIds = {
+        tenantId: input.tenantId,
+        connectorId: input.connectorId,
+        dbSecretKind: input.dbSecretKind,
+        version: input.version,
       };
-      // columnsToEncryptedSecret fails closed on an incomplete (pre-0030 / partial) or unsupported envelope.
-      return { id, encrypted: columnsToEncryptedSecret(cols) };
+      // 1) load.attempted — fail-closed.
+      await emitAudit(conn, "connector_secret.load.attempted", ids);
+
+      // 2) the SELECT (a read — nothing to roll back). Redact DB errors; record load.failed; abort.
+      let rows: ReadonlyArray<Record<string, unknown>>;
+      try {
+        const results = await conn.runSequence([
+          SET_ROLE,
+          { sql: SELECT_SECRET_SQL, params: [input.tenantId, input.connectorId, input.dbSecretKind, input.version] },
+        ]);
+        rows = results[results.length - 1]?.rows ?? [];
+      } catch {
+        await emitAudit(conn, "connector_secret.load.failed", ids, "load_failed");
+        throw new ConnectorSecretStoreError("connector secret load failed");
+      }
+
+      // 3) classify the read outcome → on any problem, record load.failed (with a STATIC class) and abort.
+      let result: StoredEncryptedSecret | null;
+      try {
+        if (rows.length > 1) {
+          await emitAudit(conn, "connector_secret.load.failed", ids, "ambiguous_match");
+          throw new ConnectorSecretStoreError("ambiguous active connector secret (multiple matching rows)");
+        }
+        if (rows.length === 0) {
+          result = null;
+        } else {
+          const row = rows[0];
+          const id = asString(row.id);
+          if (!id) {
+            await emitAudit(conn, "connector_secret.load.failed", ids, "load_failed");
+            throw new ConnectorSecretStoreError("connector secret row is missing its id");
+          }
+          const colVals: Partial<ConnectorSecretEnvelopeColumns> = {
+            ciphertext: asBuffer(row.ciphertext),
+            dek_wrapped: asBuffer(row.dek_wrapped),
+            aead_nonce: asBuffer(row.aead_nonce),
+            aead_tag: asBuffer(row.aead_tag),
+            aad_digest: asString(row.aad_digest),
+            key_id: asString(row.key_id),
+            envelope_version: asNumber(row.envelope_version),
+            aead_alg: asString(row.aead_alg),
+          };
+          let encrypted;
+          try {
+            // columnsToEncryptedSecret fails closed on an incomplete/unsupported envelope.
+            encrypted = columnsToEncryptedSecret(colVals);
+          } catch {
+            await emitAudit(conn, "connector_secret.load.failed", ids, "invalid_envelope");
+            throw new ConnectorSecretStoreError("connector secret stored envelope is invalid or unsupported");
+          }
+          result = { id, encrypted };
+        }
+      } catch (e) {
+        // re-throw the typed store error (already audited above as load.failed).
+        if (e instanceof ConnectorSecretStoreError) throw e;
+        await emitAudit(conn, "connector_secret.load.failed", ids, "load_failed");
+        throw new ConnectorSecretStoreError("connector secret load failed");
+      }
+
+      // 4) load.succeeded — fail-closed: write the audit row BEFORE returning. If it fails, the caller gets NO
+      //    payload (emitAudit throws). This is the fail-closed guarantee for the read path.
+      await emitAudit(conn, "connector_secret.load.succeeded", ids);
+      return result;
     },
   };
 }

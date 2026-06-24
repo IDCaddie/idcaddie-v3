@@ -3188,3 +3188,29 @@ decrypt, no service-role path, no route, no rotation/revocation behavior. Tests 
 (**525**); types unchanged (**1837**). Real credentials still blocked; rotation/revocation + real credential
 lifecycle remain missing. **RISK-001 remains OPEN. RISK-007 remains OPEN. Cutover remains BLOCKED. Connector
 credentials are not production-ready.** No doc 17 §5 box is ticked by this PR.
+---
+
+## 93. CONNECTOR SECRET STORE/LOAD AUDIT WIRING — atomic, fail-closed (PR #167)
+
+Wires the #166 allowlist audit builder into the #160 runner-backed store adapter so store/load operations emit a
+PERSISTED audit row, fail-closed (doc 42 §84). **STORE is ATOMIC** — the `connector_secrets` INSERT and its
+`store.succeeded` audit INSERT share ONE runner transaction (`begin … commit`); the secret commits only if its
+audit commits; if the audit INSERT fails the whole transaction rolls back (no orphaned unaudited secret, no
+compensating delete). **LOAD is fail-closed by ordering** — the caller receives no secret/envelope unless the
+`load.succeeded` audit committed.
+
+- Migration **`0031`**: the smallest safe grant — COLUMN-scoped INSERT for `connector_runner` on `audit_logs`,
+  EXACTLY `(tenant_id, action, resource_type, after_json)`; audit_logs only; no select/update/delete; no other
+  table. The audit writer ENLISTS in the runner transaction (same connection/role/tx) — it opens no connection.
+- New `secret-audit-writer.ts` (pure statement-builder) + the store adapter rewrite + comprehensive fail-closed/
+  atomic-rollback tests. RLS **T52** proves the grant shape + atomic commit/rollback + append-only under the real
+  `connector_runner` role.
+- Only the six store/load events are wired; **decrypt audit stays builder-only** (no call site); no rotation/
+  revocation event or behavior.
+
+Tests **539 → 548**; RLS suite **525 → 550** (T52); generated types unchanged (**1837**); migration `0031`. Synthetic
+DB shape proven by #163; KMS/IAM decrypt separation by #165. No real provider token, no OAuth/token exchange, no
+live connector, no request-path decrypt, no service-role path, no route, no UPDATE/DELETE on connector_secrets.
+Real credentials still blocked; rotation/revocation + real credential lifecycle remain missing. **RISK-001 remains
+OPEN. RISK-007 remains OPEN. Cutover remains BLOCKED. Connector credentials are not production-ready.** No doc 17
+§5 box is ticked by this PR.

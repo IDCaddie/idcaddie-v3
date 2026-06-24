@@ -1,0 +1,30 @@
+-- 0031_connector_runner_audit_insert_grant.sql
+--
+-- The narrow AUDIT-INSERT grant for the runner — enabling ATOMIC, fail-closed connector-secret store audit
+-- (docs/42 §84, RISK-007 audit wiring, PR #167). The PR #167 store adapter must persist the store audit row IN
+-- THE SAME runner transaction as the `connector_secrets` INSERT (the secret row commits only if its audit row
+-- commits; if the audit INSERT fails, the whole transaction rolls back — no orphaned, unaudited secret, and no
+-- compensating DELETE). For the audit INSERT to enlist in that runner transaction it must run as the SAME role
+-- (`connector_runner`) on the SAME connection — which requires `connector_runner` to be able to INSERT into
+-- `audit_logs`. It cannot today (0021/0029/0030 give it ONLY `oauth_pending` + `connector_secrets` column
+-- grants). This migration adds the SMALLEST safe grant for that requirement, and NOTHING else.
+--
+-- SCOPE — `audit_logs` ONLY, INSERT ONLY, exactly the FOUR safe columns the #166 allowlist builder emits:
+--   tenant_id, action, resource_type, after_json.
+-- The runner gets NO SELECT (it never reads audit rows), no row-mutation or row-purge privilege, and NO grant on
+-- any other table. It explicitly does NOT get INSERT on the sensitive/identity columns `actor_user_id`,
+-- `resource_id`, `before_json`, `ip_address`, or `user_agent` — only the four append-only audit columns above.
+--
+-- WHY COLUMN-SCOPED (not table-level). `connector_runner` is BYPASSRLS, so a table-level INSERT would let it
+-- write EVERY column — including columns added by future migrations. Pinning the grant to the four columns the
+-- audit writer uses keeps the blast radius minimal and matches the `audit_logs` (0001) + #166 builder shape.
+--
+-- APPEND-ONLY STILL HOLDS FOR THE RUNNER. The `audit_logs_no_mutation` trigger (0002, `before update or delete`)
+-- fires for EVERY role, so even with this INSERT grant `connector_runner` cannot UPDATE or DELETE an audit row.
+-- INSERT is append-only by nature; the trigger blocks only mutation. (Proven under the runner role in T52.)
+--
+-- This adds NO real credential, NO provider token, NO OAuth/token exchange, NO live connector, NO request-path
+-- decrypt, NO service-role path, NO rotation/revocation. It does NOT broaden the `connector_secrets` grant (no
+-- UPDATE/DELETE there — rotation/revocation stays deferred) and touches NO other table. RISK-007 remains OPEN.
+
+grant insert (tenant_id, action, resource_type, after_json) on public.audit_logs to connector_runner;

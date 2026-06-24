@@ -1,5 +1,4 @@
 import { describe, it, expect } from "vitest";
-import { randomBytes } from "node:crypto";
 import {
   createRunnerConnectorSecretStore,
   ConnectorSecretStoreError,
@@ -18,11 +17,13 @@ const ctx = (over: Partial<SecretContext> = {}): SecretContext => ({
   version: 1,
   ...over,
 });
+const KIND = "oauth_access";
+const idInput = { tenantId: ctx().tenantId, connectorId: ctx().connectorId, dbSecretKind: KIND, version: 1 };
 
-// test-only in-memory key provider (NOT secure): "wrap" = kekId prefix + dek; "unwrap" returns the dek.
 function memKeyProvider(): ConnectorVaultKeyProvider {
   return {
     async generateDataKey(kekId) {
+      const { randomBytes } = await import("node:crypto");
       const dek = randomBytes(32);
       return { dek, wrappedDek: Buffer.concat([Buffer.from(`${kekId}|`), dek]) };
     },
@@ -34,130 +35,271 @@ function memKeyProvider(): ConnectorVaultKeyProvider {
   };
 }
 
-// A mock RunnerConnection that records every runSequence call and returns canned rows per statement kind.
-function mockConn(opts: { insertRows?: Record<string, unknown>[]; selectRows?: Record<string, unknown>[] } = {}) {
-  const calls: { sql: string; params: readonly unknown[] }[][] = [];
+type Stmt = { sql: string; params: readonly unknown[] };
+type AuditRow = { tenant_id: unknown; action: string; resource_type: unknown; after_json: Record<string, unknown> };
+
+// A TRANSACTION-MODELING mock RunnerConnection. It records every statement, models begin/commit (an explicit
+// transaction flushes its writes ONLY on commit; a statement failure before commit rolls the pending writes back),
+// and exposes the COMMITTED connector_secrets + audit_logs rows so a test can prove real persistence + atomicity.
+function txMockConn(opts: {
+  insertSecretRows?: Record<string, unknown>[];
+  selectRows?: Record<string, unknown>[];
+  failSecretInsert?: boolean;
+  // return true to make THIS audit insert throw; `inTx` = it is inside a begin/commit (the atomic store path).
+  failAuditWhen?: (stmt: Stmt, inTx: boolean) => boolean;
+} = {}) {
+  const allStatements: Stmt[] = [];
+  const persistedSecrets: { params: readonly unknown[] }[] = [];
+  const persistedAudits: AuditRow[] = [];
+  const isInsertSecret = (s: Stmt) => /insert\s+into\s+public\.connector_secrets/i.test(s.sql);
+  const isInsertAudit = (s: Stmt) => /insert\s+into\s+public\.audit_logs/i.test(s.sql);
+
   const conn: RunnerConnection = {
     async runSequence(statements) {
-      calls.push(statements.map((s) => ({ sql: s.sql, params: s.params })));
-      return statements.map((s) => {
-        if (/^\s*set\s+role/i.test(s.sql)) return { rows: [] };
-        if (/^\s*insert/i.test(s.sql)) return { rows: opts.insertRows ?? [{ id: "sec-1" }] };
-        if (/^\s*select/i.test(s.sql)) return { rows: opts.selectRows ?? [] };
-        return { rows: [] };
-      });
+      for (const s of statements) allStatements.push({ sql: s.sql, params: s.params });
+      const inTx = statements.some((s) => /^\s*begin\s*$/i.test(s.sql));
+      const pendSecrets: { params: readonly unknown[] }[] = [];
+      const pendAudits: AuditRow[] = [];
+      const results: { rows: ReadonlyArray<Record<string, unknown>> }[] = [];
+      let committed = false;
+      for (const s of statements) {
+        if (/^\s*set\s+role/i.test(s.sql) || /^\s*begin\s*$/i.test(s.sql)) { results.push({ rows: [] }); continue; }
+        if (/^\s*commit\s*$/i.test(s.sql)) { committed = true; results.push({ rows: [] }); continue; }
+        if (isInsertSecret(s)) {
+          if (opts.failSecretInsert) throw new Error("secret insert failed"); // tx rejects; pending not flushed
+          pendSecrets.push({ params: s.params });
+          results.push({ rows: opts.insertSecretRows ?? [{ id: "sec-1" }] });
+          continue;
+        }
+        if (isInsertAudit(s)) {
+          if (opts.failAuditWhen?.(s, inTx)) throw new Error("audit insert failed"); // tx/auto rejects; not flushed
+          pendAudits.push({ tenant_id: s.params[0], action: String(s.params[1]), resource_type: s.params[2], after_json: JSON.parse(String(s.params[3])) });
+          results.push({ rows: [] });
+          continue;
+        }
+        if (/^\s*select/i.test(s.sql)) { results.push({ rows: opts.selectRows ?? [] }); continue; }
+        results.push({ rows: [] });
+      }
+      // explicit tx flushes only on commit; an auto-commit sequence (no begin) flushes its single write.
+      if (!inTx || committed) { persistedSecrets.push(...pendSecrets); persistedAudits.push(...pendAudits); }
+      return results;
     },
   };
-  return { conn, calls };
+  return { conn, allStatements, persistedSecrets, persistedAudits };
 }
-// the last recorded runSequence call (a save/load issues exactly one runSequence of [set role, stmt]).
-const lastCall = (calls: { sql: string; params: readonly unknown[] }[][]) => calls[calls.length - 1];
 
-describe("connector-secret-store — runner-backed save (insert)", () => {
-  it("runs SET ROLE connector_runner then the parameterized INSERT, and returns ONLY a row id", async () => {
-    const { conn, calls } = mockConn({ insertRows: [{ id: "sec-9" }] });
-    const store = createRunnerConnectorSecretStore(conn);
-    const encrypted = await encryptConnectorSecret({ plaintext: "okta-token-PLAINTEXT", context: ctx(), keyProvider: memKeyProvider(), kekId: KEK });
-    const result = await store.insertEncryptedSecret({ tenantId: ctx().tenantId, connectorId: ctx().connectorId, dbSecretKind: "oauth_access", version: 1, encrypted });
+async function anEncrypted() {
+  return encryptConnectorSecret({ plaintext: "okta-token-PLAINTEXT", context: ctx(), keyProvider: memKeyProvider(), kekId: KEK });
+}
+const auditActions = (audits: AuditRow[]) => audits.map((a) => a.action);
+const hasDelete = (stmts: Stmt[]) => stmts.some((s) => /delete\s+from\s+public\.connector_secrets/i.test(s.sql));
+const hasUpdateSecret = (stmts: Stmt[]) => stmts.some((s) => /update\s+public\.connector_secrets/i.test(s.sql));
+
+describe("connector-secret-store — store emits ATOMIC, persisted audit (attempted + succeeded)", () => {
+  it("persists store.attempted + store.succeeded for a successful insert; secret + succeeded-audit share one tx", async () => {
+    const m = txMockConn({ insertSecretRows: [{ id: "sec-9" }] });
+    const store = createRunnerConnectorSecretStore(m.conn);
+    const encrypted = await anEncrypted();
+    const result = await store.insertEncryptedSecret({ ...idInput, encrypted });
 
     expect(result).toEqual({ id: "sec-9" });
-    // no plaintext, no ciphertext, no wrapped DEK in the returned result
-    const json = JSON.stringify(result);
-    expect(json).not.toContain("PLAINTEXT");
-    expect(json).not.toContain(encrypted.ciphertext);
-    expect(json).not.toContain(encrypted.wrappedDek);
-    for (const k of ["ciphertext", "tag", "dek", "plaintext"]) expect(json).not.toContain(k);
+    // both audit rows persisted; the secret row persisted.
+    expect(auditActions(m.persistedAudits)).toEqual(["connector_secret.store.attempted", "connector_secret.store.succeeded"]);
+    expect(m.persistedSecrets).toHaveLength(1);
 
-    // statement 1 = SET ROLE connector_runner; statement 2 = the INSERT with 12 parameterized values
-    const seq = lastCall(calls);
-    expect(seq[0].sql.trim().toLowerCase()).toBe("set role connector_runner");
-    expect(seq[1].sql).toBe(INSERT_SECRET_SQL);
-    const cols = encryptedSecretToColumns(encrypted);
-    expect(seq[1].params).toEqual([
-      ctx().tenantId, ctx().connectorId, "oauth_access", 1,
-      cols.ciphertext, cols.dek_wrapped, cols.aead_nonce, cols.aad_digest, cols.key_id, cols.aead_tag, cols.envelope_version, cols.aead_alg,
-    ]);
+    // the SUCCESS path is ONE transaction containing BOTH the secret INSERT and the succeeded-audit INSERT.
+    const atomic = m.allStatements;
+    const beginIdx = atomic.findIndex((s) => /^\s*begin\s*$/i.test(s.sql));
+    const commitIdx = atomic.findIndex((s) => /^\s*commit\s*$/i.test(s.sql));
+    expect(beginIdx).toBeGreaterThanOrEqual(0);
+    expect(commitIdx).toBeGreaterThan(beginIdx);
+    const inTx = atomic.slice(beginIdx, commitIdx + 1);
+    expect(inTx.some((s) => /insert\s+into\s+public\.connector_secrets/i.test(s.sql))).toBe(true);
+    expect(inTx.some((s) => /insert\s+into\s+public\.audit_logs/i.test(s.sql))).toBe(true);
+    // NO compensating delete / no UPDATE/DELETE on connector_secrets anywhere.
+    expect(hasDelete(m.allStatements)).toBe(false);
+    expect(hasUpdateSecret(m.allStatements)).toBe(false);
   });
 
-  it("fails closed when the insert returns no row id", async () => {
-    const store = createRunnerConnectorSecretStore(mockConn({ insertRows: [] }).conn);
-    const encrypted = await encryptConnectorSecret({ plaintext: "x", context: ctx(), keyProvider: memKeyProvider(), kekId: KEK });
-    await expect(store.insertEncryptedSecret({ tenantId: ctx().tenantId, connectorId: ctx().connectorId, dbSecretKind: "oauth_access", version: 1, encrypted }))
-      .rejects.toBeInstanceOf(ConnectorSecretStoreError);
+  it("the persisted audit row carries ONLY the #166 allowlist payload — no secret material", async () => {
+    const m = txMockConn({ insertSecretRows: [{ id: "sec-1" }] });
+    const store = createRunnerConnectorSecretStore(m.conn);
+    const encrypted = await anEncrypted();
+    await store.insertEncryptedSecret({ ...idInput, encrypted });
+
+    const succeeded = m.persistedAudits.find((a) => a.action === "connector_secret.store.succeeded")!;
+    expect(succeeded.tenant_id).toBe(ctx().tenantId);
+    expect(succeeded.resource_type).toBe("connector_secret");
+    expect(Object.keys(succeeded.after_json).sort()).toEqual(["actor_type", "connector_id", "event", "result", "secret_kind", "version"]);
+    expect(succeeded.after_json).toMatchObject({ event: "connector_secret.store.succeeded", connector_id: ctx().connectorId, secret_kind: KIND, version: 1, result: "succeeded", actor_type: "connector_runner" });
+    // no secret/ciphertext/key material anywhere in the serialized audit row.
+    const json = JSON.stringify(m.persistedAudits);
+    for (const bad of ["PLAINTEXT", encrypted.ciphertext, encrypted.wrappedDek, encrypted.tag, encrypted.iv, "ciphertext", "dek", "wrapped", "aead", "nonce", "plaintext"]) {
+      expect(json).not.toContain(bad);
+    }
   });
 });
 
-describe("connector-secret-store — runner-backed load (select)", () => {
+describe("connector-secret-store — store fail-closed (atomic rollback)", () => {
+  it("persists store.failed and commits NO secret when the connector_secrets insert fails", async () => {
+    const m = txMockConn({ failSecretInsert: true });
+    const store = createRunnerConnectorSecretStore(m.conn);
+    await expect(store.insertEncryptedSecret({ ...idInput, encrypted: await anEncrypted() })).rejects.toBeInstanceOf(ConnectorSecretStoreError);
+    expect(m.persistedSecrets).toHaveLength(0);
+    expect(auditActions(m.persistedAudits)).toEqual(["connector_secret.store.attempted", "connector_secret.store.failed"]);
+    expect(m.persistedAudits.find((a) => a.action === "connector_secret.store.failed")!.after_json.error_class).toBe("store_failed");
+    expect(hasDelete(m.allStatements)).toBe(false); // no compensating delete
+  });
+
+  it("FAILS CLOSED: if the in-transaction succeeded-audit insert fails, the whole tx rolls back — NO secret row", async () => {
+    const m = txMockConn({ failAuditWhen: (_s, inTx) => inTx }); // fail ONLY the audit insert inside the atomic tx
+    const store = createRunnerConnectorSecretStore(m.conn);
+    await expect(store.insertEncryptedSecret({ ...idInput, encrypted: await anEncrypted() })).rejects.toBeInstanceOf(ConnectorSecretStoreError);
+    // the atomic tx rolled back: no secret persisted, no succeeded audit; a failed audit was recorded out-of-band.
+    expect(m.persistedSecrets).toHaveLength(0);
+    expect(auditActions(m.persistedAudits)).not.toContain("connector_secret.store.succeeded");
+    expect(auditActions(m.persistedAudits)).toContain("connector_secret.store.failed");
+    expect(hasDelete(m.allStatements)).toBe(false); // NO compensating delete — atomic rollback only
+  });
+
+  it("FAILS CLOSED before any insert: if the attempted-audit write fails, no secret is inserted at all", async () => {
+    const m = txMockConn({ failAuditWhen: (s) => String(s.params[1]) === "connector_secret.store.attempted" });
+    const store = createRunnerConnectorSecretStore(m.conn);
+    await expect(store.insertEncryptedSecret({ ...idInput, encrypted: await anEncrypted() })).rejects.toBeInstanceOf(ConnectorSecretStoreError);
+    expect(m.persistedSecrets).toHaveLength(0);
+    expect(m.allStatements.some((s) => /insert\s+into\s+public\.connector_secrets/i.test(s.sql))).toBe(false);
+  });
+
+  it("fails closed when the insert returns no row id (after a committed audit, surfaces a redacted error)", async () => {
+    const m = txMockConn({ insertSecretRows: [] });
+    const store = createRunnerConnectorSecretStore(m.conn);
+    await expect(store.insertEncryptedSecret({ ...idInput, encrypted: await anEncrypted() })).rejects.toBeInstanceOf(ConnectorSecretStoreError);
+  });
+});
+
+describe("connector-secret-store — load emits persisted audit, fail-closed on audit failure", () => {
   async function completeRow(id = "sec-2") {
-    const encrypted = await encryptConnectorSecret({ plaintext: "okta-api-key-abc123", context: ctx(), keyProvider: memKeyProvider(), kekId: KEK });
+    const encrypted = await encryptConnectorSecret({ plaintext: "round-trip-PLAINTEXT", context: ctx(), keyProvider: memKeyProvider(), kekId: KEK });
     const c = encryptedSecretToColumns(encrypted);
     return { encrypted, row: { id, ciphertext: c.ciphertext, dek_wrapped: c.dek_wrapped, aead_nonce: c.aead_nonce, aad_digest: c.aad_digest, key_id: c.key_id, aead_tag: c.aead_tag, envelope_version: c.envelope_version, aead_alg: c.aead_alg } };
   }
 
-  it("runs SET ROLE then the parameterized active/non-expired SELECT, reconstructs the COMPLETE envelope, and decrypts", async () => {
+  it("persists load.attempted + load.succeeded for a successful read, reconstructs the envelope, decrypts", async () => {
     const kp = memKeyProvider();
     const encrypted = await encryptConnectorSecret({ plaintext: "round-trip-PLAINTEXT", context: ctx(), keyProvider: kp, kekId: KEK });
     const c = encryptedSecretToColumns(encrypted);
     const row = { id: "sec-7", ciphertext: c.ciphertext, dek_wrapped: c.dek_wrapped, aead_nonce: c.aead_nonce, aad_digest: c.aad_digest, key_id: c.key_id, aead_tag: c.aead_tag, envelope_version: c.envelope_version, aead_alg: c.aead_alg };
-    const { conn, calls } = mockConn({ selectRows: [row] });
-    const store = createRunnerConnectorSecretStore(conn);
+    const m = txMockConn({ selectRows: [row] });
+    const store = createRunnerConnectorSecretStore(m.conn);
 
-    const found = await store.findEncryptedSecret({ tenantId: ctx().tenantId, connectorId: ctx().connectorId, dbSecretKind: "oauth_access", version: 1 });
-    expect(found).not.toBeNull();
+    const found = await store.findEncryptedSecret(idInput);
     expect(found!.id).toBe("sec-7");
-    expect(found!.encrypted).toEqual(encrypted); // complete envelope reconstructed byte-identical
-    // and it still decrypts to the original plaintext
-    const pt = await decryptConnectorSecret({ encrypted: found!.encrypted, context: ctx(), keyProvider: kp });
-    expect(pt.toString("utf8")).toBe("round-trip-PLAINTEXT");
-
-    const seq = lastCall(calls);
-    expect(seq[0].sql.trim().toLowerCase()).toBe("set role connector_runner");
-    expect(seq[1].sql).toBe(SELECT_SECRET_SQL);
-    expect(seq[1].params).toEqual([ctx().tenantId, ctx().connectorId, "oauth_access", 1]);
-    // the SELECT filters to active + non-expired, parameterized identity only
-    expect(seq[1].sql).toMatch(/status = 'active'/);
-    expect(seq[1].sql).toMatch(/expires_at is null or expires_at > now\(\)/);
+    expect(found!.encrypted).toEqual(encrypted);
+    expect((await decryptConnectorSecret({ encrypted: found!.encrypted, context: ctx(), keyProvider: kp })).toString("utf8")).toBe("round-trip-PLAINTEXT");
+    expect(auditActions(m.persistedAudits)).toEqual(["connector_secret.load.attempted", "connector_secret.load.succeeded"]);
+    // the read uses the parameterized active/non-expired SELECT.
+    const sel = m.allStatements.find((s) => s.sql === SELECT_SECRET_SQL)!;
+    expect(sel.params).toEqual([ctx().tenantId, ctx().connectorId, KIND, 1]);
   });
 
-  it("returns null when no matching active secret exists", async () => {
-    const store = createRunnerConnectorSecretStore(mockConn({ selectRows: [] }).conn);
-    expect(await store.findEncryptedSecret({ tenantId: ctx().tenantId, connectorId: ctx().connectorId, dbSecretKind: "oauth_access", version: 1 })).toBeNull();
+  it("returns null + load.succeeded when no matching active secret exists", async () => {
+    const m = txMockConn({ selectRows: [] });
+    const store = createRunnerConnectorSecretStore(m.conn);
+    expect(await store.findEncryptedSecret(idInput)).toBeNull();
+    expect(auditActions(m.persistedAudits)).toEqual(["connector_secret.load.attempted", "connector_secret.load.succeeded"]);
   });
 
-  it("fails closed when more than one active secret matches (ambiguous)", async () => {
+  it("persists load.failed (ambiguous_match) and throws when >1 active rows match", async () => {
     const { row: r1 } = await completeRow("a");
     const { row: r2 } = await completeRow("b");
-    const store = createRunnerConnectorSecretStore(mockConn({ selectRows: [r1, r2] }).conn);
-    await expect(store.findEncryptedSecret({ tenantId: ctx().tenantId, connectorId: ctx().connectorId, dbSecretKind: "oauth_access", version: 1 }))
-      .rejects.toBeInstanceOf(ConnectorSecretStoreError);
+    const m = txMockConn({ selectRows: [r1, r2] });
+    const store = createRunnerConnectorSecretStore(m.conn);
+    await expect(store.findEncryptedSecret(idInput)).rejects.toBeInstanceOf(ConnectorSecretStoreError);
+    expect(auditActions(m.persistedAudits)).toEqual(["connector_secret.load.attempted", "connector_secret.load.failed"]);
+    expect(m.persistedAudits.find((a) => a.action === "connector_secret.load.failed")!.after_json.error_class).toBe("ambiguous_match");
   });
 
-  it("fails closed on an INCOMPLETE stored row (missing aead_tag — a pre-0030/partial envelope)", async () => {
+  it("persists load.failed (invalid_envelope) on an incomplete stored row (missing aead_tag)", async () => {
     const { row } = await completeRow();
-    delete (row as Record<string, unknown>).aead_tag; // the GCM tag is required to decrypt
-    const store = createRunnerConnectorSecretStore(mockConn({ selectRows: [row] }).conn);
-    await expect(store.findEncryptedSecret({ tenantId: ctx().tenantId, connectorId: ctx().connectorId, dbSecretKind: "oauth_access", version: 1 }))
-      .rejects.toThrow();
+    delete (row as Record<string, unknown>).aead_tag;
+    const m = txMockConn({ selectRows: [row] });
+    const store = createRunnerConnectorSecretStore(m.conn);
+    await expect(store.findEncryptedSecret(idInput)).rejects.toBeInstanceOf(ConnectorSecretStoreError);
+    expect(m.persistedAudits.find((a) => a.action === "connector_secret.load.failed")!.after_json.error_class).toBe("invalid_envelope");
+  });
+
+  it("FAILS CLOSED: if the load.succeeded audit write fails, the load throws and returns NO encrypted payload", async () => {
+    const { row } = await completeRow("sec-x");
+    const m = txMockConn({ selectRows: [row], failAuditWhen: (s) => String(s.params[1]) === "connector_secret.load.succeeded" });
+    const store = createRunnerConnectorSecretStore(m.conn);
+    let returned: unknown = "SENTINEL";
+    await expect((async () => { returned = await store.findEncryptedSecret(idInput); })()).rejects.toBeInstanceOf(ConnectorSecretStoreError);
+    expect(returned).toBe("SENTINEL"); // the caller never received the secret/envelope
   });
 });
 
-describe("connector-secret-store — SQL uses ONLY allowed columns; no UPDATE/DELETE", () => {
-  it("the INSERT names exactly the 12 granted write columns + RETURNING id; no disallowed column", () => {
+describe("connector-secret-store — allowlist glue: hostile/benign extra input fields cannot reach the audit row", () => {
+  it("drops secret-shaped AND benign unknown fields on the store input; only the allowlist payload is audited", async () => {
+    const m = txMockConn({ insertSecretRows: [{ id: "sec-1" }] });
+    const store = createRunnerConnectorSecretStore(m.conn);
+    const encrypted = await anEncrypted();
+    // a careless caller passes secret-shaped AND benign extra props alongside the real input.
+    const hostile = {
+      ...idInput,
+      encrypted,
+      plaintext: "leaky-PLAINTEXT",
+      access_token: "gho_LEAKLEAKLEAKLEAK",
+      ciphertext: "CIPHERTEXT-LEAK",
+      wrappedDek: "WRAPPED-LEAK",
+      favoriteColor: "blurple",
+    } as unknown as Parameters<typeof store.insertEncryptedSecret>[0];
+    await store.insertEncryptedSecret(hostile);
+
+    const json = JSON.stringify(m.persistedAudits);
+    for (const bad of ["leaky-PLAINTEXT", "gho_LEAK", "CIPHERTEXT-LEAK", "WRAPPED-LEAK", "favoriteColor", "blurple", "plaintext", "access_token"]) {
+      expect(json).not.toContain(bad);
+    }
+    // every audit row carries ONLY the allowlist keys.
+    for (const a of m.persistedAudits) {
+      for (const k of Object.keys(a.after_json)) {
+        expect(["event", "connector_id", "secret_kind", "version", "result", "actor_type", "error_class", "correlation_id"]).toContain(k);
+      }
+    }
+  });
+
+  it("a failed audit write surfaces a redacted static error — no secret material in the thrown error", async () => {
+    const m = txMockConn({ failAuditWhen: () => true });
+    const store = createRunnerConnectorSecretStore(m.conn);
+    try {
+      await store.insertEncryptedSecret({ ...idInput, encrypted: await anEncrypted() });
+      throw new Error("should have thrown");
+    } catch (e) {
+      expect(e).toBeInstanceOf(ConnectorSecretStoreError);
+      const msg = String((e as Error).message);
+      for (const bad of ["PLAINTEXT", "ciphertext", "dek", "token"]) expect(msg.toLowerCase()).not.toContain(bad.toLowerCase());
+    }
+  });
+});
+
+describe("connector-secret-store — only store/load events; no decrypt/rotation/revocation; no UPDATE/DELETE", () => {
+  it("never emits a decrypt / rotation / revocation / delete / update audit event (no such call site)", async () => {
+    const m = txMockConn({ insertSecretRows: [{ id: "s" }], selectRows: [] });
+    const store = createRunnerConnectorSecretStore(m.conn);
+    await store.insertEncryptedSecret({ ...idInput, encrypted: await anEncrypted() });
+    await store.findEncryptedSecret(idInput);
+    const actions = auditActions(m.persistedAudits).join(" ");
+    for (const bad of ["decrypt", "rotation", "revocation", "delete", "update"]) expect(actions).not.toContain(bad);
+    // every emitted action is one of the six wired store/load events.
+    for (const a of m.persistedAudits) {
+      expect(/^connector_secret\.(store|load)\.(attempted|succeeded|failed)$/.test(a.action)).toBe(true);
+    }
+  });
+
+  it("the INSERT/SELECT shapes are unchanged and contain no UPDATE/DELETE/TRUNCATE", () => {
     expect(INSERT_SECRET_SQL).toContain("(tenant_id, connector_id, secret_kind, version, ciphertext, dek_wrapped, aead_nonce, aad_digest, key_id, aead_tag, envelope_version, aead_alg)");
     expect(INSERT_SECRET_SQL).toContain("returning id");
-    // never writes id (server default) or non-granted columns
-    for (const bad of ["is_active", "created_at", "revoked_at"]) expect(INSERT_SECRET_SQL).not.toContain(bad);
-    // the INSERT column-list must NOT include id (it is RETURNING id, not inserting it)
     expect(INSERT_SECRET_SQL).not.toMatch(/\(id,/);
-  });
-
-  it("the SELECT reads only granted columns and filters active/non-expired by parameterized identity", () => {
-    expect(SELECT_SECRET_SQL).toContain("select id, ciphertext, dek_wrapped, aead_nonce, aad_digest, key_id, aead_tag, envelope_version, aead_alg");
-    expect(SELECT_SECRET_SQL).toContain("where tenant_id = $1 and connector_id = $2 and secret_kind = $3 and version = $4");
-    for (const bad of ["is_active", "created_at", "revoked_at"]) expect(SELECT_SECRET_SQL).not.toContain(bad);
-  });
-
-  it("neither SQL statement performs an UPDATE or DELETE", () => {
+    expect(SELECT_SECRET_SQL).toContain("status = 'active' and (expires_at is null or expires_at > now())");
     for (const sql of [INSERT_SECRET_SQL, SELECT_SECRET_SQL]) {
       expect(sql.toLowerCase()).not.toMatch(/\bupdate\b/);
       expect(sql.toLowerCase()).not.toMatch(/\bdelete\b/);
@@ -167,16 +309,16 @@ describe("connector-secret-store — SQL uses ONLY allowed columns; no UPDATE/DE
 });
 
 // Static guard: server-only — imports only sibling modules; no db/supabase client, no service-role, no fetch,
-// no process.env, no route. Runs as connector_runner via the runner DB client path only.
+// no process.env, no route. Runs as connector_runner via the runner connection only.
 describe("connector-secret-store is server-safe (runner-only; no service-role/client/fetch/route/env)", () => {
   it("imports only sibling vault modules and contains no forbidden call/string", async () => {
     const fs = await import("node:fs");
     const path = await import("node:path");
     const src = fs.readFileSync(path.resolve(__dirname, "connector-secret-store.ts"), "utf8");
     const imports = [...src.matchAll(/from\s+["']([^"']+)["']/g)].map((m) => m[1]).sort();
-    expect(imports).toEqual(["./runner-db-client", "./secret-vault"]);
-    expect(src).toMatch(/server-only and must not be imported in client code/); // browser sentinel present
-    expect(src).toMatch(/set role connector_runner/); // runs under the runner role (via createRunnerDbClient)
+    expect(imports).toEqual(["./runner-db-client", "./secret-audit", "./secret-audit-writer", "./secret-vault"]);
+    expect(src).toMatch(/server-only and must not be imported in client code/);
+    expect(src).toMatch(/set role connector_runner/);
     const code = src.replace(/\/\/[^\n]*/g, "").replace(/\/\*[\s\S]*?\*\//g, "");
     expect(code).not.toMatch(/createClient\s*\(/);
     expect(code).not.toMatch(/createServiceClient/);
