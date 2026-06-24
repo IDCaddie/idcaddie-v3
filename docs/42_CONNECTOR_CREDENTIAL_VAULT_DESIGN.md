@@ -3662,3 +3662,57 @@ storage/use is still **NOT allowed**; **rotation/revocation and the real credent
 **Connector implementation remains blocked. Old-app parity is not complete. Connector credentials are not
 production-ready. RISK-001 remains OPEN. RISK-007 remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is
 ticked by this PR.
+## 84. Connector secret store/load audit wiring — ATOMIC, fail-closed (PR #167)
+
+Wires the #166 allowlist audit builder into the #160 runner-backed store adapter so every store/load operation
+emits a PERSISTED audit row, with FAIL-CLOSED semantics. This stores NO real credential, calls NO provider, and
+does NOT decrypt; RISK-007 remains OPEN.
+
+### 84.1 Preconditions (answered before implementing — the amendment's gate)
+1. **Shared transaction supported — YES.** `RunnerConnection.runSequence(statements)` runs an ordered statement
+   array on ONE connection, so a single `runSequence([set role connector_runner, begin, INSERT connector_secrets …
+   returning id, INSERT audit_logs, commit])` is one transaction containing BOTH inserts.
+2. **The audit writer enlists in the runner transaction — YES.** `secret-audit-writer.ts` is a PURE
+   statement-builder: it turns a #166 record into the `audit_logs` INSERT `{sql, params}` that the store adapter
+   splices into its OWN `runSequence` (same connection, same `connector_runner` role, same `begin`/`commit`). It
+   opens NO connection, uses NO separate role, owns NO RPC/transaction.
+3. **connector_runner can INSERT audit_logs — only after migration `0031`.** It could not before; `0031` adds the
+   smallest safe grant: COLUMN-scoped INSERT on `audit_logs` of EXACTLY `(tenant_id, action, resource_type,
+   after_json)`. audit_logs ONLY; no select/update/delete; no other table.
+4. **Append-only holds for the runner — YES** (proven under `set role connector_runner` in T52): the 0002
+   `audit_logs_no_mutation` trigger (`before update or delete`) fires for every role, so the runner can INSERT but
+   never UPDATE/DELETE an audit row.
+5. **The two inserts share a transaction — YES** → wired implementation (not a stop-and-propose).
+
+### 84.2 STORE is atomic (no orphaned, unaudited secret; no compensating delete)
+`insertEncryptedSecret` runs the `connector_secrets` INSERT and its `connector_secret.store.succeeded` audit
+INSERT in ONE runner transaction (`begin … commit`). The secret row commits ONLY if its audit row commits; if the
+audit INSERT fails, the WHOLE transaction rolls back — there is NEVER a committed secret without its audit, and
+there is NO compensating DELETE. `store.attempted` (before) and `store.failed` (on a rolled-back failure) are
+audit-only writes, each fail-closed (a failed audit write throws and aborts the operation). T52 proves the atomic
+commit AND the atomic rollback under the real `connector_runner` role.
+
+### 84.3 LOAD is fail-closed by ordering (caller gets no secret when audit fails)
+`findEncryptedSecret` is a read (no row to roll back). It writes `load.attempted`, runs the SELECT, then writes
+`load.succeeded` (or `load.failed` with a static class — `ambiguous_match`/`invalid_envelope`/`load_failed`)
+BEFORE returning. If the `load.succeeded` audit write fails, the load THROWS and the caller receives NO
+secret/envelope.
+
+### 84.4 Allowlist glue + redaction
+The adapter passes the #166 builder ONLY the explicit identity it picks from the store input (`tenant_id`,
+`connector_id`, `secret_kind`, `version`, actor `connector_runner`, and a static `error_class` on failures) —
+NEVER the raw input, the `encrypted` envelope, plaintext, ciphertext, a DEK/tag/nonce/aad_digest, a KMS response,
+a DB URL, or a raw error. Any hostile/benign extra field on the store input is structurally dropped (tested with
+secret-shaped fields AND a benign `favoriteColor`). The audit row is the #166 allowlist `after_json` only; the
+writer serializes exactly the four granted columns.
+
+### 84.5 What this is NOT — **RISK-007 remains OPEN**
+Only the six store/load events are wired; **decrypt audit remains BUILDER-ONLY** (no decrypt call site exists) and
+NO `rotation`/`revocation`/`delete`/`update` event is introduced. The synthetic DB grant/adapter shape is proven
+by #163 and the synthetic KMS/IAM decrypt separation by #165, but this PR stores NO real provider token, exchanges
+NO OAuth code, executes NO connector, adds NO request-path decrypt, NO service-role secret path, and NO API route;
+it adds NO UPDATE/DELETE on `connector_secrets` and NO rotation/revocation. The only privilege broadened is the
+narrow `0031` audit-INSERT grant (audit_logs only). **Real connector credential storage/use is still NOT allowed;
+rotation/revocation and the real credential lifecycle remain missing. Connector implementation remains blocked.
+Old-app parity is not complete. Connector credentials are not production-ready. RISK-001 remains OPEN. RISK-007
+remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is ticked by this PR.

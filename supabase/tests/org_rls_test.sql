@@ -2895,4 +2895,93 @@ do $$ begin
 end $$;
 reset role;
 
+-- ── Test 52: connector_runner audit_logs INSERT grant + ATOMIC store-audit + append-only (migration 0031) ─
+-- 0031 grants connector_runner a COLUMN-LEVEL INSERT on audit_logs — ONLY (tenant_id, action, resource_type,
+-- after_json) — so the connector-secret store can write its audit row IN THE SAME runner transaction as the
+-- connector_secrets INSERT (atomic fail-closed — PR #167). The runner gets NO select/update/delete and NO grant
+-- on any other table; the 0002 append-only trigger still blocks update/delete for the runner. This does NOT
+-- modify T50/T51 (the connector_secrets column grant is unchanged).
+reset role;
+do $$ begin
+  -- privilege SHAPE: column-scoped INSERT only, EXACTLY the four safe columns; NO table-level / SELECT / UPDATE / DELETE.
+  assert not has_table_privilege('connector_runner','public.audit_logs','SELECT'),    'T52 runner has NO SELECT on audit_logs (write-only audit)';
+  assert not has_table_privilege('connector_runner','public.audit_logs','INSERT'),    'T52 runner has NO table-level INSERT on audit_logs (column-scoped only)';
+  assert not has_table_privilege('connector_runner','public.audit_logs','UPDATE'),    'T52 runner must NOT UPDATE audit_logs';
+  assert not has_table_privilege('connector_runner','public.audit_logs','DELETE'),    'T52 runner must NOT DELETE audit_logs';
+  assert not has_table_privilege('connector_runner','public.audit_logs','TRUNCATE'),  'T52 runner must NOT TRUNCATE audit_logs';
+  assert not has_table_privilege('connector_runner','public.audit_logs','REFERENCES'),'T52 runner must NOT REFERENCES audit_logs';
+  assert (select coalesce(array_agg(distinct column_name::text order by column_name::text), array[]::text[])
+          from information_schema.role_column_grants
+          where grantee='connector_runner' and table_schema='public' and table_name='audit_logs' and privilege_type='INSERT')
+         = array['action','after_json','resource_type','tenant_id'],
+         'T52 runner INSERT grant on audit_logs is EXACTLY (action, after_json, resource_type, tenant_id)';
+  assert     has_column_privilege('connector_runner','public.audit_logs','tenant_id','INSERT'),     'T52 runner can INSERT tenant_id';
+  assert     has_column_privilege('connector_runner','public.audit_logs','action','INSERT'),        'T52 runner can INSERT action';
+  assert     has_column_privilege('connector_runner','public.audit_logs','resource_type','INSERT'), 'T52 runner can INSERT resource_type';
+  assert     has_column_privilege('connector_runner','public.audit_logs','after_json','INSERT'),    'T52 runner can INSERT after_json';
+  assert not has_column_privilege('connector_runner','public.audit_logs','actor_user_id','INSERT'), 'T52 runner must NOT INSERT actor_user_id';
+  assert not has_column_privilege('connector_runner','public.audit_logs','before_json','INSERT'),   'T52 runner must NOT INSERT before_json';
+  assert not has_column_privilege('connector_runner','public.audit_logs','resource_id','INSERT'),   'T52 runner must NOT INSERT resource_id';
+  assert not has_column_privilege('connector_runner','public.audit_logs','ip_address','INSERT'),    'T52 runner must NOT INSERT ip_address';
+  assert not has_column_privilege('connector_runner','public.audit_logs','user_agent','INSERT'),    'T52 runner must NOT INSERT user_agent';
+  -- NO OTHER TABLE broadened: connector_secrets is still column-scoped SELECT/INSERT only (no new UPDATE/DELETE — T50 holds).
+  assert not has_table_privilege('connector_runner','public.connector_secrets','UPDATE'), 'T52 connector_secrets UPDATE still denied (0031 broadened only audit_logs)';
+  assert not has_table_privilege('connector_runner','public.connector_secrets','DELETE'), 'T52 connector_secrets DELETE still denied (0031 broadened only audit_logs)';
+  assert not has_table_privilege('connector_runner','public.connectors','INSERT'),        'T52 runner still has NO grant on connectors';
+end $$;
+
+-- FUNCTIONAL (a): under the runner role, a single transaction with the connector_secrets INSERT + the audit_logs
+-- INSERT commits BOTH rows.
+set role connector_runner;
+do $$ begin
+  insert into public.connector_secrets (tenant_id, connector_id, secret_kind, version, ciphertext, key_id, envelope_version, aead_alg)
+    values ('11111111-1111-1111-1111-111111111111','17000000-0000-0000-0000-0000000000a1','api_key', 520, '\xbeef'::bytea, 'kek-520', 1, 'AES-256-GCM');
+  insert into public.audit_logs (tenant_id, action, resource_type, after_json)
+    values ('11111111-1111-1111-1111-111111111111','connector_secret.store.succeeded','connector_secret',
+            '{"event":"connector_secret.store.succeeded","result":"succeeded","secret_kind":"api_key","version":520}'::jsonb);
+  assert (select count(*) from public.connector_secrets where version = 520) = 1,
+         'T52 atomic store: the connector_secrets row committed under the runner';
+end $$;
+reset role;
+do $$ begin
+  -- verified as superuser (the runner has NO SELECT on audit_logs): the paired audit row committed too.
+  assert (select count(*) from public.audit_logs
+            where action='connector_secret.store.succeeded' and resource_type='connector_secret') = 1,
+         'T52 atomic store: the paired audit_logs row committed under the runner';
+end $$;
+
+-- FUNCTIONAL (b): if the audit INSERT fails (here: naming a NON-GRANTED column → permission denied), the WHOLE
+-- subtransaction rolls back — the connector_secrets INSERT before it does NOT persist. No compensating DELETE.
+set role connector_runner;
+do $$
+declare audit_failed boolean := false;
+begin
+  begin
+    insert into public.connector_secrets (tenant_id, connector_id, secret_kind, version, ciphertext, key_id, envelope_version, aead_alg)
+      values ('11111111-1111-1111-1111-111111111111','17000000-0000-0000-0000-0000000000a1','api_key', 521, '\xbeef'::bytea, 'kek-521', 1, 'AES-256-GCM');
+    -- force an audit-write failure inside the same (sub)transaction: actor_user_id is NOT granted to the runner.
+    insert into public.audit_logs (tenant_id, action, resource_type, actor_user_id)
+      values ('11111111-1111-1111-1111-111111111111','connector_secret.store.succeeded','connector_secret','0b000000-0000-0000-0000-000000000001');
+  exception when others then
+    audit_failed := true; -- the audit insert errored → the subtransaction (incl. the secret insert) rolls back
+  end;
+  assert audit_failed, 'T52 audit insert naming a non-granted column must fail under the runner';
+  assert (select count(*) from public.connector_secrets where version = 521) = 0,
+         'T52 atomic rollback: the audit failure rolled back the connector_secrets INSERT (no orphaned secret, no compensating delete)';
+end $$;
+reset role;
+
+-- FUNCTIONAL (c): append-only is enforced FOR THE RUNNER — it cannot UPDATE or DELETE an audit row.
+set role connector_runner;
+do $$ declare blocked boolean;
+begin
+  blocked := false;
+  begin update public.audit_logs set action='tamper' where action='connector_secret.store.succeeded'; exception when others then blocked := true; end;
+  assert blocked, 'T52 connector_runner must NOT UPDATE audit_logs (append-only + no update grant)';
+  blocked := false;
+  begin delete from public.audit_logs where action='connector_secret.store.succeeded'; exception when others then blocked := true; end;
+  assert blocked, 'T52 connector_runner must NOT DELETE audit_logs (append-only + no delete grant)';
+end $$;
+reset role;
+
 do $$ begin raise notice 'ALL ORG-RLS ASSERTIONS PASSED'; end $$;
