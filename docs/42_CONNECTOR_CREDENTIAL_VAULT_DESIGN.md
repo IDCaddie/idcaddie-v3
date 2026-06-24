@@ -3067,3 +3067,77 @@ implementation remains blocked. Old-app parity is not complete. UI/UX parity is 
 parity is not complete. Upload is not automatically production-ready. Hosted Auth/tenant-context is verified,
 but old-app replacement is not yet verified. RISK-001 remains OPEN. RISK-007 remains OPEN. Cutover remains
 BLOCKED.** No doc 17 §5 box is ticked by this verification.
+## 75. Implementation — Okta discovery fact emitter (PR #153)
+
+**Okta discovery fact emitter is added.** This is the FIRST real provider-data mapper
+(`okta-discovery-emitter.ts`, `src/lib/server/connector-vault/`). **Okta provider records are transformed into
+validated discovery facts** and **Okta facts are staged through the existing safe discovery fact pipeline**
+(the PR #141 zod contract → the PR #142 `stageDiscoveryFactsForReview` RLS-backed staging path). It is treated
+as high-risk: it maps records yielded by an INJECTED source (the real client is wired later), so **No live Okta
+sync is implemented** and **No provider API call is made in production**.
+
+### 75.1 What it emits (existing schema vocabulary only)
+Okta facts are staged through the existing safe discovery fact pipeline.
+- An Okta application → an `app_discovery` fact (the app exists; `discovered_app_name` = label, `source_app_id`
+  = the Okta app id) + an `app_instance_identity` fact (the alias/instance fact: `external_instance_id` = the
+  Okta app id = provider_app_id; `instance_domain`/`instance_url` ONLY from explicit `settings.app.domain`/`url`).
+- An Okta user → an `app_user_account` fact (the Okta account) + a `person_identity_candidate` fact (the
+  identity anchor) when a normalized email is available.
+- An Okta app assignment → an `app_user_account` fact carrying the user↔app relationship (`app_id_hint` = the
+  Okta app id).
+- `source_type` is the existing enum value `identity_provider_discovery` (Okta is an identity-provider discovery
+  source — the task's "provider/connector" maps onto this existing vocabulary; no new source_type is invented).
+  `source_provider` = `okta`.
+
+### 75.2 Allowlist construction + secret/config landmine blocking
+Each fact is built from an EXPLICIT named allowlist of safe Okta fields (app: id/label/name/signOnMode/status +
+explicit `settings.app.url`/`settings.app.domain` scalars; user: id/status/profile.email/profile.login;
+assignment: id/app id/status) — the raw record is **never spread**. App-level config landmines are NEVER read:
+not `settings` as a blob, not `settings.signOn` (signing keys), not `_links`, `credentials`, `client_secret`,
+cookies, authorization headers, or any token — app-level Okta config is not assumed safe just because it is not
+a user OAuth token. So an unexpected or secret field on a source record cannot reach `fact_json`/`provenance_json`
+(proven by tests). Each built fact is re-validated via `parseDiscoveryFact` (`.strict()` + the provenance refine
+reject any token/secret key), and the staging helper validates AGAIN.
+
+### 75.3 Determinism, domain-explicitness, normalization, natural-key stability
+- Confidence is HIGH (0.9) only because every fact is anchored on a deterministic Okta object id (app id / user
+  id) — never on a name. No name-only canonical guess is emitted (no `vendor_product` mapping); canonical
+  resolution stays a later, reviewable step. **Okta facts do not write canonical graph records directly. Okta
+  facts do not write app_user_identity_matches directly.**
+- A `domain`/`instance_domain` is emitted ONLY from a structured, explicit Okta field (`settings.app.domain`) —
+  NEVER inferred from label/name/vendor/signOnMode/a guessed URL/display text. An app with only
+  label/name/signOnMode/status emits no domain/instance_domain (negative test).
+- Email/login normalization REUSES the existing `normalizeEmail` from `resolution.ts` (trim + lowercase only;
+  no dot/plus stripping, no domain canonicalization): `Jane.Doe@Acme.com` == `jane.doe@acme.com`; `jane.doe` ≠
+  `janedoe`; `jane+test` ≠ `jane`.
+- `natural_key` derives from immutable Okta provider ids (app id / user id / app id + user id) via the staging
+  helper — changing label/status does not change it; two different apps produce different keys; the same record
+  twice produces an identical key (tests).
+
+### 75.4 Safety / tenant scope
+Provider payload tenant_id is not trusted. Tenant scope comes from authenticated/server context.
+**Provider payload tenant_id is not trusted. Tenant scope comes from authenticated/server context** — every
+fact's `tenant_id` is the authenticated argument, never the provider payload (a payload `tenant_id` is simply
+never read), and `emitOktaDiscoveryFacts` stages NOTHING without an authenticated tenant. A malformed record (no
+stable id) is skipped; one bad record never blocks the rest. The injected source is the only seam (unit tests
+inject a mock, so there is NO live API call); the module imports only the three sibling server-only modules
+(`discovery-facts`, `discovery-fact-staging`, `resolution`).
+
+### 75.5 Documented schema gaps (no casual schema invention)
+There is no dedicated `app_alias` fact type in the current schema, so alias signals are carried as
+`app_instance_identity` discriminators (`external_instance_id`, `instance_domain`). A distinct **`sso_app_id`**
+alias and explicit **group/app-assignment → `group_membership`** emission have no clean home in the wired source
+today; rather than expand the schema or the source plumbing casually, those are left as documented gaps for a
+later schema/source PR (the required `app_user_account` user↔app relationship IS emitted).
+
+### 75.6 Scope / status (tests **446 → 472**; RLS **492**; types **1828** 0-diff; no migration)
+**No OAuth code is exchanged for tokens. No access token is stored. No refresh token is stored. No API key is
+stored. No connector credentials are stored. No connector secret material is inserted, updated, deleted, or read.
+No connector sync is implemented. No credential form is implemented. No connect/reconnect/disconnect action is
+exposed to users. No browser-accessible service-role request path is added.** No direct write to apps /
+app_aliases / vendors / app_products / people / app_users / app_user_identity_matches — only validated discovery
+facts are staged. No service-role client, no public unauthenticated route, no production/hosted command.
+**Connector implementation remains blocked. Old-app parity is not complete. UI/UX parity is not complete. AI/API
+connector parity is not complete. Upload is not automatically production-ready. Hosted Auth/tenant-context is
+verified, but old-app replacement is not yet verified. RISK-001 remains OPEN. RISK-007 remains OPEN. Cutover
+remains BLOCKED.** No doc 17 §5 box is ticked by this PR.

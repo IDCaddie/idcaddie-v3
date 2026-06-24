@@ -2978,3 +2978,42 @@ added. No production data was touched. Connector implementation remains blocked.
 complete. UI/UX parity is not complete. AI/API connector parity is not complete. Upload is not automatically
 production-ready. Hosted Auth/tenant-context is verified, but old-app replacement is not yet verified. RISK-001
 remains OPEN. RISK-007 remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is ticked by this PR.
+---
+
+## 86. IMPLEMENTATION — Okta discovery fact emitter (PR #153)
+
+**Okta discovery fact emitter is added** (doc 42 §75) — the FIRST real provider-data mapper. **Okta provider
+records are transformed into validated discovery facts. Okta facts are staged through the existing safe
+discovery fact pipeline** (`okta-discovery-emitter.ts` → the PR #141 zod contract → the PR #142
+`stageDiscoveryFactsForReview` RLS-backed staging path). High-risk, so it maps records from an INJECTED source
+(the real client is wired later).
+
+- **Okta facts do not write canonical graph records directly. Okta facts do not write app_user_identity_matches
+  directly.** No direct write to apps / app_aliases / vendors / app_products / people / app_users /
+  app_user_identity_matches — only validated discovery facts are staged. **No live Okta sync is implemented. No
+  provider API call is made in production.**
+- ALLOWLIST construction: each fact is built from an explicit named allowlist of safe fields (app:
+  id/label/name/signOnMode/status + explicit settings.app.url/domain; user: id/status/profile.email/login;
+  assignment: id/app id/status). The raw record is never spread; `settings` blob / `settings.signOn` /
+  `_links` / `credentials` / `client_secret` / cookies / tokens are NEVER read — an unexpected/secret field
+  cannot reach fact_json/provenance_json.
+- A domain/instance_domain is emitted ONLY from an explicit structured `settings.app.domain` field — never
+  inferred from label/name/signOnMode/URL. Confidence is high only because facts are anchored on deterministic
+  Okta ids (app id / user id); `natural_key` derives from those immutable ids (stable to label/status changes).
+  Email/login normalization REUSES `resolution.ts`'s `normalizeEmail` (trim + lowercase only).
+- **Provider payload tenant_id is not trusted. Tenant scope comes from authenticated/server context** — the
+  emitter stages nothing without an authenticated tenant, and the payload tenant_id is never read. Malformed
+  records are skipped (fail closed).
+
+Maps onto EXISTING schema vocabulary only (`source_type` = `identity_provider_discovery`; alias signals via
+`app_instance_identity`); no `app_alias` fact type / `sso_app_id` alias / group-membership source plumbing is
+invented — documented as gaps for a later schema PR. Tests **446 → 472** (26 emitter tests); RLS suite unchanged
+(**492**); generated types unchanged (**1828**, 0-diff); **no migration**. **No OAuth code is exchanged for
+tokens. No access token is stored. No refresh token is stored. No API key is stored. No connector credentials
+are stored. No connector secret material is inserted, updated, deleted, or read. No connector sync is
+implemented. No credential form is implemented. No connect/reconnect/disconnect action is exposed to users. No
+browser-accessible service-role request path is added.** No service-role client, no public route, no
+production/hosted command. **Connector implementation remains blocked. Old-app parity is not complete. UI/UX
+parity is not complete. AI/API connector parity is not complete. Upload is not automatically production-ready.
+Hosted Auth/tenant-context is verified, but old-app replacement is not yet verified. RISK-001 remains OPEN.
+RISK-007 remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is ticked by this PR.

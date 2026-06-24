@@ -75,6 +75,9 @@ const CRYPTO_REL_HINTS = [
   "connector-vault/identity-match-write",
   "server/connector-vault/identity-match-write",
   "lib/server/connector-vault/identity-match-write",
+  "connector-vault/okta-discovery-emitter",
+  "server/connector-vault/okta-discovery-emitter",
+  "lib/server/connector-vault/okta-discovery-emitter",
 ];
 
 function walk(dir: string): string[] {
