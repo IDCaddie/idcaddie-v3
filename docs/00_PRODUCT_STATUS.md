@@ -202,3 +202,25 @@ Evidence:
 
 `RISK-007` remains OPEN. This verifies the staging DB grant surface only; it does not prove hosted KMS/IAM separation, real credential storage, rotation/revocation, audit, or production readiness. Cutover remains BLOCKED.
 
+## Production verification - connector secret vault grants 0029
+
+Production verification for `0029_connector_runner_secret_grants.sql` completed on project `dzbfxulvxchdemcettrx`.
+
+Verified:
+
+- production migration list shows `0029` applied remotely
+- `connector_runner` has column-scoped `INSERT`/`SELECT` on `connector_secrets` only
+- `connector_runner` has no table-level `SELECT`/`INSERT` on `connector_secrets`
+- `connector_runner` has no `UPDATE` or `DELETE` on `connector_secrets`
+- `authenticated` and `anon` have no `SELECT` on `connector_secrets`
+- `connector_secrets` has zero RLS policies
+- local project was relinked back to staging `ycdpzduxugdsffjqyoai`
+
+Evidence:
+
+- `role_column_grants` shows `INSERT` on `aad_digest`, `aead_nonce`, `ciphertext`, `connector_id`, `dek_wrapped`, `key_id`, `secret_kind`, `tenant_id`, `version`
+- `role_column_grants` shows `SELECT` on `aad_digest`, `aead_nonce`, `ciphertext`, `connector_id`, `dek_wrapped`, `expires_at`, `id`, `key_id`, `secret_kind`, `status`, `tenant_id`, `version`
+- table privilege check returned `runner_table_select=false`, `runner_table_insert=false`, `runner_update=false`, `runner_delete=false`, `authenticated_select=false`, `anon_select=false`, `policy_count=0`
+
+`RISK-007` remains OPEN. This verifies the production DB grant surface only; it does not prove hosted KMS/IAM separation, real credential storage, rotation/revocation, audit, or cutover readiness. Cutover remains BLOCKED.
+
