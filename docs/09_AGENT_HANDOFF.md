@@ -200,3 +200,30 @@ Evidence:
 
 `RISK-007` remains OPEN. This verifies the production DB grant surface only; it does not prove hosted KMS/IAM separation, real credential storage, rotation/revocation, audit, or cutover readiness. Cutover remains BLOCKED.
 
+## Staging verification - connector secret envelope schema 0030
+
+Staging verification for `0030_connector_secret_envelope_columns.sql` completed on project `ycdpzduxugdsffjqyoai`.
+
+Verified:
+
+- staging migration list shows `0030` applied remotely
+- `connector_secrets` has the new encrypted-envelope columns: `aead_alg`, `aead_tag`, `envelope_version`
+- `aead_alg` is `text`, nullable
+- `aead_tag` is `bytea`, nullable
+- `envelope_version` is `smallint`, nullable
+- `connector_runner` has column-scoped `INSERT`/`SELECT` on the complete encrypted envelope column set
+- `connector_runner` has no table-level `SELECT`/`INSERT`
+- `connector_runner` has no `UPDATE` or `DELETE`
+- `authenticated` and `anon` have no `SELECT`
+- `connector_secrets` has zero RLS policies
+- local project remains linked back to staging `ycdpzduxugdsffjqyoai`
+
+Evidence:
+
+- new columns: `aead_alg text YES`, `aead_tag bytea YES`, `envelope_version smallint YES`
+- `role_column_grants` includes `INSERT` on `aad_digest`, `aead_alg`, `aead_nonce`, `aead_tag`, `ciphertext`, `connector_id`, `dek_wrapped`, `envelope_version`, `key_id`, `secret_kind`, `tenant_id`, `version`
+- `role_column_grants` includes `SELECT` on `aad_digest`, `aead_alg`, `aead_nonce`, `aead_tag`, `ciphertext`, `connector_id`, `dek_wrapped`, `envelope_version`, `expires_at`, `id`, `key_id`, `secret_kind`, `status`, `tenant_id`, `version`
+- table privilege check returned `runner_table_select=false`, `runner_table_insert=false`, `runner_update=false`, `runner_delete=false`, `authenticated_select=false`, `anon_select=false`, `policy_count=0`
+
+`RISK-007` remains OPEN. This verifies the staging DB schema and grant surface only; it does not prove hosted KMS/IAM separation, real credential storage, rotation/revocation, audit, or cutover readiness. Cutover remains BLOCKED.
+
