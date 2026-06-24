@@ -3266,4 +3266,47 @@ Evidence:
 - table privilege check returned `runner_table_select=false`, `runner_table_insert=false`, `runner_update=false`, `runner_delete=false`, `authenticated_select=false`, `anon_select=false`, `policy_count=0`
 
 `RISK-007` remains OPEN. This verifies the production DB grant surface only; it does not prove hosted KMS/IAM separation, real credential storage, rotation/revocation, audit, or cutover readiness. Cutover remains BLOCKED.
+## 77. Implementation — connector secret envelope schema completion (PR #157)
 
+This completes the **at-rest encrypted-envelope SHAPE** for `connector_secrets` — and ONLY that. #154 added the
+vault save/load boundary, but the table (0017) had columns for only FIVE of the eight `EncryptedConnectorSecret`
+fields (crypto.ts), so a real encrypted secret could not be persisted + loaded as a COMPLETE envelope. Migration
+`0030` adds the three missing columns and extends the runner's COLUMN-scoped grant to cover them.
+
+### 77.1 The completed mapping (every envelope field now has a column)
+`ciphertext → ciphertext` · `wrappedDek → dek_wrapped` · `iv → aead_nonce` · `aadDigest → aad_digest` ·
+`kekId → key_id` (all 0017) — plus the new 0030 columns: **`tag → aead_tag`** (the 16-byte GCM auth tag,
+REQUIRED to decrypt), **`v → envelope_version`** (the payload format version), **`alg → aead_alg`** (the AEAD
+algorithm label). `secret-vault.ts` adds pure `encryptedSecretToColumns` / `columnsToEncryptedSecret` mappers
+(base64/hex ↔ bytea/text); a store-facing test round-trips a real encrypted payload encrypt → columns →
+reconstruct (byte-identical) → decrypt → original plaintext, and `columnsToEncryptedSecret` FAILS CLOSED on an
+incomplete row (NULL tag/version/alg — the pre-0030 shape) or an unsupported version/algorithm.
+
+### 77.2 Non-destructive + column-scoped grant (no broadening)
+The three columns are NULLABLE with NULL-permissive CHECKs (aead_tag is 16 bytes; envelope_version ≥ 1;
+aead_alg is `AES-256-GCM`), so any existing row stays valid — no column is dropped, renamed, or retyped (no real
+secret was ever stored: #155/#156 verified the grant surface, they did NOT write a secret). The runner grant
+stays COLUMN-scoped (the #154 correction): `REVOKE ALL` then re-`GRANT SELECT/INSERT` the column sets EXTENDED
+with the three new columns — **NO table-level SELECT/INSERT, NO UPDATE/DELETE/TRUNCATE/REFERENCES/TRIGGER**.
+`authenticated`/`anon` keep EXACTLY zero table + column privilege; `connector_secrets` stays RLS-enabled with
+ZERO policies. T50 asserts the exact post-0030 column grants (now 15 SELECT / 12 INSERT columns) + the new
+aead_tag/envelope_version grants, and functionally writes the complete envelope. Generated types DO change (new
+columns): **1828 → 1837**.
+
+### 77.3 RISK-007 status — **RISK-007 remains OPEN**
+This completes the SCHEMA SHAPE for encrypted-envelope persistence ONLY — NOT hosted KMS/IAM separation, NOT
+audit, NOT rotation/revocation, NOT cutover readiness. The at-rest schema gap is now CLOSED (the envelope can be
+persisted + loaded complete), but the OTHER RISK-007 gaps remain OPEN:
+- the hosted KMS-grant runtime separation (runner has `kms:Decrypt`, the web/request-path identity does not —
+  the real cryptographic decrypt boundary) — NOT wired/verified (mock KMS only, no real `KmsClient`);
+- audited secret access/use; revocation/rotation/tombstone (UPDATE/DELETE still deliberately not granted);
+- staging verification of `0030`; production verification of `0030`; live provider token storage.
+
+**No real KMS client is added. No live Okta sync is added. This PR does not store real customer tokens. No
+service-role path is added. No provider API call is made. No OAuth code is exchanged for tokens. No access token
+is stored. No refresh token is stored. No API key is stored. No connector credentials are stored. No connector
+secret material is inserted, updated, deleted, or read in a hosted environment. No connector sync is implemented.
+No credential form is implemented. No connect/reconnect/disconnect action is exposed to users. No
+browser-accessible service-role request path is added. No hosted staging/production commands were run.
+Connector implementation remains blocked. Old-app parity is not complete. RISK-001 remains OPEN. RISK-007 remains
+OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is ticked by this PR.

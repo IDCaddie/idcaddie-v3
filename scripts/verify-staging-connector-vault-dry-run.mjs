@@ -142,8 +142,9 @@ console.log("       a. as connector_runner, verify the COLUMN-scoped 0029 grant 
 console.log("            select privilege_type, column_name from information_schema.role_column_grants");
 console.log("             where grantee='connector_runner' and table_name='connector_secrets' order by 1,2;");
 console.log("          expect SELECT on (id,tenant_id,connector_id,secret_kind,version,status,expires_at,");
-console.log("          ciphertext,dek_wrapped,aead_nonce,aad_digest,key_id) and INSERT on (tenant_id,connector_id,");
-console.log("          secret_kind,version,ciphertext,dek_wrapped,aead_nonce,aad_digest,key_id); and");
+console.log("          ciphertext,dek_wrapped,aead_nonce,aad_digest,key_id,aead_tag,envelope_version,aead_alg) and");
+console.log("          INSERT on (tenant_id,connector_id,secret_kind,version,ciphertext,dek_wrapped,aead_nonce,");
+console.log("          aad_digest,key_id,aead_tag,envelope_version,aead_alg) [the COMPLETE envelope, incl. 0030]; and");
 console.log("          has_table_privilege('connector_runner','public.connector_secrets','SELECT') is FALSE");
 console.log("          (column-only); and the runner has NO UPDATE/DELETE/TRUNCATE/REFERENCES/TRIGGER.");
 console.log("       b. read-only proof (touches no rows): as connector_runner");

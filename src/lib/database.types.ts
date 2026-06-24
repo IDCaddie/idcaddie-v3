@@ -588,11 +588,14 @@ export type Database = {
       connector_secrets: {
         Row: {
           aad_digest: string | null
+          aead_alg: string | null
           aead_nonce: string | null
+          aead_tag: string | null
           ciphertext: string | null
           connector_id: string
           created_at: string
           dek_wrapped: string | null
+          envelope_version: number | null
           expires_at: string | null
           id: string
           is_active: boolean
@@ -605,11 +608,14 @@ export type Database = {
         }
         Insert: {
           aad_digest?: string | null
+          aead_alg?: string | null
           aead_nonce?: string | null
+          aead_tag?: string | null
           ciphertext?: string | null
           connector_id: string
           created_at?: string
           dek_wrapped?: string | null
+          envelope_version?: number | null
           expires_at?: string | null
           id?: string
           is_active?: boolean
@@ -622,11 +628,14 @@ export type Database = {
         }
         Update: {
           aad_digest?: string | null
+          aead_alg?: string | null
           aead_nonce?: string | null
+          aead_tag?: string | null
           ciphertext?: string | null
           connector_id?: string
           created_at?: string
           dek_wrapped?: string | null
+          envelope_version?: number | null
           expires_at?: string | null
           id?: string
           is_active?: boolean
