@@ -3055,3 +3055,29 @@ form is implemented. No connect/reconnect/disconnect action is exposed to users.
 service-role request path is added.** **Connector implementation remains blocked. Old-app parity is not
 complete. RISK-001 remains OPEN. RISK-007 remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is ticked by
 this PR.
+---
+
+## 88. IMPLEMENTATION — connector secret envelope schema completion (PR #157)
+
+Completes the at-rest encrypted-envelope SHAPE for `connector_secrets` (doc 42 §77) — and ONLY that. Migration
+`0030` adds the three envelope columns the `EncryptedConnectorSecret` payload (crypto.ts) needed but
+`connector_secrets` lacked: **`aead_tag`** (the 16-byte GCM auth tag, required to decrypt), **`envelope_version`**
+(`v`), **`aead_alg`** (`alg`). With these, every envelope field now has a column, so a real encrypted secret can
+be persisted + loaded as a COMPLETE envelope.
+
+- NON-DESTRUCTIVE: the three columns are NULLABLE with NULL-permissive CHECKs; no column is dropped/renamed/
+  retyped. `secret-vault.ts` adds pure `encryptedSecretToColumns`/`columnsToEncryptedSecret` mappers; a test
+  round-trips a real payload (encrypt → columns → reconstruct byte-identical → decrypt → original plaintext) and
+  fails closed on an incomplete/unsupported row.
+- The runner grant stays COLUMN-scoped (the #154 posture): `REVOKE ALL` then re-`GRANT SELECT/INSERT` the column
+  sets EXTENDED with the three new columns — NO table-level grant, NO UPDATE/DELETE. `authenticated`/`anon` keep
+  EXACTLY zero privilege; RLS-enabled, zero policies. T50 asserts the exact post-0030 column grants.
+
+Tests **487 → 489**; RLS suite **519 → 522** (T50 extended); generated types **1828 → 1837** (the three new
+columns); migration `0030` (additive + column-scoped grant only). This completes the SCHEMA SHAPE for
+encrypted-envelope persistence ONLY — NOT hosted KMS/IAM separation, audit, rotation/revocation, or cutover
+readiness. **RISK-007 remains OPEN** — the at-rest schema gap is closed, but the hosted KMS-grant runtime
+separation (mock KMS only, no real `KmsClient`), audited secret access/use, revocation/rotation/tombstone,
+staging verification of `0030`, production verification of `0030`, and live token storage all remain. **No real
+KMS client, no live Okta sync, no real customer token stored, no service-role path, no hosted command. RISK-001
+remains OPEN. RISK-007 remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is ticked by this PR.

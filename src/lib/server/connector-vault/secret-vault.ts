@@ -76,6 +76,59 @@ export type EncryptOnlyKeyProvider = Pick<ConnectorVaultKeyProvider, "generateDa
 // The at-rest payload the store persists (maps to connector_secrets columns) — NEVER plaintext.
 export type StoredEncryptedSecret = { id: string; encrypted: EncryptedConnectorSecret };
 
+// ── at-rest envelope column mapping (the COMPLETE 8-field envelope ↔ connector_secrets columns; 0030) ───────
+// The exact `connector_secrets` envelope columns. Binary fields are Buffers (bytea); the rest are scalars. The
+// runner-backed store uses these mappers to write/read a COMPLETE EncryptedConnectorSecret — every field of the
+// `crypto.ts` payload now has a column (0030 added aead_tag/envelope_version/aead_alg). NEVER plaintext.
+export type ConnectorSecretEnvelopeColumns = {
+  ciphertext: Buffer;        // <- EncryptedConnectorSecret.ciphertext (base64-decoded)
+  dek_wrapped: Buffer;       // <- .wrappedDek
+  aead_nonce: Buffer;        // <- .iv
+  aead_tag: Buffer;          // <- .tag (the 16-byte GCM auth tag; 0030)
+  aad_digest: string;        // <- .aadDigest (hex)
+  key_id: string;            // <- .kekId
+  envelope_version: number;  // <- .v (0030)
+  aead_alg: string;          // <- .alg (0030)
+};
+
+// Map a validated EncryptedConnectorSecret onto the at-rest envelope columns (base64/hex -> bytea/text).
+export function encryptedSecretToColumns(e: EncryptedConnectorSecret): ConnectorSecretEnvelopeColumns {
+  return {
+    ciphertext: Buffer.from(e.ciphertext, "base64"),
+    dek_wrapped: Buffer.from(e.wrappedDek, "base64"),
+    aead_nonce: Buffer.from(e.iv, "base64"),
+    aead_tag: Buffer.from(e.tag, "base64"),
+    aad_digest: e.aadDigest,
+    key_id: e.kekId,
+    envelope_version: e.v,
+    aead_alg: e.alg,
+  };
+}
+
+// Reconstruct the EncryptedConnectorSecret from the at-rest envelope columns. Fails closed (typed error) on an
+// INCOMPLETE row (a legacy/partial envelope with NULL tag/version/alg) or an unsupported version/algorithm — so
+// a half-written secret can never be decoded into a usable payload.
+export function columnsToEncryptedSecret(c: Partial<ConnectorSecretEnvelopeColumns>): EncryptedConnectorSecret {
+  const need = (b: Buffer | null | undefined, label: string): Buffer => {
+    if (!Buffer.isBuffer(b) || b.length === 0) throw new ConnectorSecretVaultError(`incomplete stored envelope: ${label}`);
+    return b;
+  };
+  if (typeof c.aad_digest !== "string" || c.aad_digest.length === 0) throw new ConnectorSecretVaultError("incomplete stored envelope: aad_digest");
+  if (typeof c.key_id !== "string" || c.key_id.length === 0) throw new ConnectorSecretVaultError("incomplete stored envelope: key_id");
+  if (c.envelope_version !== 1) throw new ConnectorSecretVaultError("unsupported stored envelope version");
+  if (c.aead_alg !== "AES-256-GCM") throw new ConnectorSecretVaultError("unsupported stored envelope algorithm");
+  return {
+    v: 1,
+    alg: "AES-256-GCM",
+    kekId: c.key_id,
+    wrappedDek: need(c.dek_wrapped, "dek_wrapped").toString("base64"),
+    iv: need(c.aead_nonce, "aead_nonce").toString("base64"),
+    ciphertext: need(c.ciphertext, "ciphertext").toString("base64"),
+    tag: need(c.aead_tag, "aead_tag").toString("base64"),
+    aadDigest: c.aad_digest,
+  };
+}
+
 // The INJECTED store boundary. Backed by the runner DB client (`SET ROLE connector_runner`, the narrow 0029
 // SELECT+INSERT grant) when wired — NEVER a service-role / request-path client. Tests inject a mock.
 export interface ConnectorSecretWriteStore {

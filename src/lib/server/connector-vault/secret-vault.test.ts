@@ -8,12 +8,14 @@ import {
   RedactedSecret,
   RUNNER_RUNTIME_MARKER,
   ConnectorSecretVaultError,
+  encryptedSecretToColumns,
+  columnsToEncryptedSecret,
   type ConnectorSecretWriteStore,
   type ConnectorSecretReadStore,
   type StoredEncryptedSecret,
   type EncryptOnlyKeyProvider,
 } from "./secret-vault";
-import { ConnectorVaultCryptoError, type ConnectorVaultKeyProvider, type SecretContext } from "./crypto";
+import { encryptConnectorSecret, decryptConnectorSecret, ConnectorVaultCryptoError, type ConnectorVaultKeyProvider, type SecretContext } from "./crypto";
 
 const KEK = "kek-test-1";
 const ctx = (over: Partial<SecretContext> = {}): SecretContext => ({
@@ -207,6 +209,35 @@ describe("documented RISK-007 gaps", () => {
     const store = memStore();
     expect("delete" in (store.write as object)).toBe(false);
     expect("delete" in (store.read as object)).toBe(false);
+  });
+});
+
+describe("at-rest envelope column mapping (the COMPLETE 8-field envelope ↔ connector_secrets columns; 0030)", () => {
+  it("round-trips a complete encrypted payload through the DB columns and still decrypts", async () => {
+    const kp = memKeyProvider();
+    const encrypted = await encryptConnectorSecret({ plaintext: "okta-token-PLAINTEXT", context: ctx(), keyProvider: kp, kekId: KEK });
+    const cols = encryptedSecretToColumns(encrypted);
+    // every envelope field is represented as a column, incl. the 0030 additions (tag/version/alg)
+    expect(Buffer.isBuffer(cols.ciphertext) && Buffer.isBuffer(cols.dek_wrapped) && Buffer.isBuffer(cols.aead_nonce) && Buffer.isBuffer(cols.aead_tag)).toBe(true);
+    expect(cols.aead_tag.length).toBe(16);          // the 16-byte GCM auth tag (0030)
+    expect(cols.envelope_version).toBe(1);          // v (0030)
+    expect(cols.aead_alg).toBe("AES-256-GCM");      // alg (0030)
+    expect(typeof cols.aad_digest).toBe("string");
+    expect(typeof cols.key_id).toBe("string");
+    // reconstruct from the columns: byte-identical to the original envelope, and it still decrypts
+    const back = columnsToEncryptedSecret(cols);
+    expect(back).toEqual(encrypted);
+    const pt = await decryptConnectorSecret({ encrypted: back, context: ctx(), keyProvider: kp });
+    expect(pt.toString("utf8")).toBe("okta-token-PLAINTEXT");
+  });
+
+  it("columnsToEncryptedSecret fails closed on an incomplete row (missing tag) or unsupported version/alg", () => {
+    // a partial/legacy row (no tag/version/alg — the pre-0030 shape) must NOT decode into a usable payload
+    const partial = { ciphertext: Buffer.from("x"), dek_wrapped: Buffer.from("y"), aead_nonce: Buffer.from("z"), aad_digest: "d", key_id: "k" };
+    expect(() => columnsToEncryptedSecret(partial as never)).toThrow(ConnectorSecretVaultError);
+    const ok = { ciphertext: Buffer.from("x"), dek_wrapped: Buffer.from("y"), aead_nonce: Buffer.from("z"), aead_tag: Buffer.alloc(16), aad_digest: "d", key_id: "k", envelope_version: 1, aead_alg: "AES-256-GCM" };
+    expect(() => columnsToEncryptedSecret({ ...ok, envelope_version: 2 })).toThrow(ConnectorSecretVaultError);
+    expect(() => columnsToEncryptedSecret({ ...ok, aead_alg: "ROT13" })).toThrow(ConnectorSecretVaultError);
   });
 });
 

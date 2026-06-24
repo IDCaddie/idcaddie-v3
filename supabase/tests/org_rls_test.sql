@@ -2771,26 +2771,30 @@ do $$ begin
   assert not has_table_privilege('connector_runner','public.connector_secrets','TRUNCATE'),  'T50 runner must NOT TRUNCATE connector_secrets';
   assert not has_table_privilege('connector_runner','public.connector_secrets','REFERENCES'),'T50 runner must NOT REFERENCES connector_secrets';
   assert not has_table_privilege('connector_runner','public.connector_secrets','TRIGGER'),   'T50 runner must NOT TRIGGER connector_secrets';
-  -- EXACT column-level SELECT set (identity/query + active/expiry filter + the encrypted envelope columns).
+  -- EXACT column-level SELECT set (identity/query + active/expiry filter + the COMPLETE encrypted envelope
+  -- columns, incl. the 0030 aead_tag/envelope_version/aead_alg).
   assert (select coalesce(array_agg(distinct column_name::text order by column_name::text), array[]::text[])
           from information_schema.role_column_grants
           where grantee='connector_runner' and table_schema='public' and table_name='connector_secrets' and privilege_type='SELECT')
-         = array['aad_digest','aead_nonce','ciphertext','connector_id','dek_wrapped','expires_at','id','key_id','secret_kind','status','tenant_id','version'],
-         'T50 runner SELECT columns must be EXACTLY the identity/active/envelope set';
-  -- EXACT column-level INSERT set (identity/write + the encrypted envelope columns; id/is_active/status default).
+         = array['aad_digest','aead_alg','aead_nonce','aead_tag','ciphertext','connector_id','dek_wrapped','envelope_version','expires_at','id','key_id','secret_kind','status','tenant_id','version'],
+         'T50 runner SELECT columns must be EXACTLY the identity/active/complete-envelope set (incl. 0030 columns)';
+  -- EXACT column-level INSERT set (identity/write + the COMPLETE encrypted envelope columns; id/is_active/status default).
   assert (select coalesce(array_agg(distinct column_name::text order by column_name::text), array[]::text[])
           from information_schema.role_column_grants
           where grantee='connector_runner' and table_schema='public' and table_name='connector_secrets' and privilege_type='INSERT')
-         = array['aad_digest','aead_nonce','ciphertext','connector_id','dek_wrapped','key_id','secret_kind','tenant_id','version'],
-         'T50 runner INSERT columns must be EXACTLY the identity/envelope write set';
+         = array['aad_digest','aead_alg','aead_nonce','aead_tag','ciphertext','connector_id','dek_wrapped','envelope_version','key_id','secret_kind','tenant_id','version'],
+         'T50 runner INSERT columns must be EXACTLY the identity/complete-envelope write set (incl. 0030 columns)';
   -- NO column-level privilege beyond SELECT/INSERT (no UPDATE/DELETE/REFERENCES columns).
   assert (select count(*) from information_schema.role_column_grants
           where grantee='connector_runner' and table_schema='public' and table_name='connector_secrets'
             and privilege_type not in ('SELECT','INSERT')) = 0,
          'T50 runner must have NO column privilege beyond SELECT/INSERT on connector_secrets';
-  -- representative column checks: granted envelope columns yes; a non-granted column (created_at) no.
+  -- representative column checks: granted envelope columns (incl. the 0030 tag) yes; a non-granted column no.
   assert     has_column_privilege('connector_runner','public.connector_secrets','ciphertext','SELECT'), 'T50 runner can SELECT ciphertext';
   assert     has_column_privilege('connector_runner','public.connector_secrets','ciphertext','INSERT'), 'T50 runner can INSERT ciphertext';
+  assert     has_column_privilege('connector_runner','public.connector_secrets','aead_tag','SELECT'),   'T50 runner can SELECT aead_tag (0030 — needed to decrypt)';
+  assert     has_column_privilege('connector_runner','public.connector_secrets','aead_tag','INSERT'),   'T50 runner can INSERT aead_tag (0030)';
+  assert     has_column_privilege('connector_runner','public.connector_secrets','envelope_version','INSERT'), 'T50 runner can INSERT envelope_version (0030)';
   assert not has_column_privilege('connector_runner','public.connector_secrets','created_at','SELECT'), 'T50 runner must NOT SELECT created_at (non-granted column)';
   assert not has_column_privilege('connector_runner','public.connector_secrets','id','INSERT'),         'T50 runner must NOT INSERT id (server default only)';
   assert not has_column_privilege('connector_runner','public.connector_secrets','ciphertext','UPDATE'), 'T50 runner must NOT UPDATE ciphertext';
@@ -2817,8 +2821,9 @@ end $$;
 -- 50c: FUNCTIONAL as the runner — INSERT the granted columns (NOT id) + SELECT them back; a non-granted column
 -- read, and any UPDATE/DELETE, fail closed.
 set role connector_runner;
-insert into public.connector_secrets (tenant_id, connector_id, secret_kind, version, ciphertext, dek_wrapped, aead_nonce, aad_digest, key_id)
-  values ('11111111-1111-1111-1111-111111111111','17000000-0000-0000-0000-0000000000a1','api_key', 50, '\xdead'::bytea, '\xbeef'::bytea, '\x000102'::bytea, 'digest50', 'kek-50');
+-- the runner writes the COMPLETE envelope (incl. the 0030 aead_tag[16 bytes]/envelope_version/aead_alg columns).
+insert into public.connector_secrets (tenant_id, connector_id, secret_kind, version, ciphertext, dek_wrapped, aead_nonce, aad_digest, key_id, aead_tag, envelope_version, aead_alg)
+  values ('11111111-1111-1111-1111-111111111111','17000000-0000-0000-0000-0000000000a1','api_key', 50, '\xdead'::bytea, '\xbeef'::bytea, '\x000102'::bytea, 'digest50', 'kek-50', '\x000102030405060708090a0b0c0d0e0f'::bytea, 1, 'AES-256-GCM');
 do $$ begin
   assert (select count(*) from public.connector_secrets
           where tenant_id='11111111-1111-1111-1111-111111111111' and connector_id='17000000-0000-0000-0000-0000000000a1' and secret_kind='api_key' and version=50) = 1,
