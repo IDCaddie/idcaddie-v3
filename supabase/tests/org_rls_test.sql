@@ -2876,14 +2876,19 @@ insert into public.connector_secrets (tenant_id, connector_id, secret_kind, vers
 set role connector_runner;
 do $$ begin
   -- the adapter SELECT shape (projected/filtered columns) runs without permission error AND filters correctly:
-  -- v51 active + non-expired -> 1 row; v52 expired -> 0; v53 revoked -> 0.
+  -- v51 active + non-expired -> 1 row; v52 expired -> 0; v53 revoked -> 0. The query is now LIFECYCLE-AWARE (0032):
+  -- it runs the connector_secret_lifecycle_events NOT EXISTS subquery as the runner (grant-compatible). With no
+  -- lifecycle rows seeded here, the NOT EXISTS is always true, so the result is IDENTICAL to the pre-lifecycle query.
   assert (select count(*) from (
-            select id, ciphertext, dek_wrapped, aead_nonce, aad_digest, key_id, aead_tag, envelope_version, aead_alg
-            from public.connector_secrets
-            where tenant_id='11111111-1111-1111-1111-111111111111' and connector_id='17000000-0000-0000-0000-0000000000a1'
-              and secret_kind='api_key' and version=51 and status='active' and (expires_at is null or expires_at > now())
+            select cs.id, cs.ciphertext, cs.dek_wrapped, cs.aead_nonce, cs.aad_digest, cs.key_id, cs.aead_tag, cs.envelope_version, cs.aead_alg
+            from public.connector_secrets cs
+            where cs.tenant_id='11111111-1111-1111-1111-111111111111' and cs.connector_id='17000000-0000-0000-0000-0000000000a1'
+              and cs.secret_kind='api_key' and cs.version=51 and cs.status='active' and (cs.expires_at is null or cs.expires_at > now())
+              and not exists (select 1 from public.connector_secret_lifecycle_events le
+                              where le.tenant_id=cs.tenant_id and le.connector_id=cs.connector_id and le.secret_kind=cs.secret_kind
+                                and le.version=cs.version and le.lifecycle_event_type in ('revoked','tombstoned'))
           ) q) = 1,
-         'T51 runner adapter SELECT returns the active, non-expired secret (grant-compatible projection + filter)';
+         'T51 runner LIFECYCLE-AWARE adapter SELECT returns the active, non-expired secret (grant-compatible projection + lifecycle subquery + filter)';
   assert (select count(*) from public.connector_secrets
           where tenant_id='11111111-1111-1111-1111-111111111111' and connector_id='17000000-0000-0000-0000-0000000000a1'
             and secret_kind='api_key' and version=52 and status='active' and (expires_at is null or expires_at > now())) = 0,
@@ -2981,6 +2986,106 @@ begin
   blocked := false;
   begin delete from public.audit_logs where action='connector_secret.store.succeeded'; exception when others then blocked := true; end;
   assert blocked, 'T52 connector_runner must NOT DELETE audit_logs (append-only + no delete grant)';
+end $$;
+reset role;
+
+-- ── Test 53: connector_secret_lifecycle_events — runner SELECT-only grant + APPEND-ONLY trigger (migration 0032) ─
+-- Proves TWO SEPARATE protections (per the #169 amendment): (1) the runner GRANT SHAPE under set role
+-- connector_runner — SELECT-only (the load eligibility columns); INSERT/UPDATE/DELETE all FAIL; (2) the append-only
+-- TRIGGER itself, proven against a PRIVILEGED test/admin role that CAN attempt UPDATE/DELETE — so the block is the
+-- trigger, NOT mere grant-absence. The runner gets NO INSERT in this PR (deferred to the write-helper PR); lifecycle
+-- rows are seeded by the test/admin (privileged) setup path. This does NOT modify T50/T51/T52.
+reset role;
+-- seed (privileged setup path): a connector_secrets row v54 ACTIVE + a `revoked` lifecycle event for v54.
+insert into public.connector_secrets (tenant_id, connector_id, secret_kind, version, status, ciphertext, key_id, envelope_version, aead_alg)
+  values ('11111111-1111-1111-1111-111111111111','17000000-0000-0000-0000-0000000000a1','api_key', 54, 'active', '\xdead'::bytea, 'kek-54', 1, 'AES-256-GCM');
+insert into public.connector_secret_lifecycle_events (tenant_id, connector_id, secret_kind, version, lifecycle_event_type)
+  values ('11111111-1111-1111-1111-111111111111','17000000-0000-0000-0000-0000000000a1','api_key', 54, 'revoked');
+
+do $$ begin
+  -- (1) GRANT SHAPE: runner column-scoped SELECT only (the 5 load-eligibility columns); NO table-level SELECT; NO
+  --     INSERT/UPDATE/DELETE/TRUNCATE/REFERENCES.
+  assert not has_table_privilege('connector_runner','public.connector_secret_lifecycle_events','SELECT'),    'T53 runner has NO table-level SELECT (column-scoped only)';
+  assert not has_table_privilege('connector_runner','public.connector_secret_lifecycle_events','INSERT'),    'T53 runner has NO INSERT on lifecycle table (deferred to the write-helper PR)';
+  assert not has_table_privilege('connector_runner','public.connector_secret_lifecycle_events','UPDATE'),    'T53 runner has NO UPDATE on lifecycle table';
+  assert not has_table_privilege('connector_runner','public.connector_secret_lifecycle_events','DELETE'),    'T53 runner has NO DELETE on lifecycle table';
+  assert not has_table_privilege('connector_runner','public.connector_secret_lifecycle_events','TRUNCATE'),  'T53 runner has NO TRUNCATE on lifecycle table';
+  assert not has_table_privilege('connector_runner','public.connector_secret_lifecycle_events','REFERENCES'),'T53 runner has NO REFERENCES on lifecycle table';
+  assert (select coalesce(array_agg(distinct column_name::text order by column_name::text), array[]::text[])
+          from information_schema.role_column_grants
+          where grantee='connector_runner' and table_schema='public' and table_name='connector_secret_lifecycle_events' and privilege_type='SELECT')
+         = array['connector_id','lifecycle_event_type','secret_kind','tenant_id','version'],
+         'T53 runner SELECT grant is EXACTLY (connector_id, lifecycle_event_type, secret_kind, tenant_id, version)';
+  -- NO non-SELECT column grant of ANY kind (no column-scoped INSERT/UPDATE sneaking in).
+  assert (select count(*) from information_schema.role_column_grants
+          where grantee='connector_runner' and table_schema='public' and table_name='connector_secret_lifecycle_events' and privilege_type <> 'SELECT') = 0,
+         'T53 runner has NO non-SELECT (INSERT/UPDATE) column grant on the lifecycle table';
+  -- connector_secrets still NO UPDATE/DELETE for the runner (this PR added only a lifecycle SELECT grant).
+  assert not has_table_privilege('connector_runner','public.connector_secrets','UPDATE'), 'T53 connector_secrets UPDATE still denied (0032 added only a lifecycle SELECT grant)';
+  assert not has_table_privilege('connector_runner','public.connector_secrets','DELETE'), 'T53 connector_secrets DELETE still denied (0032 added only a lifecycle SELECT grant)';
+end $$;
+
+-- (1) GRANT SHAPE functional under the runner: SELECT works; INSERT/UPDATE/DELETE FAIL.
+set role connector_runner;
+do $$ declare blocked boolean; n int;
+begin
+  -- SELECT works (the load eligibility columns) — the seeded revoked v54 event is visible to the load query.
+  select count(*) into n from public.connector_secret_lifecycle_events
+    where tenant_id='11111111-1111-1111-1111-111111111111' and connector_id='17000000-0000-0000-0000-0000000000a1'
+      and secret_kind='api_key' and version=54 and lifecycle_event_type in ('revoked','tombstoned');
+  assert n = 1, 'T53 runner SELECT reads the lifecycle eligibility columns for the load query';
+  blocked := false;
+  begin insert into public.connector_secret_lifecycle_events (tenant_id, connector_id, secret_kind, version, lifecycle_event_type)
+          values ('11111111-1111-1111-1111-111111111111','17000000-0000-0000-0000-0000000000a1','api_key', 99, 'revoked'); exception when others then blocked := true; end;
+  assert blocked, 'T53 runner INSERT on lifecycle table must FAIL (no INSERT grant in this PR)';
+  blocked := false;
+  begin update public.connector_secret_lifecycle_events set version=999 where version=54; exception when others then blocked := true; end;
+  assert blocked, 'T53 runner UPDATE on lifecycle table must FAIL';
+  blocked := false;
+  begin delete from public.connector_secret_lifecycle_events where version=54; exception when others then blocked := true; end;
+  assert blocked, 'T53 runner DELETE on lifecycle table must FAIL';
+end $$;
+reset role;
+
+-- (2) APPEND-ONLY TRIGGER independent of grant-absence: a PRIVILEGED setup role (reset role = the superuser/owner
+--     that CAN INSERT/UPDATE/DELETE) is STILL blocked from UPDATE/DELETE by the trigger — proving the TABLE is
+--     append-only, not merely that the runner lacks grants. We capture SQLERRM to prove it is the append-only
+--     trigger (message), not a permission error.
+do $$ declare blocked boolean; msg text;
+begin
+  blocked := false; msg := '';
+  begin update public.connector_secret_lifecycle_events set version=555 where version=54;
+        exception when others then blocked := true; msg := SQLERRM; end;
+  assert blocked, 'T53 APPEND-ONLY: a privileged UPDATE must be rejected';
+  assert msg like '%append-only%', format('T53 APPEND-ONLY TRIGGER (not grant) must reject privileged UPDATE — got: %s', msg);
+  blocked := false; msg := '';
+  begin delete from public.connector_secret_lifecycle_events where version=54;
+        exception when others then blocked := true; msg := SQLERRM; end;
+  assert blocked, 'T53 APPEND-ONLY: a privileged DELETE must be rejected';
+  assert msg like '%append-only%', format('T53 APPEND-ONLY TRIGGER (not grant) must reject privileged DELETE — got: %s', msg);
+  -- the blocked UPDATE left the row UNCHANGED (version still 54, the attempted 555 did not take) and the blocked
+  -- DELETE left the row STILL PRESENT — exactly one revoked v54 lifecycle row remains.
+  assert (select count(*) from public.connector_secret_lifecycle_events
+            where version = 54 and lifecycle_event_type = 'revoked'
+              and connector_id = '17000000-0000-0000-0000-0000000000a1' and tenant_id = '11111111-1111-1111-1111-111111111111') = 1,
+         'T53 APPEND-ONLY: after the blocked UPDATE+DELETE the lifecycle row is UNCHANGED (version 54) and STILL EXISTS';
+  assert (select count(*) from public.connector_secret_lifecycle_events where version = 555) = 0,
+         'T53 APPEND-ONLY: the blocked UPDATE did NOT change the version to 555';
+end $$;
+
+-- (3) LIFECYCLE-AWARE LOAD functional under the runner: the adapter SELECT EXCLUDES the active v54 because it has a
+--     `revoked` lifecycle event (proving the NOT EXISTS lifecycle check fails closed, not just the status/expiry filter).
+set role connector_runner;
+do $$ begin
+  assert (select count(*) from public.connector_secrets cs
+          where cs.tenant_id='11111111-1111-1111-1111-111111111111' and cs.connector_id='17000000-0000-0000-0000-0000000000a1'
+            and cs.secret_kind='api_key' and cs.version=54 and cs.status='active' and (cs.expires_at is null or cs.expires_at > now())
+            and not exists (select 1 from public.connector_secret_lifecycle_events le
+                            where le.tenant_id=cs.tenant_id and le.connector_id=cs.connector_id and le.secret_kind=cs.secret_kind
+                              and le.version=cs.version and le.lifecycle_event_type in ('revoked','tombstoned'))) = 0,
+         'T53 lifecycle-aware load EXCLUDES an ACTIVE version that has a revoked lifecycle event (fail-closed, not just status/expiry)';
+  -- (latest-INTENT no-fallback is proven at the adapter level in connector-secret-store.test.ts; the SQL proof
+  --  above shows the lifecycle NOT EXISTS check excludes an otherwise-active version under the runner role.)
 end $$;
 reset role;
 

@@ -295,16 +295,154 @@ describe("connector-secret-store — only store/load events; no decrypt/rotation
     }
   });
 
-  it("the INSERT/SELECT shapes are unchanged and contain no UPDATE/DELETE/TRUNCATE", () => {
+  it("the INSERT shape is unchanged and the lifecycle-aware SELECT contains no UPDATE/DELETE/TRUNCATE", () => {
     expect(INSERT_SECRET_SQL).toContain("(tenant_id, connector_id, secret_kind, version, ciphertext, dek_wrapped, aead_nonce, aad_digest, key_id, aead_tag, envelope_version, aead_alg)");
     expect(INSERT_SECRET_SQL).toContain("returning id");
     expect(INSERT_SECRET_SQL).not.toMatch(/\(id,/);
-    expect(SELECT_SECRET_SQL).toContain("status = 'active' and (expires_at is null or expires_at > now())");
+    // the SELECT keeps the active/non-expired filter AND adds the lifecycle NOT EXISTS (revoked/tombstoned).
+    expect(SELECT_SECRET_SQL).toContain("cs.status = 'active' and (cs.expires_at is null or cs.expires_at > now())");
+    expect(SELECT_SECRET_SQL).toContain("not exists (select 1 from public.connector_secret_lifecycle_events le");
+    expect(SELECT_SECRET_SQL).toContain("le.lifecycle_event_type in ('revoked', 'tombstoned')");
+    // the SELECT only READS the lifecycle table — never writes/mutates it.
     for (const sql of [INSERT_SECRET_SQL, SELECT_SECRET_SQL]) {
       expect(sql.toLowerCase()).not.toMatch(/\bupdate\b/);
       expect(sql.toLowerCase()).not.toMatch(/\bdelete\b/);
       expect(sql.toLowerCase()).not.toMatch(/\btruncate\b/);
+      // never INSERTs into the lifecycle table (no lifecycle write in this PR).
+      expect(sql.toLowerCase()).not.toMatch(/insert\s+into\s+public\.connector_secret_lifecycle_events/);
     }
+  });
+});
+
+// A lifecycle-modeling mock: the secret SELECT returns rows PER VERSION (so a test can simulate the DB excluding
+// a revoked/tombstoned/expired version by returning [] for that version), and `select max(version)` returns a
+// configured highest version. It records EVERY version the adapter queried, so a test can prove the latest-intent
+// load queries ONLY the highest version and NEVER falls back to a lower one. Audit writes always succeed.
+function lifecycleMockConn(opts: { maxVersion?: number | null; secretRowsByVersion?: Record<number, Record<string, unknown>[]> }) {
+  const allStatements: Stmt[] = [];
+  const selectVersionsQueried: number[] = [];
+  const persistedAudits: AuditRow[] = [];
+  const conn: RunnerConnection = {
+    async runSequence(statements) {
+      for (const s of statements) allStatements.push({ sql: s.sql, params: s.params });
+      return statements.map((s) => {
+        if (/^\s*(set\s+role|begin|commit)/i.test(s.sql)) return { rows: [] };
+        if (/insert\s+into\s+public\.audit_logs/i.test(s.sql)) {
+          persistedAudits.push({ tenant_id: s.params[0], action: String(s.params[1]), resource_type: s.params[2], after_json: JSON.parse(String(s.params[3])) });
+          return { rows: [] };
+        }
+        if (/select\s+max\(version\)/i.test(s.sql)) return { rows: [{ version: opts.maxVersion ?? null }] };
+        if (/select\s+cs\.id[\s\S]*from\s+public\.connector_secrets\s+cs/i.test(s.sql)) {
+          const v = s.params[3] as number;
+          selectVersionsQueried.push(v);
+          return { rows: opts.secretRowsByVersion?.[v] ?? [] };
+        }
+        return { rows: [] };
+      });
+    },
+  };
+  return { conn, allStatements, selectVersionsQueried, persistedAudits };
+}
+
+// A complete connector_secrets SELECT row (the projected envelope columns) the adapter can reconstruct + decrypt.
+async function aSecretRow(id = "sec-1") {
+  const c = encryptedSecretToColumns(await anEncrypted());
+  return { id, ciphertext: c.ciphertext, dek_wrapped: c.dek_wrapped, aead_nonce: c.aead_nonce, aad_digest: c.aad_digest, key_id: c.key_id, aead_tag: c.aead_tag, envelope_version: c.envelope_version, aead_alg: c.aead_alg };
+}
+
+describe("connector-secret-store — EXACT lifecycle-aware load (the SELECT carries the lifecycle NOT EXISTS)", () => {
+  it("exact version active, no lifecycle event -> returns (params unchanged from #167; lifecycle subquery present)", async () => {
+    const m = lifecycleMockConn({ secretRowsByVersion: { 1: [await aSecretRow("sec-7")] } });
+    const found = await createRunnerConnectorSecretStore(m.conn).findEncryptedSecret(idInput);
+    expect(found!.id).toBe("sec-7");
+    const sel = m.allStatements.find((s) => /from\s+public\.connector_secrets\s+cs/i.test(s.sql))!;
+    expect(sel.params).toEqual([ctx().tenantId, ctx().connectorId, KIND, 1]); // unchanged identity params
+    expect(sel.sql).toContain("connector_secret_lifecycle_events"); // lifecycle-aware
+    expect(auditActions(m.persistedAudits)).toEqual(["connector_secret.load.attempted", "connector_secret.load.succeeded"]);
+  });
+
+  it("exact version excluded by the DB (revoked / tombstoned / expired -> 0 rows) -> null, fail closed", async () => {
+    // the lifecycle/status/expiry filtering happens in SQL (proven in T51/T53); here the DB returns [] for v1.
+    const m = lifecycleMockConn({ secretRowsByVersion: { 1: [] } });
+    expect(await createRunnerConnectorSecretStore(m.conn).findEncryptedSecret(idInput)).toBeNull();
+    expect(auditActions(m.persistedAudits)).toEqual(["connector_secret.load.attempted", "connector_secret.load.succeeded"]);
+  });
+});
+
+describe("connector-secret-store — LATEST-INTENT load: highest version first, then THAT version only, NO fallback", () => {
+  it("highest active -> returns the highest version (queries max, then loads only the max)", async () => {
+    const m = lifecycleMockConn({ maxVersion: 5, secretRowsByVersion: { 5: [await aSecretRow("sec-hi")] } });
+    const found = await createRunnerConnectorSecretStore(m.conn).findLatestEncryptedSecret(idInput);
+    expect(found!.id).toBe("sec-hi");
+    expect(m.selectVersionsQueried).toEqual([5]); // only the highest version was loaded
+  });
+
+  it("highest REVOKED with a lower ACTIVE -> null, and NEVER queries the lower version (the load-bearing claim)", async () => {
+    // max version 5 is excluded by the DB (revoked/tombstoned lifecycle event -> [] rows); v1 WOULD be loadable.
+    const m = lifecycleMockConn({ maxVersion: 5, secretRowsByVersion: { 5: [], 1: [await aSecretRow("sec-low")] } });
+    const found = await createRunnerConnectorSecretStore(m.conn).findLatestEncryptedSecret(idInput);
+    expect(found).toBeNull();
+    expect(m.selectVersionsQueried).toEqual([5]);          // only v5 was ever queried
+    expect(m.selectVersionsQueried).not.toContain(1);      // NO fallback to the lower valid version
+  });
+
+  it("highest TOMBSTONED with a lower active -> null, no fallback", async () => {
+    const m = lifecycleMockConn({ maxVersion: 7, secretRowsByVersion: { 7: [], 2: [await aSecretRow("sec-low")] } });
+    expect(await createRunnerConnectorSecretStore(m.conn).findLatestEncryptedSecret(idInput)).toBeNull();
+    expect(m.selectVersionsQueried).toEqual([7]);
+  });
+
+  it("highest EXPIRED with a lower valid -> null, no fallback", async () => {
+    const m = lifecycleMockConn({ maxVersion: 9, secretRowsByVersion: { 9: [], 3: [await aSecretRow("sec-low")] } });
+    expect(await createRunnerConnectorSecretStore(m.conn).findLatestEncryptedSecret(idInput)).toBeNull();
+    expect(m.selectVersionsQueried).toEqual([9]);
+  });
+
+  it("all revoked (highest -> 0 rows) -> null", async () => {
+    const m = lifecycleMockConn({ maxVersion: 4, secretRowsByVersion: { 4: [] } });
+    expect(await createRunnerConnectorSecretStore(m.conn).findLatestEncryptedSecret(idInput)).toBeNull();
+    expect(m.selectVersionsQueried).toEqual([4]);
+  });
+
+  it("no versions exist -> null, and no secret SELECT is issued", async () => {
+    const m = lifecycleMockConn({ maxVersion: null });
+    expect(await createRunnerConnectorSecretStore(m.conn).findLatestEncryptedSecret(idInput)).toBeNull();
+    expect(m.selectVersionsQueried).toEqual([]);
+    expect(auditActions(m.persistedAudits)).toEqual([]); // no secret loaded -> no load audit
+  });
+
+  it("the latest-intent audit records ONLY the highest version (never a lower one)", async () => {
+    const m = lifecycleMockConn({ maxVersion: 5, secretRowsByVersion: { 5: [], 1: [await aSecretRow()] } });
+    await createRunnerConnectorSecretStore(m.conn).findLatestEncryptedSecret(idInput);
+    for (const a of m.persistedAudits) expect(a.after_json.version).toBe(5);
+  });
+});
+
+describe("connector-secret-store — NO-LIFECYCLE regression: EQUALITY of result with the pre-lifecycle behavior", () => {
+  // Build a secret SELECT row from a known envelope, keeping the original so we can assert byte-for-byte equality.
+  async function rowAndEncrypted(id: string) {
+    const encrypted = await anEncrypted();
+    const c = encryptedSecretToColumns(encrypted);
+    return { encrypted, row: { id, ciphertext: c.ciphertext, dek_wrapped: c.dek_wrapped, aead_nonce: c.aead_nonce, aad_digest: c.aad_digest, key_id: c.key_id, aead_tag: c.aead_tag, envelope_version: c.envelope_version, aead_alg: c.aead_alg } };
+  }
+
+  it("exact load with ZERO lifecycle rows returns EXACTLY { id, encrypted } — the same complete result the pre-lifecycle query gave", async () => {
+    const { encrypted, row } = await rowAndEncrypted("sec-eq");
+    const m = lifecycleMockConn({ secretRowsByVersion: { 1: [row] } }); // no lifecycle rows configured
+    const found = await createRunnerConnectorSecretStore(m.conn).findEncryptedSecret(idInput);
+    // EQUALITY OF RESULT (not just "old tests pass"): the lifecycle-aware load with no lifecycle rows yields the
+    // byte-for-byte same StoredEncryptedSecret a pre-lifecycle load would, and the identity params are unchanged.
+    expect(found).toEqual({ id: "sec-eq", encrypted });
+    const sel = m.allStatements.find((s) => /from\s+public\.connector_secrets\s+cs/i.test(s.sql))!;
+    expect(sel.params).toEqual([ctx().tenantId, ctx().connectorId, KIND, 1]);
+  });
+
+  it("latest load with ZERO lifecycle rows returns EXACTLY the highest version's { id, encrypted } (same as a direct exact load of that version)", async () => {
+    const { encrypted, row } = await rowAndEncrypted("sec-eqhi");
+    const m = lifecycleMockConn({ maxVersion: 3, secretRowsByVersion: { 3: [row] } }); // no lifecycle rows
+    const found = await createRunnerConnectorSecretStore(m.conn).findLatestEncryptedSecret(idInput);
+    expect(found).toEqual({ id: "sec-eqhi", encrypted });
+    expect(m.selectVersionsQueried).toEqual([3]); // loaded only the highest version
   });
 });
 

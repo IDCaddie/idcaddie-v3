@@ -585,6 +585,70 @@ export type Database = {
           },
         ]
       }
+      connector_secret_lifecycle_events: {
+        Row: {
+          actor_type: string | null
+          audit_log_id: string | null
+          connector_id: string
+          correlation_id: string | null
+          created_at: string
+          id: string
+          lifecycle_event_type: string
+          reason_class: string | null
+          secret_kind: string
+          tenant_id: string
+          version: number
+        }
+        Insert: {
+          actor_type?: string | null
+          audit_log_id?: string | null
+          connector_id: string
+          correlation_id?: string | null
+          created_at?: string
+          id?: string
+          lifecycle_event_type: string
+          reason_class?: string | null
+          secret_kind: string
+          tenant_id: string
+          version: number
+        }
+        Update: {
+          actor_type?: string | null
+          audit_log_id?: string | null
+          connector_id?: string
+          correlation_id?: string | null
+          created_at?: string
+          id?: string
+          lifecycle_event_type?: string
+          reason_class?: string | null
+          secret_kind?: string
+          tenant_id?: string
+          version?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "connector_secret_lifecycle_connector_same_tenant"
+            columns: ["connector_id", "tenant_id"]
+            isOneToOne: false
+            referencedRelation: "connectors"
+            referencedColumns: ["id", "tenant_id"]
+          },
+          {
+            foreignKeyName: "connector_secret_lifecycle_events_audit_log_id_fkey"
+            columns: ["audit_log_id"]
+            isOneToOne: false
+            referencedRelation: "audit_logs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "connector_secret_lifecycle_events_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       connector_secrets: {
         Row: {
           aad_digest: string | null

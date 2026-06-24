@@ -60,6 +60,12 @@ function memStore() {
       const r = rows.find((x) => x.tenantId === input.tenantId && x.connectorId === input.connectorId && x.dbSecretKind === input.dbSecretKind && x.version === input.version);
       return r ? { id: r.id, encrypted: r.encrypted } : null;
     },
+    async findLatestEncryptedSecret(input) {
+      const matches = rows.filter((x) => x.tenantId === input.tenantId && x.connectorId === input.connectorId && x.dbSecretKind === input.dbSecretKind);
+      if (matches.length === 0) return null;
+      const r = matches.reduce((a, b) => (b.version > a.version ? b : a));
+      return { id: r.id, encrypted: r.encrypted };
+    },
   };
   return { write, read, rows };
 }
@@ -169,7 +175,7 @@ describe("cross-tenant / fail-closed", () => {
     const store = memStore();
     await saveConnectorSecret({ plaintext: "secretA", context: ctx({ tenantId: "11111111-1111-1111-1111-111111111111" }), keyProvider: encryptOnly(kp), kekId: KEK, store: store.write });
     // a LEAKY read store that hands tenant A's ciphertext back regardless of the lookup tenant
-    const leaky: ConnectorSecretReadStore = { async findEncryptedSecret() { return { id: store.rows[0].id, encrypted: store.rows[0].encrypted }; } };
+    const leaky: ConnectorSecretReadStore = { async findEncryptedSecret() { return { id: store.rows[0].id, encrypted: store.rows[0].encrypted }; }, async findLatestEncryptedSecret() { return { id: store.rows[0].id, encrypted: store.rows[0].encrypted }; } };
     // load with a DIFFERENT tenant context → the AAD binding rejects it
     await expect(loadConnectorSecret(runnerCap(kp), { context: ctx({ tenantId: "22222222-2222-2222-2222-222222222222" }), store: leaky })).rejects.toBeInstanceOf(ConnectorVaultCryptoError);
   });
@@ -184,7 +190,7 @@ describe("cross-tenant / fail-closed", () => {
     const store = memStore();
     const PLAINTEXT = "leak-me-not-PLAINTEXT";
     await saveConnectorSecret({ plaintext: PLAINTEXT, context: ctx(), keyProvider: encryptOnly(kp), kekId: KEK, store: store.write });
-    const leaky: ConnectorSecretReadStore = { async findEncryptedSecret() { return { id: store.rows[0].id, encrypted: store.rows[0].encrypted }; } };
+    const leaky: ConnectorSecretReadStore = { async findEncryptedSecret() { return { id: store.rows[0].id, encrypted: store.rows[0].encrypted }; }, async findLatestEncryptedSecret() { return { id: store.rows[0].id, encrypted: store.rows[0].encrypted }; } };
     let msg = "";
     try {
       await loadConnectorSecret(runnerCap(kp), { context: ctx({ connectorId: "deadbeef-0000-0000-0000-000000000000" }), store: leaky });
