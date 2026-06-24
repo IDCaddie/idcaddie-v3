@@ -335,7 +335,7 @@ PDF on the deployed staging app as the Tenant A editor:
 | Uploaded file (synthetic) | `Invoices from Insight Canada Inc (3).PDF` |
 
 Observed DB result: `upload_status='uploaded'`, `scan_status='pending'`, `extraction_status='not_started'`,
-`storage_bucket='contract-files'`, `content_type='application/pdf'`, `byte_size=53826`, `has_storage_object=true`.
+`storage_bucket='contract-files'`, `content_type='application/pdf'`, `byte_size=53926`, `has_storage_object=true`.
 
 **The new upload finalized as uploaded, stored storage_bucket, content_type, byte_size, and had a matching private
 Storage object.** New uploads now finalize successfully — **new uploads no longer remain ambiguous pending rows** —
@@ -375,7 +375,7 @@ with v3's whole posture (no direct `storage.objects` manipulation; private bucke
 
 | Rows | State | Note |
 |---|---|---|
-| **1 good finalized upload** | `upload_status='uploaded'`, `storage_bucket='contract-files'`, `content_type='application/pdf'`, `byte_size=53826`, `has_storage_object=true` | `Invoices from Insight Canada Inc (3).PDF` on *Storage Test Contract A Central* (the §14 post-PR #78 upload) — **valid + openable** |
+| **1 good finalized upload** | `upload_status='uploaded'`, `storage_bucket='contract-files'`, `content_type='application/pdf'`, `byte_size=53926`, `has_storage_object=true` | `Invoices from Insight Canada Inc (3).PDF` on *Storage Test Contract A Central* (the §14 post-PR #78 upload) — **valid + openable** |
 | **4 old pre-fix `synthetic-test.pdf` rows** | all `pending`; **2** have matching Storage objects, **2** are metadata-only **orphan** rows | created **before** PR #78 fixed upload finalization/disposition; historical staging evidence |
 
 **The finalized post-PR #78 upload remains valid and openable.** **Pre-fix staging contract-file rows remain as
@@ -3165,3 +3165,26 @@ does NOT close RISK-007 (audit + rotation/revocation + lifecycle remain) and doe
 **No real KMS client in app code, no live Okta, no real customer token, no service-role path, no public route to
 secrets, no hosted command by the agent. RISK-001 remains OPEN. RISK-007 remains OPEN. Cutover remains BLOCKED.
 Connector credentials are not production-ready.** No doc 17 §5 box is ticked by this PR.
+---
+
+## 92. CONNECTOR SECRET LIFECYCLE AUDIT SCAFFOLDING (PR #166)
+
+Adds a narrow, allowlist-based connector-secret lifecycle **audit-event builder**
+(`src/lib/server/connector-vault/secret-audit.ts` + load-bearing redaction tests) for store/load/decrypt
+lifecycle metadata only (doc 42 §83). **Builder + tests only** — the #160 store adapter has no real call sites
+and there is no real credential lifecycle, so NO writer is wired and NO audit row is emitted; a future
+server-only writer maps the output 1:1 onto the existing append-only `audit_logs` table. **No migration** (the
+table already supports these as `action` + an allowlisted `after_json`), no DB grant change, no RLS change.
+
+- Supported events: the nine `connector_secret.store|load|decrypt . attempted|succeeded|failed`. **Rotation/
+  revocation/delete/update are NOT added** — they belong with the behavior that emits them.
+- Allowlist construction (no metadata passthrough): only `event`, `tenant_id`, `connector_id`, `secret_kind`,
+  `version`, derived `result`, optional `actor_type`, optional static `error_class`, optional safe `correlation_id`.
+  Every other field on a hostile input is structurally dropped; every emitted string value is credential-scanned.
+
+This is audit scaffolding only. Prior synthetic evidence stands (DB shape proven by #163; KMS/IAM decrypt
+separation proven by #165). No real provider token, no OAuth/token exchange, no live connector, no request-path
+decrypt, no service-role path, no route, no rotation/revocation behavior. Tests **528 → 539**; RLS unchanged
+(**525**); types unchanged (**1837**). Real credentials still blocked; rotation/revocation + real credential
+lifecycle remain missing. **RISK-001 remains OPEN. RISK-007 remains OPEN. Cutover remains BLOCKED. Connector
+credentials are not production-ready.** No doc 17 §5 box is ticked by this PR.
