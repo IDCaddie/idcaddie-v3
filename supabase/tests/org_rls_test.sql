@@ -2165,21 +2165,18 @@ do $$ begin
   assert not has_table_privilege('connector_runner','public.oauth_pending','REFERENCES'),'T43 runner must NOT REFERENCES oauth_pending';
   assert not has_table_privilege('connector_runner','public.oauth_pending','TRIGGER'),   'T43 runner must NOT TRIGGER oauth_pending';
 end $$;
--- 43c: the runner has ZERO privilege on connector_secrets / connectors / connector_runs (deferred grants).
+-- 43c: connectors/connector_runs grants are STILL deferred (zero). connector_secrets has NO TABLE-LEVEL grant —
+-- 0029's secret-store grant is COLUMN-scoped (full surface in T50), so role_table_grants stays empty here.
 do $$ begin
-  assert (select coalesce(array_agg(distinct privilege_type::text), array[]::text[]) from information_schema.role_table_grants
+  assert (select coalesce(array_agg(distinct privilege_type::text order by privilege_type::text), array[]::text[]) from information_schema.role_table_grants
           where grantee='connector_runner' and table_schema='public' and table_name='connector_secrets') = array[]::text[],
-         'T43 runner must hold ZERO privilege on connector_secrets (deferred — docs/42 §39.2)';
+         'T43 runner holds ZERO TABLE-LEVEL privilege on connector_secrets (0029 grants are COLUMN-scoped — see T50)';
   assert (select coalesce(array_agg(distinct privilege_type::text), array[]::text[]) from information_schema.role_table_grants
           where grantee='connector_runner' and table_schema='public' and table_name='connectors') = array[]::text[],
          'T43 runner must hold ZERO privilege on connectors (deferred)';
   assert (select coalesce(array_agg(distinct privilege_type::text), array[]::text[]) from information_schema.role_table_grants
           where grantee='connector_runner' and table_schema='public' and table_name='connector_runs') = array[]::text[],
          'T43 runner must hold ZERO privilege on connector_runs (deferred)';
-  -- and zero UPDATE columns on connector_secrets.
-  assert (select count(*) from information_schema.role_column_grants
-          where grantee='connector_runner' and table_schema='public' and table_name='connector_secrets') = 0,
-         'T43 runner must hold ZERO column privilege on connector_secrets';
 end $$;
 -- 43d: FUNCTIONAL — the runner can consume (SELECT + UPDATE consumed_at, the §38 shape) but nothing else.
 insert into public.oauth_pending (id, tenant_id, connector_id, provider, state_jti, nonce_hash, intent, expires_at)
@@ -2203,9 +2200,10 @@ do $$ declare ok boolean := false; begin
   assert ok, 'T43 runner must NOT DELETE oauth_pending';
 end $$;
 -- (43d INSERT coverage moved to T44 — the runner now HAS column-scoped INSERT via 0022.)
-do $$ declare ok boolean := false; begin
-  begin perform 1 from public.connector_secrets; ok := false; exception when insufficient_privilege then ok := true; end;
-  assert ok, 'T43 runner must NOT read connector_secrets (no grant — deferred)';
+do $$ begin
+  -- 0029: the runner now HAS COLUMN-scoped SELECT on connector_secrets — it can read a granted column (id);
+  -- decrypt still needs the separate KMS Decrypt grant (ciphertext alone is useless). Full surface in T50.
+  perform id from public.connector_secrets limit 1;
 end $$;
 reset role;
 -- 43e: anon/authenticated deny-all surface UNCHANGED after 0021.
@@ -2290,14 +2288,12 @@ do $$ declare ok boolean := false; begin
   assert ok, 'T44 runner must NOT INSERT a non-granted column (consumed_at)';
 end $$;
 reset role;
--- 44c: the runner STILL holds ZERO privilege on connector_secrets / connectors / connector_runs.
+-- 44c: connectors/connector_runs runner grants are STILL deferred (zero); connector_secrets has NO TABLE-LEVEL
+-- grant — 0029's secret-store grant is COLUMN-scoped (full surface in T50). 0022 itself adds nothing here.
 do $$ begin
-  assert (select coalesce(array_agg(distinct privilege_type::text), array[]::text[]) from information_schema.role_table_grants
+  assert (select coalesce(array_agg(distinct privilege_type::text order by privilege_type::text), array[]::text[]) from information_schema.role_table_grants
           where grantee='connector_runner' and table_schema='public' and table_name='connector_secrets') = array[]::text[],
-         'T44 runner must STILL hold ZERO privilege on connector_secrets';
-  assert (select count(*) from information_schema.role_column_grants
-          where grantee='connector_runner' and table_schema='public' and table_name='connector_secrets') = 0,
-         'T44 runner must STILL hold ZERO column privilege on connector_secrets';
+         'T44 runner holds ZERO TABLE-LEVEL privilege on connector_secrets (0029 grants are COLUMN-scoped — see T50)';
   assert (select coalesce(array_agg(distinct privilege_type::text), array[]::text[]) from information_schema.role_table_grants
           where grantee='connector_runner' and table_schema='public' and table_name='connectors') = array[]::text[],
          'T44 runner must STILL hold ZERO privilege on connectors';
@@ -2749,6 +2745,112 @@ do $$ declare blocked boolean := false; begin
     blocked := false;
   exception when others then blocked := true; end;
   assert blocked, 'T49 Tenant B member must NOT INSERT a Tenant A identity match (RLS with check)';
+end $$;
+reset role;
+
+-- ── Test 50: connector_runner connector_secrets COLUMN-SCOPED storage grant (migration 0029) ─────────
+-- 0029 grants the runner ONLY the exact COLUMN-scoped SELECT/INSERT the vault save/load boundary needs — NOT
+-- table-level (the runner is BYPASSRLS, so a table grant would expose every column of every row + any future
+-- column). This proves at the catalog + functional layer: there is NO table-level SELECT/INSERT; the column
+-- grants are EXACTLY the documented identity/envelope sets; no UPDATE/DELETE/TRUNCATE/REFERENCES/TRIGGER; the
+-- request-path deny-all is PRESERVED (authenticated/anon EXACTLY zero table+column privilege; RLS on, ZERO
+-- policies — no DELETE policy, no ALL policy); and FUNCTIONALLY the runner can insert/select ONLY granted
+-- columns and cannot update/delete or read a non-granted column.
+reset role;
+-- 50a: NO table-level grant; the COLUMN-scoped SELECT/INSERT sets are EXACTLY the documented columns.
+do $$ begin
+  -- no table-level SELECT/INSERT (column-only) — role_table_grants is empty; has_table_privilege is false.
+  assert (select coalesce(array_agg(distinct privilege_type::text order by privilege_type::text), array[]::text[])
+          from information_schema.role_table_grants
+          where grantee='connector_runner' and table_schema='public' and table_name='connector_secrets') = array[]::text[],
+         'T50 connector_runner must have NO table-level privilege on connector_secrets (column-scoped only)';
+  assert not has_table_privilege('connector_runner','public.connector_secrets','SELECT'),    'T50 runner has NO table-level SELECT (column-scoped only)';
+  assert not has_table_privilege('connector_runner','public.connector_secrets','INSERT'),    'T50 runner has NO table-level INSERT (column-scoped only)';
+  assert not has_table_privilege('connector_runner','public.connector_secrets','UPDATE'),    'T50 runner must NOT UPDATE connector_secrets (revocation/rotation deferred)';
+  assert not has_table_privilege('connector_runner','public.connector_secrets','DELETE'),    'T50 runner must NOT DELETE connector_secrets (no row delete)';
+  assert not has_table_privilege('connector_runner','public.connector_secrets','TRUNCATE'),  'T50 runner must NOT TRUNCATE connector_secrets';
+  assert not has_table_privilege('connector_runner','public.connector_secrets','REFERENCES'),'T50 runner must NOT REFERENCES connector_secrets';
+  assert not has_table_privilege('connector_runner','public.connector_secrets','TRIGGER'),   'T50 runner must NOT TRIGGER connector_secrets';
+  -- EXACT column-level SELECT set (identity/query + active/expiry filter + the encrypted envelope columns).
+  assert (select coalesce(array_agg(distinct column_name::text order by column_name::text), array[]::text[])
+          from information_schema.role_column_grants
+          where grantee='connector_runner' and table_schema='public' and table_name='connector_secrets' and privilege_type='SELECT')
+         = array['aad_digest','aead_nonce','ciphertext','connector_id','dek_wrapped','expires_at','id','key_id','secret_kind','status','tenant_id','version'],
+         'T50 runner SELECT columns must be EXACTLY the identity/active/envelope set';
+  -- EXACT column-level INSERT set (identity/write + the encrypted envelope columns; id/is_active/status default).
+  assert (select coalesce(array_agg(distinct column_name::text order by column_name::text), array[]::text[])
+          from information_schema.role_column_grants
+          where grantee='connector_runner' and table_schema='public' and table_name='connector_secrets' and privilege_type='INSERT')
+         = array['aad_digest','aead_nonce','ciphertext','connector_id','dek_wrapped','key_id','secret_kind','tenant_id','version'],
+         'T50 runner INSERT columns must be EXACTLY the identity/envelope write set';
+  -- NO column-level privilege beyond SELECT/INSERT (no UPDATE/DELETE/REFERENCES columns).
+  assert (select count(*) from information_schema.role_column_grants
+          where grantee='connector_runner' and table_schema='public' and table_name='connector_secrets'
+            and privilege_type not in ('SELECT','INSERT')) = 0,
+         'T50 runner must have NO column privilege beyond SELECT/INSERT on connector_secrets';
+  -- representative column checks: granted envelope columns yes; a non-granted column (created_at) no.
+  assert     has_column_privilege('connector_runner','public.connector_secrets','ciphertext','SELECT'), 'T50 runner can SELECT ciphertext';
+  assert     has_column_privilege('connector_runner','public.connector_secrets','ciphertext','INSERT'), 'T50 runner can INSERT ciphertext';
+  assert not has_column_privilege('connector_runner','public.connector_secrets','created_at','SELECT'), 'T50 runner must NOT SELECT created_at (non-granted column)';
+  assert not has_column_privilege('connector_runner','public.connector_secrets','id','INSERT'),         'T50 runner must NOT INSERT id (server default only)';
+  assert not has_column_privilege('connector_runner','public.connector_secrets','ciphertext','UPDATE'), 'T50 runner must NOT UPDATE ciphertext';
+end $$;
+-- 50b: request-path DENY-ALL preserved — authenticated/anon EXACTLY zero TABLE + COLUMN privilege; RLS on; ZERO policies.
+do $$ begin
+  assert (select coalesce(array_agg(distinct privilege_type::text), array[]::text[]) from information_schema.role_table_grants
+          where grantee='authenticated' and table_schema='public' and table_name='connector_secrets') = array[]::text[],
+         'T50 authenticated must STILL hold zero table privilege on connector_secrets after 0029';
+  assert (select count(*) from information_schema.role_column_grants
+          where grantee='authenticated' and table_schema='public' and table_name='connector_secrets') = 0,
+         'T50 authenticated must hold zero COLUMN privilege on connector_secrets (the 0029 grant is runner-only)';
+  assert (select coalesce(array_agg(distinct privilege_type::text), array[]::text[]) from information_schema.role_table_grants
+          where grantee='anon' and table_schema='public' and table_name='connector_secrets') = array[]::text[],
+         'T50 anon must STILL hold zero table privilege on connector_secrets after 0029';
+  assert (select count(*) from information_schema.role_column_grants
+          where grantee='anon' and table_schema='public' and table_name='connector_secrets') = 0,
+         'T50 anon must hold zero COLUMN privilege on connector_secrets';
+  assert (select relrowsecurity from pg_class where oid='public.connector_secrets'::regclass),
+         'T50 connector_secrets must STILL have RLS enabled';
+  assert (select count(*) from pg_policies where schemaname='public' and tablename='connector_secrets') = 0,
+         'T50 connector_secrets must STILL have ZERO RLS policies (no DELETE policy, no ALL policy)';
+end $$;
+-- 50c: FUNCTIONAL as the runner — INSERT the granted columns (NOT id) + SELECT them back; a non-granted column
+-- read, and any UPDATE/DELETE, fail closed.
+set role connector_runner;
+insert into public.connector_secrets (tenant_id, connector_id, secret_kind, version, ciphertext, dek_wrapped, aead_nonce, aad_digest, key_id)
+  values ('11111111-1111-1111-1111-111111111111','17000000-0000-0000-0000-0000000000a1','api_key', 50, '\xdead'::bytea, '\xbeef'::bytea, '\x000102'::bytea, 'digest50', 'kek-50');
+do $$ begin
+  assert (select count(*) from public.connector_secrets
+          where tenant_id='11111111-1111-1111-1111-111111111111' and connector_id='17000000-0000-0000-0000-0000000000a1' and secret_kind='api_key' and version=50) = 1,
+         'T50 runner can INSERT + SELECT the granted connector_secrets columns';
+end $$;
+do $$ declare ok boolean := false; begin
+  begin perform created_at from public.connector_secrets where version=50; ok := false;
+  exception when insufficient_privilege then ok := true; end;
+  assert ok, 'T50 runner must NOT read a non-granted column (created_at)';
+end $$;
+do $$ declare ok boolean := false; begin
+  begin update public.connector_secrets set status='revoked' where version=50; ok := false;
+  exception when insufficient_privilege then ok := true; end;
+  assert ok, 'T50 runner must NOT UPDATE connector_secrets (revocation/rotation deferred)';
+end $$;
+do $$ declare ok boolean := false; begin
+  begin delete from public.connector_secrets where version=50; ok := false;
+  exception when insufficient_privilege then ok := true; end;
+  assert ok, 'T50 runner must NOT DELETE connector_secrets (no row delete)';
+end $$;
+reset role;
+-- 50d: request-path role STILL fully denied (the deny-all is not weakened by the runner column grant).
+select set_config('request.jwt.claims','{"sub":"0a000000-0000-0000-0000-000000000001"}',false); set role authenticated;
+do $$ declare ok boolean; begin
+  ok := false; begin perform 1 from public.connector_secrets; exception when insufficient_privilege then ok := true; end;
+  assert ok, 'T50 authenticated must STILL NOT read connector_secrets';
+  ok := false; begin insert into public.connector_secrets (tenant_id, connector_id, secret_kind) values ('11111111-1111-1111-1111-111111111111','17000000-0000-0000-0000-0000000000a1','api_key'); exception when insufficient_privilege then ok := true; end;
+  assert ok, 'T50 authenticated must STILL NOT insert connector_secrets';
+  ok := false; begin update public.connector_secrets set status='revoked'; exception when insufficient_privilege then ok := true; end;
+  assert ok, 'T50 authenticated must STILL NOT update connector_secrets';
+  ok := false; begin delete from public.connector_secrets; exception when insufficient_privilege then ok := true; end;
+  assert ok, 'T50 authenticated must STILL NOT delete connector_secrets';
 end $$;
 reset role;
 

@@ -20,8 +20,11 @@
 //     printed, or interpolated; the runbook prints the shell var, e.g. "$CONNECTOR_RUNNER_DB_URL");
 //   * uses ONLY the clearly-synthetic non-secret payload "synthetic-vault-dry-run-not-a-token" — never a
 //     real provider token; never exchanges an OAuth code; never calls a provider API;
-//   * never writes connector_secrets (the runbook PROVES the runner is DENIED on it); the only synthetic
-//     setup is one oauth_pending row in a synthetic namespace, cleaned up narrowly (no broad delete).
+//   * runs NO hosted INSERT/UPDATE/DELETE against connector_secrets — step 5 PROVES the runner's narrow
+//     COLUMN-scoped grant (0029) via READ-ONLY catalog inspection + a read-only SELECT only (the runner can
+//     read/write ciphertext/envelope columns ONLY through the runner path, and cannot update/delete; the
+//     request-path stays denied). The only synthetic setup is one oauth_pending row in a synthetic namespace,
+//     cleaned up narrowly (no broad delete).
 //
 // A green human-run dry run is hosted evidence; it does NOT store real credentials, does NOT close RISK-001,
 // and does NOT unblock cutover. The connector vault stays NOT usable for real credentials until this is run.
@@ -88,8 +91,10 @@ if (process.env.CONNECTOR_VAULT_DRY_RUN_CONFIRM !== CONFIRM_PHRASE) {
   console.log(`  required env (names only): ${REQUIRED_ENV.join(", ")}.`);
   console.log("  It would then PRINT (not run) an ordered no-real-token runbook to: seed one synthetic oauth_pending");
   console.log("  row; consume it exactly once as connector_runner; prove a second consume + every mismatch yields 0");
-  console.log("  rows; prove connector_runner is DENIED on connector_secrets; prove oauth_pending/connector_secrets");
-  console.log("  stay deny-all to anon/authenticated; wrap/unwrap the synthetic payload via KMS; then clean up.\n");
+  console.log("  rows; verify connector_runner's narrow COLUMN-scoped connector_secrets grant (SELECT/INSERT on the");
+  console.log("  identity/envelope columns only; NO table-level, NO UPDATE/DELETE) via read-only catalog + a read-only");
+  console.log("  SELECT; prove oauth_pending + connector_secrets stay deny-all to anon/authenticated; wrap/unwrap the");
+  console.log("  synthetic payload via KMS; then clean up.\n");
   console.log("  Connector vault is still not usable for real credentials until the human-run staging dry run is");
   console.log("  executed and recorded. RISK-001 remains OPEN. Cutover remains BLOCKED.\n");
   process.exit(1);
@@ -111,9 +116,11 @@ const SYNTH_NONCE_HASH = "000000000000000000000000000000000000000000000000000000
 console.log("  [RUNBOOK] no-real-token connector-vault dry run — human-executed; this script opens no connection.");
 console.log("  Keep all URLs/secrets in your shell env only ($CONNECTOR_RUNNER_DB_URL etc.) — never commit/print them.\n");
 
-console.log("  0) Preconditions: staging linked; the runner DB role connector_runner exists with ONLY oauth_pending");
-console.log("     SELECT + UPDATE(consumed_at,attempt_count,last_rejected_code) (0021/T43/§41); KMS KEK alias +");
-console.log(`     IAM (GenerateDataKey+Decrypt only) provisioned. Payload is the synthetic sentinel "${SYNTHETIC_PAYLOAD}".\n`);
+console.log("  0) Preconditions: staging linked; the runner DB role connector_runner exists with oauth_pending");
+console.log("     SELECT + UPDATE(consumed_at,attempt_count,last_rejected_code) (0021/T43) AND the COLUMN-scoped");
+console.log("     connector_secrets grant from 0029 (SELECT/INSERT on the identity+envelope columns only; NO");
+console.log("     table-level, NO UPDATE/DELETE — T50/§41); KMS KEK alias + IAM (GenerateDataKey+Decrypt only)");
+console.log(`     provisioned. Payload is the synthetic sentinel "${SYNTHETIC_PAYLOAD}".\n`);
 
 console.log("  1) SEED one synthetic oauth_pending row (admin/setup conn $CONNECTOR_VAULT_SETUP_DB_URL; idempotent):");
 console.log(`       insert into public.oauth_pending (tenant_id, provider, state_jti, nonce_hash, intent, expires_at)`);
@@ -129,10 +136,23 @@ console.log(`          and consumed_at is null and expires_at > now() returning 
 console.log("  3) SECOND consume (re-run step 2 verbatim) — expect 0 rows (single-use).");
 console.log("  4) MISMATCH consumes (re-seed a fresh synthetic row, then try each) — expect 0 rows EACH:");
 console.log("       wrong nonce_hash; wrong tenant_id; wrong provider; wrong state_jti.");
-console.log("  5) RUNNER cannot read secrets — as connector_runner: `select 1 from public.connector_secrets;`");
-console.log("       expect ERROR: permission denied (the runner has NO grant on connector_secrets).");
+console.log("  5) RUNNER connector_secrets grant surface — READ-ONLY catalog + a read-only SELECT only (this runbook");
+console.log("       runs NO hosted INSERT/UPDATE/DELETE against connector_secrets):");
+console.log("       a. as connector_runner, verify the COLUMN-scoped 0029 grant via the catalog (read-only):");
+console.log("            select privilege_type, column_name from information_schema.role_column_grants");
+console.log("             where grantee='connector_runner' and table_name='connector_secrets' order by 1,2;");
+console.log("          expect SELECT on (id,tenant_id,connector_id,secret_kind,version,status,expires_at,");
+console.log("          ciphertext,dek_wrapped,aead_nonce,aad_digest,key_id) and INSERT on (tenant_id,connector_id,");
+console.log("          secret_kind,version,ciphertext,dek_wrapped,aead_nonce,aad_digest,key_id); and");
+console.log("          has_table_privilege('connector_runner','public.connector_secrets','SELECT') is FALSE");
+console.log("          (column-only); and the runner has NO UPDATE/DELETE/TRUNCATE/REFERENCES/TRIGGER.");
+console.log("       b. read-only proof (touches no rows): as connector_runner");
+console.log("            select id, ciphertext from public.connector_secrets limit 0;   -- granted columns -> OK");
+console.log("            select created_at from public.connector_secrets limit 0;       -- non-granted -> permission denied");
+console.log("          The runner can read/write ciphertext/envelope columns ONLY through the runner path; it");
+console.log("          cannot update, delete, revoke, rotate, truncate, reference, or trigger.");
 console.log("  6) DENY-ALL holds — as anon AND as authenticated: any select/update on public.oauth_pending and");
-console.log("       public.connector_secrets is denied (zero privilege, zero policies — T39/T42/T43/§41).\n");
+console.log("       public.connector_secrets is permission denied (zero privilege, zero policies — T39/T42/T43/T50/§41).\n");
 
 console.log("  7) KMS wrap/unwrap of the SYNTHETIC payload (runner IAM; region $CONNECTOR_VAULT_AWS_KMS_REGION,");
 console.log("     KEK alias $CONNECTOR_VAULT_KMS_KEY_ID) — NO provider token involved:");
@@ -148,6 +168,8 @@ console.log("  9) RECORD evidence (a docs-only verification PR): PASS/FAIL per s
 console.log("     secrets/URLs/DEKs/ciphertext. Nothing was written to connector_secrets; no token was exchanged.\n");
 
 console.log("  The verifier is human-run only; the agent did not run hosted commands. Connector vault is still not");
-console.log("  usable for real credentials until the human-run staging dry run is executed and recorded.");
-console.log("  RISK-001 remains OPEN. Cutover remains BLOCKED.\n");
+console.log("  usable for real credentials: live decrypt is still blocked on real hosted KMS/IAM grant separation");
+console.log("  (runner has kms:Decrypt, the web/request-path identity does not) — remaining RISK-007 work, along");
+console.log("  with audit, revocation/rotation, staging+production verification, and live token storage.");
+console.log("  RISK-001 remains OPEN. RISK-007 remains OPEN. Cutover remains BLOCKED.\n");
 process.exit(0);

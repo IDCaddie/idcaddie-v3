@@ -3017,3 +3017,41 @@ production/hosted command. **Connector implementation remains blocked. Old-app p
 parity is not complete. AI/API connector parity is not complete. Upload is not automatically production-ready.
 Hosted Auth/tenant-context is verified, but old-app replacement is not yet verified. RISK-001 remains OPEN.
 RISK-007 remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is ticked by this PR.
+---
+
+## 87. IMPLEMENTATION — connector secret vault storage/decrypt boundary (PR #154)
+
+The highest-risk security layer so far (doc 42 §76): the connector secret VAULT storage/decrypt boundary. It
+wires the reviewed envelope crypto to the `connector_secrets` store behind two STRUCTURALLY SEPARATE
+capabilities so future runner-only execution can store encrypted secrets and decrypt them ONLY from a runner-only
+boundary. **No live Okta sync is added; this PR does not store real customer tokens; no hosted staging/production
+commands were run.**
+
+- **Encrypt/save vs decrypt are structurally separate.** `saveConnectorSecret` takes an ENCRYPT-ONLY key
+  provider (`generateDataKey` only) and writes ONLY ciphertext; its result is redacted (no plaintext, no
+  ciphertext). `loadConnectorSecret` REQUIRES a `RunnerDecryptCapability` produced ONLY with the runner-runtime
+  marker + a decrypt-capable provider (unforgeable, module-private-token constructor). **Request-path decrypt is
+  forbidden and tested.**
+- **Migration `0029`** grants `connector_runner` a NARROW `column-scoped SELECT/INSERT` on `connector_secrets` (the
+  deferred `0021` secret-store grant) — NO UPDATE/DELETE. **The request-path deny-all is preserved**:
+  `connector_secrets` stays RLS-enabled with ZERO policies (no DELETE policy, no ALL policy);
+  `authenticated`/`anon` keep EXACTLY zero privilege (T39/T40/T50). Decrypt's REAL hosted boundary is the KMS
+  `Decrypt` grant (runner has it, web does not) — NOT wired/verified here (mock KMS only).
+- Structural redaction (`RedactedSecret` redacts toString/toJSON/inspect; bytes only via `.expose()`); tenant_id
+  bound from server context, never the payload; AAD rejects cross-tenant decrypt; no service-role / request-path
+  leakage. No real `KmsClient`, no route, no UI, no live provider call.
+
+**RISK-007 remains OPEN** (not "effectively addressed", not "mostly closed"). Completed: encrypted-storage
+primitive + save/load boundary; request-path-inaccessible secret table preserved; narrow catalog-testable runner
+grant; runner-only decrypt capability gate + redaction; no service-role/request-path leak. Remaining: hosted
+KMS-grant runtime separation (real decrypt boundary) unwired/unverified; audited secret access/use; revocation/
+rotation/tombstone; the at-rest schema gap (`connector_secrets` has no GCM `tag`/format columns yet, so a real
+secret cannot round-trip end to end); staging verification; production verification; live token storage. Tests **472 → 487**; RLS
+suite **492 → 519** (T50 + T43/T44 corrected); generated types unchanged (**1828**, 0-diff; grants are not
+columns). **No provider API call is made. No OAuth code is exchanged for tokens. No access token is stored. No
+refresh token is stored. No API key is stored. No connector credentials are stored. No connector secret material
+is inserted, updated, deleted, or read in a hosted environment. No connector sync is implemented. No credential
+form is implemented. No connect/reconnect/disconnect action is exposed to users. No browser-accessible
+service-role request path is added.** **Connector implementation remains blocked. Old-app parity is not
+complete. RISK-001 remains OPEN. RISK-007 remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is ticked by
+this PR.
