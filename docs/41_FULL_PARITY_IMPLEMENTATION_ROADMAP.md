@@ -10,6 +10,9 @@ implementation roadmap; it does not implement parity.**
 > - **OMC requires full old-app parity before cutover unless OMC explicitly waives a specific capability. The MVP
 >   subset framing is not sufficient for OMC cutover.**
 > - **Old-app parity is not complete. UI/UX parity is not complete. AI/API connector parity is not complete.**
+> - **Before claiming old-app parity for any product area, check [docs/43_OLD_APP_SOURCE_LINE_REBUILD_LEDGER.md](./43_OLD_APP_SOURCE_LINE_REBUILD_LEDGER.md) — the code-derived rebuild ledger is a REQUIRED REFERENCE for future rebuild PRs.** Appendix-only inventory is not enough: each old-app capability needs a requirement row, or an explicit rebuild/waive/defer decision.
+> - **The #162 gap patch added explicit requirement rows for surfaces previously only appendix-listed: external API-key/Chrome-plugin auth, company user invite/admin lifecycle, identity-change cascades, file/invoice group access propagation, public monthly-summary token reads, document viewer parity, people metrics context, and persisted table/filter/report UX. v3 is not full old-app UX parity yet.**
+> - **Connector vault status stays honest: `0030`/#160/#161 improve infrastructure only — they do NOT close RISK-007 or permit real connector credential storage/use. RISK-001 remains OPEN. RISK-007 remains OPEN. Cutover remains BLOCKED.**
 > - **Hosted Auth/tenant-context is verified, but old-app replacement is not yet verified.**
 > - **RISK-001 remains OPEN. Cutover remains BLOCKED. Upload is not automatically production-ready. Storage
 >   completion is necessary but not sufficient for cutover.** No doc 17 §5 box ticked.
