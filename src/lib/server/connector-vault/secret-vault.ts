@@ -142,12 +142,21 @@ export interface ConnectorSecretWriteStore {
   }): Promise<{ id: string }>;
 }
 export interface ConnectorSecretReadStore {
-  // SELECT the active encrypted secret for a context (runner SELECT). Null when none. Returns ONLY ciphertext.
+  // SELECT the active encrypted secret for an EXACT (tenant, connector, kind, version). Null when none / not
+  // loadable. Lifecycle-aware (Model B): fails closed on a revoked/tombstoned version. Returns ONLY ciphertext.
   findEncryptedSecret(input: {
     tenantId: string;
     connectorId: string;
     dbSecretKind: string;
     version: number;
+  }): Promise<StoredEncryptedSecret | null>;
+
+  // LATEST-INTENT load (docs/42 §85.6): resolve the HIGHEST version across ALL rows first, then load THAT single
+  // version's eligibility only — NO fallback to a lower version. Null when none / the highest is not loadable.
+  findLatestEncryptedSecret(input: {
+    tenantId: string;
+    connectorId: string;
+    dbSecretKind: string;
   }): Promise<StoredEncryptedSecret | null>;
 }
 

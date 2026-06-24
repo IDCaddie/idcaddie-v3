@@ -3874,3 +3874,63 @@ stands; this PR only DESIGNS the lifecycle model on top of it. **Real connector 
 NOT allowed; rotation/revocation behavior and the real credential lifecycle remain missing. Connector
 implementation remains blocked. Old-app parity is not complete. Connector credentials are not production-ready.
 RISK-001 remains OPEN. RISK-007 remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is ticked by this PR.
+## 86. Model B lifecycle table + lifecycle-aware load (PR #169, implementation)
+
+Implements the §85 Model B lifecycle TABLE and the lifecycle-aware LOAD only. **Read-only this PR:** it adds NO
+lifecycle write helper, NO lifecycle audit event/runtime constant, and NO runner INSERT grant on the lifecycle
+table — those land with the revoke/tombstone write helpers in the next PR. `connector_secrets` stays append-only.
+RISK-007 remains OPEN.
+
+### 86.1 Migration `0032` — `connector_secret_lifecycle_events` (INSERT-only)
+A new append-only table holding ONLY non-secret lifecycle metadata (id, tenant_id, connector_id, secret_kind,
+version, `lifecycle_event_type` ∈ {revoked, tombstoned, superseded}, `reason_class`, actor_type, correlation_id,
+optional `audit_log_id`, created_at). It carries NO plaintext/ciphertext/DEK/wrapped-DEK/key-material/AEAD-tag/
+nonce/IV/aad_digest/KMS-response/raw-error/env value. Same-tenant FK `(connector_id, tenant_id) → connectors`.
+Deny-all RLS (zero policies; authenticated/anon get nothing). An append-only trigger
+(`connector_secret_lifecycle_no_mutation`, `before update or delete`) rejects UPDATE/DELETE for EVERY role.
+
+### 86.2 Grants — SELECT-ONLY for `connector_runner` (this PR)
+`grant select (tenant_id, connector_id, secret_kind, version, lifecycle_event_type) on
+connector_secret_lifecycle_events to connector_runner` — EXACTLY the five columns the load eligibility check reads.
+**NO INSERT** (the runner reads lifecycle state here; lifecycle WRITES + the runner INSERT grant are deferred to
+the write-helper PR — do not grant privileges ahead of code), **NO UPDATE, NO DELETE**. `connector_secrets`
+keeps NO UPDATE/DELETE grant (T50 intact). In tests, lifecycle rows are seeded ONLY by the test/admin setup path.
+
+### 86.3 Lifecycle-aware load (the load-bearing claim)
+The runner load query is now lifecycle-aware (Model B fail-closed latest-INTENT — §85.6):
+- **Exact-version** (`findEncryptedSecret`): the SELECT adds a `NOT EXISTS (… lifecycle_event_type IN
+  ('revoked','tombstoned') …)` for the exact `(tenant, connector, kind, version)`. It returns the secret ONLY if
+  the exact version is active, non-expired, well-formed, AND has no terminal lifecycle event. The `NOT EXISTS` is
+  **purely additive** — with no lifecycle rows it is always true, so the no-lifecycle path is byte-for-byte the
+  pre-lifecycle (#163/#167) behavior (regression-proven).
+- **Latest-INTENT** (`findLatestEncryptedSecret`, new): resolves the **highest `version` across ALL rows**
+  (`select max(version) …`, including revoked/tombstoned/superseded/expired/inactive — a NUMBER only, no secret),
+  then loads the eligibility of **THAT single version only** via the lifecycle-aware exact load. It **NEVER falls
+  back to a lower version**: if the highest version is revoked/tombstoned/expired/inactive/malformed it returns
+  null (or fails closed on a malformed envelope). Highest revoked + lower active → null; highest tombstoned +
+  lower active → null; highest expired + lower valid → null; all revoked → null. "Malformed" is NOT a SQL
+  predicate — a not-provably-eligible row fails closed (the envelope mapper throws, the version is not retried).
+
+### 86.4 Tests
+- **Real DB (T53 / updated T51):** T53 proves TWO SEPARATE protections — (1) the runner GRANT SHAPE under
+  `set role connector_runner` (SELECT-only on the five columns; INSERT/UPDATE/DELETE all FAIL); (2) the
+  append-only TRIGGER itself, proven against a PRIVILEGED test/admin role that CAN attempt UPDATE/DELETE and is
+  STILL rejected by the trigger (asserting the `append-only` error message — so the block is the trigger, NOT mere
+  grant-absence). T53 also proves the lifecycle-aware SELECT excludes an ACTIVE version that has a `revoked`
+  event, and that `connector_secrets` still has no runner UPDATE/DELETE. T51 now runs the lifecycle-aware SELECT
+  shape (grant-compatible; identical result with no lifecycle rows).
+- **Unit:** exact active/no-event → returns; exact excluded → null; latest highest active → returns the highest;
+  latest highest revoked/tombstoned/expired with a lower valid → null AND the adapter queries ONLY the highest
+  version (never the lower one — the no-fallback proof); no versions → null; regression: the no-lifecycle path is
+  unchanged and the existing #167 store/load tests still pass against the new query. No secret/envelope/key
+  material appears in any lifecycle row; no hard delete exists.
+
+### 86.5 Status — **RISK-007 remains OPEN**
+**Model B lifecycle table is implemented; load semantics are fail-closed latest-intent; `connector_runner` has
+SELECT-only lifecycle access in this PR.** Lifecycle WRITE helpers (revoke/tombstone), the runner INSERT grant on
+the lifecycle table, and lifecycle AUDIT events/writes are deferred to the next PR. **Real connector credential
+storage/use remains NOT allowed; real credential save/load/use is still missing; rotation/revocation behavior and
+the real credential lifecycle remain missing. No real provider token, no OAuth/token exchange, no live connector,
+no request-path decrypt, no service-role secret path, no public route. No UPDATE/DELETE on `connector_secrets`; no
+hard delete. Connector credentials are not production-ready. RISK-001 remains OPEN. RISK-007 remains OPEN. Cutover
+remains BLOCKED.** No doc 17 §5 box is ticked by this PR.

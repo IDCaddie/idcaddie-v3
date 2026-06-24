@@ -67,13 +67,26 @@ export const INSERT_SECRET_SQL =
   "ciphertext, dek_wrapped, aead_nonce, aad_digest, key_id, aead_tag, envelope_version, aead_alg) " +
   "values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) returning id";
 
-// LOAD: read ONLY granted columns; filter to one ACTIVE, non-expired row for (tenant, connector, kind, version).
-// `limit 2` so an ambiguous (>1) active match is detected and rejected rather than silently picking one.
+// LOAD (lifecycle-aware, Model B — docs/42 §85): read ONLY granted columns; filter to one ACTIVE, non-expired row
+// for (tenant, connector, kind, version) AND fail closed if that version has a terminal `revoked`/`tombstoned`
+// lifecycle event. The `not exists` is purely ADDITIVE — when there are no lifecycle rows it is always true, so the
+// no-lifecycle path is byte-for-byte the pre-lifecycle behavior (#163/#167). `limit 2` detects an ambiguous match.
 export const SELECT_SECRET_SQL =
-  "select id, ciphertext, dek_wrapped, aead_nonce, aad_digest, key_id, aead_tag, envelope_version, aead_alg " +
-  "from public.connector_secrets " +
-  "where tenant_id = $1 and connector_id = $2 and secret_kind = $3 and version = $4 " +
-  "and status = 'active' and (expires_at is null or expires_at > now()) limit 2";
+  "select cs.id, cs.ciphertext, cs.dek_wrapped, cs.aead_nonce, cs.aad_digest, cs.key_id, cs.aead_tag, cs.envelope_version, cs.aead_alg " +
+  "from public.connector_secrets cs " +
+  "where cs.tenant_id = $1 and cs.connector_id = $2 and cs.secret_kind = $3 and cs.version = $4 " +
+  "and cs.status = 'active' and (cs.expires_at is null or cs.expires_at > now()) " +
+  "and not exists (select 1 from public.connector_secret_lifecycle_events le " +
+  "where le.tenant_id = cs.tenant_id and le.connector_id = cs.connector_id and le.secret_kind = cs.secret_kind " +
+  "and le.version = cs.version and le.lifecycle_event_type in ('revoked', 'tombstoned')) limit 2";
+
+// LATEST-INTENT (docs/42 §85.6): the HIGHEST version across ALL rows for (tenant, connector, kind) — INCLUDING
+// revoked/tombstoned/superseded/expired/inactive rows. NO status/expiry/lifecycle filter here: this finds the
+// highest version's NUMBER only (no secret bytes), so the eligibility of ONLY that single highest version is then
+// checked by the lifecycle-aware exact load. There is NO fallback to a lower version.
+export const SELECT_MAX_VERSION_SQL =
+  "select max(version) as version from public.connector_secrets " +
+  "where tenant_id = $1 and connector_id = $2 and secret_kind = $3";
 
 // Transaction control statements spliced into the runner `runSequence` (one connection, in order).
 const SET_ROLE: RunnerStatement = { sql: "set role connector_runner", params: [] };
@@ -115,6 +128,74 @@ async function emitAudit(conn: RunnerConnection, event: ConnectorSecretAuditEven
   } catch {
     throw new ConnectorSecretStoreError("connector secret audit write failed");
   }
+}
+
+// EXACT-version lifecycle-aware load (the #167 fail-closed read, now also fail-closed on a revoked/tombstoned
+// lifecycle event via SELECT_SECRET_SQL). Emits load.attempted/succeeded/failed; the caller gets the envelope ONLY
+// after load.succeeded commits. Reused by BOTH `findEncryptedSecret` (exact) and `findLatestEncryptedSecret`
+// (latest-intent — it resolves the highest version, then loads THAT version's eligibility through here).
+async function loadExactSecret(conn: RunnerConnection, ids: AuditIds): Promise<StoredEncryptedSecret | null> {
+  // 1) load.attempted — fail-closed.
+  await emitAudit(conn, "connector_secret.load.attempted", ids);
+
+  // 2) the SELECT (a read — nothing to roll back). Redact DB errors; record load.failed; abort.
+  let rows: ReadonlyArray<Record<string, unknown>>;
+  try {
+    const results = await conn.runSequence([
+      SET_ROLE,
+      { sql: SELECT_SECRET_SQL, params: [ids.tenantId, ids.connectorId, ids.dbSecretKind, ids.version] },
+    ]);
+    rows = results[results.length - 1]?.rows ?? [];
+  } catch {
+    await emitAudit(conn, "connector_secret.load.failed", ids, "load_failed");
+    throw new ConnectorSecretStoreError("connector secret load failed");
+  }
+
+  // 3) classify the read outcome → on any problem, record load.failed (with a STATIC class) and abort.
+  let result: StoredEncryptedSecret | null;
+  try {
+    if (rows.length > 1) {
+      await emitAudit(conn, "connector_secret.load.failed", ids, "ambiguous_match");
+      throw new ConnectorSecretStoreError("ambiguous active connector secret (multiple matching rows)");
+    }
+    if (rows.length === 0) {
+      result = null;
+    } else {
+      const row = rows[0];
+      const id = asString(row.id);
+      if (!id) {
+        await emitAudit(conn, "connector_secret.load.failed", ids, "load_failed");
+        throw new ConnectorSecretStoreError("connector secret row is missing its id");
+      }
+      const colVals: Partial<ConnectorSecretEnvelopeColumns> = {
+        ciphertext: asBuffer(row.ciphertext),
+        dek_wrapped: asBuffer(row.dek_wrapped),
+        aead_nonce: asBuffer(row.aead_nonce),
+        aead_tag: asBuffer(row.aead_tag),
+        aad_digest: asString(row.aad_digest),
+        key_id: asString(row.key_id),
+        envelope_version: asNumber(row.envelope_version),
+        aead_alg: asString(row.aead_alg),
+      };
+      let encrypted;
+      try {
+        // columnsToEncryptedSecret fails closed on an incomplete/unsupported envelope.
+        encrypted = columnsToEncryptedSecret(colVals);
+      } catch {
+        await emitAudit(conn, "connector_secret.load.failed", ids, "invalid_envelope");
+        throw new ConnectorSecretStoreError("connector secret stored envelope is invalid or unsupported");
+      }
+      result = { id, encrypted };
+    }
+  } catch (e) {
+    if (e instanceof ConnectorSecretStoreError) throw e; // already audited above as load.failed
+    await emitAudit(conn, "connector_secret.load.failed", ids, "load_failed");
+    throw new ConnectorSecretStoreError("connector secret load failed");
+  }
+
+  // 4) load.succeeded — fail-closed: write the audit row BEFORE returning. If it fails, the caller gets NO payload.
+  await emitAudit(conn, "connector_secret.load.succeeded", ids);
+  return result;
 }
 
 // Build the runner-backed store adapter. The injected `RunnerConnection.runSequence` runs the given statements IN
@@ -165,76 +246,41 @@ export function createRunnerConnectorSecretStore(
       return { id }; // REDACTED: row id only — never plaintext, never ciphertext
     },
 
+    // EXACT-version lifecycle-aware load — fail closed unless the exact version is active, non-expired, well-formed,
+    // and has NO revoked/tombstoned lifecycle event.
     async findEncryptedSecret(input): Promise<StoredEncryptedSecret | null> {
-      const ids: AuditIds = {
+      return loadExactSecret(conn, {
         tenantId: input.tenantId,
         connectorId: input.connectorId,
         dbSecretKind: input.dbSecretKind,
         version: input.version,
-      };
-      // 1) load.attempted — fail-closed.
-      await emitAudit(conn, "connector_secret.load.attempted", ids);
+      });
+    },
 
-      // 2) the SELECT (a read — nothing to roll back). Redact DB errors; record load.failed; abort.
-      let rows: ReadonlyArray<Record<string, unknown>>;
+    // LATEST-INTENT lifecycle-aware load (docs/42 §85.6): resolve the HIGHEST version across ALL rows (incl.
+    // revoked/tombstoned/superseded/expired/inactive), then load the eligibility of THAT single version only. It
+    // NEVER falls back to a lower version: if the highest version is revoked/tombstoned/expired/inactive/malformed
+    // it returns null (or throws on a malformed envelope) — exactly as `findEncryptedSecret(highest)` would.
+    async findLatestEncryptedSecret(input): Promise<StoredEncryptedSecret | null> {
+      // highest version = a NUMBER only (no secret bytes), so this metadata read needs no load audit.
+      let maxVersion: number | undefined;
       try {
         const results = await conn.runSequence([
           SET_ROLE,
-          { sql: SELECT_SECRET_SQL, params: [input.tenantId, input.connectorId, input.dbSecretKind, input.version] },
+          { sql: SELECT_MAX_VERSION_SQL, params: [input.tenantId, input.connectorId, input.dbSecretKind] },
         ]);
-        rows = results[results.length - 1]?.rows ?? [];
+        maxVersion = asNumber(results[results.length - 1]?.rows[0]?.version);
       } catch {
-        await emitAudit(conn, "connector_secret.load.failed", ids, "load_failed");
-        throw new ConnectorSecretStoreError("connector secret load failed");
+        throw new ConnectorSecretStoreError("connector secret latest-version lookup failed");
       }
-
-      // 3) classify the read outcome → on any problem, record load.failed (with a STATIC class) and abort.
-      let result: StoredEncryptedSecret | null;
-      try {
-        if (rows.length > 1) {
-          await emitAudit(conn, "connector_secret.load.failed", ids, "ambiguous_match");
-          throw new ConnectorSecretStoreError("ambiguous active connector secret (multiple matching rows)");
-        }
-        if (rows.length === 0) {
-          result = null;
-        } else {
-          const row = rows[0];
-          const id = asString(row.id);
-          if (!id) {
-            await emitAudit(conn, "connector_secret.load.failed", ids, "load_failed");
-            throw new ConnectorSecretStoreError("connector secret row is missing its id");
-          }
-          const colVals: Partial<ConnectorSecretEnvelopeColumns> = {
-            ciphertext: asBuffer(row.ciphertext),
-            dek_wrapped: asBuffer(row.dek_wrapped),
-            aead_nonce: asBuffer(row.aead_nonce),
-            aead_tag: asBuffer(row.aead_tag),
-            aad_digest: asString(row.aad_digest),
-            key_id: asString(row.key_id),
-            envelope_version: asNumber(row.envelope_version),
-            aead_alg: asString(row.aead_alg),
-          };
-          let encrypted;
-          try {
-            // columnsToEncryptedSecret fails closed on an incomplete/unsupported envelope.
-            encrypted = columnsToEncryptedSecret(colVals);
-          } catch {
-            await emitAudit(conn, "connector_secret.load.failed", ids, "invalid_envelope");
-            throw new ConnectorSecretStoreError("connector secret stored envelope is invalid or unsupported");
-          }
-          result = { id, encrypted };
-        }
-      } catch (e) {
-        // re-throw the typed store error (already audited above as load.failed).
-        if (e instanceof ConnectorSecretStoreError) throw e;
-        await emitAudit(conn, "connector_secret.load.failed", ids, "load_failed");
-        throw new ConnectorSecretStoreError("connector secret load failed");
-      }
-
-      // 4) load.succeeded — fail-closed: write the audit row BEFORE returning. If it fails, the caller gets NO
-      //    payload (emitAudit throws). This is the fail-closed guarantee for the read path.
-      await emitAudit(conn, "connector_secret.load.succeeded", ids);
-      return result;
+      if (maxVersion === undefined) return null; // no version rows exist for (tenant, connector, kind)
+      // eligibility of ONLY the highest version (audited, lifecycle-aware). NO fallback to a lower version.
+      return loadExactSecret(conn, {
+        tenantId: input.tenantId,
+        connectorId: input.connectorId,
+        dbSecretKind: input.dbSecretKind,
+        version: maxVersion,
+      });
     },
   };
 }

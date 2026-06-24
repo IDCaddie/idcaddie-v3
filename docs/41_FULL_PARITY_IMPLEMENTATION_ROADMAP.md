@@ -3240,3 +3240,26 @@ Tests unchanged (**548**); RLS unchanged (**550**); types unchanged (**1837**); 
 behavior implemented. Real credentials still blocked; rotation/revocation + real credential lifecycle remain
 missing. RISK-001 remains OPEN. RISK-007 remains OPEN. Cutover remains BLOCKED. Connector credentials are not
 production-ready.** No doc 17 §5 box is ticked by this PR.
+---
+
+## 95. MODEL B LIFECYCLE TABLE + LIFECYCLE-AWARE LOAD (PR #169, implementation — read-only)
+
+Implements the §85/§94 Model B lifecycle TABLE + the lifecycle-aware LOAD (doc 42 §86). **Read-only this PR: NO
+lifecycle write helper, NO lifecycle audit event/constant, NO runner INSERT grant** (deferred to the write-helper
+PR). `connector_secrets` stays append-only. RISK-007 remains OPEN.
+
+- Migration **`0032`**: INSERT-only `connector_secret_lifecycle_events` (revoked/tombstoned/superseded; safe
+  metadata only) + append-only trigger + a SELECT-only column-scoped runner grant (EXACTLY tenant_id/connector_id/
+  secret_kind/version/lifecycle_event_type) for the load eligibility check. No runner INSERT/UPDATE/DELETE.
+- Load is **fail-closed latest-INTENT**: exact-version adds a `NOT EXISTS (revoked/tombstoned)` (additive — the
+  no-lifecycle path is unchanged); new `findLatestEncryptedSecret` resolves the highest version across ALL rows
+  first, then loads THAT version's eligibility only — **never falls back to a lower version**.
+- **T53** proves two separate protections: the runner SELECT-only grant shape (INSERT/UPDATE/DELETE fail) AND the
+  append-only trigger against a PRIVILEGED role (rejected by the trigger, not grant-absence). Unit tests prove the
+  no-fallback latest-intent + the no-lifecycle regression.
+
+Tests **548 → 557**; RLS suite **550 → 569**; `database.types.ts` **1837 → 1901** (new table); migration `0032`.
+Lifecycle write helpers + runner INSERT grant + lifecycle audit events/writes deferred to the next PR. **Real
+credentials remain blocked; real credential save/load/use is still missing; rotation/revocation + real credential
+lifecycle remain missing. RISK-001 remains OPEN. RISK-007 remains OPEN. Cutover remains BLOCKED. Connector
+credentials are not production-ready.** No doc 17 §5 box is ticked by this PR.
