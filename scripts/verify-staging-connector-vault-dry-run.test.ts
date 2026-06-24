@@ -100,14 +100,21 @@ describe("verify-staging-connector-vault-dry-run.mjs guards", () => {
     }
   });
 
-  it("never writes connector_secrets (proves the runner is DENIED on it; no write statement printed)", () => {
+  it("runs NO hosted INSERT/UPDATE/DELETE on connector_secrets; proves the narrow column-scoped grant + deny-all", () => {
     const r = run(STAGING, FULL_ENV);
     const lower = r.out.toLowerCase();
+    // the runbook performs NO hosted mutation against the secret table (read-only catalog + SELECT only)
     expect(lower).not.toMatch(/insert\s+into\s+public\.connector_secrets/);
     expect(lower).not.toMatch(/update\s+public\.connector_secrets/);
     expect(lower).not.toMatch(/delete\s+from\s+public\.connector_secrets/);
-    expect(r.out).toMatch(/connector_secrets/); // it IS referenced — in the deny/permission-denied checks
+    // it describes the NEW intended post-0029 state: a COLUMN-scoped grant (not table-level), read via catalog
+    expect(r.out).toMatch(/column-scoped/i);
+    expect(r.out).toMatch(/role_column_grants/);
+    expect(r.out).toMatch(/has_table_privilege\('connector_runner','public\.connector_secrets','SELECT'\) is FALSE/i);
+    expect(r.out).toMatch(/NO UPDATE\/DELETE/i);
+    // request-path stays fully denied; a non-granted column read is permission denied
     expect(r.out).toMatch(/permission denied/i);
+    expect(r.out).toMatch(/anon AND as authenticated/i);
   });
 
   it("--help prints usage and exits 0 without any hosted action", () => {

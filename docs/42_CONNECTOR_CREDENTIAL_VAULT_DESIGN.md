@@ -3141,3 +3141,84 @@ facts are staged. No service-role client, no public unauthenticated route, no pr
 connector parity is not complete. Upload is not automatically production-ready. Hosted Auth/tenant-context is
 verified, but old-app replacement is not yet verified. RISK-001 remains OPEN. RISK-007 remains OPEN. Cutover
 remains BLOCKED.** No doc 17 §5 box is ticked by this PR.
+## 76. Implementation — connector secret vault storage/decrypt boundary (PR #154)
+
+The connector secret VAULT storage/decrypt boundary — the highest-risk security layer so far. It wires the
+reviewed envelope crypto (`crypto.ts`) to the `connector_secrets` store behind two STRUCTURALLY SEPARATE
+capabilities, so future runner-only connector execution can store encrypted secrets and decrypt them ONLY from a
+runner-only boundary. **No live Okta sync is added. This PR does not store real customer tokens. No hosted
+staging/production commands were run.**
+
+### 76.1 What this PR implements
+- **`secret-vault.ts`** (server-only): `saveConnectorSecret` (encrypt-only), `loadConnectorSecret` (runner-only
+  decrypt), `acquireRunnerDecryptCapability`, the `RunnerDecryptCapability` token, and the `RedactedSecret`
+  wrapper. Its only import is the sibling `crypto.ts`; no Supabase client, no service-role, no `fetch`, no
+  `process.env`, no route/UI.
+- **Encrypt/save vs decrypt are structurally different paths.** `saveConnectorSecret` accepts an ENCRYPT-ONLY
+  key provider (`generateDataKey` only) and writes ONLY ciphertext; it is given no decrypt key, so the save path
+  cannot decrypt by construction (its crypto call gets a throwing `unwrapDataKey`). The save RESULT is a redacted
+  reference — no plaintext, no ciphertext, no wrapped DEK.
+- **Decrypt is keyed to a runner-only capability, not merely a server-only import.** `loadConnectorSecret`
+  requires a `RunnerDecryptCapability`, produced ONLY by `acquireRunnerDecryptCapability` and ONLY when the
+  runner-runtime marker is present AND a decrypt-capable KMS provider is supplied. The capability's constructor
+  is gated by a module-private symbol token, so it cannot be forged by request-path code. **Request-path decrypt
+  is forbidden and tested** (a missing/forged capability fails closed).
+- **Migration `0029`** grants the existing `connector_runner` (NOLOGIN, BYPASSRLS, reached only via
+  `connector_runner_login` + `SET ROLE`) a NARROW **COLUMN-SCOPED** SELECT/INSERT on `connector_secrets` — the
+  deferred secret-store grant `0021` planned. It is column-scoped, NOT table-level (the runner is BYPASSRLS, so
+  a table grant would expose every column of every row + any future column), pinned to the exact identity/
+  active/envelope columns the `secret-vault.ts` store uses — SELECT (id, tenant_id, connector_id, secret_kind,
+  version, status, expires_at, ciphertext, dek_wrapped, aead_nonce, aad_digest, key_id) and INSERT (the
+  identity/write + envelope columns). NO UPDATE, NO DELETE, NO TRUNCATE/REFERENCES/TRIGGER, NO table-level
+  SELECT/INSERT. **The request-path deny-all is preserved, not weakened**: `connector_secrets` stays RLS-enabled
+  with ZERO policies (no DELETE policy, no ALL policy); `authenticated`/`anon` keep EXACTLY zero table + column
+  privilege. Generated types unchanged (grants are not columns).
+- **Structural redaction.** `RedactedSecret` redacts `toString`/`toJSON`/`util.inspect`; bytes are reachable
+  only via `.expose()` (runner use). Errors are typed, static, secret-free. Tests prove the save result omits
+  plaintext + ciphertext, the wrapper redacts string/JSON/inspect, and crypto/decrypt errors carry no secret
+  material.
+- **Defense in depth (catalog-testable now):** request-path deny-all on `connector_secrets` (T39/T40 preserved);
+  the narrow COLUMN-SCOPED runner grant (T50 — the exact column-level SELECT/INSERT sets, NO table-level grant,
+  no UPDATE/DELETE; functional insert+select of granted columns works, a non-granted column read + update/delete
+  are `insufficient_privilege`); the AAD context binding rejects a cross-tenant/cross-context decrypt; tenant_id
+  is bound from the server context, never the secret payload.
+
+### 76.2 The decrypt boundary's hosted enforcement (NOT verified in this PR)
+In production the REAL cryptographic decrypt boundary is the KMS `Decrypt` grant: the runner's IAM identity has
+`kms:Decrypt`; the web/request-path identity does NOT, so its KMS client's `decrypt` fails even with ciphertext
+in hand. This PR ships the CODE-LEVEL boundary (the capability gate + the env marker + the narrow DB grant) and
+proves it with unit + catalog tests against a MOCK KMS. It does NOT wire a real KMS client and does NOT run in a
+hosted environment, so the runtime IAM-grant separation is UNVERIFIED here. That is remaining RISK-007 work.
+
+### 76.3 RISK-007 status — **RISK-007 remains OPEN**
+RISK-007 is NOT closed, NOT "effectively addressed", NOT "mostly closed". Precise status:
+
+**Completed by this PR:**
+- Encrypted-storage primitive (envelope AES-256-GCM, `crypto.ts`) + a save/load boundary that uses it.
+- Request-path-inaccessible secret table (deny-all) — preserved and re-asserted (T39/T40/T50).
+- A narrow, explicit, catalog-testable runner grant (`column-scoped SELECT/INSERT`, no UPDATE/DELETE — T50).
+- A runner-only decrypt CAPABILITY gate (code-level) + structural redaction + secret-free errors.
+- No service-role / request-path leakage (auth-safety + the purity/RLS tests).
+
+**Remaining for RISK-007 (still OPEN):**
+- The hosted KMS-grant runtime separation (runner has `kms:Decrypt`, web does not) — the real cryptographic
+  decrypt boundary — is NOT wired and NOT verified here (mock KMS only; no real `KmsClient`).
+- Audited access/use of secrets (who decrypted what, when) — NOT built.
+- Revocation / rotation / tombstone — NOT built (UPDATE/DELETE deliberately NOT granted to the runner).
+- Staging verification of `0029` + the vault path — NOT done (no hosted commands run).
+- Production verification — NOT done.
+- The at-rest schema is incomplete: `connector_secrets` has columns for ciphertext/dek_wrapped/aead_nonce/
+  aad_digest/key_id but NONE for the GCM auth `tag` or the `v`/`alg` format metadata that `crypto.ts`'s
+  `EncryptedConnectorSecret` carries, so a real secret cannot yet round-trip end to end — a later schema PR
+  must add and grant those columns.
+- The live provider wiring that would actually store a real token — NOT built (and still gated by RISK-007).
+
+### 76.4 Status (tests **472 → 487**; RLS **492 → 519**; types **1828** 0-diff; migration `0029`)
+**No provider API call is made. No OAuth code is exchanged for tokens. No access token is stored. No refresh
+token is stored. No API key is stored. No connector credentials are stored. No connector secret material is
+inserted, updated, deleted, or read in a hosted environment. No connector sync is implemented. No credential
+form is implemented. No connect/reconnect/disconnect action is exposed to users. No browser-accessible
+service-role request path is added.** No service-role client; no public route; no UI; no live Okta; no real
+customer token stored; any live verification is future work. **Connector implementation remains blocked. Old-app
+parity is not complete. RISK-001 remains OPEN. RISK-007 remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box
+is ticked by this PR.

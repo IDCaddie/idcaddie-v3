@@ -78,6 +78,9 @@ const CRYPTO_REL_HINTS = [
   "connector-vault/okta-discovery-emitter",
   "server/connector-vault/okta-discovery-emitter",
   "lib/server/connector-vault/okta-discovery-emitter",
+  "connector-vault/secret-vault",
+  "server/connector-vault/secret-vault",
+  "lib/server/connector-vault/secret-vault",
 ];
 
 function walk(dir: string): string[] {
