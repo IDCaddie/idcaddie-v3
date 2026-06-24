@@ -3258,7 +3258,7 @@ PR). `connector_secrets` stays append-only. RISK-007 remains OPEN.
   append-only trigger against a PRIVILEGED role (rejected by the trigger, not grant-absence). Unit tests prove the
   no-fallback latest-intent + the no-lifecycle regression.
 
-Tests **548 → 557**; RLS suite **550 → 569**; `database.types.ts` **1837 → 1901** (new table); migration `0032`.
+Tests **548 → 559**; RLS suite **550 → 571**; `database.types.ts` **1837 → 1901** (new table); migration `0032`.
 Lifecycle write helpers + runner INSERT grant + lifecycle audit events/writes deferred to the next PR. **Real
 credentials remain blocked; real credential save/load/use is still missing; rotation/revocation + real credential
 lifecycle remain missing. RISK-001 remains OPEN. RISK-007 remains OPEN. Cutover remains BLOCKED. Connector

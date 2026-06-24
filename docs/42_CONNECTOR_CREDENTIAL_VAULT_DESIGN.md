@@ -3906,10 +3906,14 @@ The runner load query is now lifecycle-aware (Model B fail-closed latest-INTENT 
 - **Latest-INTENT** (`findLatestEncryptedSecret`, new): resolves the **highest `version` across ALL rows**
   (`select max(version) …`, including revoked/tombstoned/superseded/expired/inactive — a NUMBER only, no secret),
   then loads the eligibility of **THAT single version only** via the lifecycle-aware exact load. It **NEVER falls
-  back to a lower version**: if the highest version is revoked/tombstoned/expired/inactive/malformed it returns
-  null (or fails closed on a malformed envelope). Highest revoked + lower active → null; highest tombstoned +
-  lower active → null; highest expired + lower valid → null; all revoked → null. "Malformed" is NOT a SQL
-  predicate — a not-provably-eligible row fails closed (the envelope mapper throws, the version is not retried).
+  back to a lower version**: if the highest version is revoked/tombstoned/expired/inactive — or its stored
+  envelope is incomplete/unsupported — it returns null (or throws, as the envelope mapper fails closed at that
+  version). Highest revoked + lower active → null; highest tombstoned + lower active → null; highest expired +
+  lower valid → null; all revoked → null. **Eligibility is defined ONLY by `status='active'` + non-expired + no
+  `revoked`/`tombstoned` lifecycle event** (the #169 prompt's "if a row is not provably eligible, fail closed").
+  There is **no `malformed` SQL predicate or load-query branch**: an incomplete/unsupported envelope simply makes
+  the envelope mapper (`columnsToEncryptedSecret`) fail closed at the resolved version, which is NOT retried at a
+  lower version — it is the pre-existing #167 fail-closed behavior, not a new eligibility condition.
 
 ### 86.4 Tests
 - **Real DB (T53 / updated T51):** T53 proves TWO SEPARATE protections — (1) the runner GRANT SHAPE under

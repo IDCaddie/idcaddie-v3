@@ -259,8 +259,10 @@ export function createRunnerConnectorSecretStore(
 
     // LATEST-INTENT lifecycle-aware load (docs/42 §85.6): resolve the HIGHEST version across ALL rows (incl.
     // revoked/tombstoned/superseded/expired/inactive), then load the eligibility of THAT single version only. It
-    // NEVER falls back to a lower version: if the highest version is revoked/tombstoned/expired/inactive/malformed
-    // it returns null (or throws on a malformed envelope) — exactly as `findEncryptedSecret(highest)` would.
+    // NEVER falls back to a lower version: if the highest version is revoked/tombstoned/expired/inactive — or its
+    // stored envelope is incomplete/unsupported (the envelope mapper fails closed) — it returns null (or throws),
+    // exactly as `findEncryptedSecret(highest)` would. Eligibility is ONLY active/non-expired + no revoked/
+    // tombstoned event; there is no "malformed" query predicate (an incomplete envelope just fails closed here).
     async findLatestEncryptedSecret(input): Promise<StoredEncryptedSecret | null> {
       // highest version = a NUMBER only (no secret bytes), so this metadata read needs no load audit.
       let maxVersion: number | undefined;

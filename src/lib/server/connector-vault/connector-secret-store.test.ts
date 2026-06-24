@@ -418,6 +418,34 @@ describe("connector-secret-store — LATEST-INTENT load: highest version first, 
   });
 });
 
+describe("connector-secret-store — NO-LIFECYCLE regression: EQUALITY of result with the pre-lifecycle behavior", () => {
+  // Build a secret SELECT row from a known envelope, keeping the original so we can assert byte-for-byte equality.
+  async function rowAndEncrypted(id: string) {
+    const encrypted = await anEncrypted();
+    const c = encryptedSecretToColumns(encrypted);
+    return { encrypted, row: { id, ciphertext: c.ciphertext, dek_wrapped: c.dek_wrapped, aead_nonce: c.aead_nonce, aad_digest: c.aad_digest, key_id: c.key_id, aead_tag: c.aead_tag, envelope_version: c.envelope_version, aead_alg: c.aead_alg } };
+  }
+
+  it("exact load with ZERO lifecycle rows returns EXACTLY { id, encrypted } — the same complete result the pre-lifecycle query gave", async () => {
+    const { encrypted, row } = await rowAndEncrypted("sec-eq");
+    const m = lifecycleMockConn({ secretRowsByVersion: { 1: [row] } }); // no lifecycle rows configured
+    const found = await createRunnerConnectorSecretStore(m.conn).findEncryptedSecret(idInput);
+    // EQUALITY OF RESULT (not just "old tests pass"): the lifecycle-aware load with no lifecycle rows yields the
+    // byte-for-byte same StoredEncryptedSecret a pre-lifecycle load would, and the identity params are unchanged.
+    expect(found).toEqual({ id: "sec-eq", encrypted });
+    const sel = m.allStatements.find((s) => /from\s+public\.connector_secrets\s+cs/i.test(s.sql))!;
+    expect(sel.params).toEqual([ctx().tenantId, ctx().connectorId, KIND, 1]);
+  });
+
+  it("latest load with ZERO lifecycle rows returns EXACTLY the highest version's { id, encrypted } (same as a direct exact load of that version)", async () => {
+    const { encrypted, row } = await rowAndEncrypted("sec-eqhi");
+    const m = lifecycleMockConn({ maxVersion: 3, secretRowsByVersion: { 3: [row] } }); // no lifecycle rows
+    const found = await createRunnerConnectorSecretStore(m.conn).findLatestEncryptedSecret(idInput);
+    expect(found).toEqual({ id: "sec-eqhi", encrypted });
+    expect(m.selectVersionsQueried).toEqual([3]); // loaded only the highest version
+  });
+});
+
 // Static guard: server-only — imports only sibling modules; no db/supabase client, no service-role, no fetch,
 // no process.env, no route. Runs as connector_runner via the runner connection only.
 describe("connector-secret-store is server-safe (runner-only; no service-role/client/fetch/route/env)", () => {

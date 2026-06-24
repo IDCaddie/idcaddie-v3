@@ -3063,6 +3063,14 @@ begin
         exception when others then blocked := true; msg := SQLERRM; end;
   assert blocked, 'T53 APPEND-ONLY: a privileged DELETE must be rejected';
   assert msg like '%append-only%', format('T53 APPEND-ONLY TRIGGER (not grant) must reject privileged DELETE — got: %s', msg);
+  -- the blocked UPDATE left the row UNCHANGED (version still 54, the attempted 555 did not take) and the blocked
+  -- DELETE left the row STILL PRESENT — exactly one revoked v54 lifecycle row remains.
+  assert (select count(*) from public.connector_secret_lifecycle_events
+            where version = 54 and lifecycle_event_type = 'revoked'
+              and connector_id = '17000000-0000-0000-0000-0000000000a1' and tenant_id = '11111111-1111-1111-1111-111111111111') = 1,
+         'T53 APPEND-ONLY: after the blocked UPDATE+DELETE the lifecycle row is UNCHANGED (version 54) and STILL EXISTS';
+  assert (select count(*) from public.connector_secret_lifecycle_events where version = 555) = 0,
+         'T53 APPEND-ONLY: the blocked UPDATE did NOT change the version to 555';
 end $$;
 
 -- (3) LIFECYCLE-AWARE LOAD functional under the runner: the adapter SELECT EXCLUDES the active v54 because it has a
