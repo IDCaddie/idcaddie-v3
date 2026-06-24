@@ -3364,4 +3364,53 @@ Evidence:
 - table privilege check returned `runner_table_select=false`, `runner_table_insert=false`, `runner_update=false`, `runner_delete=false`, `authenticated_select=false`, `anon_select=false`, `policy_count=0`
 
 `RISK-007` remains OPEN. This verifies the production DB schema and grant surface only; it does not prove hosted KMS/IAM separation, real credential storage, rotation/revocation, audit, live provider token storage, or cutover readiness. Cutover remains BLOCKED.
+## 78. Implementation — runner-backed connector_secrets store adapter (PR #160)
 
+Wires the vault save/load boundary to the real `connector_secrets` table over the COMPLETE `0030` encrypted
+envelope. `connector-secret-store.ts` (`createRunnerConnectorSecretStore`) implements the existing injected
+`ConnectorSecretWriteStore` / `ConnectorSecretReadStore` (secret-vault.ts) using the runner DB client path ONLY.
+It adds NO migration (the `0029`/`0030` grant + schema already exist) and stores NO real provider token (nothing
+calls it with one yet). This is the DB read/write adapter ONLY.
+
+### 78.1 Runner-only, column-scoped, parameterized
+- Every statement runs under **`SET ROLE connector_runner`** via the injected `RunnerConnection` (the same seam
+  as `runner-db-client.ts`, wrapped by `createRunnerDbClient` which prepends the `SET ROLE` and redacts raw DB
+  errors). NO service-role / global / request-path client; NO Supabase client import; NO `fetch`; NO
+  `process.env`; NO route/UI. The module imports only `./runner-db-client` + `./secret-vault`.
+- **SAVE** inserts ONLY the 12 granted write columns — identity (`tenant_id`, `connector_id`, `secret_kind`,
+  `version`) + the complete envelope (`ciphertext`, `dek_wrapped`, `aead_nonce`, `aad_digest`, `key_id`,
+  `aead_tag`, `envelope_version`, `aead_alg`) via `encryptedSecretToColumns`. It NEVER writes `id` (server
+  default), `is_active`/`status`/`created_at`/`revoked_at`. `RETURNING id`; every value is parameterized
+  (`$1..$12`). The returned result is the row id ONLY — **no plaintext, no ciphertext**.
+- **LOAD** selects ONLY granted columns and filters to one ACTIVE, non-expired row for
+  (tenant, connector, kind, version): `... and status = 'active' and (expires_at is null or expires_at > now())`,
+  reconstructing the complete envelope via `columnsToEncryptedSecret`. Identity values are parameterized
+  (`$1..$4`).
+- **NO UPDATE and NO DELETE** are issued here (revocation/rotation stays deferred — RISK-007).
+
+### 78.2 Fail-closed
+A missing insert id, MORE THAN ONE matching active row (`limit 2` detects it), or an INCOMPLETE/unsupported
+stored envelope (the `columnsToEncryptedSecret` mapper rejects a pre-`0030`/partial row or a non-v1/non-AES
+algorithm) all throw a typed, secret-free error; a no-match load returns `null`.
+
+### 78.3 Tests
+`connector-secret-store.test.ts` (mock `RunnerConnection`) proves: the save/load issue `SET ROLE
+connector_runner` then the parameterized statement; the INSERT/SELECT name ONLY allowed columns (no
+`is_active`/`created_at`/`revoked_at`, no `id` in the insert list, no UPDATE/DELETE/TRUNCATE); the save result
+carries no plaintext/ciphertext; the load reconstructs the complete envelope byte-identical and decrypts;
+fail-closed on no-id / ambiguous (>1) / incomplete row; and the server-only purity surface (only sibling
+imports; no service-role/client/fetch/process.env/route). **T51** runs the adapter's EXACT SELECT shape as
+`connector_runner` against real Postgres — proving every projected/filtered column (incl. `status`/`expires_at`)
+is grant-accessible under the `0029`/`0030` COLUMN grant AND that the active/expiry/status filter is correct;
+**T50 is unchanged (not weakened)**. Tests **489 → 499**; RLS suite **522 → 525**; generated types unchanged
+(**1837**, 0-diff — no migration).
+
+### 78.4 RISK-007 status — **RISK-007 remains OPEN**
+This is the runner DB read/write adapter ONLY. It does NOT prove or provide hosted KMS/IAM separation (the real
+decrypt boundary — runner has `kms:Decrypt`, web does not; mock KMS only, no real `KmsClient`), real
+end-to-end runner secret write/load against hosted, audit, rotation/revocation, live provider token storage, or
+cutover readiness. **No service-role path is added. No browser/request-path access is added. No public route is
+added. No OAuth code is exchanged for tokens. No real provider token is stored. No Okta live client is added. No
+UPDATE or DELETE on connector_secrets is issued. No hosted staging/production commands were run. Connector
+implementation remains blocked. Old-app parity is not complete. RISK-001 remains OPEN. RISK-007 remains OPEN.
+Cutover remains BLOCKED.** No doc 17 §5 box is ticked by this PR.

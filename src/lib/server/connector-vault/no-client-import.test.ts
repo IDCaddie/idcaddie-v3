@@ -81,6 +81,9 @@ const CRYPTO_REL_HINTS = [
   "connector-vault/secret-vault",
   "server/connector-vault/secret-vault",
   "lib/server/connector-vault/secret-vault",
+  "connector-vault/connector-secret-store",
+  "server/connector-vault/connector-secret-store",
+  "lib/server/connector-vault/connector-secret-store",
 ];
 
 function walk(dir: string): string[] {
