@@ -3563,3 +3563,51 @@ provider API call is made. No OAuth code is exchanged for tokens. No connector c
 connector_runner DB grant is broadened. No hosted command was run by the agent. Connector implementation remains
 blocked. Old-app parity is not complete. Connector credentials are not production-ready. RISK-001 remains OPEN.
 RISK-007 remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is ticked by this PR.
+## 82. Staging verification — hosted KMS/IAM separation synthetic dry-run (PR #165)
+
+A human operator ran the PR #164 SYNTHETIC-ONLY hosted KMS/IAM separation dry-run on staging
+`ycdpzduxugdsffjqyoai`, and the **load-bearing negative passed**: the hosted RUNNER identity can use KMS for the
+synthetic vault path, and the WEB/REQUEST identity is DENIED `kms:Decrypt`. **The dry-run and its verification
+were human-run; this PR only records the non-secret evidence — the agent did not touch staging and ran no hosted
+command.** Recorded 2026-06-24.
+
+This UPDATES the §80 (#163) note that the hosted KMS/IAM separation was UNVERIFIED: the **synthetic KMS/IAM
+decrypt separation boundary is now PROVEN** on staging. It does **NOT** close RISK-007 — see §82.4.
+
+### 82.1 What ran
+- Script: `scripts/verify-staging-kms-iam-separation-dry-run.mjs` — the #164 harness (`073eb84`), generated for
+  staging only.
+- Staging ref used: `ycdpzduxugdsffjqyoai`. **Production ref `dzbfxulvxchdemcettrx` was NOT used** (PASS).
+- Synthetic plaintext `synthetic-kms-dry-run-not-a-token` only (PASS). No real provider token used (PASS). No
+  secret values printed (PASS).
+
+### 82.2 Observed — PASS (synthetic material only)
+- **Two distinct IAM identities:** runner profile works (PASS); web/request profile works (PASS); the runner and
+  web/request identities are different (PASS).
+- **Runner POSITIVE:** `kms:GenerateDataKey` path (PASS); `kms:Encrypt` path (PASS); `kms:Decrypt` path (PASS);
+  synthetic envelope encrypt/decrypt under the runner DEK round-trips to the synthetic sentinel (PASS).
+- **Web/request NEGATIVE (load-bearing):** web/request identity `kms:Decrypt` is DENIED (PASS) — the proof of
+  separation.
+- **No side effects:** no DB grants changed (PASS); no `connector_secrets` rows written (PASS); no production
+  command run (PASS); cleanup/not-applicable (PASS — the KMS test persists no DB state).
+
+### 82.3 The precise claim — what this proves
+This proves the **hosted staging SYNTHETIC KMS/IAM decrypt separation boundary**: the runner identity can use
+KMS for the synthetic vault path (GenerateDataKey + Encrypt + Decrypt + a synthetic envelope round-trip), and the
+web/request identity is DENIED `kms:Decrypt`. The load-bearing NEGATIVE test passed (web decrypt denied), so the
+boundary holds with synthetic material. A web/request decrypt SUCCESS would have been a RISK-007 failure; it did
+not occur.
+
+### 82.4 What this does NOT do — **RISK-007 remains OPEN**
+This evidence is **synthetic-only** and involves **no real connector credential**. It does **NOT**:
+- close RISK-007 by itself;
+- permit real connector credential storage or use;
+- supply the still-missing **audit** of secret access/use, **rotation/revocation/tombstone**, or the **real
+  credential lifecycle** — all of which remain before any real credential can be stored or used.
+
+**No real KMS client is added to app code. No live Okta sync is added. This PR stores no real customer token. No
+service-role path is added. No public route to secrets is added. No `connector_runner` DB grant is broadened. No
+provider API call was made. No OAuth code was exchanged for tokens. No connector credential is stored. No hosted
+production commands were run. Connector implementation remains blocked. Old-app parity is not complete. Connector
+credentials are not production-ready. RISK-001 remains OPEN. RISK-007 remains OPEN. Cutover remains BLOCKED.** No
+doc 17 §5 box is ticked by this PR.
