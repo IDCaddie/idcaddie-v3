@@ -3611,3 +3611,54 @@ provider API call was made. No OAuth code was exchanged for tokens. No connector
 production commands were run. Connector implementation remains blocked. Old-app parity is not complete. Connector
 credentials are not production-ready. RISK-001 remains OPEN. RISK-007 remains OPEN. Cutover remains BLOCKED.** No
 doc 17 §5 box is ticked by this PR.
+## 83. Connector secret lifecycle audit scaffolding (PR #166)
+
+Adds a narrow, ALLOWLIST-based connector-secret lifecycle **audit-event builder** —
+`src/lib/server/connector-vault/secret-audit.ts` (+ load-bearing redaction tests) — for store/load/decrypt
+lifecycle metadata only. It does **not** store or expose any secret and does **not** enable real credentials.
+
+### 83.1 Scope — builder + tests only (honest integration)
+The #160 runner-backed store adapter has **no real call sites yet** and there is **no real credential lifecycle**,
+so per the scope rule this PR adds the **pure builder + tests only** — it wires NO writer and emits NO audit row.
+A future server-only writer (when a real lifecycle exists) maps the builder's output 1:1 onto the existing
+append-only `audit_logs` table (`action` / `resource_type` / `tenant_id` / `after_json`; `created_at` is the DB
+default). **No migration is added** — `audit_logs` (0001, append-only via the 0002 reject-mutation trigger)
+already supports these events as `action` strings + an allowlisted `after_json`. **Do not claim the real
+credential lifecycle emits audit events — no real lifecycle exists.**
+
+### 83.2 Supported events (this PR) — store / load / decrypt only
+`connector_secret.store.attempted|succeeded|failed`, `connector_secret.load.attempted|succeeded|failed`,
+`connector_secret.decrypt.attempted|succeeded|failed` (nine total). **Rotation/revocation/delete/update events
+are intentionally NOT added** — those belong with the behavior that emits them, which does not exist yet.
+
+### 83.3 Allowlist, not denylist (the load-bearing property)
+`buildConnectorSecretAuditEvent(input)` constructs `after_json` from an EXPLICIT set of permitted fields and
+NEVER spreads the input — there is no metadata-passthrough field, so any extra property on a (hostile) input is
+structurally DROPPED (never read, never in the output). Allowed metadata only: `event`, `tenant_id` (the repo's
+`tenant_id` convention), `connector_id`, `secret_kind`, `version`, derived `result` status, optional `actor_type`
+(allowlist: `connector_runner`), optional static `error_class` (a fixed allowlist; unknown → `unknown_error`;
+honored only on `.failed`, dropped otherwise), and an optional safe-shaped `correlation_id`. Identity fields are
+uuid-shaped; `secret_kind` is a bounded lower-snake token; `correlation_id` is restricted to a uuid or a short
+prefixed id (`run-`/`job-`/`req-`/`corr-`/`trace-`/`span-`…) so a high-entropy opaque blob (a 64-char hex key, a
+base64 DEK, key material) is structurally rejected rather than echoed. As defense in depth, every emitted string
+value is re-scanned with the shared credential-value guard, so a credential-shaped value cannot ride in through
+an allowed field.
+
+**Hard-prohibited (structurally dropped or rejected):** plaintext, provider/refresh/access token, client secret,
+ciphertext, DEK / wrapped DEK, key material, AEAD tag, nonce/IV, `aad_digest`, KMS response body, DB URL, env
+values, raw error object, and arbitrary metadata passthrough. The redaction tests feed an intentionally hostile
+object containing all of these and assert none of the names or values survive into the audit record, thrown
+errors, or snapshots; that unknown fields are DROPPED (not redacted-in-place); that error handling records only a
+safe static class; that the event type is restricted to the nine supported events (rotation/revocation rejected);
+and that the source opens no DB/provider/route/service-role path.
+
+### 83.4 What this is NOT — **RISK-007 remains OPEN**
+This is audit SCAFFOLDING only. It stores no real provider token, exchanges no OAuth code, executes no connector,
+adds no request-path decrypt, no service-role secret path, and no API route for secret save/load/decrypt; it adds
+no `UPDATE`/`DELETE` on `connector_secrets` and no rotation/revocation events or behavior; it broadens no
+permission and adds no migration. Prior synthetic evidence stands: the **synthetic DB grant/adapter shape is
+proven by #163** and the **synthetic KMS/IAM decrypt separation is proven by #165**. Real connector credential
+storage/use is still **NOT allowed**; **rotation/revocation and the real credential lifecycle remain missing**.
+**Connector implementation remains blocked. Old-app parity is not complete. Connector credentials are not
+production-ready. RISK-001 remains OPEN. RISK-007 remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is
+ticked by this PR.
