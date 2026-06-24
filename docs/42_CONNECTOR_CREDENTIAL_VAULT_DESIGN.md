@@ -3414,3 +3414,57 @@ added. No OAuth code is exchanged for tokens. No real provider token is stored. 
 UPDATE or DELETE on connector_secrets is issued. No hosted staging/production commands were run. Connector
 implementation remains blocked. Old-app parity is not complete. RISK-001 remains OPEN. RISK-007 remains OPEN.
 Cutover remains BLOCKED.** No doc 17 §5 box is ticked by this PR.
+## 79. Verification harness — connector secret store synthetic dry-run (PR #161)
+
+Adds `scripts/verify-staging-connector-secret-store-dry-run.mjs` (+ its guard test) — a **human-run, staging-only,
+NO-REAL-TOKEN** runbook emitter that proves the PR #160 runner-backed connector_secrets store adapter can WRITE
+and LOAD a **synthetic** encrypted secret through the REAL hosted grant shape, without ever using or printing a
+real provider token. **This is still no-real-token verification INFRASTRUCTURE** — the agent does NOT run it; a
+human operator runs the emitted runbook against staging in a later evidence PR.
+
+### 79.1 What the harness is (and is not)
+It is a runbook EMITTER, identical in safety posture to `verify-staging-connector-vault-dry-run.mjs`: it connects
+to NOTHING, performs NO hosted mutation itself, and prints NO secret values. The confirmed path only PRINTS an
+ordered, parameterized runbook the operator executes. It calls NO provider API, exchanges NO OAuth code, uses NO
+real Okta/Slack/Google token, adds NO public route, uses NO service-role path, and never makes the web/request
+runtime capable of decrypting (the unwrap/decrypt step runs only as the runner with the runner's KMS Decrypt
+grant).
+
+### 79.2 Gates (fail closed)
+Refuses the PRODUCTION ref `dzbfxulvxchdemcettrx`; requires the STAGING ref `ycdpzduxugdsffjqyoai`; requires the
+explicit confirmation phrase `RUN CONNECTOR SECRET STORE STAGING DRY RUN`; requires the hosted DB connections by
+ENV NAME only (`CONNECTOR_RUNNER_DB_URL`, `CONNECTOR_VAULT_SETUP_DB_URL`; KMS env is OPTIONAL); never reads,
+prints, or interpolates an env VALUE. The only payload is the synthetic sentinel
+`synthetic-vault-dry-run-not-a-token`.
+
+### 79.3 What the runbook proves (synthetic data only)
+(1) required hosted env present by name; (2) linked ref is staging, not production; (3) a narrow, explicit
+synthetic tenant+connector seed (setup conn) that is cleaned up; (4) the runner DB path uses `SET ROLE
+connector_runner`; (5) the store adapter WRITE uses ONLY the 12 allowed encrypted-envelope columns (the adapter's
+exact INSERT shape, parameterized); (6) the adapter LOAD reads back ONLY an active/non-expired matching synthetic
+row (the adapter's SELECT shape); (7) the envelope is reconstructed from the columns; (8) KMS wrap/unwrap of the
+synthetic payload works IF KMS env is supplied; (9) wrong tenant/connector/kind/version returns 0 (fail closed);
+(10) expired/revoked/inactive rows are NOT returned; (11) cleanup is narrow + synthetic-keyed ONLY, on the
+SETUP/admin connection (the runner holds NO DELETE grant — and this PR adds NONE; deleting the synthetic
+connector cascades its connector_secrets); (12) the runbook records RISK-007 OPEN + cutover BLOCKED.
+
+### 79.4 Constraints honored
+Parameterized SQL only; no broad deletes; no real token-shaped sample values; NO UPDATE on connector_secrets;
+the cleanup DELETE runs on the setup/admin conn (NOT the runner) and is synthetic-keyed. It does NOT broaden
+`connector_runner` privileges, adds NO grant, and does NOT weaken T50 or T51 (no migration, no RLS-test change).
+The guard test proves: refuses production / unknown ref / no-confirmation / missing-env; prints no env/secret
+VALUE (var names only); synthetic payload only with no provider-token / token-exchange / provider-client strings;
+the secret INSERT names exactly the 12 allowed columns (no id/is_active/created_at/revoked_at); the SQL is
+parameterized and the cleanup is narrow synthetic-keyed; no GRANT; source imports only `node:fs`.
+
+### 79.5 Status — **RISK-007 remains OPEN**
+**This PR adds the harness only; it includes NO direct human-run hosted evidence, so hosted KMS/IAM separation is
+NOT proven by it. Real connector credential storage/use is still NOT allowed.** A green human-run dry run (a
+future evidence PR) would prove the store-adapter SHAPE with SYNTHETIC data only — it would NOT store a real
+credential and would NOT, on its own, prove hosted KMS/IAM separation. **No provider API call is made. No OAuth
+code is exchanged for tokens. No access token / refresh token / API key / connector credential is stored. No
+real provider token is used. No connector sync is implemented. No connect/reconnect/disconnect action is exposed
+to users. No browser-accessible service-role request path is added. No hosted staging/production commands were
+run by the agent. Connector implementation remains blocked. Old-app parity is not complete. Connector
+credentials are not production-ready. RISK-001 remains OPEN (no separate hosted evidence in this PR). RISK-007
+remains OPEN. Cutover remains BLOCKED.** No doc 17 §5 box is ticked by this PR.

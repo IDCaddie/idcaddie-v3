@@ -3108,3 +3108,30 @@ types unchanged (**1837**, 0-diff). **RISK-007 remains OPEN** — this is the DB
 hosted KMS/IAM separation (mock KMS only, no real `KmsClient`), audit, rotation/revocation, live token storage,
 or cutover readiness. **No real provider token is stored. RISK-001 remains OPEN. RISK-007 remains OPEN. Cutover
 remains BLOCKED.** No doc 17 §5 box is ticked by this PR.
+---
+
+## 90. VERIFICATION HARNESS — connector secret store synthetic dry-run (PR #161)
+
+Adds `scripts/verify-staging-connector-secret-store-dry-run.mjs` (+ guard test) — a human-run, staging-only,
+NO-REAL-TOKEN runbook emitter that proves the PR #160 runner-backed connector_secrets store adapter can WRITE +
+LOAD a SYNTHETIC encrypted secret through the real hosted grant shape (doc 42 §79). **Still no-real-token
+verification infrastructure** — the agent does NOT run it; a human runs the emitted runbook in a later evidence
+PR.
+
+- Runbook EMITTER (connects to nothing, prints no secrets, no hosted mutation): refuses production
+  `dzbfxulvxchdemcettrx`; requires staging `ycdpzduxugdsffjqyoai`; requires the confirmation phrase; requires
+  hosted env by NAME only; synthetic sentinel `synthetic-vault-dry-run-not-a-token` only. No provider API, no
+  OAuth exchange, no real token, no public route, no service-role path; never makes the web/request runtime
+  decrypt-capable.
+- Proves (synthetic only): `SET ROLE connector_runner`; the adapter WRITE uses ONLY the 12 allowed envelope
+  columns (parameterized); the adapter LOAD returns only an active/non-expired matching synthetic row; envelope
+  reconstruct; optional KMS wrap/unwrap of the synthetic payload; wrong tenant/connector/kind/version -> 0;
+  expired/revoked excluded; narrow synthetic-keyed cleanup on the setup/admin conn.
+- Adds NO grant (does not broaden `connector_runner`); NO UPDATE on connector_secrets; the cleanup DELETE runs on
+  the setup conn (the runner has no DELETE grant); does NOT weaken T50/T51; no migration; no RLS-test change.
+
+Tests **499 -> 514** (15 verifier guard tests); RLS suite unchanged (**525**); generated types unchanged
+(**1837**); no migration. **This PR includes NO direct human-run hosted evidence — hosted KMS/IAM separation is
+NOT proven by it; real connector credential storage/use is still NOT allowed. No real provider token is used. No
+hosted staging/production command was run by the agent. RISK-001 remains OPEN. RISK-007 remains OPEN. Cutover
+remains BLOCKED. Connector credentials are not production-ready.** No doc 17 §5 box is ticked by this PR.
