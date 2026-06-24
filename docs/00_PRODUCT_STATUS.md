@@ -179,3 +179,26 @@ One-line decisions; deep rationale in the linked canonical docs.
 4. First reviewed **hosted-Supabase apply** (RISK-001 — still nothing applied to any hosted env).
 
 (These are `planned`. Each must follow [07_P0_REVIEW_CHECKLIST.md](./07_P0_REVIEW_CHECKLIST.md) and update [04](./04_RISK_REGISTER.md)/[05](./05_ENGINEERING_CHANGELOG.md). Detailed ordering: [09_AGENT_HANDOFF](./09_AGENT_HANDOFF.md).)
+
+## Staging verification - connector secret vault grants 0029
+
+Staging verification for `0029_connector_runner_secret_grants.sql` completed on project `ycdpzduxugdsffjqyoai`.
+
+Verified:
+
+- staging migration list shows `0029` applied remotely
+- `connector_runner` has column-scoped `INSERT`/`SELECT` on `connector_secrets` only
+- `connector_runner` has no table-level `SELECT`/`INSERT` on `connector_secrets`
+- `connector_runner` has no `UPDATE` or `DELETE` on `connector_secrets`
+- `authenticated` and `anon` have no `SELECT` on `connector_secrets`
+- `connector_secrets` has zero RLS policies
+- local project relink remains staging `ycdpzduxugdsffjqyoai`
+
+Evidence:
+
+- `role_column_grants` shows `INSERT` on `aad_digest`, `aead_nonce`, `ciphertext`, `connector_id`, `dek_wrapped`, `key_id`, `secret_kind`, `tenant_id`, `version`
+- `role_column_grants` shows `SELECT` on `aad_digest`, `aead_nonce`, `ciphertext`, `connector_id`, `dek_wrapped`, `expires_at`, `id`, `key_id`, `secret_kind`, `status`, `tenant_id`, `version`
+- table privilege check returned `runner_table_select=false`, `runner_table_insert=false`, `runner_update=false`, `runner_delete=false`, `authenticated_select=false`, `anon_select=false`, `policy_count=0`
+
+`RISK-007` remains OPEN. This verifies the staging DB grant surface only; it does not prove hosted KMS/IAM separation, real credential storage, rotation/revocation, audit, or production readiness. Cutover remains BLOCKED.
+
