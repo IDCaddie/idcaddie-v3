@@ -3996,3 +3996,25 @@ execution, no request-path decrypt, no service-role secret path, no public/API r
 credential storage/use remains NOT allowed; real credential save/load/use is still missing; rotation and the rest of
 the real credential lifecycle remain missing. **RISK-001 remains OPEN. RISK-007 remains OPEN. Cutover remains
 BLOCKED.** No doc 17 §5 box is ticked by this PR.
+
+## 88. Real-token threat model & implementation gate (PR #171, docs only)
+
+The synthetic vault is built (§76–§87). Before any **real** provider token is stored, decrypted, or used, the
+safety requirements, the single allowed first-real-credential path, the threat model, the evidence gate, the kill
+switch, and the merge gates are defined in a dedicated doc: **[44_CONNECTOR_CREDENTIAL_REAL_TOKEN_THREAT_MODEL](./44_CONNECTOR_CREDENTIAL_REAL_TOKEN_THREAT_MODEL.md)**.
+
+Highlights (the canonical text is doc 44):
+- **First real credential** = a Slack bot OAuth access token (`xoxb-`) from a disposable NON-production dev
+  workspace, **source-revocable** via `auth.revoke` + app removal; refresh + rotation OUT of scope.
+- **Only allowed ingestion path** = server-only callback → **runner** one-time `oauth.v2.access` exchange →
+  **encrypt-only** key provider → atomic store; with a **complete plaintext-lifetime trace** (the deliverable) and a
+  forbidden list. The browser never sees the token (only `state`+`code`).
+- **Real decrypt/use stays BLOCKED** (runner-only when later allowed — no web/request/service-role decrypt, no route
+  returns a token).
+- **Blast-radius**, **RISK-007 closure evidence gate** (the staging dry-run **IS** the first real-token event, NOT
+  synthetic), and a **provider-side-first kill switch**.
+- **PR sequence:** A (this docs gate) → B (staging ingestion; also adds versioned `connector_runner_login` DDL) → C
+  (staging decrypt) → D (live behind a staging flag) → E (prod-readiness) → only then RISK-007 closure.
+
+This PR is **docs only** — no code, migration, test, or real token. **RISK-001 remains OPEN. RISK-007 remains OPEN.
+Cutover remains BLOCKED.** Connector credentials are not production-ready. No doc 17 §5 box is ticked.

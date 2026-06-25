@@ -1,0 +1,343 @@
+# 44 — Connector Credential: Real-Token Threat Model & Implementation Gate
+
+**Status: DESIGN GATE — not implementation.** This document is **docs-only**. It defines the exact safety
+requirements, the single allowed first-real-credential path, the threat model, the evidence required, the
+rollback/kill-switch plan, and the merge gates that **must** be satisfied **before any real provider token is
+stored, decrypted, or used**. It implements nothing and grants nothing.
+
+> **Posture (unchanged by this PR):**
+> - **Real connector credentials remain BLOCKED.** No real provider token has entered the system.
+> - **RISK-007 remains OPEN.** This doc does **not** close it; it refines the closure evidence (§5).
+> - **RISK-001 remains OPEN. Cutover remains BLOCKED.** Connector credentials are **not production-ready**.
+> - **This is a design gate, not implementation.** No code, no migration, no test, no real token.
+> - **The first staging real-token dry-run (§5) IS the first real-token event.** It is **not synthetic** and must
+>   be treated with the same care as production.
+
+---
+
+## 0. Current state this gate builds on (grounded facts, verified)
+
+The synthetic vault is built and request-path-fenced. The threat model is anchored to these **actual** primitives
+(PRs #160–#170; doc 42 §76–§87):
+
+- **Two-role DB identity.** `connector_runner` is `NOLOGIN BYPASSRLS` (migration `0021`) — a privilege role like
+  `anon`/`authenticated`, reached only by connecting as the LOGIN role `connector_runner_login` (LOGIN, NOINHERIT,
+  **no** direct grants) and running `SET ROLE connector_runner` (`runner-db-client.ts`). Tenant isolation is by the
+  query's `WHERE tenant_id = $1` (BYPASSRLS bypasses RLS; the vault tables are RLS-enabled deny-all).
+  ⚠️ **GAP:** `connector_runner_login` is **not created by any committed migration** — it is a manual,
+  staging-only provisioning step (doc 42 §46.1). The production login chain has **no versioned DDL**. *(See §2/§7
+  prerequisite.)*
+- **Column-scoped runner grants (no table-level, no UPDATE/DELETE on the secret tables):**
+  - `connector_secrets`: SELECT (15 cols) + INSERT (12 envelope cols). **No UPDATE/DELETE** → append-only.
+  - `connector_secret_lifecycle_events`: SELECT (5) + INSERT (8). **No UPDATE/DELETE** (append-only trigger).
+  - `audit_logs`: INSERT (`tenant_id, action, resource_type, after_json`) only. Append-only trigger.
+  - `oauth_pending`: SELECT + INSERT (9 authorize cols) + UPDATE (3 consume cols). No DELETE.
+  - `anon`/`authenticated` (browser/request-path roles): **deny-all** on every vault table (RLS-enabled, zero
+    policies, `revoke all`), re-asserted across `0017`–`0033`.
+- **Envelope encryption.** Per-secret DEK (AES-256-GCM, 12-byte nonce, 16-byte tag, 32-byte DEK); the DEK is wrapped
+  by a KEK held in **external KMS** (the KEK never leaves KMS). At rest = 8 columns: `ciphertext, dek_wrapped,
+  aead_nonce, aead_tag, aad_digest, key_id, envelope_version, aead_alg`. AAD binds the ciphertext to
+  `{tenantId, connectorId, secretKind, version}` → a row copied cross-tenant/kind/version **fails GCM auth on
+  decrypt** (confused-deputy / replay defense). The plaintext DEK is transient and zeroed (`dek.fill(0)`).
+- **Asymmetric encrypt/decrypt capability.** SAVE uses an **encrypt-only** key provider (only `generateDataKey`;
+  `unwrapDataKey` always throws) → the request-initiated save path **structurally cannot decrypt**. DECRYPT requires
+  an unforgeable module-private `RunnerDecryptCapability` **and** the runner's **KMS `kms:Decrypt` IAM grant** — the
+  real cryptographic boundary. The web/request IAM identity does **not** hold `kms:Decrypt`, so it cannot unwrap a
+  DEK even holding the ciphertext.
+- **Audit is allowlist-built.** 15 events (`store/load/decrypt` + `revocation/tombstone` × `attempted/succeeded/
+  failed`); `after_json` is EXACTLY 8 allowlisted keys (`event, connector_id, secret_kind, version, result,
+  actor_type?, error_class?, correlation_id?`), built field-by-field (never spreads input), with a defense-in-depth
+  value scan (`CREDENTIAL_VALUE_RE` rejects JWT/`xox*`/`gh*`/OpenAI-key shapes) and a 9-class static `error_class`
+  allowlist. A credential-shaped value cannot reach an audit row.
+- **Everything is inert.** There is **zero non-test caller** of `saveConnectorSecret`/`loadConnectorSecret`/
+  `createRunnerConnectorSecretStore`, **no** real OAuth token exchange anywhere (no `fetch`, no `oauth.v2.access`),
+  **no** KMS client bound in production (`kmsKeyProviderConfigFromEnv()` returns null unless env is set), and every
+  registered provider is `enabled:false` (`isConnectorProviderReady` is false for **all**). The OAuth callback route
+  returns inert `not_configured` (503) because `CONNECTOR_OAUTH_STATE_SECRET` is unset.
+- **What is proven, and only synthetically.** Hosted-staging KMS/IAM decrypt-separation passed **synthetic-only**
+  (doc 42 §82, 2026-06-24): the **hosted runner IAM identity** has `kms:Decrypt` on the staging KEK
+  (`alias/idcaddie-staging-connector-vault`, `arn:aws:kms:ca-central-1:833822972703:key/…`, doc 42 §47.3), and the
+  **web/request IAM identity** is denied. (The recorded runner principal in the §47 dry-run is the EC2 assumed role
+  `idc-runner-role`; the specific staging IAM profile names are an operational detail, not pinned by this doc.) The
+  store-adapter DB shape passed synthetic (doc 42 §80). **No real token has ever entered any of these paths.**
+  Production KMS/IAM separation is **unverified**.
+
+---
+
+## 1. First real credential
+
+**Decision: the first allowed real credential is a Slack bot OAuth access token (`xoxb-…`) issued for a dedicated,
+disposable, non-production Slack workspace + app.** Slack is the furthest-along provider (the only one with a
+dedicated modules, `providers/slack-oauth.ts` + `providers/slack-authorize-pending.ts`) and a Slack bot token is
+source-revocable, which is mandatory below.
+
+| Attribute | Value |
+|---|---|
+| **Provider** | Slack |
+| **Credential kind** | OAuth bot access token (`xoxb-…`) |
+| **Token type** | **Access token** (bot token). NOT a refresh token, NOT a raw OAuth authorization code, NOT a long-lived API key. The OAuth `code` is exchanged **once** server-side and never stored. |
+| **Source of credential** | Slack's `oauth.v2.access` token endpoint, called **once** server-side (runner identity) during the §2 ingestion, in exchange for a one-time authorization `code` from the Slack OAuth consent flow. |
+| **Who/what may submit it** | **No human ever submits/pastes the token.** A workspace admin of the **disposable dev workspace** completes the Slack consent screen; the `code` returns to the server-only callback; the **runner** performs the one-time exchange. Manual token paste is forbidden (§2). |
+| **Short- vs long-lived** | **Long-lived** (a non-rotating Slack bot token does not expire). Acceptable **only because it is source-revocable** (below). Token rotation (short-lived + refresh) is deliberately **NOT** enabled for the first credential. |
+| **Refresh** | **OUT of scope.** Token rotation is not enabled, so there is no refresh token to store/handle. |
+| **Rotation** | **OUT of scope.** No rotation helper exists (the audit allowlist deliberately rejects `rotation` events). Revocation/tombstone (Model B, PR #170) is the only lifecycle write that exists. |
+| **Scopes / privilege** | **Lowest possible, read-only** (e.g. a single `channels:read`/`team:read`). No write/admin scopes. The dev workspace contains **no** real organizational data. |
+
+### Source-revocability (mandatory)
+
+The first real credential **must be invalidatable at the provider source**, not only tombstoned locally:
+
+- **Provider-side revocation mechanism:** Slack `auth.revoke` (revokes the specific token) **and** removing/
+  uninstalling the app from the workspace (App Management → *Remove App*) invalidates all of the app's tokens.
+- **Who may execute provider-side revocation:** an **admin/owner of the disposable dev Slack workspace** (or anyone
+  holding the token, via `auth.revoke`). The named operator is recorded in the §5 evidence + §6 runbook.
+- **Expected time to provider-side invalidation:** effectively immediate — `auth.revoke` invalidates the token on
+  the next API call; app removal invalidates all tokens at once. The §5 dry-run **must verify** invalidation by
+  observing a post-revocation API call fail with `token_revoked`/`invalid_auth`.
+
+> **Gate:** if the provider-side revocation path is ever **not known or not available** for a chosen first
+> credential, **real credential use remains BLOCKED**. The Slack `auth.revoke` + app-removal path above satisfies
+> this; PR B must re-confirm it against the live Slack API console before any real token is stored.
+
+> The first credential **is** decided (above). It nonetheless stays blocked until the §5 evidence is produced and
+> signed off — this section defines the target, not an authorization to ingest.
+
+---
+
+## 2. Allowed ingestion path (the ONLY path)
+
+The first real credential may enter **only** via this path. Anything else is out of scope and forbidden.
+
+| Concern | Requirement |
+|---|---|
+| **Caller identity** | The server-only OAuth **callback route** (`src/app/(authenticated)/connectors/oauth/callback/route.ts`), reached after the dev-workspace admin completes Slack consent. The browser only carries the opaque, HMAC-signed `state` + the one-time `code` in the redirect — never a token. |
+| **Server/runtime identity** | A **server-only** Next.js route handler / server action (never a `"use client"` component, never the browser). The HMAC state signer must be configured (`CONNECTOR_OAUTH_STATE_SECRET`) so the callback is no longer inert. |
+| **Runner identity** | The **one-time token exchange** (`oauth.v2.access`) and the **encrypt + store** run under the **runner** (`connector_runner_login` → `SET ROLE connector_runner`), using the **encrypt-only** key provider. The request/web identity performs **no** crypto and holds **no** `kms:Decrypt`. |
+| **Encryption path** | `encryptConnectorSecret` → envelope (per-secret DEK via KMS `GenerateDataKey`, AES-256-GCM, AAD = `{tenant, connector, secret_kind, version}`), then `insertEncryptedSecret` (atomic `set role`/`begin`/INSERT/`store.succeeded` audit/`commit`). Only the **wrapped DEK + ciphertext** are persisted. |
+| **KMS key** | The KEK in external KMS (staging: `alias/idcaddie-staging-connector-vault`). The KEK never leaves KMS; the runner's IAM identity calls `GenerateDataKey` on store. |
+| **Tenant binding** | `tenant_id` is bound in the row, the query `WHERE`, **and** the AEAD AAD — a row read under the wrong tenant fails GCM authentication. The dev-workspace credential is stored under a **dedicated staging tenant**. |
+| **Connector binding** | `connector_id` + `secret_kind` are bound in the row and the AAD; the secret is loadable only for that exact connector/kind/version. |
+| **Audit requirements** | `store.attempted` → (atomic) row + `store.succeeded`, or `store.failed` — via the allowlist builder only (`secret-audit.ts` `buildConnectorSecretAuditEvent`; the 8-key allowlist + `CREDENTIAL_VALUE_RE` value scan, §0 + doc 42 audit sections). **Fail-closed:** the secret row commits **only if** its `store.succeeded` audit commits (PR #167 atomicity). |
+| **Lifecycle / version** | Append-only: a new credential is a new `version`; revoke/tombstone is an INSERT into `connector_secret_lifecycle_events` (Model B). No UPDATE/DELETE of `connector_secrets`. |
+| **Failure behavior** | Any failure (exchange error, KMS error, audit failure) is **fail-closed**: no secret row without its audit, no plaintext logged, the operation throws a **static** error (no raw provider/KMS error echoed). |
+
+### Plaintext lifetime trace (the deliverable)
+
+The forbidden list below is necessary but **not** sufficient. This is the **positive** journey of the plaintext
+token — where it exists, who sees it, and exactly where it dies:
+
+1. **First plaintext existence — at Slack, then in the one-time exchange response.** The token does **not** exist in
+   plaintext anywhere in our system until the runner calls `oauth.v2.access` (over TLS) and receives the response
+   body. The browser and the request URL **never** carry the token (the redirect carries only `state` + one-time
+   `code`).
+2. **Transport protection.** The Slack consent redirect (browser↔Slack), the callback (browser↔our server), and the
+   token exchange (our runner↔Slack) are **all TLS**. The `code`→token exchange is **server→Slack only**.
+3. **Runtime that receives plaintext.** Only the **server-only runner runtime** (the route handler / server action
+   executing the exchange) ever holds the plaintext token, as a local in-memory `string`/`Buffer`.
+4. **Memory buffers that may contain plaintext.** (a) the HTTPS response body buffer from `oauth.v2.access`; (b) the
+   parsed token `string`; (c) the `plaintext` arg to `encryptConnectorSecret`; (d) the transient AES-GCM input. The
+   transient **DEK** is zeroed (`dek.fill(0)`); the plaintext **token** is dropped (de-referenced) at step 6 but is
+   **not** wiped (see step 7's residual-exposure note).
+5. **The exact plaintext→ciphertext point.** `encryptConnectorSecret({ plaintext, context, keyProvider, kekId })`
+   produces the AEAD ciphertext + wrapped DEK and **returns the ciphertext envelope** (`EncryptedConnectorSecret`).
+   After this call returns, **only ciphertext leaves the function** — no plaintext.
+6. **The exact plaintext-discard point.** Immediately after `encryptConnectorSecret` returns the **ciphertext
+   envelope** (no plaintext), the local plaintext token goes out of scope (no field, no return, no log) and is
+   eligible for GC. Each store-boundary return is **redacted**: `saveConnectorSecret` returns a `SavedSecretRef`
+   (`{ secretId, tenantId, connectorId, secretKind, version, kekId }` — no ciphertext, no wrapped DEK), and the
+   low-level `insertEncryptedSecret` returns only `{ id }`. **Plaintext is on NONE of these return paths**; nothing
+   downstream (DB, audit, response) holds it.
+7. **What bounds the plaintext lifetime.** No reference to the plaintext is retained after the encrypt call — no
+   field, no return, no log, no queue, no external hop — so it becomes **unreachable** once the call chain unwinds.
+   **Residual exposure (stated, not hidden):** unlike the DEK (zeroed via `dek.fill(0)`), the plaintext token
+   `Buffer`/`string` is **NOT** wiped — a JS `string` cannot be overwritten in place — so the bytes remain reachable
+   in the V8 heap until **non-deterministic GC**, which can **outlive** the request handler's stack frame. The true
+   bound is therefore *"no live reference + unreachable after the call,"* **NOT** a guaranteed in-memory wipe.
+   *(Hardening for PR B: carry the token as a `Buffer` and `fill(0)` it immediately after encrypt; the unavoidable
+   immutable-string copy is the minimized-but-nonzero residual to accept explicitly.)*
+8. **What guarantees non-persistence.** (a) `insertEncryptedSecret` writes only the 12 envelope columns — there is
+   **no** plaintext column and no runner grant to write one; (b) the audit builder's 8-key allowlist + value scan
+   cannot carry a token; (c) the store/load adapters return only a **redacted ref** (`SavedSecretRef` / `{ id }`) or
+   the **encrypted** envelope — never plaintext; (d) request/web identity holds no `kms:Decrypt`, so even the
+   ciphertext is unreadable off the runner.
+9. **How to verify plaintext was not logged or stored.** The §5 dry-run + §6 inspection: grep the server/function/
+   DB logs, tracing, and error-monitoring for the token's distinctive `xoxb-` prefix (and a hash of the token) and
+   confirm **zero** hits; confirm the DB row holds an envelope only (no plaintext); confirm no analytics/tracing
+   span carries it; confirm the token is absent from shell/command/browser history, clipboard, and screenshots.
+
+### Forbidden in the ingestion path (necessary, not sufficient)
+
+- ❌ **Browser-side token handling** (the browser must never see the token; only `state`+`code` transit it). *Not
+  justified or risk-accepted for the first credential → forbidden.*
+- ❌ Request-path decrypt; ❌ service-role secret write/read/decrypt; ❌ any log line containing token material.
+- ❌ Manual token paste into the DB; ❌ token in env vars; ❌ token in docs; ❌ token in local shell/command history;
+  ❌ token in PR comments; ❌ token in test fixtures; ❌ token in screenshots; ❌ token in issue comments;
+  ❌ token in analytics / error monitoring / tracing.
+
+---
+
+## 3. Allowed decrypt / use path
+
+**Real decrypt/use remains BLOCKED by this gate.** Storing the first real credential (PR B) does **not** authorize
+decrypting or using it; that is a **separate** PR (PR C) behind its own evidence.
+
+When later allowed (PR C), the decrypt/use path **must**:
+
+- be reachable **only by the runner identity** holding both the module-private `RunnerDecryptCapability` **and** the
+  KMS `kms:Decrypt` IAM grant;
+- have **no** web/request-identity decrypt (the request path holds no `kms:Decrypt` and the save provider is
+  encrypt-only — both already true);
+- have **no** service-role decrypt path;
+- expose **no** route/endpoint that returns a decrypted token (a connector uses the token server-side; it is never
+  returned to a client);
+- emit `decrypt.attempted/succeeded/failed` audit (allowlist only) and place **no** token material in any log.
+
+Until PR C ships and is verified, `decryptConnectorSecret`/`loadConnectorSecret` stay caller-less in production.
+
+---
+
+## 4. Blast-radius analysis
+
+| Scenario | Outcome |
+|---|---|
+| **Web/request identity compromised — can it decrypt?** | **No.** It holds no `kms:Decrypt`, the save provider is encrypt-only, and it has deny-all (RLS + `revoke all`) on the secret tables. It cannot read the ciphertext, and could not unwrap the DEK even if it did. |
+| **Service role compromised — what can it read/write?** | The vault deliberately uses **no** service-role secret path. Service role is not granted `kms:Decrypt` and is not part of the runner identity; it must never be wired to the secret tables. (Prerequisite: confirm no service-role grant exists before PR B — see §7.) |
+| **`connector_runner` (DB role) compromised** | It can INSERT secrets/lifecycle/audit rows and SELECT the **ciphertext envelope** for any tenant (BYPASSRLS) — but it **cannot UPDATE/DELETE** secrets, lifecycle, or audit rows (append-only), and **cannot decrypt** without the KMS `kms:Decrypt` IAM grant. DB compromise alone yields ciphertext, not plaintext. |
+| **KMS runner role (IAM `kms:Decrypt`) compromised** | It can unwrap DEKs **for rows it can also read** → plaintext exposure for stored secrets. This is the highest-value target; it is why `kms:Decrypt` is isolated to the runner IAM identity, why the first credential is low-privilege + source-revocable, and why §6 includes IAM key deactivation. |
+| **DB-only access compromised** (e.g. a DB dump) | Exposes **ciphertext envelopes only** (wrapped DEK + AEAD ciphertext). No plaintext; no KEK; no `kms:Decrypt`. Useless without the separate KMS grant. |
+| **Audit insert fails** | **Fail-closed:** the secret store/lifecycle write rolls back in the same transaction — no secret/lifecycle row commits without its audit (PR #167/#170). No unsafe operation proceeds unaudited. |
+| **Lifecycle revoke fails** | The revoke helper **throws**; no partial state. The targeted version remains in its prior state (loadable iff it was loadable). The caller must retry/escalate (§6); a credential believed-revoked-but-not is treated as **still live** until provider-side revocation (below) confirms. |
+| **Tenant binding wrong** | A wrong-tenant load returns **null** (the `WHERE tenant_id` filter) and, even if a row were force-read, **GCM authentication fails** because `tenant_id` is in the AAD → decrypt throws. Wrong-tenant access yields nothing usable. |
+| **First credential leaks BEFORE encryption** (plaintext, steps 1–5) | This is the **only** window of plaintext exposure (one server-side stack frame). Mitigation: minimize the window (§2 trace), TLS everywhere, no logging, and — because the credential is **source-revocable + low-privilege + dev-workspace-only** — a leak is killed at the Slack source (§6) with negligible real-world blast radius. |
+| **First credential leaks AFTER provider ingestion** (ciphertext at rest) | Killed at the source: revoke at Slack (`auth.revoke` / app removal) **and** tombstone locally. Source revocation makes the stored token inert regardless of ciphertext exposure. |
+| **Local vault tombstone succeeds but provider-side revocation FAILS** | The credential **remains exposed at the provider** — a local tombstone only stops *our* load, not Slack's acceptance of the token. This is treated as an **open incident**: the token is **still live** until provider-side revocation is confirmed; §6 mandates retrying provider revocation, rotating the app, and (if needed) removing the app/workspace. **Local tombstone is never sufficient on its own.** |
+
+---
+
+## 5. Evidence required before RISK-007 closure
+
+> **The staging dry-run that produces this evidence IS the first real-token event. It is NOT synthetic.** It must
+> use the §1 source-revocable, low-risk Slack dev-workspace credential and be treated with the same care as
+> production (named operator, fresh temporary IAM keys, full log inspection, immediate source revocation after).
+
+RISK-007 closure requires **all** of:
+
+1. **Staging real-credential store dry-run** with the §1 low-risk, source-revocable Slack dev-workspace token (the
+   first real-token event), on staging `ycdpzduxugdsffjqyoai` only.
+2. **No token printed in logs** — across the **named staging surfaces** (item 15), grep for the **full token**, the
+   `xoxb-` prefix, a **truncated** prefix, **and** a SHA-256 hash of the token (a high-entropy Slack secret can evade
+   a single literal grep via truncation or base64/url-encoding): **zero** hits is the only PASS. *Absence of a log
+   line is only as strong as log coverage (item 15 names what is NOT covered).* The structural audit allowlist
+   (`CREDENTIAL_VALUE_RE`) protects **audit rows only** — general app/platform logs have no structural redaction, so
+   this grep is the load-bearing control.
+3. **No token in browser/devtools** — confirmed (the browser carried only `state`+`code`). *Browser token handling
+   is forbidden, not risk-accepted.*
+4. **Audit rows** for `store.attempted/succeeded/failed` present and allowlist-shaped (no token material).
+5. **DB row holds an envelope only** — dump the **FULL** `connector_secrets` row (ALL columns, not only the 8
+   envelope columns) and grep **every text/bytea column** — including the free-text `aad_digest`, `key_id`,
+   `secret_kind`, `aead_alg` — for the `xoxb-` prefix **and** a SHA-256 of the token: **zero** hits across ALL
+   columns. Also confirm **no plaintext-capable column exists** by diffing the live table against migrations
+   `0017`/`0030`. (Shape — "the 8 envelope columns populated" — is necessary but is NOT the non-persistence check.)
+6. **Web/request identity cannot decrypt** — an **executed negative on staging** (not a code re-read): the web/
+   request IAM identity attempts `kms:Decrypt` of a real stored wrapped DEK and is **observed** to return
+   `AccessDenied` (capture the API response / CloudTrail entry); **and** a web-role `SELECT` on `connector_secrets`
+   returns zero rows / permission denied (deny-all RLS). Residual exposure stated: the web identity can reach **only**
+   the ciphertext-envelope path, itself blocked by deny-all RLS — and cannot unwrap the DEK regardless.
+7. **Runner identity can decrypt only through the allowed path** (PR C; runner IAM `kms:Decrypt` + capability), and
+   **only** then.
+8. **Wrong tenant cannot load** — BOTH sub-checks observed (the query filter is NOT the cryptographic boundary; the
+   AAD is): **(a)** a normal cross-tenant load returns **null** (the `WHERE tenant_id` filter); **and** **(b)** a
+   force-fed envelope decrypted under a **mismatched** `SecretContext` **throws** an AEAD/GCM auth failure (`aad
+   mismatch`) — proving the structural confused-deputy/replay defense, not just the query filter.
+9. **Revoked credential cannot load**; 10. **Tombstoned credential cannot load** (Model B lifecycle exclusion).
+11. **Audit failure blocks the unsafe operation** — an **induced fault on staging** (not a happy-path + code-read):
+    force the `store.succeeded` audit INSERT to fail **inside the runner transaction** (e.g. revoke the `0031`
+    `audit_logs` grant or violate an `audit_logs` constraint), then **observe** (a) the operation throws, (b)
+    `count(*)` on `connector_secrets` for that exact `(tenant, connector, secret_kind, version)` is **0** (full
+    rollback — **no** compensating DELETE), and (c) **no** `store.succeeded` audit row exists.
+12. **Provider-side revocation path verified** — `auth.revoke` / app removal observed to invalidate the token
+    (a post-revocation Slack API call returns `token_revoked`/`invalid_auth`).
+13. **Vault-side tombstone/revoke path verified** — the revoke/tombstone helper makes the version non-loadable;
+    **and** an **induced** in-CTE audit failure (same fault-injection as item 11, on the lifecycle CTE) leaves **no**
+    lifecycle row and **no** succeeded audit (fail-closed, observed — not code-read).
+14. **Rollback / cleanup verified** — the test credential is revoked at Slack, tombstoned locally, the dev workspace/
+    app is removed, and temporary IAM keys are deleted (§6).
+15. **Logs inspected and clean** — enumerate the **exact** staging surfaces and record each one's retention window:
+    Vercel runtime/function/build logs for the staging deployment, and Supabase Postgres logs for
+    `ycdpzduxugdsffjqyoai`. The telemetry stack is **determinate** today: the ONLY telemetry is Vercel **Analytics +
+    Speed Insights** (both **client-side**, `src/app/layout.tsx`; RISK-013), which is structurally **off** the
+    server-side token path (§2 steps 3–7), and there is **NO** error-monitoring or tracing vendor (no
+    Sentry/OpenTelemetry/Datadog/PostHog/Axiom anywhere). Apply item 2's multi-pattern grep to **each** server-side
+    surface (zero hits = PASS), and **explicitly state what is NOT covered** (e.g. any surface whose retention has
+    already rolled off, or any new vendor added before the dry-run) — "clean" is bounded by log coverage. *(If a
+    server-side error-monitoring/tracing vendor is added later, it MUST be added to this list before the dry-run.)*
+16. **Docs updated** — evidence recorded (a dedicated evidence doc, non-secret only).
+17. **Production still blocked** until explicitly approved (production KMS/IAM separation is still **unverified**).
+
+Additional prerequisites surfaced by the current code (must be resolved before/within PR B, not at closure):
+
+- **Versioned runner login DDL** — `connector_runner_login` must be created by a reviewed migration (or a reviewed,
+  recorded bootstrap), not a manual staging-only step; the production identity chain needs versioned, auditable DDL.
+- **Production KMS/IAM separation** must be provisioned + verified before any production real-token consideration
+  (only staging synthetic separation is proven today).
+
+---
+
+## 6. Kill switch / rollback
+
+If the first real credential leaks, or any check fails, execute **provider-side first**, then local:
+
+1. **Revoke at the Slack source (authoritative):** call `auth.revoke` for the token **and** remove/uninstall the app
+   from the dev workspace (App Management → *Remove App*). Provider-side revocation is what actually kills the token.
+2. **Who performs it:** the named **dev-workspace admin/owner** (recorded in the §5 evidence + this runbook).
+3. **Verify provider-side revocation succeeded:** make a Slack API call with the token and confirm
+   `token_revoked`/`invalid_auth`; confirm the app no longer appears installed.
+4. **Tombstone/revoke in the vault:** call the runner `revoke`/`tombstone` helper (PR #170) for the exact
+   `(tenant, connector, secret_kind, version)` → the version becomes non-loadable (Model B). *(Local only — never a
+   substitute for step 1.)*
+5. **Disable the runner decrypt path:** unset the runner KMS env (`CONNECTOR_VAULT_KMS_KEY_ID` / the runner AWS
+   profile) so no `kms:Decrypt` is possible; if PR C shipped a decrypt entrypoint, disable its flag.
+6. **Remove/deactivate IAM access if needed:** cut the runner's temporary programmatic access — if the runner
+   authenticates with long-lived keys, deactivate + delete its temporary IAM access keys; if it uses an EC2/STS
+   assumed role (e.g. `idc-runner-role`), rotate/disable that role's session instead (there are no long-lived keys
+   to delete). Keep the IAM identities/policies + the KEK in place; cut only the temporary access path. Escalate to
+   disabling the runner IAM identity if compromise is suspected.
+7. **Confirm no plaintext leaked:** grep server/function/DB/tracing/error-monitoring/analytics for the `xoxb-` prefix
+   + a token hash; confirm zero hits; confirm clipboard/shell/command/browser history + screenshots are clean.
+8. **Inspect — logs:** server logs, serverless function logs, Postgres logs, tracing spans, error-monitoring events.
+9. **Inspect — DB rows:** the `connector_secrets` row (envelope only, no plaintext) + the
+   `connector_secret_lifecycle_events` revoked/tombstoned row.
+10. **Inspect — audit rows:** `connector_secret.store.*` and `connector_secret.revocation/tombstone.*` rows are
+    present, allowlist-shaped, and carry no token material.
+11. **If audit fails:** treat the operation as not-performed (fail-closed); do **not** proceed; investigate the audit
+    path before any retry.
+12. **If wrong-tenant access is detected:** treat as a confused-deputy incident — revoke the credential at source,
+    tombstone locally, and audit the `tenant_id` binding + AAD path before any further real-token work.
+13. **If vault tombstone succeeds but provider-side revocation FAILS:** the token is **still live** — this is an open
+    incident. Retry `auth.revoke`, remove the app, and (if necessary) delete the dev workspace/app entirely; do not
+    consider the credential neutralized until a Slack API call confirms invalidation.
+
+---
+
+## 7. Implementation PR sequence (proposed)
+
+| PR | Scope | Real token? |
+|---|---|---|
+| **PR A** | **This docs-only threat model / gate.** | No |
+| **PR B** | **Staging-only real-credential INGESTION path** — wire the Slack authorize→callback→one-time-exchange→encrypt→store flow under the runner (configure the HMAC state signer + KMS env on staging; add the **versioned `connector_runner_login` DDL**). **No live connector use, no decrypt.** Produces §5 evidence items 1–6, 11, 16. | **Yes — first real-token event (staging, §1 credential, treated as production).** |
+| **PR C** | **Staging real DECRYPT/USE harness** — runner-only decrypt of the §1 token behind an explicit staging flag; verify §5 items 7–13. Still no live connector traffic beyond the minimal read used to prove the token works + is revocable. | Yes (staging) |
+| **PR D** | **Live connector integration** behind an explicit **staging** feature flag (the first real provider sync), low-privilege/read-only. | Yes (staging) |
+| **PR E** | **Production-readiness review** — production KMS/IAM separation provisioned + verified, production runner identity, full evidence, sign-off. | — |
+| **then** | **Only after PR E** consider RISK-007 closure (per doc 04 closure criteria + §5 here). | — |
+
+---
+
+## 8. Posture language (must remain true until explicitly changed)
+
+- **Real credentials remain BLOCKED by this PR.**
+- **RISK-007 remains OPEN** (this is a design gate, not implementation; closure is gated on §5 + doc 04).
+- **RISK-001 remains OPEN.**
+- **Cutover remains BLOCKED.**
+- **Connector credentials are NOT production-ready.**
+- **This PR is a design gate, not implementation** — docs only; no code, migration, test, or real token.
+- **The first staging real-token dry-run (§5) is the first real-token event and must NOT be treated as synthetic.**
