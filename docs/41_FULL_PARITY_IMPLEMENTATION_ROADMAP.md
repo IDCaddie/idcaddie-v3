@@ -3309,3 +3309,17 @@ connector execution, NO request-path decrypt, NO service-role secret path, NO pu
 remain blocked; real credential save/load/use is still missing; rotation + the rest of the real credential
 lifecycle remain missing. **RISK-001 remains OPEN. RISK-007 remains OPEN. Cutover remains BLOCKED. Connector
 credentials are not production-ready.** No doc 17 §5 box is ticked by this PR.
+
+## 97. REAL-TOKEN THREAT MODEL & IMPLEMENTATION GATE (PR #171, docs only)
+
+Docs-only design gate before any real connector credential. Adds **[44_CONNECTOR_CREDENTIAL_REAL_TOKEN_THREAT_MODEL](./44_CONNECTOR_CREDENTIAL_REAL_TOKEN_THREAT_MODEL.md)**
+(+ doc 42 §88): the exact safety requirements, the single allowed first-real-credential path (a source-revocable
+Slack dev-workspace bot token), the complete plaintext-lifetime trace, the blast-radius analysis, the RISK-007
+closure evidence gate (**the staging dry-run IS the first real-token event, not synthetic**), the provider-side-first
+kill switch, and the PR sequence **A (docs) → B (staging ingestion, + versioned `connector_runner_login` DDL) → C
+(staging decrypt) → D (live behind a staging flag) → E (prod-readiness) → only then RISK-007 closure**.
+
+No code, migration, test, or real token. No OAuth/token exchange, no live connector, no request-path decrypt, no
+service-role secret path, no public route. Real credentials remain blocked; real credential save/load/use is still
+missing; rotation remains missing. **RISK-001 remains OPEN. RISK-007 remains OPEN. Cutover remains BLOCKED.**
+Connector credentials are not production-ready. No doc 17 §5 box is ticked by this PR.
