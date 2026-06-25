@@ -183,6 +183,29 @@ token — where it exists, who sees it, and exactly where it dies:
   ❌ token in PR comments; ❌ token in test fixtures; ❌ token in screenshots; ❌ token in issue comments;
   ❌ token in analytics / error monitoring / tracing.
 
+### B2 OAuth — three secrets, traced separately (design; the implementation lands in B2a–B2c — doc 42 §90)
+
+The steps above trace the **Slack bot token**. The B2 OAuth path introduces **two more** sensitive values that must
+each be traced separately:
+
+- **Authorization `code` (request-path, one-time).** Arrives as a **query parameter** on the callback URL. It is
+  read once into a local in the server-only callback handler, used only to (a) validate + bind the signed state
+  (§2 binding / doc 42 §90.2) and (b) hand to the server-side exchange; then discarded (no field/return/log). It is
+  **not** the token, but it is one-time exchangeable. **Risk surface:** query strings can leak via proxy/platform
+  **access logs**, **browser history**, and **`Referer`** headers — so the callback must be treated as sensitive and
+  the query **stripped immediately** (a 303 redirect to a clean path) and the access-log surface enumerated (doc 42
+  §90.5; the §5 OAuth-evidence sub-block). It is **never** logged, stored, echoed, audited raw, returned to the browser, or retried after a
+  possible Slack consume (single-use). Live reference dropped at the end of the exchange call chain (V8-heap residual
+  as in step 7 — not a hard wipe).
+- **Slack client secret (vault-grade — doc 42 §90.3).** It exists in plaintext **only** transiently inside the
+  server-side exchange: the runner reads it from the **KMS-backed vault-grade store** (never a plaintext env var),
+  uses it to sign the `oauth.v2.access` POST, and drops the live reference when the exchange returns. Only the runner
+  process reads it; it is **never** logged, echoed into errors, traced, or sent toward the browser. Its lifetime is
+  bounded to the single exchange call; like the token, the JS reference is dropped (V8-heap residual documented, not
+  wiped). Evidence (§5, OAuth sub-block) must prove it is vault-grade + not in a plaintext env before the first real exchange.
+- **Slack bot token** — born in the `oauth.v2.access` response (server-side runner only); encrypted immediately via
+  the existing vault path; traced in steps 1–9 above.
+
 ---
 
 ## 3. Allowed decrypt / use path
@@ -290,6 +313,32 @@ Additional prerequisites surfaced by the current code (must be resolved before/w
 - **Production KMS/IAM separation** must be provisioned + verified before any production real-token consideration
   (only staging synthetic separation is proven today).
 
+### Additional evidence before the first real OAuth exchange (B2c — doc 42 §90)
+
+Because B2c mints the first real token via the Slack `oauth.v2.access` exchange, the §1–17 evidence above ALSO
+requires, before any real OAuth run:
+
+1. **Staging-only flag** set (the exchange path is gated, never production).
+2. **A dedicated test Slack dev workspace + app** (disposable, non-production, no real org data).
+3. **A source-revocable token** (Slack bot token; `auth.revoke` / app removal — §1).
+4. **The provider-side revocation operator identified** (the dev-workspace admin, named in the evidence/runbook).
+5. **No production redirect URI** — the registered Slack redirect URI is the staging one only.
+6. **Exact redirect URI verified** — the Slack-app-registered redirect URI matches the authorize + callback
+   **exactly** (full-string; no prefix/origin/loose — doc 42 §90.2).
+7. **Log / tracing / access-log surfaces identified** for the **authorization `code`** (query-string surface) +
+   token + client secret (doc 42 §90.5; the access-log/Referer surfaces for the `code`).
+8. **Scanner passing with Slack structural patterns** (`scripts/check-no-real-tokens.sh` already catches `xox*` +
+   the auth-`code`/client-secret shapes are enumerated before the run).
+9. **Slack client secret protected with vault-grade controls** (doc 42 §90.3 — KMS-backed, runner-only, ≥ bot-token
+   strength).
+10. **Slack client secret NOT in a plaintext env var** — an **executed negative**: grep the staging env / secret
+    surfaces (deployment env vars, `.env*`, function config) for the client-secret value **and** its shape with
+    **zero** hits (item 2's multi-pattern discipline), and confirm the exchange resolves it **only** from the
+    KMS-backed store (item 9), never `process.env`.
+11. **A runbook for provider-side revocation** (Slack `auth.revoke` + app removal) **and** for **vault tombstone/
+    revoke** (§6).
+12. **Explicit Sam authorization** for the real-token run (B2c is not authorized by merging B2/B2a/B2b).
+
 ---
 
 ## 6. Kill switch / rollback
@@ -334,9 +383,12 @@ If the first real credential leaks, or any check fails, execute **provider-side 
 |---|---|---|
 | **PR A** | **This docs-only threat model / gate.** | No |
 | **PR B1** | **Staging-only store/encrypt INGESTION path — SYNTHETIC ONLY.** The smallest guarded entry that encrypts + stores a connector secret through the existing vault (`saveConnectorSecret`): the production hard-block, the Slack-bot-token provider/kind allowlist, the required-identity + grammar-safe `correlation_id` guards, and the atomic store + audit — all proven with **synthetic sentinel** values. **No real token, no operator/admin-console paste, no OAuth exchange, no Slack API call, no callback route, no live connector, no decrypt.** It proves the path is *designed not to leak a token if a token flows through it*, without any real token. **Merging B1 does NOT authorize a real-token run.** | **No — synthetic only.** |
-| **PR B2** | **Slack OAuth authorize → callback → one-time `oauth.v2.access` exchange** (server-side only; configure the HMAC state signer + KMS env on staging; add the **versioned `connector_runner_login` DDL`**). The token is **born inside the trusted server/runner path** and immediately encrypted/stored via B1's path — **no human ever sees/copies/pastes/submits it.** The **FIRST real-token event happens only here**, as a separately authorized operational run governed by §5/§6. | **Yes — first real-token event (staging, §1 credential, treated as production).** |
-| **PR C** | **Staging real DECRYPT/USE harness** — runner-only decrypt of the §1 token behind an explicit staging flag; verify §5 items 7–13. Still no live connector traffic beyond the minimal read used to prove the token works + is revocable. | Yes (staging) |
-| **PR D** | **Live connector integration** behind an explicit **staging** feature flag (the first real provider sync), low-privilege/read-only. | Yes (staging) |
+| **PR B2 (design)** | **Slack OAuth authorize/callback/exchange DESIGN GATE** (docs only — doc 42 §90): the code-vs-token boundary, state/CSRF/actor binding, the **vault-grade Slack client secret**, the exchange path, the auth-code/token/client-secret plaintext traces (§5 below), audit, failure modes, and the B2a–B2d sequence. **No OAuth implementation, no callback route, no Slack API call, no real token.** | **No — design only.** |
+| **PR B2a** | **State generation + validation ONLY** — adds **actor/session + exact-redirect binding** (the current validator binds tenant/provider/connector but NOT `sub`/intent — doc 42 §90.2), synthetic callback tests; **no** Slack exchange. Also adds the versioned `connector_runner_login` DDL + configures the HMAC state signer + KMS env on staging. | **No — synthetic.** |
+| **PR B2b** | **Slack exchange wrapper against MOCKED Slack responses** + the vault-grade client-secret store wiring (doc 42 §90.3/§90.4); **no** real Slack call, **no** real token. | **No — mocked.** |
+| **PR B2c** | **Staging real OAuth exchange harness** — server-side `oauth.v2.access` exchange; the token is **born inside the trusted server/runner path** and immediately encrypted/stored via B1's path — **no human ever sees/copies/pastes/submits it.** The **FIRST real-token event happens only here**, explicitly authorized by Sam, governed by §5 (incl. its OAuth sub-block) / §6. | **Yes — first real-token event (staging, §1 credential, treated as production).** |
+| **PR C (decrypt)** | **Staging real DECRYPT/USE harness** — runner-only decrypt of the B2c-stored token behind an explicit staging flag; verify §5 items 7–13. No live connector traffic beyond the minimal read proving the token works + is revocable. | Yes (staging) |
+| **PR B2d** | **Live connector use** behind an explicit **staging** feature flag (the first real provider sync), low-privilege/read-only. | Yes (staging) |
 | **PR E** | **Production-readiness review** — production KMS/IAM separation provisioned + verified, production runner identity, full evidence, sign-off. | — |
 | **then** | **Only after PR E** consider RISK-007 closure (per doc 04 closure criteria + §5 here). | — |
 

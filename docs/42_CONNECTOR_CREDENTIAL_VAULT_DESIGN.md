@@ -4061,3 +4061,187 @@ rejected, and fail-closed rollback on audit/encryption failure.
 callback route, NO live connector, NO request-path decrypt, NO route returning a token, NO production enablement, NO
 rotation. **RISK-001 remains OPEN. RISK-007 remains OPEN. Cutover remains BLOCKED.** Connector credentials are not
 production-ready. No doc 17 §5 box is ticked.
+
+## 90. Slack OAuth authorize / callback / exchange — DESIGN GATE (PR #173, B2 design only)
+
+**DESIGN ONLY. No OAuth implementation, no callback route wiring, no Slack API call, no real token, no live
+connector, no request-path decrypt, no production enablement, no RISK-007 closure.** This section designs the
+Slack OAuth authorize → callback → code-exchange path so the *first* real token can later be **born server-side**
+(B2c) without ever being human-handled (preserving docs/44 §1/§2). It builds on the inert scaffolding already in
+the repo: the HMAC-signed state (`oauth-state.ts`), the `oauth_pending` single-use replay store (migration `0020`),
+the Slack provider module (`providers/slack-oauth.ts`, `SLACK_AUTHORIZE_URL = https://slack.com/oauth/v2/authorize`),
+the inert callback route (`…/connectors/oauth/callback/route.ts`, returns `not_configured`/`received`, **never**
+exchanges), and the B1 store path (`ingestStagingConnectorSecret` → `saveConnectorSecret`).
+
+### 90.1 Code-vs-token boundary (the core invariant)
+
+- The OAuth **callback receives an authorization `code`** on the request path. The `code` is **not** the bot token,
+  but it is **sensitive + one-time exchangeable** (whoever exchanges it first wins).
+- The `code` may exist on the request path **only long enough** to (a) parse the callback query, (b) validate the
+  signed `state` + bind it (90.2), and (c) hand off to the **server-side** exchange. It is held as a local value in
+  the server-only handler — never a field, never returned.
+- The `code` must **never** be logged, stored, echoed, audited in raw form, included in an error, or returned to the
+  browser. (Audit records only a safe `callback.received` event — 90.7 — never the `code`.)
+- The **`code` → token exchange happens server-side ONLY** (runner identity → Slack `oauth.v2.access`, 90.4). The
+  browser never sees the token; the token never travels back toward the request path / response body.
+- The resulting Slack **bot token is encrypted + stored IMMEDIATELY** through the existing vault path
+  (`saveConnectorSecret` / the B1 `ingestStagingConnectorSecret` guard) — born server-side, encrypted before any
+  reference escapes the exchange call chain. **No code path exposes the token after exchange** (no route returns it;
+  decrypt stays runner-only + blocked until PR C).
+
+### 90.2 OAuth state / CSRF / tenant + actor binding
+
+The signed state already exists (`OAuthStatePayload { v, tid, prov, cid, sub, intent, nonce, exp }`,
+HMAC-signed via `CONNECTOR_OAUTH_STATE_SECRET`, constant-time verified). The replay/pending row exists
+(`oauth_pending`: `tenant_id, organization_id, connector_id, provider, subject, state_jti, nonce_hash =
+sha256(nonce), intent, expires_at`; single-use `UNIQUE(state_jti)` + `UNIQUE(nonce_hash)`; the raw nonce is NEVER
+stored). Design of the binding:
+
+| Concern | Design |
+|---|---|
+| **state format** | the existing `<b64url(payload)>.<b64url(HMAC)>`; payload v1 = `{tid, prov, cid, sub, intent, nonce, exp}`. Opaque + integrity-protected; carries **no secret** (the nonce is single-use CSRF, not a credential). |
+| **state storage** | the `oauth_pending` row (safe metadata only; `nonce_hash`, never the raw nonce). The signed state is the bearer; the row is the single-use + actor record. |
+| **state expiry** | `exp` in the payload **and** `expires_at` on the row (short TTL, docs/42 §16); the callback rejects `expired` and a swept/absent row. |
+| **one-time use** | `UNIQUE(nonce_hash)` + the consume step (mark consumed) ⇒ a second callback with the same nonce is `replayed`. The nonce is consumed ONLY for an otherwise-valid state (a rejected state never burns a nonce). |
+| **tenant binding** | `payload.tid` must equal the completing context's tenant (`tenant_mismatch`). |
+| **provider binding** | `payload.prov` must equal the expected provider (`provider_mismatch`) — only the provider that initiated the authorize may complete it. |
+| **connector binding** | for re-auth, `payload.cid` must equal the expected connector (`connector_mismatch`). |
+| **exact redirect URI binding** | the `redirect_uri` sent to Slack at authorize is bound and must match the callback **EXACTLY** — full-string equality, **NOT** prefix/substring/origin-only/loose. Designed as: bind the exact `redirect_uri` to the state (extend the payload or pin it per-app) and reject any mismatch (`redirect_uri_mismatch`). `buildSlackAuthorizeUrl` already requires an absolute-HTTPS redirect (no `http:`/`javascript:`/relative). |
+| **actor / session binding (GAP to close in B2a)** | ⚠️ the current `validateOAuthState` binds `tid`/`prov`/`cid` but **does NOT compare `payload.sub` or `intent` to the completing session.** B2a MUST add **actor/session binding**: the completing session's authenticated subject must equal `payload.sub` **and** `oauth_pending.subject` (a new `subject_mismatch`/`session_mismatch` reason code), and `intent` must match. **How the callback obtains the subject (B2a must name it, not assume a layout):** an App Router **route handler does NOT run the `(authenticated)/layout.tsx` auth gate**, so the callback handler MUST itself resolve the authenticated user (e.g. `getSessionUser()` / `supabase.auth.getUser()` **inside** the handler) and compare to `payload.sub`/`oauth_pending.subject`. **Routing caveat:** the callback path is not in `proxy.ts` `PUBLIC_PREFIXES`, so an **unauthenticated** browser returning from Slack is 302'd to `/login` and the in-flight `code`/`state` are dropped — B2a must define how the session is guaranteed present at callback (e.g. require an active session + re-entry after login, or a controlled allowlist with auth enforced inside the handler), never weakening the subject check. Without all this, an attacker-initiated authorize could be completed by a victim session even though tenant/provider match. |
+| **correlation_id binding** | a **prefixed grammar-safe** `correlation_id` (the #166 `SAFE_CORRELATION_RE`, e.g. `corr-…`/`run-…`) is generated at authorize **for the audit rows**, kept **separate** from `state_jti` (which is the random `oauth_pending` lookup key, sha256-hex shaped — NOT the correlation_id), and threaded into every audit row (§90.7) so authorize→callback→exchange→store correlate. |
+| **failure behavior** | every check is fail-closed: any mismatch/expired/replayed/bad-signature ⇒ reject with a safe reason CODE (§90.7), **no** exchange, **no** state burned on a rejected state, **no** raw `code`/nonce surfaced. |
+
+**OAuth state MUST bind — and the callback MUST compare against the completing request/session — ALL EIGHT of:**
+
+1. **actor/session subject** (`sub`) — the authenticated user completing the callback;
+2. **tenant_id** (`tid`);
+3. **provider** (`prov`);
+4. **connector_id** (`cid`) — for re-auth;
+5. **the EXACT redirect URI** / redirect intent (full-string equality; **no** prefix/substring/origin/loose);
+6. a **correlation / operation id** (the prefixed grammar-safe `correlation_id`);
+7. **expiry** (`exp` in the payload **and** `expires_at` on the row);
+8. a **single-use marker** (`nonce_hash`, consumed exactly once).
+
+**State validation MUST verify the state binds to the SAME session/actor/tenant/connector that initiated the
+authorize, by comparing EACH of the eight fields above against the completing request/session, and MUST FAIL CLOSED
+(a safe reason code — §90.7) on ANY field mismatch.** Well-formed + unexpired + unused is **NOT sufficient** — the
+per-field equality check against the completing session/request is **mandatory**, and is a **B2a implementation
+requirement** (not merely a risk note). This closes: callback replay, CSRF, tenant swap, connector swap,
+**wrong-user callback completing setup**, **attacker-initiated authorize completed by a victim session**,
+redirect-URI confusion, and stale/replayed state. **Redirect URI matching is EXACT** (no prefix/substring/origin/
+loose).
+
+> **B2a schema/code change (not this PR):** the new `subject_mismatch`/`session_mismatch` and `redirect_uri_mismatch`
+> reason codes do not exist yet — B2a must extend the `OAuthStateReason` union + `validateOAuthState`, and (to
+> persist a rejected-attempt code) the **migration** that widens the `oauth_pending.last_rejected_code` CHECK
+> allowlist to include them. The exact redirect URI must also be carried (extend the signed payload or pin per-app)
+> so the callback can compare it full-string.
+
+### 90.3 Slack client secret is VAULT-GRADE (not ordinary config)
+
+The Slack **client secret** is the **master capability** that converts authorization codes into tokens — its
+compromise is *more* severe than a single bot-token compromise (it can mint tokens for every code). It must NOT be
+the unprotected weak point behind a vault that carefully protects the tokens it mints. There is **no** client-secret
+**store** today (no table, no storage code path); `client_secret` appears in the repo only as redaction-denylist
+entries, leak-test fixtures, and comments. Design:
+
+- **Storage (DEFAULT decision):** a dedicated **app-level KMS-encrypted store** — the same AES-256-GCM envelope +
+  KEK-in-external-KMS scheme as the bot-token vault, AAD-bound + append-only/versioned, gated by the **same runner
+  IAM `kms:Decrypt` boundary**. Because the client secret is **app-level** (one per Slack app, not per
+  tenant/connector), it does NOT fit `connector_secrets` (per-tenant) → a small dedicated table (e.g.
+  `connector_app_secrets`) keyed by app/provider. AWS **Secrets Manager** is a documented **alternative** that, if
+  chosen in B2b, requires its OWN evidence that its access boundary is ≥ the runner `kms:Decrypt` boundary. The
+  concrete schema is specified + provisioned in B2b (the migration/store), never in this design PR.
+- **Read identity:** ONLY the **runner** exchange identity (the same `connector_runner` + KMS `kms:Decrypt` boundary
+  that decrypts bot tokens). The web/request identity holds **no** access (no `kms:Decrypt`, deny-all).
+- **Use identity:** the client secret is read + used to call Slack **only** inside the server-side exchange (90.4),
+  never on the request path.
+- **NEVER a plaintext env var.** `CONNECTOR_OAUTH_STATE_SECRET` (the HMAC state key) is a *different*, lower-grade
+  secret; the **client secret** must be vault-grade. (B2c evidence must prove it is not sitting in a plaintext env.)
+- **Rotation:** rotate at the Slack app (provider-side: regenerate the client secret in the Slack app config) +
+  re-encrypt/replace in the store; a versioned app-secret with the same monotonic/append-only discipline as the
+  bot-token vault. **Provider-side revocation/rotation:** a Slack app admin regenerates the client secret in the
+  Slack app settings (immediately invalidates the old one) — the named operator is recorded.
+- **Audit:** every read/use of the client secret emits a safe audit event (90.7) — never the value.
+- **Blast radius if it leaks:** an attacker can exchange any intercepted `code` and mint bot tokens for the app's
+  scopes across any workspace that installed the app → **app-wide**, far worse than one bot token. Hence vault-grade.
+- **Why ≥ bot-token strength:** same KEK/KMS + IAM `kms:Decrypt` runner-only boundary, same encrypt-only/decrypt-
+  runner-only asymmetry, same allowlist audit — so the secret that *mints* tokens is protected at least as strongly
+  as the tokens it mints.
+
+> **Gate:** before the first real OAuth exchange (B2c), evidence MUST prove the Slack client secret is protected with
+> vault-grade controls and is **not** in a plaintext env var (docs/44 §5).
+
+### 90.4 Slack exchange path
+
+- **Endpoint:** Slack `https://slack.com/api/oauth.v2.access` (the token endpoint — currently NEVER built). Bot-token
+  install flow (OAuth v2).
+- **Request shape (high level):** `POST` `application/x-www-form-urlencoded` with `client_id`, `client_secret`,
+  `code`, and the **exact** `redirect_uri`. Over TLS only.
+- **`client_id`:** non-secret app config (may be env/config).
+- **`client_secret`:** read from the **vault-grade** store (90.3) at exchange time — never env plaintext.
+- **Calling identity:** the **runner** server-side runtime (the only identity with client-secret access + the
+  `kms:Decrypt` boundary). Never the web/request identity, never the browser.
+- **Timeout/retry:** a short timeout; **no blind retry of the code** (a `code` is single-use — a retry after a
+  partial success risks double-spend/duplicate token). Retry only on a clean pre-send/network failure where Slack
+  provably did not consume the code; otherwise fail closed.
+- **No token logging; no raw Slack-response logging.** The Slack JSON response (which contains `access_token`) is
+  parsed in memory; only the bot token field is extracted → encrypted; the raw response is never logged/persisted.
+- **Slack error sanitization:** map Slack's `error` codes to safe static reason classes (§90.7); never echo the raw
+  Slack body or an error containing token/code material.
+- **Partial failures fail closed:** if the token is received but encryption/store/audit fails, the operation fails
+  closed (no half-stored secret; the just-minted token is dropped/unusable; consider provider-side revoke in cleanup,
+  docs/44 §6). 
+- **Bot token ONLY** is accepted for the first credential (docs/44 §1). An unexpected token type / missing bot token
+  ⇒ fail closed (§90.7).
+- **Refresh / rotation OUT of scope** unless explicitly decided (docs/44 §1: token rotation not enabled for the first
+  credential → no refresh token to handle).
+
+### 90.5 Receipt-to-encryption: zero observers (implementation plan)
+
+When B2a/B2c implement the callback + exchange, EVERY surface that could observe the callback query / `code` / Slack
+exchange request / Slack response / token / client secret must be proven not to record raw material:
+
+| Surface | Prevention |
+|---|---|
+| **proxy / platform access logs** (Vercel) | the `code` arrives as a **query param** in the callback URL → access logs / Referer can capture full URLs. Mitigation: treat the callback URL as sensitive; **redirect to strip the query** immediately (303 to a clean path) so the `code` does not persist in history/Referer; rely on POST-style handoff where possible; confirm the platform does not log full query strings (or that the surface is enumerated in docs/44 §5 (the OAuth-evidence sub-block) as a residual). |
+| **Next.js middleware / route handler** | the callback handler is server-only; it reads `searchParams.get("code")` into a local, validates state, hands to the exchange. No middleware logs the body; `proxy.ts` (session refresh) must not log the callback URL. |
+| **logger** | the vault code never calls `console.*`; the exchange + store paths emit ONLY allowlist audit (90.7). No request-body logger on this route. |
+| **tracer / analytics** | the only telemetry is client-side Vercel Analytics/Speed Insights (off the server-side path); **no** server tracer/error-monitoring vendor exists (docs/44 §5/§15). Adding one later requires re-checking this row. |
+| **request parser / validator** | the state validator returns reason CODES only (never the nonce/code); the `code` is passed by value to the exchange, never serialized. |
+| **error handler** | errors are static, redacted (`ConnectorSecret*Error` / sanitized Slack reason); never the raw Slack body, `code`, token, or client secret. |
+| **framework helpers** | no `JSON.stringify` of the request/response onto a log; the redacted `SavedSecretRef` is the only thing returned upstream. |
+
+### 90.6 Audit design
+
+Events (allowlist builder, the #166 grammar (`secret-audit.ts`) — safe static fields + a grammar-safe `correlation_id`):
+`connector_oauth.authorize.initiated`, `connector_oauth.callback.received`, `connector_oauth.exchange.attempted`,
+`connector_oauth.exchange.succeeded`, `connector_oauth.exchange.failed`, plus the existing
+`connector_secret.store.attempted/succeeded/failed` for the bot-token store, and a client-secret-use event
+(90.3). Audit MUST **never** include: the raw authorization `code`, the raw Slack response, the token, a refresh
+token, the client secret, ciphertext/key material, or a raw error body. **Safe/static reason classes only** (§90.7).
+(The exact event constants + builder extension are implemented in B2a/B2b, not this PR.)
+
+### 90.7 Failure modes (all fail-closed — no token/code/secret leaked, no half-state)
+
+invalid state, expired state, replayed state, **session/actor mismatch**, tenant mismatch, connector mismatch,
+**redirect URI mismatch**, Slack exchange failure, Slack returns no bot token, Slack returns an unexpected token
+type, client secret unavailable, client secret access denied, vault encryption failure, vault store failure, audit
+failure, and lifecycle/revoke failure during cleanup → each yields a safe reason CODE (§90.7), **no**
+`connector_secrets` row without its audit, **no** token toward the browser, **no** raw material in logs/errors. On a
+post-mint failure, cleanup includes provider-side revoke + vault tombstone (docs/44 §6).
+
+### 90.8 Implementation sequence after this design
+
+- **B2 (this PR #173)** — design gate (docs only).
+- **B2a** — state generation + validation ONLY, with **actor/session + exact-redirect binding added**, synthetic
+  callback tests, **no** Slack exchange.
+- **B2b** — Slack exchange wrapper against **mocked** Slack responses + the vault-grade client-secret store wiring;
+  **no** real Slack call.
+- **B2c** — staging real OAuth exchange harness, **explicitly authorized by Sam** — the **first real-token event**
+  (token born server-side, immediately encrypted; docs/44 §5).
+- **B2d** — live connector use behind a staging flag (later). Production readiness later. **Only then** consider
+  RISK-007 closure.
+
+**RISK-001 remains OPEN. RISK-007 remains OPEN. Cutover remains BLOCKED.** Connector credentials are not
+production-ready. No doc 17 §5 box is ticked by this PR.

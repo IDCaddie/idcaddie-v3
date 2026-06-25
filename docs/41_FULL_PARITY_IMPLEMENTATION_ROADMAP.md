@@ -3341,3 +3341,20 @@ run.** NO real token, NO operator paste, NO OAuth exchange, NO Slack API call, N
 NO request-path decrypt, NO production enablement, NO rotation. Real credential save/load/use is still missing.
 **RISK-001 remains OPEN. RISK-007 remains OPEN. Cutover remains BLOCKED.** Connector credentials are not
 production-ready. No doc 17 §5 box is ticked by this PR.
+
+## 99. SLACK OAUTH AUTHORIZE/CALLBACK/EXCHANGE DESIGN GATE (PR #173, B2 — docs only)
+
+Docs-only design gate for the Slack OAuth path before implementation (doc 42 §90 + doc 44 §2/§5/§7). Designs:
+the **code-vs-token boundary** (a one-time authorization `code` arrives on the request path — NOT the token —
+validated + state-bound then handed to a SERVER-SIDE runner-only `oauth.v2.access` exchange; the bot token is born
+server-side + encrypted immediately via the existing vault and never returns toward the browser); **state/CSRF/
+binding** (tenant/provider/connector + the B2a gap to close: **actor/session `sub` + EXACT redirect URI**, single-use
+nonce, short TTL); the **vault-grade Slack client secret** (KMS-backed, runner-only, ≥ bot-token strength, never a
+plaintext env var); the three-secret plaintext traces; the receipt-to-encryption zero-observer plan; audit events;
+fail-closed failure modes; and the sequence **B2a (state) → B2b (mock exchange) → B2c (first real token, explicitly
+authorized) → B2d (live connector)** with a pre-first-OAuth evidence gate.
+
+No OAuth implementation, no callback route, no Slack API call, no real token, no live connector, no request-path
+decrypt, no production enablement. Real credentials remain blocked; the first real-token event (B2c) remains future
++ explicitly authorized. **RISK-001 remains OPEN. RISK-007 remains OPEN. Cutover remains BLOCKED.** Connector
+credentials are not production-ready. No doc 17 §5 box is ticked by this PR.
