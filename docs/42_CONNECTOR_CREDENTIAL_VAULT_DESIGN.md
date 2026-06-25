@@ -4104,17 +4104,32 @@ stored). Design of the binding:
 | **state expiry** | `exp` in the payload **and** `expires_at` on the row (short TTL, docs/42 §16); the callback rejects `expired` and a swept/absent row. |
 | **one-time use** | `UNIQUE(nonce_hash)` + the consume step (mark consumed) ⇒ a second callback with the same nonce is `replayed`. The nonce is consumed ONLY for an otherwise-valid state (a rejected state never burns a nonce). |
 | **tenant binding** | `payload.tid` must equal the completing context's tenant (`tenant_mismatch`). |
+| **provider binding** | `payload.prov` must equal the expected provider (`provider_mismatch`) — only the provider that initiated the authorize may complete it. |
 | **connector binding** | for re-auth, `payload.cid` must equal the expected connector (`connector_mismatch`). |
 | **exact redirect URI binding** | the `redirect_uri` sent to Slack at authorize is bound and must match the callback **EXACTLY** — full-string equality, **NOT** prefix/substring/origin-only/loose. Designed as: bind the exact `redirect_uri` to the state (extend the payload or pin it per-app) and reject any mismatch (`redirect_uri_mismatch`). `buildSlackAuthorizeUrl` already requires an absolute-HTTPS redirect (no `http:`/`javascript:`/relative). |
 | **actor / session binding (GAP to close in B2a)** | ⚠️ the current `validateOAuthState` binds `tid`/`prov`/`cid` but **does NOT compare `payload.sub` or `intent` to the completing session.** B2a MUST add **actor/session binding**: the completing session's authenticated subject must equal `payload.sub` **and** `oauth_pending.subject` (a new `subject_mismatch`/`session_mismatch` reason code), and `intent` must match. **How the callback obtains the subject (B2a must name it, not assume a layout):** an App Router **route handler does NOT run the `(authenticated)/layout.tsx` auth gate**, so the callback handler MUST itself resolve the authenticated user (e.g. `getSessionUser()` / `supabase.auth.getUser()` **inside** the handler) and compare to `payload.sub`/`oauth_pending.subject`. **Routing caveat:** the callback path is not in `proxy.ts` `PUBLIC_PREFIXES`, so an **unauthenticated** browser returning from Slack is 302'd to `/login` and the in-flight `code`/`state` are dropped — B2a must define how the session is guaranteed present at callback (e.g. require an active session + re-entry after login, or a controlled allowlist with auth enforced inside the handler), never weakening the subject check. Without all this, an attacker-initiated authorize could be completed by a victim session even though tenant/provider match. |
 | **correlation_id binding** | a **prefixed grammar-safe** `correlation_id` (the #166 `SAFE_CORRELATION_RE`, e.g. `corr-…`/`run-…`) is generated at authorize **for the audit rows**, kept **separate** from `state_jti` (which is the random `oauth_pending` lookup key, sha256-hex shaped — NOT the correlation_id), and threaded into every audit row (§90.7) so authorize→callback→exchange→store correlate. |
 | **failure behavior** | every check is fail-closed: any mismatch/expired/replayed/bad-signature ⇒ reject with a safe reason CODE (§90.7), **no** exchange, **no** state burned on a rejected state, **no** raw `code`/nonce surfaced. |
 
-**State validation MUST verify the state binds to the same session/actor/tenant/connector that initiated the
-authorize** — well-formed + unexpired + unused is **not sufficient**. This closes: callback replay, CSRF, tenant
-swap, connector swap, **wrong-user callback completing setup**, **attacker-initiated authorize completed by a victim
-session**, redirect-URI confusion, and stale-code reuse. **Redirect URI matching is EXACT** (no prefix/substring/
-origin/loose).
+**OAuth state MUST bind — and the callback MUST compare against the completing request/session — ALL EIGHT of:**
+
+1. **actor/session subject** (`sub`) — the authenticated user completing the callback;
+2. **tenant_id** (`tid`);
+3. **provider** (`prov`);
+4. **connector_id** (`cid`) — for re-auth;
+5. **the EXACT redirect URI** / redirect intent (full-string equality; **no** prefix/substring/origin/loose);
+6. a **correlation / operation id** (the prefixed grammar-safe `correlation_id`);
+7. **expiry** (`exp` in the payload **and** `expires_at` on the row);
+8. a **single-use marker** (`nonce_hash`, consumed exactly once).
+
+**State validation MUST verify the state binds to the SAME session/actor/tenant/connector that initiated the
+authorize, by comparing EACH of the eight fields above against the completing request/session, and MUST FAIL CLOSED
+(a safe reason code — §90.7) on ANY field mismatch.** Well-formed + unexpired + unused is **NOT sufficient** — the
+per-field equality check against the completing session/request is **mandatory**, and is a **B2a implementation
+requirement** (not merely a risk note). This closes: callback replay, CSRF, tenant swap, connector swap,
+**wrong-user callback completing setup**, **attacker-initiated authorize completed by a victim session**,
+redirect-URI confusion, and stale/replayed state. **Redirect URI matching is EXACT** (no prefix/substring/origin/
+loose).
 
 > **B2a schema/code change (not this PR):** the new `subject_mismatch`/`session_mismatch` and `redirect_uri_mismatch`
 > reason codes do not exist yet — B2a must extend the `OAuthStateReason` union + `validateOAuthState`, and (to
