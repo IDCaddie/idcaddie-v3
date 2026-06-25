@@ -4018,3 +4018,46 @@ Highlights (the canonical text is doc 44):
 
 This PR is **docs only** — no code, migration, test, or real token. **RISK-001 remains OPEN. RISK-007 remains OPEN.
 Cutover remains BLOCKED.** Connector credentials are not production-ready. No doc 17 §5 box is ticked.
+
+## 89. Staging-only store/encrypt ingestion path (PR #172, B1 — synthetic only)
+
+Implements the **store/encrypt half** of the docs/44 §2 ingestion path — **B1 of the §7 B1/B2 split** — proven with
+**synthetic sentinel values only**. The OAuth `oauth.v2.access` exchange + the first real-token event are deferred to
+**B2** (token born server-side, no human handling); **merging B1 does NOT authorize a real-token run.**
+
+**`connector-secret-ingest.ts` — `ingestStagingConnectorSecret(input, deps)`** is the smallest guarded server-only
+entry that encrypts + stores through the existing `saveConnectorSecret` (encrypt-only provider → atomic store +
+audit → redacted `SavedSecretRef`). Fail-closed guards, in order:
+
+1. **PRODUCTION HARD-BLOCK** — `isStagingIngestEnvironment()` allows ingestion ONLY when the explicit
+   `CONNECTOR_VAULT_STAGING_INGEST_ENABLED=1` opt-in is set AND the deployment is non-production
+   (`VERCEL_ENV`/`NODE_ENV` ≠ `production`). Fail-closed default-off; read from the **trusted server env**, never
+   request data (a caller cannot spoof it). B2's route must resolve the env from this same signal.
+2. **provider/kind allowlist** — Slack dev-workspace bot OAuth access token ONLY (docs/44 §1; crypto kind
+   `oauth_access_token` → DB `oauth_access`).
+3. **required identity** — `tenant_id`, `connector_id` (uuid), `version` (positive int; explicit + monotonic).
+4. **grammar-safe `correlation_id`** — the #166 grammar (`isSafeCorrelationId`), threaded into the store audit rows
+   (never the secret row).
+
+On success: encrypt-immediately + atomic store + `store.attempted`/`store.succeeded` audit + a redacted
+`SavedSecretRef` (ids + KEK handle — no plaintext/ciphertext/wrapped DEK). On ANY guard/encrypt/audit failure:
+NOTHING commits (no `connector_secrets` row, no succeeded audit; the existing atomic rollback, no compensating
+DELETE) and a STATIC error is thrown. **Plaintext is never logged, echoed, serialized, traced, or returned.**
+
+**Plaintext handling (docs/44 §2):** B1 has **no HTTP route**, so there is no request-body observer surface
+(middleware / logger / tracer / body-parser) — that analysis lands with **B2's** callback route. The wrapper takes
+the plaintext as a function argument and hands it straight to the encrypt call; the live reference is dropped after
+encrypt, with the V8-heap residual documented in docs/44 §2 step 7 (NOT a hard wipe).
+
+**Secret scanner** `scripts/check-no-real-tokens.sh` scans changed files (incl. untracked) for high-confidence
+full-token shapes (Slack `xox*`/`xapp-`, JWT, `AKIA`/`ASIA`, PEM private key, `gho_`/`github_pat_`, `sk-`, DB URL
+with an embedded password) and fails closed on a hit (matches redacted).
+
+**Proof:** 14 synthetic tests — envelope-only store with no token anywhere (row/ref/audits/console), the production
+hard-block refusing (no row, no audit, no DB touch), forbidden provider/kind + invalid ids/version/correlation_id
+rejected, and fail-closed rollback on audit/encryption failure.
+
+**Scope (unchanged):** NO real token, NO operator/admin-console paste, NO OAuth exchange, NO Slack API call, NO
+callback route, NO live connector, NO request-path decrypt, NO route returning a token, NO production enablement, NO
+rotation. **RISK-001 remains OPEN. RISK-007 remains OPEN. Cutover remains BLOCKED.** Connector credentials are not
+production-ready. No doc 17 §5 box is ticked.

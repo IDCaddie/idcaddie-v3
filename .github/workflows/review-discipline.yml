@@ -33,3 +33,9 @@ jobs:
         env:
           REQUIRE_BASE: "1"
         run: bash scripts/check-docs-updated.sh "origin/$BASE_BRANCH"
+      - name: No real provider tokens committed (RISK-007)
+        # selftest proves the matcher catches positives + excuses sentinels; --all then scans every tracked file
+        # (robust regardless of clone depth). The scanner fails loud if perl is absent.
+        run: |
+          bash scripts/check-no-real-tokens.sh selftest
+          bash scripts/check-no-real-tokens.sh --all
