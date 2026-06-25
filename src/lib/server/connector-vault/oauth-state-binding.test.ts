@@ -143,6 +143,16 @@ describe("B2a validation — ONE isolated mismatch per bound field (other seven 
     expect(mintThenValidate(ctx({ correlationId: "", subject: "0b000000-0000-0000-0000-0000000000ff" }))).toEqual({ ok: false, reason: "subject_mismatch" });
     expect(mintThenValidate(ctx({ correlationId: "", redirectUri: "https://app.example.com/OTHER/cb" }))).toEqual({ ok: false, reason: "redirect_uri_mismatch" });
   });
+
+  it("connector binding is UNCONDITIONAL (null-normalized): a fresh-connect (cid=null both) succeeds, but a re-auth state cannot complete a fresh-connect context", () => {
+    const s = signer();
+    // fresh connect: state cid=null validated against a fresh-connect context (cid=null) → ok.
+    const fresh = createOAuthState(ctx({ connectorId: null }), { signer: s, ttlSeconds: TTL, now: NOW });
+    expect(validateOAuthState(fresh.state, ctx({ connectorId: null }), { signer: s, now: NOW + 1000 }).ok).toBe(true);
+    // a re-auth state (cid=A) CANNOT complete a fresh-connect context (cid=null) — the compare is not skipped.
+    const reauth = createOAuthState(ctx({ connectorId: CONNECTOR }), { signer: s, ttlSeconds: TTL, now: NOW });
+    expect(validateOAuthState(reauth.state, ctx({ connectorId: null }), { signer: s, now: NOW + 1000 })).toEqual({ ok: false, reason: "connector_mismatch" });
+  });
 });
 
 describe("B2a — no completing session / App Router route-handler reality", () => {
@@ -166,16 +176,21 @@ describe("B2a redirect URI — exact, server-trusted; Host/X-Forwarded-Host spoo
     expect(serverTrustedRedirectUri(SERVER_REDIRECT)).toBe(SERVER_REDIRECT);
     expect(() => serverTrustedRedirectUri("http://insecure/cb")).toThrow(OAuthStateError);
   });
-  it("a legit state validates against the SERVER-TRUSTED redirect regardless of a spoofed Host", () => {
-    // The callback derives expected.redirectUri ONLY from server config — a spoofed Host header never reaches it.
-    const spoofedHost = "evil.attacker.example"; // present in a (hypothetical) request, but IGNORED by the resolver
-    void spoofedHost;
-    const expected = ctx({ redirectUri: serverTrustedRedirectUri(SERVER_REDIRECT) });
-    expect(mintThenValidate(expected).ok).toBe(true);
-  });
-  it("if the callback WRONGLY built the redirect from a spoofed Host, the mismatched redirect FAILS CLOSED (never validates)", () => {
-    const hostReconstructed = "https://evil.attacker.example/connectors/oauth/callback"; // what a Host-spoof would yield
-    expect(mintThenValidate(ctx({ redirectUri: hostReconstructed }))).toEqual({ ok: false, reason: "redirect_uri_mismatch" });
+  it("a spoofed Host / X-Forwarded-Host header is PRESENT but cannot move the redirect comparison (server-trusted config wins)", () => {
+    // A malicious completing request carries spoofed host headers (actually present):
+    const spoofedReq = new Headers({ host: "evil.attacker.example", "x-forwarded-host": "evil.attacker.example", "x-forwarded-proto": "https", forwarded: "host=evil.attacker.example" });
+    expect(spoofedReq.get("x-forwarded-host")).toBe("evil.attacker.example"); // header is genuinely present
+    // The callback resolves the expected redirect ONLY from server config — `serverTrustedRedirectUri` takes NO
+    // request argument, so the spoofed headers can never reach the comparison target.
+    const expectedRedirect = serverTrustedRedirectUri(SERVER_REDIRECT);
+    expect(expectedRedirect).toBe(SERVER_REDIRECT);
+    expect(expectedRedirect).not.toContain("evil.attacker.example");
+    // A legit state (redir = the server config) validates; the spoofed headers are irrelevant.
+    expect(mintThenValidate(ctx({ redirectUri: expectedRedirect })).ok).toBe(true);
+    // If a BUGGY callback had reconstructed the redirect from those spoofed headers, the mismatched redirect FAILS
+    // CLOSED — a spoofed Host can NEVER make a mismatched redirect validate.
+    const hostDerived = `https://${spoofedReq.get("x-forwarded-host")}/connectors/oauth/callback`;
+    expect(mintThenValidate(ctx({ redirectUri: hostDerived }))).toEqual({ ok: false, reason: "redirect_uri_mismatch" });
   });
   it("an attacker-chosen redirect baked into the state cannot complete against the server-trusted redirect", () => {
     // Mint a state whose `redir` is the attacker's URL; the callback compares against the SERVER config → reject.

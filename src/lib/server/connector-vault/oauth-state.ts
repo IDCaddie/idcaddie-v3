@@ -298,7 +298,10 @@ export function validateOAuthState(
     if (payload.sub !== expectedContext.subject) return { ok: false, reason: "subject_mismatch" };
     if (payload.tid !== expectedContext.tenantId) return { ok: false, reason: "tenant_mismatch" };
     if (payload.prov !== expectedContext.provider) return { ok: false, reason: "provider_mismatch" };
-    if (expectedContext.connectorId != null && payload.cid !== expectedContext.connectorId)
+    // UNCONDITIONAL connector compare (null-normalized): a fresh-connect state (cid=null) matches a fresh-connect
+    // context (null===null); a re-auth state (cid=A) matches only cid=A — and a re-auth state can NEVER complete a
+    // fresh-connect context, nor connector A complete connector B. (Not gated on `!= null`, so it cannot be skipped.)
+    if ((payload.cid ?? null) !== (expectedContext.connectorId ?? null))
       return { ok: false, reason: "connector_mismatch" };
     if (payload.redir !== expectedContext.redirectUri) return { ok: false, reason: "redirect_uri_mismatch" };
     // The correlation id is the AUDIT-correlation binding (docs/42 §90.2) — compared ONLY when the caller supplies
