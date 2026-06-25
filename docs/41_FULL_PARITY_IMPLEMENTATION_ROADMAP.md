@@ -3417,3 +3417,29 @@ No real Slack API call, no real token, no real client secret, no route, no reque
 no production enablement. The KMS-backed client-secret store remains future (B2c-secret); the production callback route remains future
 (B2c-route); the first real-token event remains future + explicitly authorized (B2c-run). **RISK-001 remains OPEN. RISK-007 remains OPEN. Cutover remains
 BLOCKED.** Connector credentials are not production-ready. No doc 17 §5 box is ticked by this PR.
+
+## 103. VAULT-GRADE SLACK CLIENT-SECRET STORE (PR #178, B2c-secret)
+
+Implements B2c-**secret** (docs/42 §90.3): the app-scoped, KMS-backed store + decrypt boundary for the OAuth MASTER
+CREDENTIAL (the Slack client secret), synthetic only. The client secret converts authorization codes into tokens, so
+its compromise is app-wide — it is treated as vault-grade, NOT ordinary config.
+
+New `connector_app_secrets` table (migration 0035): **app-scoped** (keyed by {app_env, provider, secret_kind,
+version}, NO tenant_id), append-only/versioned, holding ONLY the AES-256-GCM envelope. RLS deny-all to the request
+path (RLS-enabled, zero policies, revoke all from authenticated/anon); runner column-scoped grant only — the same
+`connector_runner` BYPASSRLS + KMS kms:Decrypt boundary as the bot-token vault. RLS T56 proves authenticated/anon
+cannot read/insert and the runner has no update/delete grant; `test-rls.sh` re-revokes it after the hosted-sim blanket
+grant (lockstep with connector_secrets).
+
+`crypto.ts` refactored to a shared envelope core (`sealEnvelope`/`openEnvelope` over an AAD buffer; the tenant path
+delegates to it unchanged) + an **app-scope AAD** (`canonicalAppAad`, a distinct domain prefix binding {app_env,
+provider, kind, version}) — a staging ciphertext cannot decrypt as production, and a wrong provider/kind/version fails
+closed. `slack-client-secret-store.ts`: `saveSlackClientSecret` stores the envelope only (no plaintext at rest), and
+the load-bearing `withSlackClientSecret(identity, deps, exchange)` is a scoped decrypt-and-use closure — NO
+`loadClientSecret(): string` API; the plaintext is decrypted, handed ONLY to the exchange callback, the buffer wiped,
+and only a redacted result returned. 29 synthetic tests with a marked client-secret sentinel + RLS T56.
+
+No real Slack client secret, no real token, no Slack API call, no production callback route, no live connector, no
+request-path decrypt, no production enablement. The app-secret use audit (§90.7) remains future. **RISK-001 remains
+OPEN. RISK-007 remains OPEN. Cutover remains BLOCKED.** Connector credentials are not production-ready. No doc 17 §5
+box is ticked by this PR.

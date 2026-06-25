@@ -54,6 +54,21 @@ export type SecretContext = {
   version: number;
 };
 
+// APP-SCOPED secret kinds (docs/42 §90.3) — the OAuth client secret is APP-level (one per Slack app), NOT
+// tenant-scoped. It uses the same envelope scheme but a DISTINCT app-scope AAD ({appEnv, provider, kind, version}),
+// so it never collides with a tenant-scoped ciphertext and a staging ciphertext cannot decrypt as production.
+export const APP_SECRET_KINDS = ["oauth_client_secret"] as const;
+export type AppSecretKind = (typeof APP_SECRET_KINDS)[number];
+
+// The APP-SCOPED AAD-binding context. `appEnv` (e.g. "staging"/"production") REPLACES tenant_id as the scope
+// identity — every field is folded into the AEAD additional data, so any mismatch on decrypt fails closed.
+export type AppSecretContext = {
+  appEnv: string;
+  provider: string;
+  secretKind: AppSecretKind;
+  version: number;
+};
+
 // Injected key-wrapping provider (the KMS abstraction). A real KMS implements this in a LATER PR; tests
 // inject an in-memory provider. Async because real KMS calls are async. The provider holds the KEKs — this
 // module never sees or stores a KEK.
@@ -122,29 +137,21 @@ function assertContext(ctx: SecretContext): void {
     throw new ConnectorVaultCryptoError("invalid secret context: version");
 }
 
-// ── Public API ──────────────────────────────────────────────────────────────────────────────────────
-// Encrypt a connector secret. `plaintext` is the raw credential bytes (a Buffer or utf8 string) — it is
-// used only inside this function, never logged, never returned. Returns the structured at-rest payload.
-export async function encryptConnectorSecret(input: {
-  plaintext: Buffer | string;
-  context: SecretContext;
-  keyProvider: ConnectorVaultKeyProvider;
-  kekId: string;
-}): Promise<EncryptedConnectorSecret> {
-  const { context, keyProvider, kekId } = input;
-  assertContext(context);
-  if (typeof kekId !== "string" || kekId.length === 0)
-    throw new ConnectorVaultCryptoError("invalid kekId");
-  const plaintext = typeof input.plaintext === "string" ? Buffer.from(input.plaintext, "utf8") : input.plaintext;
-  if (!Buffer.isBuffer(plaintext) || plaintext.length === 0)
-    throw new ConnectorVaultCryptoError("invalid plaintext");
-
+// ── Envelope core (AAD-agnostic) ────────────────────────────────────────────────────────────────────
+// Seal/open over an opaque AAD Buffer — the SOLE crypto path, shared by the tenant-scoped (connector) and the
+// app-scoped (client-secret) wrappers below. The AAD's MEANING is the caller's concern; here it is just bound.
+async function sealEnvelope(
+  plaintext: Buffer,
+  aad: Buffer,
+  keyProvider: ConnectorVaultKeyProvider,
+  kekId: string,
+): Promise<EncryptedConnectorSecret> {
+  if (typeof kekId !== "string" || kekId.length === 0) throw new ConnectorVaultCryptoError("invalid kekId");
+  if (!Buffer.isBuffer(plaintext) || plaintext.length === 0) throw new ConnectorVaultCryptoError("invalid plaintext");
   const { dek, wrappedDek } = await keyProvider.generateDataKey(kekId);
   if (!Buffer.isBuffer(dek) || dek.length !== DEK_BYTES)
     throw new ConnectorVaultCryptoError("key provider returned an invalid data key");
-
   try {
-    const aad = canonicalAad(context);
     const iv = randomBytes(IV_BYTES);
     const cipher = createCipheriv("aes-256-gcm", dek, iv);
     cipher.setAAD(aad);
@@ -165,28 +172,20 @@ export async function encryptConnectorSecret(input: {
   }
 }
 
-// Decrypt a connector secret. Returns the plaintext Buffer ONLY when the AAD context, the KEK id, the
-// wrapped DEK, and the auth tag all verify. Fails closed (throws a safe ConnectorVaultCryptoError) on any
-// mismatch/tamper — wrong tenant/connector/kind/version, wrong KEK, or altered ciphertext/metadata.
-export async function decryptConnectorSecret(input: {
-  encrypted: EncryptedConnectorSecret;
-  context: SecretContext;
-  keyProvider: ConnectorVaultKeyProvider;
-}): Promise<Buffer> {
-  const { encrypted, context, keyProvider } = input;
-  assertContext(context);
-  if (!encrypted || typeof encrypted !== "object")
-    throw new ConnectorVaultCryptoError("invalid encrypted payload");
+async function openEnvelope(
+  encrypted: EncryptedConnectorSecret,
+  aad: Buffer,
+  keyProvider: ConnectorVaultKeyProvider,
+): Promise<Buffer> {
+  if (!encrypted || typeof encrypted !== "object") throw new ConnectorVaultCryptoError("invalid encrypted payload");
   if (encrypted.v !== 1 || encrypted.alg !== "AES-256-GCM")
     throw new ConnectorVaultCryptoError("unsupported payload version/algorithm");
   for (const f of ["kekId", "wrappedDek", "iv", "ciphertext", "tag", "aadDigest"] as const) {
     if (typeof encrypted[f] !== "string" || encrypted[f].length === 0)
       throw new ConnectorVaultCryptoError(`invalid encrypted payload: ${f}`);
   }
-
-  const aad = canonicalAad(context);
-  // Fast fail-closed pre-check: the provided context must match the bound AAD digest (constant-time). This
-  // is convenience only — the GCM tag (below) is the sole authority; never trust the digest in isolation.
+  // Fast fail-closed pre-check: the provided context must match the bound AAD digest (constant-time). This is
+  // convenience only — the GCM tag (below) is the sole authority; never trust the digest in isolation.
   const expected = Buffer.from(aadDigestHex(aad), "utf8");
   const actual = Buffer.from(encrypted.aadDigest, "utf8");
   if (expected.length !== actual.length || !timingSafeEqual(expected, actual))
@@ -200,7 +199,6 @@ export async function decryptConnectorSecret(input: {
   }
   if (!Buffer.isBuffer(dek) || dek.length !== DEK_BYTES)
     throw new ConnectorVaultCryptoError("key provider returned an invalid data key");
-
   try {
     const decipher = createDecipheriv("aes-256-gcm", dek, Buffer.from(encrypted.iv, "base64"));
     decipher.setAAD(aad);
@@ -212,4 +210,77 @@ export async function decryptConnectorSecret(input: {
   } finally {
     dek.fill(0);
   }
+}
+
+// ── Public API ──────────────────────────────────────────────────────────────────────────────────────
+// Encrypt a tenant-scoped connector secret. `plaintext` is the raw credential bytes (a Buffer or utf8 string) — it
+// is used only inside this function, never logged, never returned. Returns the structured at-rest payload.
+export async function encryptConnectorSecret(input: {
+  plaintext: Buffer | string;
+  context: SecretContext;
+  keyProvider: ConnectorVaultKeyProvider;
+  kekId: string;
+}): Promise<EncryptedConnectorSecret> {
+  assertContext(input.context);
+  const plaintext = typeof input.plaintext === "string" ? Buffer.from(input.plaintext, "utf8") : input.plaintext;
+  return sealEnvelope(plaintext, canonicalAad(input.context), input.keyProvider, input.kekId);
+}
+
+// Decrypt a connector secret. Returns the plaintext Buffer ONLY when the AAD context, the KEK id, the
+// wrapped DEK, and the auth tag all verify. Fails closed (throws a safe ConnectorVaultCryptoError) on any
+// mismatch/tamper — wrong tenant/connector/kind/version, wrong KEK, or altered ciphertext/metadata.
+export async function decryptConnectorSecret(input: {
+  encrypted: EncryptedConnectorSecret;
+  context: SecretContext;
+  keyProvider: ConnectorVaultKeyProvider;
+}): Promise<Buffer> {
+  assertContext(input.context);
+  return openEnvelope(input.encrypted, canonicalAad(input.context), input.keyProvider);
+}
+
+// ── App-scoped (client-secret) crypto (docs/42 §90.3) ─────────────────────────────────────────────────
+function assertAppContext(ctx: AppSecretContext): void {
+  if (!ctx || typeof ctx !== "object") throw new ConnectorVaultCryptoError("invalid app secret context");
+  if (typeof ctx.appEnv !== "string" || ctx.appEnv.length === 0)
+    throw new ConnectorVaultCryptoError("invalid app secret context: appEnv");
+  if (typeof ctx.provider !== "string" || ctx.provider.length === 0)
+    throw new ConnectorVaultCryptoError("invalid app secret context: provider");
+  if (!(APP_SECRET_KINDS as readonly string[]).includes(ctx.secretKind))
+    throw new ConnectorVaultCryptoError("invalid app secret context: secretKind");
+  if (!Number.isInteger(ctx.version) || ctx.version < 1)
+    throw new ConnectorVaultCryptoError("invalid app secret context: version");
+}
+
+// Canonical AAD for an APP-SCOPED secret. A DISTINCT domain prefix ("...-app-vault") means an app-scoped ciphertext
+// can never be confused with a tenant-scoped one, and binding `appEnv` means a staging ciphertext fails to decrypt as
+// production (and vice versa). NO tenant_id — the app-scope identity {appEnv, provider, kind, version} IS the binding.
+function canonicalAppAad(ctx: AppSecretContext): Buffer {
+  const parts = [ctx.appEnv, ctx.provider, ctx.secretKind, String(ctx.version)];
+  const tagged = parts.map((p) => `${Buffer.byteLength(p, "utf8")}:${p}`).join(" ");
+  return Buffer.from(`idcaddie-connector-app-vault v1 ${tagged}`, "utf8");
+}
+
+// Encrypt an app-scoped secret (the Slack OAuth client secret). Same envelope, app-scope AAD. Never logs/returns
+// plaintext.
+export async function encryptAppSecret(input: {
+  plaintext: Buffer | string;
+  context: AppSecretContext;
+  keyProvider: ConnectorVaultKeyProvider;
+  kekId: string;
+}): Promise<EncryptedConnectorSecret> {
+  assertAppContext(input.context);
+  const plaintext = typeof input.plaintext === "string" ? Buffer.from(input.plaintext, "utf8") : input.plaintext;
+  return sealEnvelope(plaintext, canonicalAppAad(input.context), input.keyProvider, input.kekId);
+}
+
+// Decrypt an app-scoped secret. Returns plaintext ONLY when appEnv/provider/kind/version, the KEK, the wrapped DEK,
+// and the GCM tag all verify — fails closed (safe error) on ANY mismatch (wrong appEnv/provider/kind/version, wrong
+// KEK, tampering). The caller MUST bound the plaintext lifetime (see `withSlackClientSecret`).
+export async function decryptAppSecret(input: {
+  encrypted: EncryptedConnectorSecret;
+  context: AppSecretContext;
+  keyProvider: ConnectorVaultKeyProvider;
+}): Promise<Buffer> {
+  assertAppContext(input.context);
+  return openEnvelope(input.encrypted, canonicalAppAad(input.context), input.keyProvider);
 }
