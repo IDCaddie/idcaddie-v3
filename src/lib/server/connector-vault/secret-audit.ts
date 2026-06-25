@@ -9,8 +9,9 @@
 // writer is wired in this PR — the #160 store adapter has no real call sites yet, so there is no real lifecycle
 // to emit from. This is audit SCAFFOLDING only.
 //
-// SCOPE (this PR): ONLY the nine store/load/decrypt events. Rotation/revocation/delete/update events are NOT
-// added — those belong with the behavior that emits them, which does not exist yet.
+// SCOPE: the store/load/decrypt events (#166/#167) + the revocation/tombstone events (#170, emitted by the
+// revoke/tombstone write helpers). Rotation/delete/update events are NOT added — those belong with the behavior
+// that emits them, and no rotation/delete/update helper exists yet.
 //
 // ALLOWLIST, NOT DENYLIST: the builder constructs the audit `after_json` from an EXPLICIT set of permitted
 // fields only. It NEVER spreads the input and carries NO arbitrary-metadata passthrough field, so any extra

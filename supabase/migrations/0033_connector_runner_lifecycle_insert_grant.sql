@@ -14,9 +14,12 @@
 -- (no UPDATE/DELETE, no new constraint) — its append-only invariant (T50) is preserved.
 --
 -- ORPHAN PREVENTION is enforced by the HELPERS in-transaction (a clean composite FK would require adding a
--- UNIQUE constraint to the append-only `connector_secrets` table, which is awkward; the helpers instead INSERT
--- the lifecycle row + its audit row with a `WHERE EXISTS (connector_secrets row)` guard inside ONE runner
--- transaction, so a revoke/tombstone of a nonexistent version commits NO lifecycle row and NO audit row).
+-- UNIQUE constraint to the append-only `connector_secrets` table, which is awkward). Each helper runs ONE atomic
+-- CTE: the lifecycle INSERT is guarded by `WHERE EXISTS (the connector_secrets row)` and `RETURNING version` is the
+-- single existence source of truth; the `succeeded`/`failed` audit derive from that lifecycle RETURNING. So a
+-- revoke/tombstone of a NONEXISTENT version commits NO lifecycle row and NO `succeeded` audit (the orphan invariant
+-- binds lifecycle ROWS) — but the `attempted` + `failed`(`target_not_found`) AUDIT rows ARE committed (the failed
+-- attempt stays auditable) and the helper THROWS (the caller never receives success). See docs/42 §87.
 --
 -- This adds NO real credential, NO provider token, NO OAuth/token exchange, NO live connector, NO request-path
 -- decrypt, NO service-role path, NO rotation. RISK-007 remains OPEN.
