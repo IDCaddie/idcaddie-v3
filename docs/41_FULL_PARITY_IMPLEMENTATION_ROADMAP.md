@@ -3443,3 +3443,27 @@ No real Slack client secret, no real token, no Slack API call, no production cal
 request-path decrypt, no production enablement. The app-secret use audit (§90.7) remains future. **RISK-001 remains
 OPEN. RISK-007 remains OPEN. Cutover remains BLOCKED.** Connector credentials are not production-ready. No doc 17 §5
 box is ticked by this PR.
+
+## 104. PRODUCTION-SHAPED SYNTHETIC OAUTH CALLBACK ROUTE (PR #179, B2c-route)
+
+Implements B2c-**route** (docs/42 §90): the Slack OAuth callback route in its production SHAPE but FULLY synthetic +
+production-disabled. New server-only `oauth-callback-route-handler.ts` `handleSyntheticSlackOAuthCallback(request,
+deps)`: a production-disabled GUARD refuses at the earliest point (generic 404 before reading/parsing/logging any
+request material; no disclosure of purpose/guard/env/reason) via `isSyntheticCallbackEnabled` (trusted env only —
+false in production + without the explicit staging opt-in; a request value cannot enable it); EXPLICIT session
+resolution (no layout auth — no/failed session fails closed); parses ONLY state+code (never logged/echoed/returned);
+runs the B2c-wire orchestrator with FULLY SYNTHETIC deps; returns ONLY safe/static 303s (`/connectors?oauth=success|
+error` — never raw code/state/reason/token/secret).
+
+The `(authenticated)/connectors/oauth/callback/route.ts` is a thin shim wiring the real session resolver
+(`getSessionUser`) + `makeSyntheticOrchestratorRunner` (a synthetic http client returning a token-shaped sentinel, a
+synthetic client-secret sentinel, a synthetic store). It does NOT import/call `withSlackClientSecret` / the B2c-secret
+decrypt boundary, has NO global fetch, and can never reach slack.com. 12 synthetic tests with marked code/state/
+session/token/secret sentinels (production-disabled 404 no-disclosure; no-session; tampered-state/wrong-session/
+missing-code do NOT reach the exchange; valid reaches the synthetic exchange + global fetch never called; import-
+boundary scan).
+
+No real Slack API call, no real token, no real client secret, no request-path decrypt, no route returning a decrypted
+token, no live connector, no production enablement. The first real-token event + B2c-run remain future + explicitly
+authorized. **RISK-001 remains OPEN. RISK-007 remains OPEN. Cutover remains BLOCKED.** Connector credentials are not
+production-ready. No doc 17 §5 box is ticked by this PR.

@@ -51,6 +51,11 @@ export async function updateSession(request: NextRequest) {
   if (!user && !isPublic(request.nextUrl.pathname)) {
     const redirectUrl = request.nextUrl.clone();
     redirectUrl.pathname = "/login";
+    // DROP the original query before redirecting to /login. A protected route's query can carry sensitive
+    // material — e.g. an OAuth callback's `?code=&state=` — which must NOT be carried into the /login URL
+    // (it would land in access logs, browser history, the referer, and analytics). /login reads only `?error=`,
+    // so nothing depends on the original query. (docs/44 §2: no raw code/state in logs.)
+    redirectUrl.search = "";
     return NextResponse.redirect(redirectUrl);
   }
 

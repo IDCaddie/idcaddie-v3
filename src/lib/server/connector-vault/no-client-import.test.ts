@@ -157,7 +157,13 @@ describe("connector vault crypto is server-only (no client/app import path)", ()
 // imported by ONE src/app file — the inert server-only callback route handler (a route.ts is server code,
 // never client/browser code). So its guard forbids any "use client" importer and pins the single allowed
 // src/app importer to that route handler (so a future page/client file can't start importing it).
-const OAUTH_REL_HINTS = ["connector-vault/oauth-state", "server/connector-vault/oauth-state", "lib/server/connector-vault/oauth-state"];
+// The OAuth callback CHAIN that ONLY the callback route may import from src/app: the state module (B2a) + the
+// production-shaped synthetic route handler (B2c-route, which itself imports the B2c-wire orchestrator — that
+// orchestrator stays in CRYPTO_REL_HINTS, forbidden everywhere in src/app, since the route imports only the handler).
+const OAUTH_REL_HINTS = [
+  "connector-vault/oauth-state", "server/connector-vault/oauth-state", "lib/server/connector-vault/oauth-state",
+  "connector-vault/oauth-callback-route-handler", "server/connector-vault/oauth-callback-route-handler", "lib/server/connector-vault/oauth-callback-route-handler",
+];
 const CALLBACK_ROUTE = path.join(SRC, "app", "(authenticated)", "connectors", "oauth", "callback", "route.ts");
 
 describe("connector vault oauth-state is server-only (only the inert callback route may import it)", () => {

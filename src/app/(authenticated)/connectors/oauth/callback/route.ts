@@ -1,50 +1,45 @@
-import { NextResponse } from "next/server";
+import { getSessionUser } from "@/lib/auth/session";
+import { createHmacStateSigner } from "@/lib/server/connector-vault/oauth-state";
 import {
-  handleOAuthCallback,
-  createHmacStateSigner,
-  type OAuthStateSigner,
-} from "@/lib/server/connector-vault/oauth-state";
+  handleSyntheticSlackOAuthCallback,
+  isSyntheticCallbackEnabled,
+  makeSyntheticOrchestratorRunner,
+} from "@/lib/server/connector-vault/oauth-callback-route-handler";
 
-// Inert OAuth callback skeleton (docs/42 §7/§16/§31, gated sequence PR F). It validates `state` (CSRF /
-// nonce / expiry / signature) and returns a SAFE, INERT response — it performs NO token exchange, calls NO
-// provider endpoint, stores NO token/credential, never touches `connector_secrets`, never marks a
-// connector connected, and never persists the query params. The authorization `code` is intentionally
-// ignored (never read, returned, or logged). The vault stays NOT usable for real credentials.
-//
-// The HMAC signing secret is read from a SERVER-ONLY env var that THIS PR does not set — so by default the
-// signer is null and every callback returns an inert "not configured" status. No real secret ships here;
-// the production secret/KMS wiring is a remaining gate (docs/42 §17/§31). Tests exercise the pure
-// `handleOAuthCallback` with a test-only signer, never this env path.
+// PRODUCTION-SHAPED but SYNTHETIC Slack OAuth callback route (PR B2c-route — docs/42 §90). This is the request-path
+// SHAPE (guard → explicit session resolution → B2c-wire orchestrator → safe/static response), wired with FULLY
+// SYNTHETIC/MOCKED dependencies. It is PRODUCTION-DISABLED (`isSyntheticCallbackEnabled` is false in production and
+// without the explicit staging opt-in) and makes NO real Slack call, handles NO real token, uses NO real client
+// secret, and does NOT touch the B2c-secret client-secret decrypt boundary. The real exchange + the first real-token
+// event are B2c-run (future, explicitly authorized). NOT production OAuth.
 
-// Build the signer from a server-only secret, or null when unconfigured (the skeleton default). The env
-// var is read ONLY here (the oauth-state module stays pure); it is never exposed to the browser.
-function signerFromEnv(): OAuthStateSigner | null {
-  const secret = process.env.CONNECTOR_OAUTH_STATE_SECRET;
-  if (!secret) return null;
-  return createHmacStateSigner(secret, process.env.CONNECTOR_OAUTH_STATE_KEY_ID ?? "env");
+// Synthetic signer + server-trusted expected context (synthetic placeholders in B2c-route; in B2c-run these come from
+// the oauth_pending lookup + server config). The state secret is read from a server-only env (with a clearly-
+// synthetic fallback used only in the staging-synthetic, production-disabled path) — never exposed to the browser.
+function syntheticRunner() {
+  const signer = createHmacStateSigner(
+    process.env.CONNECTOR_OAUTH_STATE_SECRET ?? "SYNTHETIC-staging-only-state-secret-not-real",
+    process.env.CONNECTOR_OAUTH_STATE_KEY_ID ?? "synthetic",
+  );
+  return makeSyntheticOrchestratorRunner({
+    signer,
+    expected: {
+      tenantId: "11111111-1111-1111-1111-111111111111",
+      connectorId: "17000000-0000-0000-0000-0000000000a1",
+      provider: "slack",
+      redirectUri: "https://app.example.com/connectors/oauth/callback",
+      correlationId: "corr-b2c-route-synthetic",
+    },
+    now: () => Date.now(),
+  });
 }
 
-// Safe, inert messages — no secret, no code, no state, no provider payload.
-const MESSAGES: Record<string, string> = {
-  not_configured:
-    "Connector OAuth callback is not available yet. Connecting a provider is not built; no credentials were stored.",
-  provider_error: "The provider reported an error on the OAuth callback. No credentials were stored.",
-  invalid: "Invalid or expired OAuth callback. No credentials were stored.",
-  received:
-    "OAuth callback received. Connecting a provider is not built yet; no authorization code was exchanged and no credentials were stored.",
-};
-
-function handle(request: Request) {
-  const url = new URL(request.url);
-  const outcome = handleOAuthCallback(url.searchParams, {
-    signer: signerFromEnv(),
-    now: Date.now(),
-  });
-  // Plain-text, no-store, inert. The body carries only a fixed safe message + the safe status/reason code.
-  const body = `${MESSAGES[outcome.status] ?? "OAuth callback."}${outcome.reason ? ` (${outcome.reason})` : ""}`;
-  return new NextResponse(body, {
-    status: outcome.httpStatus,
-    headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" },
+async function handle(request: Request) {
+  return handleSyntheticSlackOAuthCallback(request, {
+    enabled: isSyntheticCallbackEnabled(),
+    // Explicit session resolution (no layout auth): the validated server-side user id, or null.
+    resolveSubject: async () => (await getSessionUser())?.id ?? null,
+    runOrchestrator: syntheticRunner(),
   });
 }
 
