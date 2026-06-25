@@ -56,13 +56,16 @@ list_files() {
 
 run_selftest() {
   local fail=0 s
-  # POSITIVES — real-shaped tokens with no sentinel marker; MUST be caught even on a JSX/comment line.
+  # POSITIVES — real-shaped tokens whose OWN body carries NO sentinel marker; MUST be caught even when an actual
+  # sentinel MARKER, a JSX tag, a TS generic, or a reassuring comment sits ADJACENT on the line. This proves the
+  # excuse is TOKEN-INTRINSIC, never proximity-based: a real token cannot be laundered by writing SENTINEL next to it.
   local POS=(
-    '<div token="xoxb-2468013579-2468013579246-AbCdEfGhIjKlMnOpQrStUvWx" /> // placeholder'
-    'const m: Map<string> = x; const t = "ghp_ABCDEFGHIJ0123456789abcdefghij0123456789" // synthetic'
+    '<div token="xoxb-2468013579-2468013579246-AbCdEfGhIjKlMnOpQrStUvWx" /> // SENTINEL EXAMPLE markers adjacent'
+    'const t = "ghp_ABCDEFGHIJ0123456789abcdefghij0123456789"; // SENTINEL not-a-real-token sits nearby'
+    'sk-proj-ABCDEFGHIJ0123456789abcdefghij0123456789 /* MUSTNOTLEAK marker adjacent, token body unmarked */'
+    'const m: Map<string> = x; const t = "xoxb-2468013579-2468013579246-ZzYyXxWwVvUuTtSs"'
     'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwMTIzNDU2In0.abcDEF123456ZZ'
     'AKIAIOSFODNN7REALKEYZ'
-    'sk-proj-ABCDEFGHIJ0123456789abcdefghij0123456789'
     'postgres://runner:supersecret@db.prod.internal:5432/x'
   )
   # NEGATIVES — sentinel/example/local; MUST NOT be caught.
