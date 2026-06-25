@@ -108,6 +108,15 @@ The first real credential **must be invalidatable at the provider source**, not 
 
 The first real credential may enter **only** via this path. Anything else is out of scope and forbidden.
 
+> **Build split (§7).** This path is built in two PRs without ever weakening the no-human-handling property:
+> **B1** builds the **store/encrypt half** (the guards + atomic encrypt-immediately + store + audit) and proves it
+> **with synthetic sentinel values only** — no real token, no operator/admin-console paste, no OAuth exchange, no
+> Slack API call, no callback route. **B2** builds the **token-source half** — the server-side `oauth.v2.access`
+> exchange below, where the token is **born inside the trusted server/runner path and immediately encrypted**, so
+> **no human ever sees/copies/pastes/submits it**. The **first real-token event happens only in B2**, as a
+> separately authorized run (§5/§6). The token-source rows below describe the **B2** path; they are NOT a
+> human-paste path and must never be weakened to one.
+
 | Concern | Requirement |
 |---|---|
 | **Caller identity** | The server-only OAuth **callback route** (`src/app/(authenticated)/connectors/oauth/callback/route.ts`), reached after the dev-workspace admin completes Slack consent. The browser only carries the opaque, HMAC-signed `state` + the one-time `code` in the redirect — never a token. |
@@ -324,7 +333,8 @@ If the first real credential leaks, or any check fails, execute **provider-side 
 | PR | Scope | Real token? |
 |---|---|---|
 | **PR A** | **This docs-only threat model / gate.** | No |
-| **PR B** | **Staging-only real-credential INGESTION path** — wire the Slack authorize→callback→one-time-exchange→encrypt→store flow under the runner (configure the HMAC state signer + KMS env on staging; add the **versioned `connector_runner_login` DDL**). **No live connector use, no decrypt.** Produces §5 evidence items 1–6, 11, 16. | **Yes — first real-token event (staging, §1 credential, treated as production).** |
+| **PR B1** | **Staging-only store/encrypt INGESTION path — SYNTHETIC ONLY.** The smallest guarded entry that encrypts + stores a connector secret through the existing vault (`saveConnectorSecret`): the production hard-block, the Slack-bot-token provider/kind allowlist, the required-identity + grammar-safe `correlation_id` guards, and the atomic store + audit — all proven with **synthetic sentinel** values. **No real token, no operator/admin-console paste, no OAuth exchange, no Slack API call, no callback route, no live connector, no decrypt.** It proves the path is *designed not to leak a token if a token flows through it*, without any real token. **Merging B1 does NOT authorize a real-token run.** | **No — synthetic only.** |
+| **PR B2** | **Slack OAuth authorize → callback → one-time `oauth.v2.access` exchange** (server-side only; configure the HMAC state signer + KMS env on staging; add the **versioned `connector_runner_login` DDL`**). The token is **born inside the trusted server/runner path** and immediately encrypted/stored via B1's path — **no human ever sees/copies/pastes/submits it.** The **FIRST real-token event happens only here**, as a separately authorized operational run governed by §5/§6. | **Yes — first real-token event (staging, §1 credential, treated as production).** |
 | **PR C** | **Staging real DECRYPT/USE harness** — runner-only decrypt of the §1 token behind an explicit staging flag; verify §5 items 7–13. Still no live connector traffic beyond the minimal read used to prove the token works + is revocable. | Yes (staging) |
 | **PR D** | **Live connector integration** behind an explicit **staging** feature flag (the first real provider sync), low-privilege/read-only. | Yes (staging) |
 | **PR E** | **Production-readiness review** — production KMS/IAM separation provisioned + verified, production runner identity, full evidence, sign-off. | — |

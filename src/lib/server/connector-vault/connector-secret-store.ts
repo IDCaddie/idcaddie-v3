@@ -104,7 +104,7 @@ function asNumber(v: unknown): number | undefined {
 }
 
 // The identity an audit row needs — picked EXPLICITLY (allowlist) from the store input; never the whole input.
-type AuditIds = { tenantId: string; connectorId: string; dbSecretKind: string; version: number };
+type AuditIds = { tenantId: string; connectorId: string; dbSecretKind: string; version: number; correlationId?: string };
 
 // Build the #166 allowlist audit record (actor = the runner) and the audit_logs INSERT statement to enlist.
 function auditStatement(event: ConnectorSecretAuditEvent, ids: AuditIds, errorClass?: ConnectorSecretErrorClass): RunnerStatement {
@@ -115,6 +115,7 @@ function auditStatement(event: ConnectorSecretAuditEvent, ids: AuditIds, errorCl
     secretKind: ids.dbSecretKind,
     version: ids.version,
     actorType: "connector_runner",
+    ...(ids.correlationId !== undefined ? { correlationId: ids.correlationId } : {}),
     ...(errorClass !== undefined ? { errorClass } : {}),
   });
   return buildAuditInsertStatement(record);
@@ -210,6 +211,7 @@ export function createRunnerConnectorSecretStore(
         connectorId: input.connectorId,
         dbSecretKind: input.dbSecretKind,
         version: input.version,
+        ...(input.correlationId !== undefined ? { correlationId: input.correlationId } : {}),
       };
       // 1) store.attempted — fail-closed: no store proceeds unaudited.
       await emitAudit(conn, "connector_secret.store.attempted", ids);

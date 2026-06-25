@@ -139,6 +139,7 @@ export interface ConnectorSecretWriteStore {
     dbSecretKind: string;
     version: number;
     encrypted: EncryptedConnectorSecret;
+    correlationId?: string; // optional grammar-safe id; threaded into the store audit rows ONLY (never the secret row)
   }): Promise<{ id: string }>;
 }
 export interface ConnectorSecretReadStore {
@@ -249,6 +250,7 @@ export async function saveConnectorSecret(input: {
   keyProvider: EncryptOnlyKeyProvider;
   kekId: string;
   store: ConnectorSecretWriteStore;
+  correlationId?: string; // optional grammar-safe id; flows into the store audit rows only (never the secret/ciphertext)
 }): Promise<SavedSecretRef> {
   const { context, kekId, store } = input;
   if (!store || typeof store.insertEncryptedSecret !== "function")
@@ -274,6 +276,7 @@ export async function saveConnectorSecret(input: {
     dbSecretKind: CRYPTO_TO_DB_KIND[context.secretKind],
     version: context.version,
     encrypted,
+    ...(input.correlationId !== undefined ? { correlationId: input.correlationId } : {}),
   });
 
   // REDACTED result: identifiers + non-secret KEK handle only. No plaintext, no ciphertext, no wrapped DEK.

@@ -123,6 +123,12 @@ const SAFE_KIND_RE = /^[a-z][a-z0-9_]{0,62}$/;
 const SAFE_CORRELATION_RE =
   /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|(run|job|req|corr|trace|span)[-_][A-Za-z0-9][A-Za-z0-9_-]{0,62})$/i;
 
+// Reusable grammar-safe correlation_id guard (same grammar the audit builder enforces) — so callers (e.g. the
+// staging ingestion guard) can fail closed on a bad correlation_id BEFORE any store, with the identical rule.
+export function isSafeCorrelationId(value: unknown): value is string {
+  return typeof value === "string" && SAFE_CORRELATION_RE.test(value);
+}
+
 function deriveResult(event: ConnectorSecretAuditEvent): ConnectorSecretAuditResult {
   // The suffix after the last "." is always attempted | succeeded | failed for the supported events.
   const suffix = event.slice(event.lastIndexOf(".") + 1);

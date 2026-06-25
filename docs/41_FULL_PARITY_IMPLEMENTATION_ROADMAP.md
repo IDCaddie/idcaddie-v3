@@ -3323,3 +3323,21 @@ No code, migration, test, or real token. No OAuth/token exchange, no live connec
 service-role secret path, no public route. Real credentials remain blocked; real credential save/load/use is still
 missing; rotation remains missing. **RISK-001 remains OPEN. RISK-007 remains OPEN. Cutover remains BLOCKED.**
 Connector credentials are not production-ready. No doc 17 §5 box is ticked by this PR.
+
+## 98. STAGING-ONLY STORE/ENCRYPT INGESTION PATH (PR #172, B1 — synthetic only)
+
+Implements **B1** of the docs/44 §7 B1/B2 split (doc 42 §89): the staging-only **store/encrypt** half of the
+ingestion path, proven with **synthetic sentinel values only**. New server-only `connector-secret-ingest.ts`
+(`ingestStagingConnectorSecret`) wraps the existing `saveConnectorSecret` behind fail-closed guards — a PRODUCTION
+HARD-BLOCK (explicit staging opt-in AND non-production, fail-closed default-off, trusted-server-env only), a
+Slack-bot-token provider/kind allowlist, required tenant/connector/version, and a grammar-safe `correlation_id`
+(threaded into the store audit) — then encrypt-immediately + atomic store + audit + a redacted ref. Plaintext is
+never logged/echoed/returned; any failure commits nothing. Adds `scripts/check-no-real-tokens.sh` (changed-file
+real-token-shape scan). No migration / schema / types / RLS change.
+
+**The OAuth `oauth.v2.access` exchange and the first real-token event are deferred to B2** (token born server-side,
+no human handling — docs/44's no-human-handling property preserved). **Merging B1 does NOT authorize a real-token
+run.** NO real token, NO operator paste, NO OAuth exchange, NO Slack API call, NO callback route, NO live connector,
+NO request-path decrypt, NO production enablement, NO rotation. Real credential save/load/use is still missing.
+**RISK-001 remains OPEN. RISK-007 remains OPEN. Cutover remains BLOCKED.** Connector credentials are not
+production-ready. No doc 17 §5 box is ticked by this PR.
