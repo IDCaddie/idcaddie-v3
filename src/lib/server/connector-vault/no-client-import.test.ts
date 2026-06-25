@@ -96,6 +96,9 @@ const CRYPTO_REL_HINTS = [
   "connector-vault/connector-secret-ingest",
   "server/connector-vault/connector-secret-ingest",
   "lib/server/connector-vault/connector-secret-ingest",
+  "connector-vault/slack-oauth-exchange",
+  "server/connector-vault/slack-oauth-exchange",
+  "lib/server/connector-vault/slack-oauth-exchange",
 ];
 
 function walk(dir: string): string[] {

@@ -3377,3 +3377,21 @@ No Slack OAuth exchange, no Slack API call, no callback route that exchanges a c
 connector, no request-path decrypt, no production enablement. Real credentials remain blocked; the first real-token
 event (B2c) remains future + explicitly authorized. **RISK-001 remains OPEN. RISK-007 remains OPEN. Cutover remains
 BLOCKED.** Connector credentials are not production-ready. No doc 17 §5 box is ticked by this PR.
+
+## 101. MOCKED SLACK OAUTH EXCHANGE WRAPPER (PR #175, B2b)
+
+Implements B2b (doc 42 §90.4): the server-side `code`→token exchange SHAPE, tested with MOCKED Slack responses only.
+New server-only `slack-oauth-exchange.ts` `exchangeSlackOAuthCode(input, deps)`: reads the Slack client secret from
+an **injected** `ClientSecretProvider` (NEVER `process.env`), POSTs `client_id/client_secret/code/redirect_uri` to the
+Slack token endpoint via an **injected** `SlackHttpClient` (no global `fetch`, no fallback — a stubbed global fetch
+fails loud in tests), parses the bot-token response in memory, and hands the bot token STRAIGHT to the B1 store/encrypt
+path (`ExchangeStoreHandoff`). Returns a REDACTED ref on success; a SAFE static reason on any failure
+(`missing_client_secret`/`client_secret_denied`/`exchange_http_error`/`slack_error`/`malformed_response`/
+`missing_bot_token`/`unexpected_token_type`/`store_failed`). The code, client secret, raw Slack response, and bot token
+are never logged, returned, audited, or echoed into an error. 18 synthetic tests use a token-shaped
+`xoxb-…MUSTNOTLEAK…` sentinel to prove no-leak + the store handoff + the no-network guarantee.
+
+No real Slack API call, no real token, no callback route that performs a real exchange, no live connector, no
+request-path decrypt, no production enablement. The vault-grade/KMS-backed client-secret store + exchange-specific
+audit (`connector_oauth.exchange.*`) remain FUTURE (B2c). **RISK-001 remains OPEN. RISK-007 remains OPEN. Cutover
+remains BLOCKED.** Connector credentials are not production-ready. No doc 17 §5 box is ticked by this PR.
