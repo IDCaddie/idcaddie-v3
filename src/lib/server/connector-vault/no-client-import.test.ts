@@ -99,6 +99,9 @@ const CRYPTO_REL_HINTS = [
   "connector-vault/slack-oauth-exchange",
   "server/connector-vault/slack-oauth-exchange",
   "lib/server/connector-vault/slack-oauth-exchange",
+  "connector-vault/oauth-callback-orchestrator",
+  "server/connector-vault/oauth-callback-orchestrator",
+  "lib/server/connector-vault/oauth-callback-orchestrator",
 ];
 
 function walk(dir: string): string[] {

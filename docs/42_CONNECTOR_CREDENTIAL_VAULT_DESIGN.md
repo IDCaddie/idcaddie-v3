@@ -4249,9 +4249,16 @@ post-mint failure, cleanup includes provider-side revoke + vault tombstone (docs
 - **B2b** — Slack exchange wrapper against **mocked** Slack responses (injected http client + injected client-secret
   provider + B1 store handoff); **no** real Slack call, **no** real token. _(✅ done, #175.)_ The vault-grade
   client-secret store itself + exchange-specific audit are **FUTURE — B2c** (not wired in B2b).
-- **B2c** — the vault-grade/KMS-backed client-secret store + the real injected http client + exchange audit, then the
-  staging real OAuth exchange harness, **explicitly authorized by Sam** — the **first real-token event** (token born
-  server-side, immediately encrypted; docs/44 §5).
+- **B2c — SPLIT into three separate PRs/steps (never one):**
+  - **B2c-wire** _(✅ done, #176)_ — synthetic end-to-end callback composition: `oauth-callback-orchestrator.ts`
+    composes B2a validate (gate) → B2b mocked exchange → B1 store, threading the validated payload as the single
+    source of truth (`b1StoreHandoff` wires the real B1 ingestion). Mocked Slack, synthetic token, mocked client
+    secret — no real call/token/secret, no route.
+  - **B2c-secret** _(future)_ — the vault-grade/KMS-backed Slack **client-secret store** (§90.3) + the real injected
+    http client + exchange audit (§90.6). Introduces the master OAuth credential — its **own review**.
+  - **B2c-run** _(future)_ — the staging real OAuth exchange harness, **explicitly authorized by Sam** — the **first
+    real-token event** (token born server-side, immediately encrypted; docs/44 §5). An operational go/no-go, **not a
+    normal code PR.**
 - **B2d** — live connector use behind a staging flag (later). Production readiness later. **Only then** consider
   RISK-007 closure.
 
