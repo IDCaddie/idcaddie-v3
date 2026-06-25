@@ -41,6 +41,13 @@ the lifecycle table `connector_secret_lifecycle_events`, and `scripts/check-no-r
       **staging** environment only — and is **OFF** in production.
 - [ ] The **production callback remains blocked** (production `isSyntheticCallbackEnabled` is false; no production
       redirect URI configured at Slack).
+- [ ] **#179 PROXY FIX VERIFIED SYNTHETICALLY — pre-run, BEFORE any real `code` exists (GO/NO-GO).** With ONLY
+      synthetic values, confirm the unauthenticated callback path does NOT leak the OAuth query through the auth
+      redirect: an **unauthenticated** request to the staging callback with a **synthetic** `?code=SYN&state=SYN`
+      redirects to a **CLEAN `/login`** (no `code`/`state`), the `/login` URL does **not** preserve the OAuth query,
+      and **no `Referer`/header** carries `code`/`state` (the `proxy.ts` `redirectUrl.search = ""` fix from #179). This
+      MUST PASS **before** the run is allowed to produce any real `code` — if it does not, **NO-GO** (do not enable the
+      real run). _(Re-confirm on the real path post-run in §6 — but the gate is HERE, pre-run.)_
 - [ ] **Slack DEV workspace/app confirmed** — a dedicated Slack app in a dev workspace, not production.
 - [ ] The Slack workspace is **dedicated, disposable, and contains NO real business content.**
 - [ ] The Slack workspace has **no real users/members** beyond the operator/test accounts needed for the run.
@@ -114,6 +121,8 @@ Capture (into the private evidence location) proof of each:
       thrown error, the console output, and any snapshots/artifacts.
 - [ ] **wrong-tenant cannot load** the stored secret (RLS/app-scope boundary holds).
 - [ ] a **revoked/tombstoned** token **cannot load** (lifecycle-aware fail-closed load).
+- [ ] the **#179 proxy fix was verified SYNTHETICALLY pre-run (§1), BEFORE any real `code` existed** (the
+      unauthenticated callback drops `code`/`state` on the `/login` redirect) — and re-confirmed on the real path (§6).
 - [ ] **provider-side revocation succeeds** (the Slack token is dead — §8).
 - [ ] **vault-side revoke/tombstone succeeds** (`connector_secret_lifecycle_events` records it).
 - [ ] the **staging guard is disabled** after the run (the route refuses again).
@@ -210,6 +219,14 @@ Define the response if ANY of these occurs:
 3. **Vault-side tombstone/revoke follows provider-side revocation** — UNLESS the vault row is the only immediate
    containment available (then tombstone first to stop a load, then revoke provider-side).
 
+> **A vault-side tombstone is NOT a substitute for provider-side revocation of a leaked live Slack token.** A vault
+> tombstone only stops **THIS system** from loading/using the token — the Slack token remains **live everywhere else**
+> (anyone holding the leaked copy can still use it). **Provider-side revocation at Slack is what actually KILLS the
+> token at the source.** If provider-side revocation is temporarily unreachable, a vault tombstone is **only a PARTIAL
+> STOPGAP** — **the incident is NOT contained until provider-side revocation succeeds.** Keep escalating (find another
+> Slack app-admin, rotate the client secret, uninstall the app) until the token is confirmed dead at the source; do
+> NOT close the incident or mark cleanup complete on a tombstone alone.
+
 ---
 
 ## 8. Cleanup / kill switch (provider-side revocation is NON-OPTIONAL)
@@ -241,7 +258,7 @@ After the run (pass or fail), perform + record:
 **Run id / date / operator / authorizing approver (Sam): __________   Main SHA: __________   Ref: ycdpzduxugdsffjqyoai**
 
 ### Pre-run GO
-- [ ] All §1 gate items true. Sam "GO" recorded (who/when). _If not → NO-GO._
+- [ ] All §1 gate items true, **including the #179 proxy-fix synthetic check (verified BEFORE any real `code` exists)**. Sam "GO" recorded (who/when). _If not → NO-GO._
 
 ### During-run observations
 - [ ] Exactly one authorize / callback / exchange / store (§3). No loops/retries/sweeps.
