@@ -105,6 +105,9 @@ const CRYPTO_REL_HINTS = [
   "connector-vault/slack-client-secret-store",
   "server/connector-vault/slack-client-secret-store",
   "lib/server/connector-vault/slack-client-secret-store",
+  "connector-vault/client-secret-ingest-harness",
+  "server/connector-vault/client-secret-ingest-harness",
+  "lib/server/connector-vault/client-secret-ingest-harness",
 ];
 
 function walk(dir: string): string[] {
@@ -163,6 +166,7 @@ describe("connector vault crypto is server-only (no client/app import path)", ()
 const OAUTH_REL_HINTS = [
   "connector-vault/oauth-state", "server/connector-vault/oauth-state", "lib/server/connector-vault/oauth-state",
   "connector-vault/oauth-callback-route-handler", "server/connector-vault/oauth-callback-route-handler", "lib/server/connector-vault/oauth-callback-route-handler",
+  "connector-vault/connector-oauth-config", "server/connector-vault/connector-oauth-config", "lib/server/connector-vault/connector-oauth-config",
 ];
 const CALLBACK_ROUTE = path.join(SRC, "app", "(authenticated)", "connectors", "oauth", "callback", "route.ts");
 

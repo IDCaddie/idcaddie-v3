@@ -4147,6 +4147,14 @@ loose).
 > `slack-client-secret-store.ts` envelope save + the load-bearing `withSlackClientSecret` scoped decrypt-and-use
 > closure (NO `loadClientSecret(): string` API), and the app-scope AAD (a staging ciphertext cannot decrypt as
 > production). NO real client secret entered the system; the app-secret USE audit remains future.
+>
+> **✅ B2c-run PREP (#181):** the reviewed, synthetic-tested ingestion path is now turnkey — `client-secret-ingest-
+> harness.ts` (`readSecretFromStream(stdin)` → `ingestClientSecret` → `saveSlackClientSecret`; stdin-only, refuses
+> argv/env secret, envelope-only, redacted, fail-closed, catch never surfaces the secret), `connector-oauth-config.ts`
+> `connectorOAuthRedirectUri()` (the EXACT staging redirect from server config — placeholder removed), a guarded
+> pre-flight (`scripts/b2c-ingest-client-secret.mjs`), and `connector_runner_login` documented + proven minimal-
+> privilege (RLS T57). The hosted `RunnerConnection` (connector_runner_login) + real KMS provider remain B2c-run
+> prerequisites (injected). See docs/45 §11. NO real run.
 
 The Slack **client secret** is the **master capability** that converts authorization codes into tokens — its
 compromise is *more* severe than a single bot-token compromise (it can mint tokens for every code). It must NOT be

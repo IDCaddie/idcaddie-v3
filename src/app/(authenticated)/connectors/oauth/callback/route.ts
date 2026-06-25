@@ -1,5 +1,6 @@
 import { getSessionUser } from "@/lib/auth/session";
 import { createHmacStateSigner } from "@/lib/server/connector-vault/oauth-state";
+import { connectorOAuthRedirectUri } from "@/lib/server/connector-vault/connector-oauth-config";
 import {
   handleSyntheticSlackOAuthCallback,
   isSyntheticCallbackEnabled,
@@ -27,7 +28,7 @@ function syntheticRunner() {
       tenantId: "11111111-1111-1111-1111-111111111111",
       connectorId: "17000000-0000-0000-0000-0000000000a1",
       provider: "slack",
-      redirectUri: "https://app.example.com/connectors/oauth/callback",
+      redirectUri: connectorOAuthRedirectUri(), // server-trusted exact staging callback URL — NOT request-derived
       correlationId: "corr-b2c-route-synthetic",
     },
     now: () => Date.now(),
