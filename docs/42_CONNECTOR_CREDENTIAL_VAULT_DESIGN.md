@@ -4153,8 +4153,9 @@ entries, leak-test fixtures, and comments. Design:
   IAM `kms:Decrypt` boundary**. Because the client secret is **app-level** (one per Slack app, not per
   tenant/connector), it does NOT fit `connector_secrets` (per-tenant) → a small dedicated table (e.g.
   `connector_app_secrets`) keyed by app/provider. AWS **Secrets Manager** is a documented **alternative** that, if
-  chosen in B2b, requires its OWN evidence that its access boundary is ≥ the runner `kms:Decrypt` boundary. The
-  concrete schema is specified + provisioned in B2b (the migration/store), never in this design PR.
+  chosen in B2c, requires its OWN evidence that its access boundary is ≥ the runner `kms:Decrypt` boundary. The
+  concrete schema is specified + provisioned in B2c (the migration/store), never in this design PR. (B2b only mocks
+  the injected `ClientSecretProvider`; the vault-grade store itself is FUTURE — B2c.)
 - **Read identity:** ONLY the **runner** exchange identity (the same `connector_runner` + KMS `kms:Decrypt` boundary
   that decrypts bot tokens). The web/request identity holds **no** access (no `kms:Decrypt`, deny-all).
 - **Use identity:** the client secret is read + used to call Slack **only** inside the server-side exchange (90.4),
@@ -4176,6 +4177,12 @@ entries, leak-test fixtures, and comments. Design:
 > vault-grade controls and is **not** in a plaintext env var (docs/44 §5).
 
 ### 90.4 Slack exchange path
+
+> **✅ B2b status (#175):** the MOCKED exchange wrapper is implemented — `slack-oauth-exchange.ts`
+> `exchangeSlackOAuthCode(input, deps)` builds this shape against an INJECTED http client + an INJECTED client-secret
+> provider + the B1 store handoff (no global fetch, no real Slack call, no real token). The vault-grade/KMS-backed
+> client-secret store (§90.3) and exchange-specific audit (§90.6) remain FUTURE (B2c). The token endpoint is still
+> NEVER reached by a real network call.
 
 - **Endpoint:** Slack `https://slack.com/api/oauth.v2.access` (the token endpoint — currently NEVER built). Bot-token
   install flow (OAuth v2).
@@ -4239,10 +4246,12 @@ post-mint failure, cleanup includes provider-side revoke + vault tombstone (docs
 - **B2 (this PR #173)** — design gate (docs only).
 - **B2a** — state generation + validation ONLY, with **actor/session + exact-redirect binding added**, synthetic
   callback tests, **no** Slack exchange.
-- **B2b** — Slack exchange wrapper against **mocked** Slack responses + the vault-grade client-secret store wiring;
-  **no** real Slack call.
-- **B2c** — staging real OAuth exchange harness, **explicitly authorized by Sam** — the **first real-token event**
-  (token born server-side, immediately encrypted; docs/44 §5).
+- **B2b** — Slack exchange wrapper against **mocked** Slack responses (injected http client + injected client-secret
+  provider + B1 store handoff); **no** real Slack call, **no** real token. _(✅ done, #175.)_ The vault-grade
+  client-secret store itself + exchange-specific audit are **FUTURE — B2c** (not wired in B2b).
+- **B2c** — the vault-grade/KMS-backed client-secret store + the real injected http client + exchange audit, then the
+  staging real OAuth exchange harness, **explicitly authorized by Sam** — the **first real-token event** (token born
+  server-side, immediately encrypted; docs/44 §5).
 - **B2d** — live connector use behind a staging flag (later). Production readiness later. **Only then** consider
   RISK-007 closure.
 
