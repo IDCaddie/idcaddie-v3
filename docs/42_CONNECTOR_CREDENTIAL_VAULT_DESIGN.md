@@ -4269,9 +4269,11 @@ post-mint failure, cleanup includes provider-side revoke + vault tombstone (docs
     **synthetic** (no real Slack egress), with the App-Router request-path discipline **proven** (server-only,
     staging/test-guarded, explicit actor/session resolution — no layout-auth reliance; no query-string/`state`/`code`
     logging; no raw `state`/`code` in error responses; safe/static failures). No real token.
-  - **B2c-run** _(future)_ — the staging real OAuth exchange harness, **explicitly authorized by Sam** — the **first
-    real-token event** (token born server-side, immediately encrypted; docs/44 §5). An operational go/no-go, **not a
-    normal code PR.**
+  - **B2c-run** _(future — runbook ready, #180)_ — the staging real OAuth exchange harness, **explicitly authorized by
+    Sam** — the **first real-token event** (token born server-side, immediately encrypted; docs/44 §5). An operational
+    go/no-go, **not a normal code PR.** The operator checklist is
+    [45_B2C_RUN_FIRST_REAL_TOKEN_RUNBOOK](./45_B2C_RUN_FIRST_REAL_TOKEN_RUNBOOK.md); #180 created the runbook only — no
+    real run happened.
 - **B2d** — live connector use behind a staging flag (later). Production readiness later. **Only then** consider
   RISK-007 closure.
 
