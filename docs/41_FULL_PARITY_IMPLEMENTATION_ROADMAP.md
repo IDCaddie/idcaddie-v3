@@ -3398,9 +3398,10 @@ remains BLOCKED.** Connector credentials are not production-ready. No doc 17 §5
 
 ## 102. SYNTHETIC OAUTH CALLBACK WIRING (PR #176, B2c-wire)
 
-Implements B2c-**wire** (docs/42 §90): the synthetic end-to-end callback composition. **B2c is split into three
-never-combined steps — B2c-wire (this) / B2c-secret (real KMS-backed Slack client-secret store, future) / B2c-run
-(first real-token event, future + explicitly authorized).** New server-only `oauth-callback-orchestrator.ts`
+Implements B2c-**wire** (docs/42 §90): the synthetic end-to-end callback composition. **B2c is split into FOUR
+never-combined steps — B2c-wire (this) / B2c-secret (real KMS-backed Slack client-secret store, future) / B2c-route
+(synthetic production callback route, request-path discipline proven, future) / B2c-run (first real-token event,
+future + explicitly authorized).** New server-only `oauth-callback-orchestrator.ts`
 `orchestrateSlackOAuthCallback(query, deps)` composes B2a `validateOAuthState` (the authoritative GATE) → B2b
 `exchangeSlackOAuthCode` (MOCKED) → B1 store/encrypt, as a PURE FUNCTION (no production OAuth callback route added).
 
@@ -3409,10 +3410,10 @@ redirect/correlation) is the single source of truth threaded downstream — the 
 for `state`+`code` (a decoy tenant/connector/provider in the query is ignored). Stage ordering validate→exchange→store
 is enforced (each stage skipped if the prior fails); the exchange-success/store-failure seam drops the token (the
 orchestrator never sees it — B2b never returns it). `b1StoreHandoff` wires the real B1 ingestion (token-shaped
-sentinel → ciphertext; redacted ref). 26 synthetic tests with token/secret/code sentinels + the real B2a validator
+sentinel → ciphertext; redacted ref). 27 synthetic tests with token/secret/code sentinels + the real B2a validator
 + a fail-loud global-fetch stub.
 
 No real Slack API call, no real token, no real client secret, no route, no request-path decrypt, no live connector,
-no production enablement. The KMS-backed client-secret store remains future (B2c-secret); the first real-token event
-remains future + explicitly authorized (B2c-run). **RISK-001 remains OPEN. RISK-007 remains OPEN. Cutover remains
+no production enablement. The KMS-backed client-secret store remains future (B2c-secret); the production callback route remains future
+(B2c-route); the first real-token event remains future + explicitly authorized (B2c-run). **RISK-001 remains OPEN. RISK-007 remains OPEN. Cutover remains
 BLOCKED.** Connector credentials are not production-ready. No doc 17 §5 box is ticked by this PR.

@@ -141,6 +141,7 @@ describe("B2c-wire — state integration: the REAL B2a validator gates the flow 
     { name: "no session", query: () => ({ state: mintState(), code: CODE_SENTINEL }), over: { expectedContext: ctx({ subject: "" }) }, reason: "session_required" },
     { name: "wrong tenant", query: () => ({ state: mintState(), code: CODE_SENTINEL }), over: { expectedContext: ctx({ tenantId: "22222222-2222-2222-2222-222222222222" }) }, reason: "tenant_mismatch" },
     { name: "wrong connector", query: () => ({ state: mintState(), code: CODE_SENTINEL }), over: { expectedContext: ctx({ connectorId: "17000000-0000-0000-0000-0000000000ff" }) }, reason: "connector_mismatch" },
+    { name: "wrong provider", query: () => ({ state: mintState(), code: CODE_SENTINEL }), over: { expectedContext: ctx({ provider: "okta" }) }, reason: "provider_mismatch" },
     { name: "wrong redirect", query: () => ({ state: mintState(), code: CODE_SENTINEL }), over: { expectedContext: ctx({ redirectUri: "https://app.example.com/OTHER/cb" }) }, reason: "redirect_uri_mismatch" },
     { name: "expired state", query: () => ({ state: mintState(), code: CODE_SENTINEL }), over: { now: NOW + TTL * 1000 + 1 }, reason: "expired" },
   ];
