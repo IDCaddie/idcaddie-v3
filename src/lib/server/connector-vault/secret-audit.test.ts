@@ -130,9 +130,9 @@ describe("buildConnectorSecretAuditEvent — error class is a safe static label 
   });
 });
 
-describe("buildConnectorSecretAuditEvent — event allowlist (store/load/decrypt only)", () => {
-  it("accepts exactly the nine supported store/load/decrypt events", () => {
-    expect(CONNECTOR_SECRET_AUDIT_EVENTS).toHaveLength(9);
+describe("buildConnectorSecretAuditEvent — event allowlist (store/load/decrypt + revocation/tombstone)", () => {
+  it("accepts exactly the fifteen supported events (store/load/decrypt + revocation/tombstone)", () => {
+    expect(CONNECTOR_SECRET_AUDIT_EVENTS).toHaveLength(15);
     for (const event of CONNECTOR_SECRET_AUDIT_EVENTS) {
       const r = buildConnectorSecretAuditEvent(base(event));
       expect(r.action).toBe(event);
@@ -140,10 +140,20 @@ describe("buildConnectorSecretAuditEvent — event allowlist (store/load/decrypt
     }
   });
 
-  it("rejects rotation/revocation/delete/update events (not in scope this PR)", () => {
+  it("accepts the #170 revocation + tombstone events (the write helpers emit them)", () => {
+    for (const event of [
+      "connector_secret.revocation.attempted", "connector_secret.revocation.succeeded", "connector_secret.revocation.failed",
+      "connector_secret.tombstone.attempted", "connector_secret.tombstone.succeeded", "connector_secret.tombstone.failed",
+    ] as const) {
+      expect(buildConnectorSecretAuditEvent(base(event)).action).toBe(event);
+    }
+  });
+
+  it("STILL rejects rotation/delete/update events (no such behavior implemented)", () => {
     for (const bad of [
+      "connector_secret.rotation.attempted",
       "connector_secret.rotation.succeeded",
-      "connector_secret.revocation.succeeded",
+      "connector_secret.rotation.failed",
       "connector_secret.delete.succeeded",
       "connector_secret.update.succeeded",
       "connector_secret.store.rotated",
@@ -190,7 +200,7 @@ describe("secret-audit.ts source is pure server-only + scoped", () => {
     for (const bad of [
       "createClient", "@supabase", "@aws-sdk", "pg.Client", "new Client(", "fetch(", "process.env",
       ["service", "role", "key"].join("_"), "NextRequest", "NextResponse", "export async function GET", "export async function POST",
-      "rotation", "revocation",
+      "rotation", // no rotation event/behavior exists (revocation/tombstone are now legitimately present from #170)
     ]) {
       expect(code).not.toContain(bad);
     }

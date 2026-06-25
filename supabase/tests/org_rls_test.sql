@@ -3006,7 +3006,7 @@ do $$ begin
   -- (1) GRANT SHAPE: runner column-scoped SELECT only (the 5 load-eligibility columns); NO table-level SELECT; NO
   --     INSERT/UPDATE/DELETE/TRUNCATE/REFERENCES.
   assert not has_table_privilege('connector_runner','public.connector_secret_lifecycle_events','SELECT'),    'T53 runner has NO table-level SELECT (column-scoped only)';
-  assert not has_table_privilege('connector_runner','public.connector_secret_lifecycle_events','INSERT'),    'T53 runner has NO INSERT on lifecycle table (deferred to the write-helper PR)';
+  assert not has_table_privilege('connector_runner','public.connector_secret_lifecycle_events','INSERT'),    'T53 runner has NO table-level INSERT (column-scoped only — the 0033 INSERT shape is proven in T54)';
   assert not has_table_privilege('connector_runner','public.connector_secret_lifecycle_events','UPDATE'),    'T53 runner has NO UPDATE on lifecycle table';
   assert not has_table_privilege('connector_runner','public.connector_secret_lifecycle_events','DELETE'),    'T53 runner has NO DELETE on lifecycle table';
   assert not has_table_privilege('connector_runner','public.connector_secret_lifecycle_events','TRUNCATE'),  'T53 runner has NO TRUNCATE on lifecycle table';
@@ -3016,16 +3016,19 @@ do $$ begin
           where grantee='connector_runner' and table_schema='public' and table_name='connector_secret_lifecycle_events' and privilege_type='SELECT')
          = array['connector_id','lifecycle_event_type','secret_kind','tenant_id','version'],
          'T53 runner SELECT grant is EXACTLY (connector_id, lifecycle_event_type, secret_kind, tenant_id, version)';
-  -- NO non-SELECT column grant of ANY kind (no column-scoped INSERT/UPDATE sneaking in).
-  assert (select count(*) from information_schema.role_column_grants
-          where grantee='connector_runner' and table_schema='public' and table_name='connector_secret_lifecycle_events' and privilege_type <> 'SELECT') = 0,
-         'T53 runner has NO non-SELECT (INSERT/UPDATE) column grant on the lifecycle table';
+  -- the runner column grants are ONLY SELECT + INSERT (0032 SELECT + 0033 INSERT) — NEVER UPDATE/DELETE.
+  assert (select coalesce(array_agg(distinct privilege_type::text order by privilege_type::text), array[]::text[])
+          from information_schema.role_column_grants
+          where grantee='connector_runner' and table_schema='public' and table_name='connector_secret_lifecycle_events')
+         = array['INSERT','SELECT'],
+         'T53 runner column grants on lifecycle table are EXACTLY {SELECT, INSERT} — no UPDATE/DELETE column grant';
   -- connector_secrets still NO UPDATE/DELETE for the runner (this PR added only a lifecycle SELECT grant).
   assert not has_table_privilege('connector_runner','public.connector_secrets','UPDATE'), 'T53 connector_secrets UPDATE still denied (0032 added only a lifecycle SELECT grant)';
   assert not has_table_privilege('connector_runner','public.connector_secrets','DELETE'), 'T53 connector_secrets DELETE still denied (0032 added only a lifecycle SELECT grant)';
 end $$;
 
--- (1) GRANT SHAPE functional under the runner: SELECT works; INSERT/UPDATE/DELETE FAIL.
+-- (1) GRANT SHAPE functional under the runner: SELECT works; UPDATE/DELETE FAIL. (INSERT is now granted by 0033 —
+--     its shape + atomicity are proven in T54; here we only re-confirm the SELECT + the still-denied UPDATE/DELETE.)
 set role connector_runner;
 do $$ declare blocked boolean; n int;
 begin
@@ -3034,10 +3037,6 @@ begin
     where tenant_id='11111111-1111-1111-1111-111111111111' and connector_id='17000000-0000-0000-0000-0000000000a1'
       and secret_kind='api_key' and version=54 and lifecycle_event_type in ('revoked','tombstoned');
   assert n = 1, 'T53 runner SELECT reads the lifecycle eligibility columns for the load query';
-  blocked := false;
-  begin insert into public.connector_secret_lifecycle_events (tenant_id, connector_id, secret_kind, version, lifecycle_event_type)
-          values ('11111111-1111-1111-1111-111111111111','17000000-0000-0000-0000-0000000000a1','api_key', 99, 'revoked'); exception when others then blocked := true; end;
-  assert blocked, 'T53 runner INSERT on lifecycle table must FAIL (no INSERT grant in this PR)';
   blocked := false;
   begin update public.connector_secret_lifecycle_events set version=999 where version=54; exception when others then blocked := true; end;
   assert blocked, 'T53 runner UPDATE on lifecycle table must FAIL';
@@ -3086,6 +3085,179 @@ do $$ begin
          'T53 lifecycle-aware load EXCLUDES an ACTIVE version that has a revoked lifecycle event (fail-closed, not just status/expiry)';
   -- (latest-INTENT no-fallback is proven at the adapter level in connector-secret-store.test.ts; the SQL proof
   --  above shows the lifecycle NOT EXISTS check excludes an otherwise-active version under the runner role.)
+end $$;
+reset role;
+
+-- ── Test 54: connector_runner lifecycle INSERT grant + revoke/tombstone atomicity + orphan prevention (0033) ─
+-- 0033 adds the runner COLUMN-scoped INSERT on connector_secret_lifecycle_events (the 8 safe-metadata columns) for
+-- the revoke/tombstone write helpers. The runner KEEPS SELECT (0032) and STILL gets NO UPDATE/DELETE — the 0032
+-- append-only trigger STILL rejects mutation for the runner even though it now holds INSERT. Orphan prevention is
+-- the helper's `where exists (connector_secrets)` guard, in the same runner transaction as the audit. This does
+-- NOT modify connector_secrets (still no runner UPDATE/DELETE) and does NOT add rotation.
+reset role;
+-- seed (privileged setup): a FRESH active connector_secrets v55 (the helper revokes/tombstones an EXISTING version).
+insert into public.connector_secrets (tenant_id, connector_id, secret_kind, version, status, ciphertext, key_id, envelope_version, aead_alg)
+  values ('11111111-1111-1111-1111-111111111111','17000000-0000-0000-0000-0000000000a1','api_key', 55, 'active', '\xdead'::bytea, 'kek-55', 1, 'AES-256-GCM');
+
+do $$ begin
+  -- (1) GRANT SHAPE: runner now has column-scoped INSERT of EXACTLY the 8 safe columns; SELECT kept (5 cols); NO
+  --     table-level; NO UPDATE/DELETE/TRUNCATE.
+  assert not has_table_privilege('connector_runner','public.connector_secret_lifecycle_events','UPDATE'),   'T54 runner still has NO UPDATE on lifecycle table (even with INSERT)';
+  assert not has_table_privilege('connector_runner','public.connector_secret_lifecycle_events','DELETE'),   'T54 runner still has NO DELETE on lifecycle table (even with INSERT)';
+  assert not has_table_privilege('connector_runner','public.connector_secret_lifecycle_events','TRUNCATE'), 'T54 runner has NO TRUNCATE on lifecycle table';
+  assert not has_table_privilege('connector_runner','public.connector_secret_lifecycle_events','INSERT'),   'T54 runner has NO table-level INSERT (column-scoped only)';
+  assert (select coalesce(array_agg(distinct column_name::text order by column_name::text), array[]::text[])
+          from information_schema.role_column_grants
+          where grantee='connector_runner' and table_schema='public' and table_name='connector_secret_lifecycle_events' and privilege_type='INSERT')
+         = array['actor_type','connector_id','correlation_id','lifecycle_event_type','reason_class','secret_kind','tenant_id','version'],
+         'T54 runner INSERT grant is EXACTLY the 8 safe-metadata columns (no id/created_at/audit_log_id)';
+  assert not has_column_privilege('connector_runner','public.connector_secret_lifecycle_events','id','INSERT'),           'T54 runner must NOT INSERT id (server default)';
+  assert not has_column_privilege('connector_runner','public.connector_secret_lifecycle_events','created_at','INSERT'),   'T54 runner must NOT INSERT created_at (server default)';
+  assert not has_column_privilege('connector_runner','public.connector_secret_lifecycle_events','audit_log_id','INSERT'), 'T54 runner must NOT INSERT audit_log_id (not granted this PR)';
+  -- SELECT (0032) still exactly the 5 eligibility columns.
+  assert (select coalesce(array_agg(distinct column_name::text order by column_name::text), array[]::text[])
+          from information_schema.role_column_grants
+          where grantee='connector_runner' and table_schema='public' and table_name='connector_secret_lifecycle_events' and privilege_type='SELECT')
+         = array['connector_id','lifecycle_event_type','secret_kind','tenant_id','version'],
+         'T54 runner SELECT grant is still EXACTLY the 5 eligibility columns (0032 unchanged)';
+  -- connector_secrets STILL no runner UPDATE/DELETE (this PR touched only the lifecycle grant).
+  assert not has_table_privilege('connector_runner','public.connector_secrets','UPDATE'), 'T54 connector_secrets UPDATE still denied';
+  assert not has_table_privilege('connector_runner','public.connector_secrets','DELETE'), 'T54 connector_secrets DELETE still denied';
+end $$;
+
+-- (2) FUNCTIONAL under the runner — run the ACTUAL helper CTE (single statement: lifecycle WHERE EXISTS = the
+--     existence source of truth; attempted UNCONDITIONAL; succeeded WHERE EXISTS ins_lifecycle; failed WHERE NOT
+--     EXISTS ins_lifecycle). EXISTING v55 -> lifecycle + attempted + succeeded (no failed). NONEXISTENT v777 ->
+--     attempted + failed(target_not_found), NO lifecycle, NO succeeded. Exactly one terminal each.
+set role connector_runner;
+with ins_lifecycle as (
+  insert into public.connector_secret_lifecycle_events (tenant_id, connector_id, secret_kind, version, lifecycle_event_type, reason_class, actor_type, correlation_id)
+  select '11111111-1111-1111-1111-111111111111','17000000-0000-0000-0000-0000000000a1','api_key', 55, 'revoked', 'manual', 'connector_runner', null
+  where exists (select 1 from public.connector_secrets cs where cs.tenant_id='11111111-1111-1111-1111-111111111111' and cs.connector_id='17000000-0000-0000-0000-0000000000a1' and cs.secret_kind='api_key' and cs.version=55)
+  returning version),
+ins_attempted as (insert into public.audit_logs (tenant_id, action, resource_type, after_json) values ('11111111-1111-1111-1111-111111111111','connector_secret.revocation.attempted','connector_secret','{"event":"connector_secret.revocation.attempted","version":55}'::jsonb) returning 1),
+ins_succeeded as (insert into public.audit_logs (tenant_id, action, resource_type, after_json) select '11111111-1111-1111-1111-111111111111','connector_secret.revocation.succeeded','connector_secret','{"event":"connector_secret.revocation.succeeded","version":55}'::jsonb where exists (select 1 from ins_lifecycle) returning 1),
+ins_failed as (insert into public.audit_logs (tenant_id, action, resource_type, after_json) select '11111111-1111-1111-1111-111111111111','connector_secret.revocation.failed','connector_secret','{"event":"connector_secret.revocation.failed","version":55,"error_class":"target_not_found"}'::jsonb where not exists (select 1 from ins_lifecycle) returning 1)
+select count(*) from ins_lifecycle;
+with ins_lifecycle as (
+  insert into public.connector_secret_lifecycle_events (tenant_id, connector_id, secret_kind, version, lifecycle_event_type, reason_class, actor_type, correlation_id)
+  select '11111111-1111-1111-1111-111111111111','17000000-0000-0000-0000-0000000000a1','api_key', 777, 'revoked', 'manual', 'connector_runner', null
+  where exists (select 1 from public.connector_secrets cs where cs.tenant_id='11111111-1111-1111-1111-111111111111' and cs.connector_id='17000000-0000-0000-0000-0000000000a1' and cs.secret_kind='api_key' and cs.version=777)
+  returning version),
+ins_attempted as (insert into public.audit_logs (tenant_id, action, resource_type, after_json) values ('11111111-1111-1111-1111-111111111111','connector_secret.revocation.attempted','connector_secret','{"event":"connector_secret.revocation.attempted","version":777}'::jsonb) returning 1),
+ins_succeeded as (insert into public.audit_logs (tenant_id, action, resource_type, after_json) select '11111111-1111-1111-1111-111111111111','connector_secret.revocation.succeeded','connector_secret','{"event":"connector_secret.revocation.succeeded","version":777}'::jsonb where exists (select 1 from ins_lifecycle) returning 1),
+ins_failed as (insert into public.audit_logs (tenant_id, action, resource_type, after_json) select '11111111-1111-1111-1111-111111111111','connector_secret.revocation.failed','connector_secret','{"event":"connector_secret.revocation.failed","version":777,"error_class":"target_not_found"}'::jsonb where not exists (select 1 from ins_lifecycle) returning 1)
+select count(*) from ins_lifecycle;
+reset role;
+do $$ begin
+  -- EXISTING v55: lifecycle row committed; attempted + succeeded committed; NO failed; exactly one terminal.
+  assert (select count(*) from public.connector_secret_lifecycle_events where version=55 and lifecycle_event_type='revoked' and connector_id='17000000-0000-0000-0000-0000000000a1') = 1, 'T54 EXISTING v55: the revoke committed the lifecycle row';
+  assert (select count(*) from public.audit_logs where action='connector_secret.revocation.attempted' and (after_json->>'version')='55') = 1, 'T54 EXISTING v55: attempted audit committed';
+  assert (select count(*) from public.audit_logs where action='connector_secret.revocation.succeeded' and (after_json->>'version')='55') = 1, 'T54 EXISTING v55: succeeded audit committed';
+  assert (select count(*) from public.audit_logs where action='connector_secret.revocation.failed' and (after_json->>'version')='55') = 0, 'T54 EXISTING v55: NO failed audit';
+  assert (select count(*) from public.audit_logs where action in ('connector_secret.revocation.succeeded','connector_secret.revocation.failed') and (after_json->>'version')='55') = 1, 'T54 EXISTING v55: EXACTLY one terminal audit (succeeded)';
+  -- NONEXISTENT v777: NO lifecycle row; attempted + failed(target_not_found) committed; NO succeeded; exactly one terminal.
+  assert (select count(*) from public.connector_secret_lifecycle_events where version=777) = 0, 'T54 NONEXISTENT v777: NO lifecycle row (orphan prevented)';
+  assert (select count(*) from public.audit_logs where action='connector_secret.revocation.attempted' and (after_json->>'version')='777') = 1, 'T54 NONEXISTENT v777: attempted audit committed (the failed attempt IS auditable)';
+  assert (select count(*) from public.audit_logs where action='connector_secret.revocation.succeeded' and (after_json->>'version')='777') = 0, 'T54 NONEXISTENT v777: NO succeeded audit';
+  assert (select count(*) from public.audit_logs where action='connector_secret.revocation.failed' and (after_json->>'version')='777' and (after_json->>'error_class')='target_not_found') = 1, 'T54 NONEXISTENT v777: failed audit committed with target_not_found';
+  assert (select count(*) from public.audit_logs where action in ('connector_secret.revocation.succeeded','connector_secret.revocation.failed') and (after_json->>'version')='777') = 1, 'T54 NONEXISTENT v777: EXACTLY one terminal audit (failed)';
+end $$;
+
+-- (2b) the SAME helper CTE for TOMBSTONE (amendment #4 — exactly-one-terminal proven for revoke AND tombstone on
+--     the REAL DB, not just the mock). Fresh v57 (existing) -> lifecycle + attempted + succeeded; v778 (nonexistent)
+--     -> attempted + failed(target_not_found), no lifecycle/succeeded. The SQL is identical to (2) bar the literals.
+reset role;
+insert into public.connector_secrets (tenant_id, connector_id, secret_kind, version, status, ciphertext, key_id, envelope_version, aead_alg)
+  values ('11111111-1111-1111-1111-111111111111','17000000-0000-0000-0000-0000000000a1','api_key', 57, 'active', '\xdead'::bytea, 'kek-57', 1, 'AES-256-GCM');
+set role connector_runner;
+with ins_lifecycle as (
+  insert into public.connector_secret_lifecycle_events (tenant_id, connector_id, secret_kind, version, lifecycle_event_type, reason_class, actor_type, correlation_id)
+  select '11111111-1111-1111-1111-111111111111','17000000-0000-0000-0000-0000000000a1','api_key', 57, 'tombstoned', 'manual', 'connector_runner', null
+  where exists (select 1 from public.connector_secrets cs where cs.tenant_id='11111111-1111-1111-1111-111111111111' and cs.connector_id='17000000-0000-0000-0000-0000000000a1' and cs.secret_kind='api_key' and cs.version=57)
+  returning version),
+ins_attempted as (insert into public.audit_logs (tenant_id, action, resource_type, after_json) values ('11111111-1111-1111-1111-111111111111','connector_secret.tombstone.attempted','connector_secret','{"event":"connector_secret.tombstone.attempted","version":57}'::jsonb) returning 1),
+ins_succeeded as (insert into public.audit_logs (tenant_id, action, resource_type, after_json) select '11111111-1111-1111-1111-111111111111','connector_secret.tombstone.succeeded','connector_secret','{"event":"connector_secret.tombstone.succeeded","version":57}'::jsonb where exists (select 1 from ins_lifecycle) returning 1),
+ins_failed as (insert into public.audit_logs (tenant_id, action, resource_type, after_json) select '11111111-1111-1111-1111-111111111111','connector_secret.tombstone.failed','connector_secret','{"event":"connector_secret.tombstone.failed","version":57,"error_class":"target_not_found"}'::jsonb where not exists (select 1 from ins_lifecycle) returning 1)
+select count(*) from ins_lifecycle;
+with ins_lifecycle as (
+  insert into public.connector_secret_lifecycle_events (tenant_id, connector_id, secret_kind, version, lifecycle_event_type, reason_class, actor_type, correlation_id)
+  select '11111111-1111-1111-1111-111111111111','17000000-0000-0000-0000-0000000000a1','api_key', 778, 'tombstoned', 'manual', 'connector_runner', null
+  where exists (select 1 from public.connector_secrets cs where cs.tenant_id='11111111-1111-1111-1111-111111111111' and cs.connector_id='17000000-0000-0000-0000-0000000000a1' and cs.secret_kind='api_key' and cs.version=778)
+  returning version),
+ins_attempted as (insert into public.audit_logs (tenant_id, action, resource_type, after_json) values ('11111111-1111-1111-1111-111111111111','connector_secret.tombstone.attempted','connector_secret','{"event":"connector_secret.tombstone.attempted","version":778}'::jsonb) returning 1),
+ins_succeeded as (insert into public.audit_logs (tenant_id, action, resource_type, after_json) select '11111111-1111-1111-1111-111111111111','connector_secret.tombstone.succeeded','connector_secret','{"event":"connector_secret.tombstone.succeeded","version":778}'::jsonb where exists (select 1 from ins_lifecycle) returning 1),
+ins_failed as (insert into public.audit_logs (tenant_id, action, resource_type, after_json) select '11111111-1111-1111-1111-111111111111','connector_secret.tombstone.failed','connector_secret','{"event":"connector_secret.tombstone.failed","version":778,"error_class":"target_not_found"}'::jsonb where not exists (select 1 from ins_lifecycle) returning 1)
+select count(*) from ins_lifecycle;
+reset role;
+do $$ begin
+  -- EXISTING v57: tombstoned lifecycle row + attempted + succeeded; NO failed; exactly one terminal.
+  assert (select count(*) from public.connector_secret_lifecycle_events where version=57 and lifecycle_event_type='tombstoned' and connector_id='17000000-0000-0000-0000-0000000000a1') = 1, 'T54 TOMBSTONE EXISTING v57: the tombstone committed the lifecycle row';
+  assert (select count(*) from public.audit_logs where action='connector_secret.tombstone.attempted' and (after_json->>'version')='57') = 1, 'T54 TOMBSTONE EXISTING v57: attempted audit committed';
+  assert (select count(*) from public.audit_logs where action='connector_secret.tombstone.succeeded' and (after_json->>'version')='57') = 1, 'T54 TOMBSTONE EXISTING v57: succeeded audit committed';
+  assert (select count(*) from public.audit_logs where action in ('connector_secret.tombstone.succeeded','connector_secret.tombstone.failed') and (after_json->>'version')='57') = 1, 'T54 TOMBSTONE EXISTING v57: EXACTLY one terminal audit (succeeded)';
+  -- NONEXISTENT v778: NO lifecycle row; attempted + failed(target_not_found); NO succeeded; exactly one terminal.
+  assert (select count(*) from public.connector_secret_lifecycle_events where version=778) = 0, 'T54 TOMBSTONE NONEXISTENT v778: NO lifecycle row (orphan prevented)';
+  assert (select count(*) from public.audit_logs where action='connector_secret.tombstone.attempted' and (after_json->>'version')='778') = 1, 'T54 TOMBSTONE NONEXISTENT v778: attempted audit committed';
+  assert (select count(*) from public.audit_logs where action='connector_secret.tombstone.succeeded' and (after_json->>'version')='778') = 0, 'T54 TOMBSTONE NONEXISTENT v778: NO succeeded audit';
+  assert (select count(*) from public.audit_logs where action='connector_secret.tombstone.failed' and (after_json->>'version')='778' and (after_json->>'error_class')='target_not_found') = 1, 'T54 TOMBSTONE NONEXISTENT v778: failed audit committed with target_not_found';
+  assert (select count(*) from public.audit_logs where action in ('connector_secret.tombstone.succeeded','connector_secret.tombstone.failed') and (after_json->>'version')='778') = 1, 'T54 TOMBSTONE NONEXISTENT v778: EXACTLY one terminal audit (failed)';
+end $$;
+
+-- (3) APPEND-ONLY still holds for the runner DESPITE the new INSERT grant: runner UPDATE/DELETE FAIL.
+set role connector_runner;
+do $$ declare blocked boolean;
+begin
+  blocked := false; begin update public.connector_secret_lifecycle_events set version=556 where version=55; exception when others then blocked := true; end;
+  assert blocked, 'T54 runner UPDATE on lifecycle table must FAIL even though the runner now has INSERT';
+  blocked := false; begin delete from public.connector_secret_lifecycle_events where version=55; exception when others then blocked := true; end;
+  assert blocked, 'T54 runner DELETE on lifecycle table must FAIL even though the runner now has INSERT';
+end $$;
+reset role;
+
+-- (4) APPEND-ONLY TRIGGER independent of grant-absence (runner now HAS INSERT): a PRIVILEGED role's UPDATE/DELETE
+--     is STILL rejected by the trigger, and the row is UNCHANGED / STILL EXISTS afterwards.
+do $$ declare blocked boolean; msg text;
+begin
+  blocked := false; msg := '';
+  begin update public.connector_secret_lifecycle_events set version=999 where version=55; exception when others then blocked := true; msg := SQLERRM; end;
+  assert blocked, 'T54 APPEND-ONLY: a privileged UPDATE must be rejected (runner now has INSERT)';
+  assert msg like '%append-only%', format('T54 APPEND-ONLY TRIGGER (not grant) must reject privileged UPDATE — got: %s', msg);
+  blocked := false; msg := '';
+  begin delete from public.connector_secret_lifecycle_events where version=55; exception when others then blocked := true; msg := SQLERRM; end;
+  assert blocked, 'T54 APPEND-ONLY: a privileged DELETE must be rejected (runner now has INSERT)';
+  assert msg like '%append-only%', format('T54 APPEND-ONLY TRIGGER (not grant) must reject privileged DELETE — got: %s', msg);
+  assert (select count(*) from public.connector_secret_lifecycle_events where version=55 and lifecycle_event_type='revoked') = 1,
+         'T54 APPEND-ONLY: after the blocked UPDATE+DELETE the lifecycle row is UNCHANGED and STILL EXISTS';
+  assert (select count(*) from public.connector_secret_lifecycle_events where version=999) = 0, 'T54 APPEND-ONLY: the blocked UPDATE did NOT change version to 999';
+end $$;
+
+-- (5) ATOMICITY rollback REAL DB: the SINGLE statement (the helper CTE) is all-or-nothing. Force the in-CTE
+--     SUCCEEDED audit to FAIL (it names the non-granted actor_user_id column) AFTER the lifecycle INSERT matched
+--     v55 — the WHOLE statement aborts, so the lifecycle row does NOT commit (no orphan lifecycle row without its
+--     audit, no compensating delete). Proves a succeeded-audit failure rolls back the lifecycle insert at the DB level.
+set role connector_runner;
+do $$ declare cte_failed boolean := false;
+begin
+  begin
+    execute $cte$
+      with ins_lifecycle as (
+        insert into public.connector_secret_lifecycle_events (tenant_id, connector_id, secret_kind, version, lifecycle_event_type, reason_class, actor_type, correlation_id)
+        select '11111111-1111-1111-1111-111111111111','17000000-0000-0000-0000-0000000000a1','api_key', 55, 'tombstoned', 'manual', 'connector_runner', null
+        where exists (select 1 from public.connector_secrets cs where cs.tenant_id='11111111-1111-1111-1111-111111111111' and cs.connector_id='17000000-0000-0000-0000-0000000000a1' and cs.secret_kind='api_key' and cs.version=55)
+        returning version)
+      insert into public.audit_logs (tenant_id, action, resource_type, actor_user_id)
+        select '11111111-1111-1111-1111-111111111111','connector_secret.tombstone.succeeded','connector_secret','0b000000-0000-0000-0000-000000000001'
+        where exists (select 1 from ins_lifecycle)
+    $cte$;
+  exception when others then cte_failed := true;
+  end;
+  assert cte_failed, 'T54 ATOMICITY: an in-CTE succeeded-audit failure (non-granted actor_user_id) must fail the whole statement under the runner';
+  assert (select count(*) from public.connector_secret_lifecycle_events where version=55 and lifecycle_event_type='tombstoned') = 0,
+         'T54 ATOMICITY: the succeeded-audit failure rolled back the in-CTE lifecycle INSERT (no tombstoned row, no compensating delete)';
+  -- the v55 REVOKED row from part (2) is untouched (it was a separate, committed statement).
+  assert (select count(*) from public.connector_secret_lifecycle_events where version=55 and lifecycle_event_type='revoked') = 1,
+         'T54 ATOMICITY: the prior committed revoked v55 row is unaffected by the rolled-back tombstone';
 end $$;
 reset role;
 
