@@ -10,11 +10,15 @@
 // the runtime browser sentinel below, and `no-client-import.test.ts` asserts no `"use client"` / `src/app`
 // file imports it. Its only import is `node:crypto` (HMAC + constant-time compare + random nonce).
 //
-// MODEL (docs/42 §7): a stateless, HMAC-signed `state` binds the callback to `{tenant_id, provider,
-// connector_id?, subject?, redirect_intent, nonce, exp}`. On the provider's redirect back, the callback
-// recomputes the HMAC and rejects any mismatch (tamper / wrong key), tenant/provider/connector swap,
-// expiry, or missing nonce — fail-closed, with safe reason CODES only (never the key, nonce, code, or any
-// provider payload). The signing key is held by an INJECTED signer (a server-only secret / KMS in
+// MODEL (docs/42 §7 + §90.2, B2a): a stateless, HMAC-signed `state` binds the callback to ALL EIGHT of
+// `{ sub (actor), tid (tenant), prov (provider), cid (connector), redir (EXACT redirect URI), corr
+// (correlation/operation id), exp (expiry), nonce (single-use) }`. Generation is GATED by an actor authorization
+// check (`generateBoundOAuthState`) so an actor cannot mint a state for a tenant/connector they cannot access.
+// On the provider's redirect back, the callback recomputes the HMAC and then compares EACH bound field against
+// the completing request/session — rejecting any tamper / wrong key, missing session, subject/tenant/provider/
+// connector/redirect/correlation mismatch, expiry, replay, or missing nonce — fail-closed, with safe reason CODES
+// only (never the key, nonce, code, session, or any provider payload). The single-use marker is enforced atomically
+// by `oauth-pending-consume.ts` (one atomic UPDATE; a concurrent second consume fails closed). The signing key is held by an INJECTED signer (a server-only secret / KMS in
 // production — NOT in this PR; a test-only in-memory signer in tests). Single-use REPLAY rejection needs a
 // shared consumed-nonce store; an optional in-memory store is supported for tests, and the production
 // (DB-backed, single-use `oauth_pending`) store remains a gate — see docs/42 §16/§30.
@@ -38,17 +42,26 @@ export type OAuthStateContext = {
   connectorId?: string | null;
   subject?: string | null;
   redirectIntent: string;
+  // B2a (docs/42 §90.2): the EXACT redirect URI (absolute HTTPS) bound at authorize and compared FULL-STRING at
+  // callback. It MUST be a server-trusted/configured value — NEVER reconstructed from request-controlled inputs
+  // (Host, X-Forwarded-Host, Forwarded, request URL, origin, query). Use `serverTrustedRedirectUri`.
+  redirectUri: string;
+  // B2a: a grammar-safe correlation/operation id (mirrors the #166 grammar) bound at authorize.
+  correlationId: string;
 };
 
 // The signed payload carried in `state` (compact keys; all non-secret EXCEPT the nonce, which is a
-// single-use random value, not a long-lived secret). `exp` is an epoch-ms expiry.
+// single-use random value, not a long-lived secret). `exp` is an epoch-ms expiry. B2a binds all eight fields
+// (docs/42 §90.2): sub, tid, prov, cid, redir (exact URI), corr, exp, nonce (single-use).
 export type OAuthStatePayload = {
   v: 1;
   tid: string; // tenant_id
   prov: string; // provider
   cid: string | null; // connector_id (re-auth) or null
-  sub: string | null; // initiating subject or null
-  intent: string; // redirect/callback intent
+  sub: string | null; // initiating subject (actor) — B2a binds + compares this
+  intent: string; // redirect/callback intent (logical label)
+  redir: string; // B2a: the EXACT redirect URI (compared full-string at callback)
+  corr: string; // B2a: correlation/operation id
   nonce: string; // single-use CSRF nonce
   exp: number; // epoch ms expiry
 };
@@ -74,9 +87,13 @@ export type OAuthStateReason =
   | "missing_nonce"
   | "expired"
   | "replayed"
+  | "session_required" // B2a: the callback supplied no completing session/actor subject
+  | "subject_mismatch" // B2a: state.sub != the completing session's authenticated subject
   | "tenant_mismatch"
   | "provider_mismatch"
-  | "connector_mismatch";
+  | "connector_mismatch"
+  | "redirect_uri_mismatch" // B2a: state.redir != the server-trusted expected redirect URI
+  | "correlation_mismatch"; // B2a: state.corr != the expected correlation/operation id
 
 export type OAuthStateValidation =
   | { ok: true; payload: OAuthStatePayload }
@@ -90,6 +107,32 @@ export class OAuthStateError extends Error {
 }
 
 const NONCE_BYTES = 16;
+
+// Grammar-safe correlation/operation id — a uuid OR a short prefixed id. Mirrors the #166 `SAFE_CORRELATION_RE`
+// (kept inline so this module's only import stays `node:crypto`); structurally rejects an opaque high-entropy blob.
+const SAFE_CORRELATION_RE =
+  /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|(run|job|req|corr|trace|span)[-_][A-Za-z0-9][A-Za-z0-9_-]{0,62})$/i;
+
+// A redirect URI is acceptable only if it is an absolute HTTPS URL (no `http:`/`javascript:`/`data:`/relative) —
+// the same rule `buildSlackAuthorizeUrl` applies. The EXACT string is what is bound + compared.
+function isAbsoluteHttpsUrl(value: unknown): value is string {
+  if (typeof value !== "string" || value.length === 0) return false;
+  try {
+    return new URL(value).protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+// B2a: resolve the EXACT redirect URI to compare against — ONLY from server-trusted config, NEVER from a request.
+// The callback MUST feed `validateOAuthState`'s `expectedContext.redirectUri` from this (a server constant/env),
+// not from Host/X-Forwarded-Host/Forwarded/request URL/origin/query — otherwise a spoofed Host could move the
+// comparison target. This helper deliberately takes NO request argument.
+export function serverTrustedRedirectUri(configuredRedirectUri: string): string {
+  if (!isAbsoluteHttpsUrl(configuredRedirectUri))
+    throw new OAuthStateError("invalid server-configured redirect uri (must be absolute https)");
+  return configuredRedirectUri;
+}
 
 // A pure HMAC-SHA256 signer factory (used by the route to build a signer from a server-only secret, and by
 // tests to build a test-only signer). The secret is passed in — this module NEVER reads it from env.
@@ -116,6 +159,14 @@ function assertContext(ctx: OAuthStateContext): void {
     throw new OAuthStateError("invalid oauth state context: provider");
   if (typeof ctx.redirectIntent !== "string" || ctx.redirectIntent.length === 0)
     throw new OAuthStateError("invalid oauth state context: redirectIntent");
+  // B2a: every minted state binds all eight fields — require the actor subject, the EXACT absolute-HTTPS redirect
+  // URI, and a grammar-safe correlation id.
+  if (typeof ctx.subject !== "string" || ctx.subject.length === 0)
+    throw new OAuthStateError("invalid oauth state context: subject (actor) is required");
+  if (!isAbsoluteHttpsUrl(ctx.redirectUri))
+    throw new OAuthStateError("invalid oauth state context: redirectUri (must be absolute https)");
+  if (!SAFE_CORRELATION_RE.test(ctx.correlationId))
+    throw new OAuthStateError("invalid oauth state context: correlationId");
 }
 
 // ── Public API ─────────────────────────────────────────────────────────────────────────────────────
@@ -139,6 +190,8 @@ export function createOAuthState(
     cid: ctx.connectorId ?? null,
     sub: ctx.subject ?? null,
     intent: ctx.redirectIntent,
+    redir: ctx.redirectUri,
+    corr: ctx.correlationId,
     nonce,
     exp: opts.now + opts.ttlSeconds * 1000,
   };
@@ -146,6 +199,36 @@ export function createOAuthState(
   const sig = opts.signer.sign(json);
   const state = `${b64urlEncode(Buffer.from(json, "utf8"))}.${b64urlEncode(sig)}`;
   return { state, nonce };
+}
+
+// B2a generation-time authorization (docs/42 §90.1 / §1): the initiating actor MUST be authorized for the
+// `tenant_id` AND `connector_id` being bound. An actor must NOT be able to mint a state binding a tenant or
+// connector they cannot access — this prevents a *self-consistent* malicious state (the callback equality check
+// alone is not enough; both are required). Returns true iff `subject` may bind that tenant + connector.
+export type AuthorizeActorForState = (input: {
+  subject: string;
+  tenantId: string;
+  connectorId: string | null;
+}) => boolean | Promise<boolean>;
+
+// Mint a fully-bound state ONLY after the actor passes the generation-time authorization check. If the actor is
+// not authorized, it THROWS and NO usable state is created (the signer is never invoked). The injected
+// `authorizeActor` is the tenant-membership / connector-access gate (a real DB check in B2c; a mock in tests).
+export async function generateBoundOAuthState(
+  ctx: OAuthStateContext,
+  deps: { signer: OAuthStateSigner; ttlSeconds: number; now: number; authorizeActor: AuthorizeActorForState; nonce?: string },
+): Promise<{ state: string; nonce: string }> {
+  assertContext(ctx); // requires subject + redirectUri + correlationId (+ tenant/provider/intent)
+  if (!deps || typeof deps.authorizeActor !== "function")
+    throw new OAuthStateError("missing authorizeActor");
+  const allowed = await deps.authorizeActor({
+    subject: ctx.subject as string,
+    tenantId: ctx.tenantId,
+    connectorId: ctx.connectorId ?? null,
+  });
+  if (allowed !== true)
+    throw new OAuthStateError("actor is not authorized to mint state for this tenant/connector");
+  return createOAuthState(ctx, { signer: deps.signer, ttlSeconds: deps.ttlSeconds, now: deps.now, nonce: deps.nonce });
 }
 
 // Validate a `state` returned to the callback. Verifies the HMAC over the EXACT signed bytes BEFORE
@@ -193,7 +276,11 @@ export function validateOAuthState(
     typeof payload.tid !== "string" ||
     typeof payload.prov !== "string" ||
     typeof payload.intent !== "string" ||
-    typeof payload.exp !== "number"
+    typeof payload.exp !== "number" ||
+    // B2a: a fully-bound state MUST carry the actor subject, the exact redirect URI, and the correlation id.
+    typeof payload.sub !== "string" || payload.sub.length === 0 ||
+    typeof payload.redir !== "string" || payload.redir.length === 0 ||
+    typeof payload.corr !== "string" || payload.corr.length === 0
   ) {
     return { ok: false, reason: "malformed_state" };
   }
@@ -203,13 +290,26 @@ export function validateOAuthState(
   if (!(payload.exp > opts.now)) return { ok: false, reason: "expired" };
 
   if (expectedContext) {
+    // B2a (docs/42 §90.2): compare EACH bound field against the completing request/session; ANY mismatch fails
+    // closed. The callback MUST supply the authenticated subject + the server-trusted redirect URI (NOT
+    // request-reconstructed) + the expected tenant/provider/connector/correlation.
+    if (typeof expectedContext.subject !== "string" || expectedContext.subject.length === 0)
+      return { ok: false, reason: "session_required" }; // no completing session/actor → cannot bind
+    if (payload.sub !== expectedContext.subject) return { ok: false, reason: "subject_mismatch" };
     if (payload.tid !== expectedContext.tenantId) return { ok: false, reason: "tenant_mismatch" };
     if (payload.prov !== expectedContext.provider) return { ok: false, reason: "provider_mismatch" };
-    if (
-      expectedContext.connectorId != null &&
-      payload.cid !== expectedContext.connectorId
-    )
+    if (expectedContext.connectorId != null && payload.cid !== expectedContext.connectorId)
       return { ok: false, reason: "connector_mismatch" };
+    if (payload.redir !== expectedContext.redirectUri) return { ok: false, reason: "redirect_uri_mismatch" };
+    // The correlation id is the AUDIT-correlation binding (docs/42 §90.2) — compared ONLY when the caller supplies
+    // an expected value ("if applicable"); it is NOT a confused-deputy defense (the seven above are). The seven
+    // security bindings (subject/tenant/provider/connector/redirect/expiry/single-use) are unconditional fail-closed.
+    if (
+      typeof expectedContext.correlationId === "string" &&
+      expectedContext.correlationId.length > 0 &&
+      payload.corr !== expectedContext.correlationId
+    )
+      return { ok: false, reason: "correlation_mismatch" };
   }
 
   // Single-use replay rejection (only when a store is supplied). Consume the nonce only for an otherwise

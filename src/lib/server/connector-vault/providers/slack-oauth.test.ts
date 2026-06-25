@@ -14,11 +14,12 @@ const NOW = 1_750_000_000_000;
 const TENANT = "aaaa1111-1111-1111-1111-111111111111";
 const REDIRECT = "https://app.example.com/connectors/oauth/callback";
 
+const SUBJECT = "cccc3333-3333-3333-3333-333333333333";
 function ctx(over: Partial<OAuthStateContext> = {}): OAuthStateContext {
-  return { tenantId: TENANT, provider: "slack", connectorId: null, subject: null, redirectIntent: "connect", ...over };
+  return { tenantId: TENANT, provider: "slack", connectorId: null, subject: SUBJECT, redirectIntent: "connect", redirectUri: REDIRECT, correlationId: "corr-slack-test", ...over };
 }
 function authInput(over: Partial<SlackAuthorizeInput> = {}): SlackAuthorizeInput {
-  return { ctx: ctx(), clientId: "11111.22222", redirectUri: REDIRECT, signer: SIGNER, now: NOW, nonce: "nonce-A", ...over };
+  return { ctx: ctx(), clientId: "11111.22222", redirectUri: REDIRECT, correlationId: "corr-slack-test", signer: SIGNER, now: NOW, nonce: "nonce-A", ...over };
 }
 const sha256 = (s: string) => createHash("sha256").update(s, "utf8").digest("hex");
 

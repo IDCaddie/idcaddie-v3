@@ -3261,4 +3261,33 @@ begin
 end $$;
 reset role;
 
+-- ── Test 55: oauth_pending B2a reason codes — the runner can record the four NEW safe codes; the CHECK rejects an
+--    out-of-allowlist value (migration 0034). The runner already holds the column-scoped UPDATE
+--    (consumed_at, attempt_count, last_rejected_code) from 0021 — no grant change in B2a.
+reset role;
+insert into public.oauth_pending (tenant_id, provider, subject, state_jti, nonce_hash, intent, expires_at)
+  values ('11111111-1111-1111-1111-111111111111','slack','0a000000-0000-0000-0000-000000000001','jti-b2a-1','nh-b2a-1','connect', now() + interval '10 minutes');
+set role connector_runner;
+do $$ declare blocked boolean;
+begin
+  -- the four NEW B2a reason codes are accepted by the widened CHECK (recorded via the safe last_rejected_code column).
+  update public.oauth_pending set last_rejected_code = 'session_required', attempt_count = attempt_count + 1 where state_jti = 'jti-b2a-1';
+  update public.oauth_pending set last_rejected_code = 'subject_mismatch' where state_jti = 'jti-b2a-1';
+  update public.oauth_pending set last_rejected_code = 'redirect_uri_mismatch' where state_jti = 'jti-b2a-1';
+  update public.oauth_pending set last_rejected_code = 'correlation_mismatch' where state_jti = 'jti-b2a-1';
+  -- an out-of-allowlist value is fail-closed rejected by the CHECK (no arbitrary string can be recorded).
+  blocked := false;
+  begin update public.oauth_pending set last_rejected_code = 'not_a_real_code' where state_jti = 'jti-b2a-1'; exception when others then blocked := true; end;
+  assert blocked, 'T55 the last_rejected_code CHECK rejects an out-of-allowlist value';
+  -- the ATOMIC single-use consume (the one-time marker) — set consumed_at only while it is null.
+  update public.oauth_pending set consumed_at = now() where state_jti = 'jti-b2a-1' and consumed_at is null;
+end $$;
+reset role;
+do $$ begin
+  assert (select last_rejected_code from public.oauth_pending where state_jti='jti-b2a-1') = 'correlation_mismatch',
+         'T55 the runner recorded a new B2a reason code (the widened CHECK accepts it)';
+  assert (select consumed_at is not null from public.oauth_pending where state_jti='jti-b2a-1'),
+         'T55 the runner consumed the row (single-use marker set)';
+end $$;
+
 do $$ begin raise notice 'ALL ORG-RLS ASSERTIONS PASSED'; end $$;

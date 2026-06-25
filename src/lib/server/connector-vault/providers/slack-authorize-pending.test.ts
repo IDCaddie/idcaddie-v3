@@ -37,7 +37,7 @@ function makeInserter(opts: { failDb?: boolean } = {}): SlackPendingInserter & {
 }
 
 function input(over: Partial<SlackAuthorizePersistInput> = {}): SlackAuthorizePersistInput {
-  return { tenantId: TENANT, organizationId: ORG, subject: SUBJECT, clientId: "11111.22222", redirectUri: REDIRECT, signer: SIGNER, now: NOW, nonce: "nonce-A", ...over };
+  return { tenantId: TENANT, organizationId: ORG, subject: SUBJECT, correlationId: "corr-auth-test", clientId: "11111.22222", redirectUri: REDIRECT, signer: SIGNER, now: NOW, nonce: "nonce-A", ...over };
 }
 
 describe("persistSlackAuthorizePending — authorize-time oauth_pending persist", () => {
