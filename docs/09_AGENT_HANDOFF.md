@@ -136,7 +136,7 @@ Still NOT safe to surface: `people`, `identity_accounts`, `invoices`/`files`/`li
 
 ## Current open risks to respect
 **hosted apply PARTIAL** (`0001`–`0013` `staged` to staging `ycdpzduxugdsffjqyoai`; Storage object policies + verification + production still pending — RISK-001 OPEN, [04](./04_RISK_REGISTER.md)); child tables **not org-scoped for reads** — tenant-only (`people`) or default-deny (`identity_accounts`/`license_*`/`files`/`invoices`); `app_contracts` (`0006`) + `app_users` (`0007`) + `app_user_identity_matches` (`0008`) are now org-scoped read; see read map [02 §8](./02_SECURITY_AND_RLS.md) (RISK-002, narrowed not closed); no tenant switching /
-user provisioning yet (RISK-012); no credential vault; imports/exports destructive-in-legacy
+user provisioning yet (RISK-012); **connector credential vault — scaffolding only, RISK-007 OPEN**: the runner-only crypto/store/load chain + the Model B lifecycle table + lifecycle-aware fail-closed load (#169) + the `revoke`/`tombstone` write helpers (atomic with audit, exactly one terminal, nonexistent fails explicitly with no orphan lifecycle row — #170, migration `0033`) exist, but there is **NO rotation helper, NO real provider token / OAuth / live connector / request-path decrypt / service-role path / public route**, and real credential save/load/use is still missing — connector credentials are NOT production-ready; imports/exports destructive-in-legacy
 (don't port — legacy deletes "outdated" users, `onFileLinkedToApp.js:290`); v3 must not miss legacy
 paid-client (OMC/Flywheel) capabilities (RISK-016). Full list:
 [04_RISK_REGISTER](./04_RISK_REGISTER.md).

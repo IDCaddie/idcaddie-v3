@@ -29,8 +29,10 @@ if (typeof (globalThis as { window?: unknown }).window !== "undefined") {
   throw new Error("connector-vault/secret-audit is server-only and must not be imported in client code");
 }
 
-// ── The ONLY supported events this PR audits: store / load / decrypt × attempted / succeeded / failed. ──────
-// Rotation/revocation/delete/update are intentionally absent — they are added only when that behavior exists.
+// ── Supported events: store / load / decrypt (#166/#167) + revocation / tombstone (#170, with the helpers that
+//    emit them). Each event is `connector_secret.<op>.<attempted|succeeded|failed>`. `rotation` and
+//    `delete`/`update` events are intentionally ABSENT — they are added only when that behavior exists (no
+//    rotation helper yet).
 export const CONNECTOR_SECRET_AUDIT_EVENTS = [
   "connector_secret.store.attempted",
   "connector_secret.store.succeeded",
@@ -41,6 +43,13 @@ export const CONNECTOR_SECRET_AUDIT_EVENTS = [
   "connector_secret.decrypt.attempted",
   "connector_secret.decrypt.succeeded",
   "connector_secret.decrypt.failed",
+  // ── #170: the revoke/tombstone WRITE helpers emit these (the rotation events are NOT added — no rotation helper).
+  "connector_secret.revocation.attempted",
+  "connector_secret.revocation.succeeded",
+  "connector_secret.revocation.failed",
+  "connector_secret.tombstone.attempted",
+  "connector_secret.tombstone.succeeded",
+  "connector_secret.tombstone.failed",
 ] as const;
 export type ConnectorSecretAuditEvent = (typeof CONNECTOR_SECRET_AUDIT_EVENTS)[number];
 
@@ -61,6 +70,7 @@ export const CONNECTOR_SECRET_ERROR_CLASSES = [
   "ambiguous_match",
   "invalid_envelope",
   "permission_denied",
+  "target_not_found", // #170: a revoke/tombstone whose exact (tenant, connector, kind, version) secret does not exist
   "unknown_error",
 ] as const;
 export type ConnectorSecretErrorClass = (typeof CONNECTOR_SECRET_ERROR_CLASSES)[number];
@@ -113,7 +123,7 @@ const SAFE_CORRELATION_RE =
   /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|(run|job|req|corr|trace|span)[-_][A-Za-z0-9][A-Za-z0-9_-]{0,62})$/i;
 
 function deriveResult(event: ConnectorSecretAuditEvent): ConnectorSecretAuditResult {
-  // The suffix after the last "." is always attempted | succeeded | failed for the nine supported events.
+  // The suffix after the last "." is always attempted | succeeded | failed for the supported events.
   const suffix = event.slice(event.lastIndexOf(".") + 1);
   if (suffix === "attempted" || suffix === "succeeded" || suffix === "failed") return suffix;
   // Unreachable for the validated allowlist; fail closed rather than guess.
@@ -125,8 +135,8 @@ function deriveResult(event: ConnectorSecretAuditEvent): ConnectorSecretAuditRes
 // URL, or raw error) is structurally DROPPED. Fails closed on a missing/malformed allowed field or any
 // credential-shaped value. PURE: no DB, no I/O, no time, no randomness.
 export function buildConnectorSecretAuditEvent(input: ConnectorSecretAuditInput): ConnectorSecretAuditRecord {
-  // 1) event must be one of the nine supported store/load/decrypt events (rejects rotation/revocation/
-  //    delete/update and anything else).
+  // 1) event must be one of the supported store/load/decrypt/revocation/tombstone events (rejects rotation/
+  //    delete/update and anything else — see CONNECTOR_SECRET_AUDIT_EVENTS).
   if (!(CONNECTOR_SECRET_AUDIT_EVENTS as readonly string[]).includes(input.event))
     throw new ConnectorLifecycleError(`unsupported connector secret audit event: ${String(input.event)}`);
 

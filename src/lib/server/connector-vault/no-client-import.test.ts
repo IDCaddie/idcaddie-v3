@@ -90,6 +90,9 @@ const CRYPTO_REL_HINTS = [
   "connector-vault/secret-audit-writer",
   "server/connector-vault/secret-audit-writer",
   "lib/server/connector-vault/secret-audit-writer",
+  "connector-vault/connector-secret-lifecycle",
+  "server/connector-vault/connector-secret-lifecycle",
+  "lib/server/connector-vault/connector-secret-lifecycle",
 ];
 
 function walk(dir: string): string[] {

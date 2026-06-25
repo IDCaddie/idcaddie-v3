@@ -3263,3 +3263,49 @@ Lifecycle write helpers + runner INSERT grant + lifecycle audit events/writes de
 credentials remain blocked; real credential save/load/use is still missing; rotation/revocation + real credential
 lifecycle remain missing. RISK-001 remains OPEN. RISK-007 remains OPEN. Cutover remains BLOCKED. Connector
 credentials are not production-ready.** No doc 17 §5 box is ticked by this PR.
+
+## 96. REVOKE/TOMBSTONE LIFECYCLE WRITE HELPERS + ATOMIC LIFECYCLE AUDIT (PR #170, implementation)
+
+Implements the §85/§95 Model B **write** side (doc 42 §87): the runner-only `revoke`/`tombstone` lifecycle write
+helpers, atomic with their audit. Builds directly on #169's lifecycle table + lifecycle-aware load.
+
+**Migration `0033`** — a COLUMN-scoped `connector_runner` **INSERT** on `connector_secret_lifecycle_events` of
+EXACTLY the eight safe-metadata columns (`tenant_id, connector_id, secret_kind, version, lifecycle_event_type,
+reason_class, actor_type, correlation_id`). Keeps the #169 SELECT grant; adds NO UPDATE/DELETE; NOT `id`/
+`created_at` (server defaults) or `audit_log_id`. `connector_secrets` is UNTOUCHED (no new grant, no constraint) —
+its append-only invariant (T50) holds. 0-diff `database.types.ts` (grant-only).
+
+**`connector-secret-lifecycle.ts`** (`createRunnerConnectorSecretLifecycleWriter(conn)` → `revoke`/`tombstone`) —
+each call is ONE atomic CTE statement (`LIFECYCLE_WRITE_SQL`):
+- `ins_lifecycle`: `INSERT … WHERE EXISTS (the connector_secrets row) RETURNING version` — the **single existence
+  determination / source of truth** (the runner has SELECT on `version`, not `id`).
+- `ins_attempted`: an **unconditional** `<op>.attempted` audit — records the request regardless of existence.
+- `ins_succeeded`: `<op>.succeeded` gated `WHERE EXISTS (select 1 from ins_lifecycle)` — fires iff the lifecycle
+  row was actually inserted.
+- `ins_failed`: `<op>.failed` (`target_not_found`) gated `WHERE NOT EXISTS (select 1 from ins_lifecycle)`.
+- final `select count(*) from ins_lifecycle` → the helper maps `0` to an explicit thrown failure, `1` to `{ ok }`.
+
+**Semantics (exactly as required):** succeeded/failed both derive from `ins_lifecycle`, so they are mutually
+exclusive BY CONSTRUCTION — **exactly one** terminal audit per operation, never both, never neither, no racing
+second predicate. **Nonexistent target → the helper THROWS** (the caller NEVER receives `{ ok }`); NO lifecycle row,
+NO succeeded audit; the `attempted` + `failed`(`target_not_found`) audit rows ARE committed (a failed attempt is
+auditable). The **orphan invariant binds lifecycle ROWS** (never reference a nonexistent version), NOT the
+attempted/failed AUDIT rows. It is ONE statement, so any insert failure (e.g. the succeeded audit) rolls the WHOLE
+statement back — no lifecycle row without its audit, no compensating DELETE; fail closed. The helpers return only
+`{ ok }` / throw — never a secret/envelope/key material. Six `revocation`/`tombstone` audit events + a
+`target_not_found` error class were added to the #166 allowlist builder (rotation events remain ABSENT).
+
+**Proof — RLS T54 (real DB, under `set role connector_runner`):** the INSERT grant shape (exactly the 8 columns;
+no table-level INSERT; no UPDATE/DELETE; `connector_secrets` still no runner UPDATE/DELETE); the 0032 append-only
+trigger STILL rejects the runner's UPDATE/DELETE and a PRIVILEGED role's UPDATE/DELETE even now that the runner
+holds INSERT (row unchanged / still exists after); the actual CTE for an EXISTING v55 → lifecycle + attempted +
+succeeded, no failed, exactly one terminal; for a NONEXISTENT v777 → attempted + failed(`target_not_found`), NO
+lifecycle, NO succeeded, exactly one terminal; and a forced in-CTE succeeded-audit failure rolls back the lifecycle
+insert. Helper unit tests cover the same behavior + redaction + scope guards.
+
+**Still missing / unchanged:** NO rotation helper, NO real provider token, NO OAuth/token exchange, NO live
+connector execution, NO request-path decrypt, NO service-role secret path, NO public/API route, NO UPDATE/DELETE on
+`connector_secrets` or the lifecycle table, NO hard delete. The #169 load semantics are unchanged. Real credentials
+remain blocked; real credential save/load/use is still missing; rotation + the rest of the real credential
+lifecycle remain missing. **RISK-001 remains OPEN. RISK-007 remains OPEN. Cutover remains BLOCKED. Connector
+credentials are not production-ready.** No doc 17 §5 box is ticked by this PR.
