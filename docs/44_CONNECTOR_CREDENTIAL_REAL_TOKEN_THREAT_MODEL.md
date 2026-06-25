@@ -136,19 +136,30 @@ token — where it exists, who sees it, and exactly where it dies:
    executing the exchange) ever holds the plaintext token, as a local in-memory `string`/`Buffer`.
 4. **Memory buffers that may contain plaintext.** (a) the HTTPS response body buffer from `oauth.v2.access`; (b) the
    parsed token `string`; (c) the `plaintext` arg to `encryptConnectorSecret`; (d) the transient AES-GCM input. The
-   transient DEK is zeroed (`dek.fill(0)`); the token string is dropped at step 6.
+   transient **DEK** is zeroed (`dek.fill(0)`); the plaintext **token** is dropped (de-referenced) at step 6 but is
+   **not** wiped (see step 7's residual-exposure note).
 5. **The exact plaintext→ciphertext point.** `encryptConnectorSecret({ plaintext, context, keyProvider, kekId })`
-   produces the AEAD ciphertext + wrapped DEK. After this call returns, **only ciphertext leaves the function.**
-6. **The exact plaintext-discard point.** Immediately after `encryptConnectorSecret` returns, the local token
-   `string`/`Buffer` goes out of scope (no field, no return, no log) and is eligible for GC; the function returns
-   only `{ id }`. Nothing downstream (DB, audit, response) holds plaintext.
-7. **What bounds the plaintext lifetime.** The plaintext exists **only** within the single server-side exchange→
-   encrypt call chain — bounded by one request handler's stack frame. It is **never** awaited across an external
-   hop after encryption, **never** persisted, **never** placed on a queue.
+   produces the AEAD ciphertext + wrapped DEK and **returns the ciphertext envelope** (`EncryptedConnectorSecret`).
+   After this call returns, **only ciphertext leaves the function** — no plaintext.
+6. **The exact plaintext-discard point.** Immediately after `encryptConnectorSecret` returns the **ciphertext
+   envelope** (no plaintext), the local plaintext token goes out of scope (no field, no return, no log) and is
+   eligible for GC. Each store-boundary return is **redacted**: `saveConnectorSecret` returns a `SavedSecretRef`
+   (`{ secretId, tenantId, connectorId, secretKind, version, kekId }` — no ciphertext, no wrapped DEK), and the
+   low-level `insertEncryptedSecret` returns only `{ id }`. **Plaintext is on NONE of these return paths**; nothing
+   downstream (DB, audit, response) holds it.
+7. **What bounds the plaintext lifetime.** No reference to the plaintext is retained after the encrypt call — no
+   field, no return, no log, no queue, no external hop — so it becomes **unreachable** once the call chain unwinds.
+   **Residual exposure (stated, not hidden):** unlike the DEK (zeroed via `dek.fill(0)`), the plaintext token
+   `Buffer`/`string` is **NOT** wiped — a JS `string` cannot be overwritten in place — so the bytes remain reachable
+   in the V8 heap until **non-deterministic GC**, which can **outlive** the request handler's stack frame. The true
+   bound is therefore *"no live reference + unreachable after the call,"* **NOT** a guaranteed in-memory wipe.
+   *(Hardening for PR B: carry the token as a `Buffer` and `fill(0)` it immediately after encrypt; the unavoidable
+   immutable-string copy is the minimized-but-nonzero residual to accept explicitly.)*
 8. **What guarantees non-persistence.** (a) `insertEncryptedSecret` writes only the 12 envelope columns — there is
    **no** plaintext column and no runner grant to write one; (b) the audit builder's 8-key allowlist + value scan
-   cannot carry a token; (c) the store/load adapters return only `{ id }` / the **encrypted** envelope, never
-   plaintext; (d) request/web identity holds no `kms:Decrypt`, so even the ciphertext is unreadable off the runner.
+   cannot carry a token; (c) the store/load adapters return only a **redacted ref** (`SavedSecretRef` / `{ id }`) or
+   the **encrypted** envelope — never plaintext; (d) request/web identity holds no `kms:Decrypt`, so even the
+   ciphertext is unreadable off the runner.
 9. **How to verify plaintext was not logged or stored.** The §5 dry-run + §6 inspection: grep the server/function/
    DB logs, tracing, and error-monitoring for the token's distinctive `xoxb-` prefix (and a hash of the token) and
    confirm **zero** hits; confirm the DB row holds an envelope only (no plaintext); confirm no analytics/tracing
@@ -213,23 +224,53 @@ RISK-007 closure requires **all** of:
 
 1. **Staging real-credential store dry-run** with the §1 low-risk, source-revocable Slack dev-workspace token (the
    first real-token event), on staging `ycdpzduxugdsffjqyoai` only.
-2. **No token printed in logs** — server/function/DB/build logs grepped for the `xoxb-` prefix + a token hash: zero hits.
+2. **No token printed in logs** — across the **named staging surfaces** (item 15), grep for the **full token**, the
+   `xoxb-` prefix, a **truncated** prefix, **and** a SHA-256 hash of the token (a high-entropy Slack secret can evade
+   a single literal grep via truncation or base64/url-encoding): **zero** hits is the only PASS. *Absence of a log
+   line is only as strong as log coverage (item 15 names what is NOT covered).* The structural audit allowlist
+   (`CREDENTIAL_VALUE_RE`) protects **audit rows only** — general app/platform logs have no structural redaction, so
+   this grep is the load-bearing control.
 3. **No token in browser/devtools** — confirmed (the browser carried only `state`+`code`). *Browser token handling
    is forbidden, not risk-accepted.*
 4. **Audit rows** for `store.attempted/succeeded/failed` present and allowlist-shaped (no token material).
-5. **DB row holds an envelope only** — the 8 envelope columns populated, **no** plaintext anywhere in the row.
-6. **Web/request identity cannot decrypt** — re-verified (no `kms:Decrypt`; encrypt-only save provider).
+5. **DB row holds an envelope only** — dump the **FULL** `connector_secrets` row (ALL columns, not only the 8
+   envelope columns) and grep **every text/bytea column** — including the free-text `aad_digest`, `key_id`,
+   `secret_kind`, `aead_alg` — for the `xoxb-` prefix **and** a SHA-256 of the token: **zero** hits across ALL
+   columns. Also confirm **no plaintext-capable column exists** by diffing the live table against migrations
+   `0017`/`0030`. (Shape — "the 8 envelope columns populated" — is necessary but is NOT the non-persistence check.)
+6. **Web/request identity cannot decrypt** — an **executed negative on staging** (not a code re-read): the web/
+   request IAM identity attempts `kms:Decrypt` of a real stored wrapped DEK and is **observed** to return
+   `AccessDenied` (capture the API response / CloudTrail entry); **and** a web-role `SELECT` on `connector_secrets`
+   returns zero rows / permission denied (deny-all RLS). Residual exposure stated: the web identity can reach **only**
+   the ciphertext-envelope path, itself blocked by deny-all RLS — and cannot unwrap the DEK regardless.
 7. **Runner identity can decrypt only through the allowed path** (PR C; runner IAM `kms:Decrypt` + capability), and
    **only** then.
-8. **Wrong tenant cannot load** — a cross-tenant load returns null / fails GCM auth.
+8. **Wrong tenant cannot load** — BOTH sub-checks observed (the query filter is NOT the cryptographic boundary; the
+   AAD is): **(a)** a normal cross-tenant load returns **null** (the `WHERE tenant_id` filter); **and** **(b)** a
+   force-fed envelope decrypted under a **mismatched** `SecretContext` **throws** an AEAD/GCM auth failure (`aad
+   mismatch`) — proving the structural confused-deputy/replay defense, not just the query filter.
 9. **Revoked credential cannot load**; 10. **Tombstoned credential cannot load** (Model B lifecycle exclusion).
-11. **Audit failure blocks the unsafe operation** — re-verified at the real-DB level (fail-closed rollback).
+11. **Audit failure blocks the unsafe operation** — an **induced fault on staging** (not a happy-path + code-read):
+    force the `store.succeeded` audit INSERT to fail **inside the runner transaction** (e.g. revoke the `0031`
+    `audit_logs` grant or violate an `audit_logs` constraint), then **observe** (a) the operation throws, (b)
+    `count(*)` on `connector_secrets` for that exact `(tenant, connector, secret_kind, version)` is **0** (full
+    rollback — **no** compensating DELETE), and (c) **no** `store.succeeded` audit row exists.
 12. **Provider-side revocation path verified** — `auth.revoke` / app removal observed to invalidate the token
     (a post-revocation Slack API call returns `token_revoked`/`invalid_auth`).
-13. **Vault-side tombstone/revoke path verified** — the revoke/tombstone helper makes the version non-loadable.
+13. **Vault-side tombstone/revoke path verified** — the revoke/tombstone helper makes the version non-loadable;
+    **and** an **induced** in-CTE audit failure (same fault-injection as item 11, on the lifecycle CTE) leaves **no**
+    lifecycle row and **no** succeeded audit (fail-closed, observed — not code-read).
 14. **Rollback / cleanup verified** — the test credential is revoked at Slack, tombstoned locally, the dev workspace/
     app is removed, and temporary IAM keys are deleted (§6).
-15. **Logs inspected and clean** — server, function, DB, tracing, error-monitoring, analytics: zero token material.
+15. **Logs inspected and clean** — enumerate the **exact** staging surfaces and record each one's retention window:
+    Vercel runtime/function/build logs for the staging deployment, and Supabase Postgres logs for
+    `ycdpzduxugdsffjqyoai`. The telemetry stack is **determinate** today: the ONLY telemetry is Vercel **Analytics +
+    Speed Insights** (both **client-side**, `src/app/layout.tsx`; RISK-013), which is structurally **off** the
+    server-side token path (§2 steps 3–7), and there is **NO** error-monitoring or tracing vendor (no
+    Sentry/OpenTelemetry/Datadog/PostHog/Axiom anywhere). Apply item 2's multi-pattern grep to **each** server-side
+    surface (zero hits = PASS), and **explicitly state what is NOT covered** (e.g. any surface whose retention has
+    already rolled off, or any new vendor added before the dry-run) — "clean" is bounded by log coverage. *(If a
+    server-side error-monitoring/tracing vendor is added later, it MUST be added to this list before the dry-run.)*
 16. **Docs updated** — evidence recorded (a dedicated evidence doc, non-secret only).
 17. **Production still blocked** until explicitly approved (production KMS/IAM separation is still **unverified**).
 
