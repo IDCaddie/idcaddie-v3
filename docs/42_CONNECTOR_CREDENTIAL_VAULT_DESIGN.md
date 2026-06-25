@@ -4142,6 +4142,12 @@ loose).
 
 ### 90.3 Slack client secret is VAULT-GRADE (not ordinary config)
 
+> **✅ B2c-secret status (#178):** the vault-grade store is implemented (synthetic) — the app-scoped
+> `connector_app_secrets` table (migration 0035; NO tenant_id; RLS deny-all; runner column-scoped, T56), the
+> `slack-client-secret-store.ts` envelope save + the load-bearing `withSlackClientSecret` scoped decrypt-and-use
+> closure (NO `loadClientSecret(): string` API), and the app-scope AAD (a staging ciphertext cannot decrypt as
+> production). NO real client secret entered the system; the app-secret USE audit remains future.
+
 The Slack **client secret** is the **master capability** that converts authorization codes into tokens — its
 compromise is *more* severe than a single bot-token compromise (it can mint tokens for every code). It must NOT be
 the unprotected weak point behind a vault that carefully protects the tokens it mints. There is **no** client-secret
@@ -4254,8 +4260,11 @@ post-mint failure, cleanup includes provider-side revoke + vault tombstone (docs
     orchestrator.ts` composes B2a validate (gate) → B2b mocked exchange → B1 store, threading the validated payload as
     the single source of truth (`b1StoreHandoff` wires the real B1 ingestion). Mocked Slack, synthetic token, mocked
     client secret — no real call/token/secret, no route.
-  - **B2c-secret** _(future)_ — the vault-grade/KMS-backed Slack **client-secret store** (§90.3) + the real injected
-    http client + exchange audit (§90.6). Introduces the master OAuth credential — its **own review**.
+  - **B2c-secret** _(✅ done, #178)_ — the vault-grade/KMS-backed Slack **client-secret store** (§90.3): app-scoped
+    `connector_app_secrets` (NO tenant_id; RLS deny-all; runner column-scoped, T56) + `slack-client-secret-store.ts`'s
+    load-bearing `withSlackClientSecret` scoped decrypt-and-use closure (no `loadClientSecret` API) + app-scope AAD
+    (staging≠production). Synthetic — no real client secret/token. *(The real injected http client + the app-secret
+    use audit (§90.6/§90.7) remain future.)*
   - **B2c-route** _(future)_ — the **production OAuth callback route** wrapping the B2c-wire orchestrator, still
     **synthetic** (no real Slack egress), with the App-Router request-path discipline **proven** (server-only,
     staging/test-guarded, explicit actor/session resolution — no layout-auth reliance; no query-string/`state`/`code`

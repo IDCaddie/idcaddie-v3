@@ -102,7 +102,9 @@ grant update (upload_status) on public.files to authenticated;
 -- oauth_pending (migration 0020) is a near-Tier-2 deny-all store (RLS-enabled, ZERO policies, no grant —
 -- like connector_secrets); the blanket grant above re-broadens it too, so revoke it back here (NOTHING is
 -- granted to authenticated/anon on it). T42's exact-zero-privilege array is the backstop.
-revoke all on public.connector_secrets, public.connectors, public.connector_runs, public.oauth_pending from authenticated, anon;
+-- connector_app_secrets (migration 0035) is the APP-SCOPED OAuth client-secret store — another Tier-2 deny-all
+-- table (RLS-enabled, ZERO policies, no grant); revoke it back here too. T56's deny-all assertions are the backstop.
+revoke all on public.connector_secrets, public.connectors, public.connector_runs, public.oauth_pending, public.connector_app_secrets from authenticated, anon;
 grant select on public.connectors, public.connector_runs to authenticated;
 SQL
 

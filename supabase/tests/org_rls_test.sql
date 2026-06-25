@@ -3290,4 +3290,46 @@ do $$ begin
          'T55 the runner consumed the row (single-use marker set)';
 end $$;
 
+-- ── Test 56: connector_app_secrets (app-scoped OAuth client-secret store) — DENY-ALL to the request path; runner
+--    column-scoped only (migration 0035). The Slack client secret is the app-level OAuth master credential: NOT
+--    tenant-scoped, NO tenant_id, NO RLS tenant predicate — RLS-enabled with ZERO policies + the request roles hold
+--    NO base privilege; only the BYPASSRLS `connector_runner` has the column-scoped envelope grant.
+reset role;
+insert into public.connector_app_secrets (app_env, provider, secret_kind, version, ciphertext, dek_wrapped, aead_nonce, aead_tag, aad_digest, kek_id, envelope_version, aead_alg)
+  values ('staging','slack','oauth_client_secret',1,'\x01'::bytea,'\x02'::bytea,'\x03'::bytea,'\x04'::bytea,'digest-1','kek-app-1',1,'AES-256-GCM');
+-- 56a: a tenant member (authenticated) cannot read/insert (deny-all — revoke all + no policy).
+select set_config('request.jwt.claims','{"sub":"0a000000-0000-0000-0000-000000000001"}',false); set role authenticated;
+do $$ declare ok boolean := false; begin
+  begin perform 1 from public.connector_app_secrets; ok := false; exception when insufficient_privilege then ok := true; end;
+  assert ok, 'T56 authenticated must NOT read connector_app_secrets (app-scoped deny-all)';
+end $$;
+do $$ declare ok boolean := false; begin
+  begin insert into public.connector_app_secrets (app_env, provider, secret_kind, version, ciphertext, dek_wrapped, aead_nonce, aead_tag, aad_digest, kek_id, envelope_version, aead_alg)
+    values ('staging','slack','oauth_client_secret',9,'\x01'::bytea,'\x02'::bytea,'\x03'::bytea,'\x04'::bytea,'d','k',1,'AES-256-GCM'); ok := false;
+  exception when insufficient_privilege then ok := true; end;
+  assert ok, 'T56 authenticated must NOT insert connector_app_secrets';
+end $$;
+reset role;
+set role anon;
+do $$ declare ok boolean := false; begin
+  begin perform 1 from public.connector_app_secrets; ok := false; exception when insufficient_privilege then ok := true; end;
+  assert ok, 'T56 anon must NOT read connector_app_secrets';
+end $$;
+reset role;
+-- 56b: the runner CAN read the granted envelope columns + insert a new version; CANNOT update/delete (no grant).
+set role connector_runner;
+do $$ declare ok boolean := false; n int;
+begin
+  select count(*) into n from public.connector_app_secrets where app_env='staging' and provider='slack' and secret_kind='oauth_client_secret';
+  assert n >= 1, 'T56 runner can read app-secret envelope metadata (granted SELECT)';
+  insert into public.connector_app_secrets (app_env, provider, secret_kind, version, ciphertext, dek_wrapped, aead_nonce, aead_tag, aad_digest, kek_id, envelope_version, aead_alg)
+    values ('staging','slack','oauth_client_secret',2,'\x05'::bytea,'\x06'::bytea,'\x07'::bytea,'\x08'::bytea,'digest-2','kek-app-1',1,'AES-256-GCM');
+  begin update public.connector_app_secrets set is_active = false where version = 2; ok := false; exception when insufficient_privilege then ok := true; end;
+  assert ok, 'T56 runner has NO update grant on connector_app_secrets';
+  ok := false;
+  begin delete from public.connector_app_secrets where version = 2; ok := false; exception when insufficient_privilege then ok := true; end;
+  assert ok, 'T56 runner has NO delete grant on connector_app_secrets';
+end $$;
+reset role;
+
 do $$ begin raise notice 'ALL ORG-RLS ASSERTIONS PASSED'; end $$;

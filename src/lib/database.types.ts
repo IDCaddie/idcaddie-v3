@@ -525,6 +525,60 @@ export type Database = {
           },
         ]
       }
+      connector_app_secrets: {
+        Row: {
+          aad_digest: string
+          aead_alg: string
+          aead_nonce: string
+          aead_tag: string
+          app_env: string
+          ciphertext: string
+          created_at: string
+          dek_wrapped: string
+          envelope_version: number
+          id: string
+          is_active: boolean
+          kek_id: string
+          provider: string
+          secret_kind: string
+          version: number
+        }
+        Insert: {
+          aad_digest: string
+          aead_alg: string
+          aead_nonce: string
+          aead_tag: string
+          app_env: string
+          ciphertext: string
+          created_at?: string
+          dek_wrapped: string
+          envelope_version: number
+          id?: string
+          is_active?: boolean
+          kek_id: string
+          provider: string
+          secret_kind: string
+          version: number
+        }
+        Update: {
+          aad_digest?: string
+          aead_alg?: string
+          aead_nonce?: string
+          aead_tag?: string
+          app_env?: string
+          ciphertext?: string
+          created_at?: string
+          dek_wrapped?: string
+          envelope_version?: number
+          id?: string
+          is_active?: boolean
+          kek_id?: string
+          provider?: string
+          secret_kind?: string
+          version?: number
+        }
+        Relationships: []
+      }
       connector_runs: {
         Row: {
           completed_at: string | null
