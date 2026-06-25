@@ -3437,7 +3437,7 @@ provider, kind, version}) — a staging ciphertext cannot decrypt as production,
 closed. `slack-client-secret-store.ts`: `saveSlackClientSecret` stores the envelope only (no plaintext at rest), and
 the load-bearing `withSlackClientSecret(identity, deps, exchange)` is a scoped decrypt-and-use closure — NO
 `loadClientSecret(): string` API; the plaintext is decrypted, handed ONLY to the exchange callback, the buffer wiped,
-and only a redacted result returned. 29 synthetic tests with a marked client-secret sentinel + RLS T56.
+and only a redacted result returned. 14 synthetic tests with a marked client-secret sentinel + RLS T56.
 
 No real Slack client secret, no real token, no Slack API call, no production callback route, no live connector, no
 request-path decrypt, no production enablement. The app-secret use audit (§90.7) remains future. **RISK-001 remains

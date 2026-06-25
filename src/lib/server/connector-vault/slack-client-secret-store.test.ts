@@ -109,6 +109,23 @@ describe("B2c-secret decrypt boundary — withSlackClientSecret: plaintext reach
     expect(result).toEqual({ ok: false, reason: "use_failed" }); // fail closed, NOT a thrown secret
     noLeak(JSON.stringify({ result, thrown: thrown instanceof Error ? thrown.message : thrown, console: consoleDump }));
   });
+  it("the plaintext buffer is WIPED even when the exchange callback THROWS (cleanup runs in finally, not only on success)", async () => {
+    const { store } = memStore();
+    await save(store);
+    // Capture the pre-wipe content of EVERY buffer that .fill() touches during the run; the real fill still zeroes it.
+    const wiped: string[] = [];
+    const realFill = Buffer.prototype.fill;
+    const spy = vi.spyOn(Buffer.prototype, "fill").mockImplementation(function (this: Buffer, ...args: unknown[]) {
+      wiped.push(this.toString("utf8")); // content BEFORE the real wipe zeroes it
+      return (realFill as (...a: unknown[]) => Buffer).apply(this, args);
+    });
+    const result = await withSlackClientSecret({ appEnv: "staging" }, { keyProvider: kp, store }, async (secret) => { throw new Error(`boom ${secret}`); });
+    spy.mockRestore();
+    expect(result).toEqual({ ok: false, reason: "use_failed" }); // failure path
+    // wipe-ATTEMPTED on the failure path: the buffer holding the plaintext sentinel was filled (its lifetime was
+    // bounded even though the callback threw). Would FAIL if the wipe were only after a successful callback.
+    expect(wiped).toContain(SENTINEL);
+  });
   it("an identity WITHOUT kms:Decrypt (web/request-like) cannot decrypt — fails closed", async () => {
     const { store } = memStore();
     await save(store);
