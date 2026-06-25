@@ -293,3 +293,90 @@ After the run (pass or fail), perform + record:
 - **Connector credentials are not production-ready. Live connector use remains BLOCKED.**
 - B2c-run is the explicitly-authorized operational go/no-go for the first real token — **not a normal code PR**; it is
   executed by a human operator per this runbook, only after Sam's explicit "GO."
+
+---
+
+## 11. B2c-run PREP harness (PR #181) — exact ingestion + readiness commands
+
+PR #181 added the reviewed, synthetic-tested pieces that make the client-secret ingestion turnkey. **None of this runs a
+real secret; the real run is still B2c-run (Sam's explicit GO).**
+
+### 11.1 Safe client-secret ingestion (stdin only — NEVER argv/env/history)
+The ingestion LOGIC is the reviewed core `src/lib/server/connector-vault/client-secret-ingest-harness.ts`
+(`readSecretFromStream(process.stdin)` → `ingestClientSecret({ plaintext, appEnv: "staging", version: 1 }, { keyProvider, kekId, store })`).
+It reads the secret from **stdin**, encrypts immediately via the KMS/envelope boundary, writes an **envelope-only** row
+to `connector_app_secrets`, and returns only a redacted `secret_id` (or a safe static reason). It is invoked **inside
+the hosted runner runtime** (which supplies the real KMS provider + the `RunnerConnection` as `connector_runner_login`).
+
+Pre-flight first (refuses production ref / env-secret / argv-secret; emits the procedure — never holds the secret):
+```
+node scripts/b2c-ingest-client-secret.mjs --confirm
+```
+Then, in the hosted runner, **pipe** the secret on stdin (never type it, never argv, never env):
+```
+unset HISTFILE; set +o history                 # this shell only
+CONNECTOR_VAULT_KMS_KEY_ID=<staging-KEK> \      # NON-secret config (the KEK handle), not the client secret
+  <runner-invokes ingestClientSecret reading stdin>  < /path/to/secret-0600-file
+shred -u /path/to/secret-0600-file             # clear immediately after
+```
+**WARNING — never type the client secret into argv, an env var, or an interactive prompt (shell history).** Pipe it via
+stdin (e.g. from a `0600` file you `shred -u`, or another approved one-time source). `SLACK_CLIENT_SECRET` must **not**
+be set in the environment — the harness and the launcher both refuse if it is.
+
+### 11.2 Exact staging callback URL + trusted-redirect config check
+- **Register in Slack (verbatim):** `https://idcaddie-v3.vercel.app/connectors/oauth/callback` (no trailing slash).
+- The server validates against the **same** value via `connectorOAuthRedirectUri()`
+  (`connector-oauth-config.ts`) — server config only, **never** request-derived (no Host/X-Forwarded-Host). The route
+  now uses this (the old `app.example.com` placeholder is gone). Confirm it matches:
+  ```
+  # both must print the identical string:
+  node -e "console.log(require('./src/lib/server/connector-vault/connector-oauth-config').STAGING_OAUTH_REDIRECT_URI)" 2>/dev/null \
+    || grep -n 'STAGING_OAUTH_REDIRECT_URI' src/lib/server/connector-vault/connector-oauth-config.ts
+  ```
+  (or set `CONNECTOR_OAUTH_REDIRECT_URI` on staging to the exact URL).
+
+### 11.3 connector_runner_login readiness check
+`connector_runner_login` is a **manual, staging-only** prerequisite (NOT a committed migration — the LOGIN credential is
+environment-specific and must never be committed). Documented DDL (run by a DB admin on staging; the password is set
+out-of-band, never committed):
+```sql
+create role connector_runner_login login noinherit;   -- NOINHERIT: no ambient privilege
+grant connector_runner to connector_runner_login;      -- may SET ROLE connector_runner, and nothing more
+alter role connector_runner_login password '<supplied-out-of-band, never committed>';
+```
+Verify minimal privilege (matches RLS T57):
+```sql
+select rolname, rolsuper, rolinherit, rolcreaterole, rolcreatedb, rolbypassrls, rolcanlogin
+  from pg_roles where rolname = 'connector_runner_login';
+-- expect: rolsuper=f, rolinherit=f, rolcreaterole=f, rolcreatedb=f, rolbypassrls=f, rolcanlogin=t
+select count(*) from information_schema.role_table_grants where grantee = 'connector_runner_login';  -- expect 0
+-- confirm SET ROLE works and NOINHERIT denies ambient access:
+set session authorization connector_runner_login;
+  select 1 from public.connector_app_secrets;   -- expect: insufficient_privilege (NOINHERIT, no direct grant)
+  set role connector_runner; select 1 from public.connector_app_secrets;  -- expect: allowed (granted)
+reset role; reset session authorization;
+```
+
+### 11.4 KMS key readiness check
+- `CONNECTOR_VAULT_KMS_KEY_ID` must be set to the **staging** KEK (a non-sensitive KMS key handle), with the runner's
+  IAM allowing `GenerateDataKey` (and `Decrypt` for later loads) on it. `createKmsKeyProvider` **fails closed** on a
+  missing client/KEK, so an unconfigured deploy can never silently use a weak path. Confirm via the staging dry-run
+  (`scripts/verify-staging-connector-vault-dry-run.mjs`, synthetic) that wrap/unwrap works under the runner IAM.
+
+### 11.5 DB inspection after ingestion (envelope-only)
+```sql
+select id, app_env, provider, secret_kind, version, is_active, kek_id, aead_alg, aad_digest,
+       (ciphertext is not null) as has_ciphertext, (aead_tag is not null) as has_tag
+  from public.connector_app_secrets where app_env='staging' and provider='slack' order by created_at desc limit 3;
+-- envelope columns present; the text columns (provider/secret_kind/kek_id/aead_alg/aad_digest) carry NO secret.
+```
+
+### 11.6 Scanner / log checks after ingestion
+`scripts/check-no-real-tokens.sh --all`; scan the runner's stdout/stderr + log surfaces (docs/45 §6) for the client
+secret structurally first (it must appear nowhere); the harness output is only the redacted `secret_id`/reason.
+
+### 11.7 Cleanup if ingestion fails partway
+- If the row was written but the run is aborted: **tombstone/revoke** the app-secret version (the lifecycle path) so it
+  cannot load, then re-run only after review. `shred -u` any `0600` temp file. `unset` any shell var. If a real client
+  secret was exposed at any point, follow the §7/§8 containment ordering (provider-side rotation first — a tombstone is
+  only a partial stopgap).

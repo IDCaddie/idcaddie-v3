@@ -3332,4 +3332,47 @@ begin
 end $$;
 reset role;
 
+-- ── Test 57: connector_runner_login MINIMAL-PRIVILEGE prerequisite (docs/45 §4 documented DDL — manual staging-only,
+--    NOT a committed migration: the LOGIN credential is environment-specific + must never be committed). The hosted
+--    runner connects as `connector_runner_login` (LOGIN, NOINHERIT) and SET ROLEs into `connector_runner`. This test
+--    creates the role per the documented DDL and proves it can do NOTHING beyond assuming the runner role: NOINHERIT,
+--    no superuser/createrole/createdb/bypassrls, ZERO direct table grants, member of EXACTLY connector_runner.
+reset role;
+do $$ begin
+  if not exists (select 1 from pg_roles where rolname = 'connector_runner_login') then
+    create role connector_runner_login login noinherit;   -- NOINHERIT → no ambient privilege from member roles
+    grant connector_runner to connector_runner_login;     -- may SET ROLE connector_runner, and nothing more
+  end if;
+end $$;
+do $$ declare r pg_roles%rowtype; n int;
+begin
+  select * into r from pg_roles where rolname = 'connector_runner_login';
+  assert r.rolsuper = false,      'T57 connector_runner_login must NOT be superuser';
+  assert r.rolinherit = false,    'T57 connector_runner_login must be NOINHERIT';
+  assert r.rolcreaterole = false, 'T57 connector_runner_login must NOT have CREATEROLE';
+  assert r.rolcreatedb = false,   'T57 connector_runner_login must NOT have CREATEDB';
+  assert r.rolbypassrls = false,  'T57 connector_runner_login must NOT BYPASSRLS (only connector_runner does, via SET ROLE)';
+  assert r.rolcanlogin = true,    'T57 connector_runner_login must be a LOGIN role';
+  select count(*) into n from information_schema.role_table_grants where grantee = 'connector_runner_login';
+  assert n = 0, 'T57 connector_runner_login must hold ZERO direct table grants of its own';
+  select count(*) into n from pg_auth_members where member = (select oid from pg_roles where rolname='connector_runner_login');
+  assert n = 1, 'T57 connector_runner_login must be a member of EXACTLY one role';
+  assert exists (select 1 from pg_auth_members m join pg_roles g on g.oid=m.roleid
+     where m.member=(select oid from pg_roles where rolname='connector_runner_login') and g.rolname='connector_runner'),
+     'T57 connector_runner_login must be a member of connector_runner (so it can SET ROLE connector_runner)';
+end $$;
+-- behavioral: as connector_runner_login (NOINHERIT) there is NO ambient access; only AFTER `set role connector_runner`.
+set session authorization connector_runner_login;
+do $$ declare ok boolean := false; begin
+  begin perform 1 from public.connector_app_secrets; ok := false; exception when insufficient_privilege then ok := true; end;
+  assert ok, 'T57 connector_runner_login WITHOUT set role must NOT read connector_app_secrets (NOINHERIT, no direct grant)';
+end $$;
+set role connector_runner;  -- allowed: it is a member — now the runner column grant applies
+do $$ declare n int; begin
+  select count(*) into n from public.connector_app_secrets;  -- granted SELECT under the runner role
+  assert n >= 0, 'T57 after SET ROLE connector_runner the runner CAN reach connector_app_secrets (granted access)';
+end $$;
+reset role;
+reset session authorization;
+
 do $$ begin raise notice 'ALL ORG-RLS ASSERTIONS PASSED'; end $$;
