@@ -4265,7 +4265,7 @@ post-mint failure, cleanup includes provider-side revoke + vault tombstone (docs
     load-bearing `withSlackClientSecret` scoped decrypt-and-use closure (no `loadClientSecret` API) + app-scope AAD
     (staging≠production). Synthetic — no real client secret/token. *(The real injected http client + the app-secret
     use audit (§90.6/§90.7) remain future.)*
-  - **B2c-route** _(future)_ — the **production OAuth callback route** wrapping the B2c-wire orchestrator, still
+  - **B2c-route** _(✅ done, #179)_ — the **production OAuth callback route** wrapping the B2c-wire orchestrator, still
     **synthetic** (no real Slack egress), with the App-Router request-path discipline **proven** (server-only,
     staging/test-guarded, explicit actor/session resolution — no layout-auth reliance; no query-string/`state`/`code`
     logging; no raw `state`/`code` in error responses; safe/static failures). No real token.
