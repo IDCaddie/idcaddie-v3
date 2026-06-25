@@ -57,6 +57,8 @@ export type SlackAuthorizePersistReason =
   | "missing_inserter"
   | "unsupported_provider"
   | "missing_tenant"
+  | "missing_subject"
+  | "missing_correlation_id"
   | "duplicate_pending"
   | "persist_failed";
 
@@ -64,7 +66,8 @@ export type SlackAuthorizePersistInput = {
   tenantId: string;
   organizationId?: string | null; // optional (nullable in oauth_pending)
   connectorId?: string | null; // null for a fresh connect
-  subject?: string | null; // initiating user (auth.uid()); optional/nullable
+  subject: string; // B2a: the initiating user (auth.uid()) — REQUIRED (state binds the actor)
+  correlationId: string; // B2a: grammar-safe correlation/operation id bound into the state
   clientId: string; // INJECTED — never hardcoded / env-read here
   redirectUri: string; // validated (https only) by the builder
   signer: OAuthStateSigner; // the existing oauth-state signer boundary
@@ -93,21 +96,25 @@ export async function persistSlackAuthorizePending(
     return { ok: false, reason: "missing_tenant" };
   if (input.organizationId != null && (typeof input.organizationId !== "string" || input.organizationId.length === 0))
     return { ok: false, reason: "missing_tenant" };
-  if (input.subject != null && (typeof input.subject !== "string" || input.subject.length === 0))
-    return { ok: false, reason: "missing_tenant" };
+  // B2a: the actor subject is REQUIRED (the state binds the initiating actor; no anonymous authorize).
+  if (typeof input.subject !== "string" || input.subject.length === 0)
+    return { ok: false, reason: "missing_subject" };
+  if (typeof input.correlationId !== "string" || input.correlationId.length === 0)
+    return { ok: false, reason: "missing_correlation_id" };
 
-  // Build the authorize URL + the one-way hashes (the builder validates clientId/redirectUri/signer/scopes
-  // and never returns the raw nonce). A bad config fails closed with the builder's safe reason.
+  // Build the authorize URL + the one-way hashes (the builder validates clientId/redirectUri/signer/scopes/
+  // subject/correlationId and never returns the raw nonce). A bad config fails closed with the builder's safe reason.
   const auth = buildSlackAuthorizeUrl({
     ctx: {
       tenantId: input.tenantId,
       provider: SLACK_PROVIDER_ID,
       connectorId: input.connectorId ?? null,
-      subject: input.subject ?? null,
+      subject: input.subject,
       redirectIntent: "connect",
     },
     clientId: input.clientId,
     redirectUri: input.redirectUri,
+    correlationId: input.correlationId,
     signer: input.signer,
     now: input.now,
     ttlSeconds: input.ttlSeconds,

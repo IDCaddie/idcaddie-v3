@@ -3358,3 +3358,22 @@ No OAuth implementation, no callback route, no Slack API call, no real token, no
 decrypt, no production enablement. Real credentials remain blocked; the first real-token event (B2c) remains future
 + explicitly authorized. **RISK-001 remains OPEN. RISK-007 remains OPEN. Cutover remains BLOCKED.** Connector
 credentials are not production-ready. No doc 17 §5 box is ticked by this PR.
+
+## 100. OAUTH STATE BINDING + VALIDATION (PR #174, B2a)
+
+Implements B2a (doc 42 §90.2): closes the `validateOAuthState` binding gap. `oauth-state.ts` now binds + validates
+ALL EIGHT fields (`sub`, `tid`, `prov`, `cid`, `redir` = EXACT redirect URI, `corr` = correlation/operation id,
+`exp`, single-use `nonce`). `validateOAuthState` compares EACH bound field against the completing request/session
+and FAILS CLOSED on ANY mismatch — new safe reason codes `session_required` / `subject_mismatch` /
+`redirect_uri_mismatch` / `correlation_mismatch`. New `generateBoundOAuthState` adds **generation-time actor
+authorization** (an injected gate — an actor cannot mint a state for a tenant/connector they cannot access; the
+signer is never invoked on failure). `serverTrustedRedirectUri` resolves the exact redirect from server config only
+(NEVER request Host/X-Forwarded-Host/URL). The existing atomic single-use consume (`oauth-pending-consume.ts`) is
+reused. Migration `0034` widens the `oauth_pending.last_rejected_code` CHECK for the four new codes. 26 synthetic
+binding tests (one isolated per-field mismatch ×8, generation-auth rejection, confused-deputy, Host-spoof, no-session)
++ RLS T55.
+
+No Slack OAuth exchange, no Slack API call, no callback route that exchanges a code, no real token, no live
+connector, no request-path decrypt, no production enablement. Real credentials remain blocked; the first real-token
+event (B2c) remains future + explicitly authorized. **RISK-001 remains OPEN. RISK-007 remains OPEN. Cutover remains
+BLOCKED.** Connector credentials are not production-ready. No doc 17 §5 box is ticked by this PR.

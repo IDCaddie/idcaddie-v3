@@ -30,6 +30,8 @@ const CTX: OAuthStateContext = {
   connectorId: "17000000-0000-0000-0000-0000000000a1",
   subject: "0a000000-0000-0000-0000-000000000001",
   redirectIntent: "connect",
+  redirectUri: "https://app.example.com/connectors/oauth/callback",
+  correlationId: "corr-state-test-01",
 };
 const NOW = 1_750_000_000_000;
 const TTL = 600; // 10 min
@@ -124,7 +126,7 @@ describe("validateOAuthState — security cases", () => {
   it("missing nonce fails (payload re-signed without a nonce)", () => {
     // Forge a correctly-signed payload that has an empty nonce — proves the nonce-presence check, not the
     // signature check, is what rejects it.
-    const payload = { v: 1, tid: CTX.tenantId, prov: "github", cid: null, sub: null, intent: "connect", nonce: "", exp: NOW + 60_000 };
+    const payload = { v: 1, tid: CTX.tenantId, prov: "github", cid: null, sub: CTX.subject, intent: "connect", redir: CTX.redirectUri, corr: CTX.correlationId, nonce: "", exp: NOW + 60_000 };
     const json = JSON.stringify(payload);
     const sig = createHmac("sha256", "test-only-oauth-state-secret-NOT-real").update(json, "utf8").digest();
     const b64url = (b: Buffer) => b.toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");

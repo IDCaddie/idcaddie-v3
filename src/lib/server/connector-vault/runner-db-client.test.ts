@@ -148,7 +148,7 @@ describe("full wiring — Slack authorize persist -> callback consume through th
   it("persists the authorize row, then the runner consumer consumes it exactly once", async () => {
     const conn = makeInMemoryConn();
     const persist = await persistSlackAuthorizePending(
-      { tenantId: TENANT, organizationId: ORG, subject: SUBJECT, clientId: "11111.22222", redirectUri: "https://app.example.com/cb", signer, now: NOW, nonce: "nonce-A" },
+      { tenantId: TENANT, organizationId: ORG, subject: SUBJECT, correlationId: "corr-auth-test", clientId: "11111.22222", redirectUri: "https://app.example.com/cb", signer, now: NOW, nonce: "nonce-A" },
       createRunnerPendingInserter(conn),
     );
     expect(persist.ok).toBe(true);
@@ -170,7 +170,7 @@ describe("full wiring — Slack authorize persist -> callback consume through th
   it("a duplicate authorize persist (same nonce) fails closed", async () => {
     const conn = makeInMemoryConn();
     const inserter = createRunnerPendingInserter(conn);
-    const args = { tenantId: TENANT, organizationId: ORG, subject: SUBJECT, clientId: "11111.22222", redirectUri: "https://app.example.com/cb", signer, now: NOW, nonce: "dup" } as const;
+    const args = { tenantId: TENANT, organizationId: ORG, subject: SUBJECT, correlationId: "corr-auth-test", clientId: "11111.22222", redirectUri: "https://app.example.com/cb", signer, now: NOW, nonce: "dup" } as const;
     expect((await persistSlackAuthorizePending(args, inserter)).ok).toBe(true);
     expect(await persistSlackAuthorizePending(args, inserter)).toEqual({ ok: false, reason: "duplicate_pending" });
     expect(conn.rows.size).toBe(1);
@@ -179,7 +179,7 @@ describe("full wiring — Slack authorize persist -> callback consume through th
   it("the runner consumer issues SET ROLE connector_runner before consuming", async () => {
     const conn = makeInMemoryConn();
     await persistSlackAuthorizePending(
-      { tenantId: TENANT, organizationId: ORG, subject: SUBJECT, clientId: "c", redirectUri: "https://app.example.com/cb", signer, now: NOW, nonce: "n2" },
+      { tenantId: TENANT, organizationId: ORG, subject: SUBJECT, correlationId: "corr-auth-test", clientId: "c", redirectUri: "https://app.example.com/cb", signer, now: NOW, nonce: "n2" },
       createRunnerPendingInserter(conn),
     );
     // spy on the raw sequences by wrapping

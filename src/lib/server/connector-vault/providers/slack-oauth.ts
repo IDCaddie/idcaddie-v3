@@ -51,9 +51,12 @@ export type SlackAuthorizeReason =
   | "invalid_context";
 
 export type SlackAuthorizeInput = {
-  ctx: OAuthStateContext; // provider MUST be 'slack'
+  // provider MUST be 'slack'. `redirectUri`/`correlationId` are injected into the bound state from the input fields
+  // below (the redirect bound into the state IS the authorize redirect_uri), so they are omitted from `ctx`.
+  ctx: Omit<OAuthStateContext, "redirectUri" | "correlationId">;
   clientId: string; // INJECTED from server-only config — never hardcoded / read from env here
-  redirectUri: string; // validated (https only)
+  redirectUri: string; // validated (https only) — bound EXACTLY into the state (B2a)
+  correlationId: string; // B2a: grammar-safe correlation/operation id bound into the state
   signer: OAuthStateSigner; // the existing oauth-state signer boundary
   now: number;
   ttlSeconds?: number;
@@ -115,12 +118,15 @@ export function buildSlackAuthorizeUrl(input: SlackAuthorizeInput): SlackAuthori
   let state: string;
   let nonce: string;
   try {
-    ({ state, nonce } = createOAuthState(input.ctx, {
-      signer: input.signer,
-      ttlSeconds: input.ttlSeconds ?? DEFAULT_TTL_SECONDS,
-      now: input.now,
-      nonce: input.nonce,
-    }));
+    ({ state, nonce } = createOAuthState(
+      { ...input.ctx, redirectUri: input.redirectUri, correlationId: input.correlationId },
+      {
+        signer: input.signer,
+        ttlSeconds: input.ttlSeconds ?? DEFAULT_TTL_SECONDS,
+        now: input.now,
+        nonce: input.nonce,
+      },
+    ));
   } catch {
     // createOAuthState validates the context/opts; a bad context fails closed (no raw value surfaced).
     return { ok: false, reason: "invalid_context" };
