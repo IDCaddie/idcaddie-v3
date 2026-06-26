@@ -34,6 +34,42 @@ NOT change credential-vault / RISK-007 posture.** Customer-facing v3 credentials
   fails closed, unsupported provider fails closed, request-supplied opt-in cannot enable it, the token never appears in
   errors or console, and the server-only boundary (no `"use client"` / no `src/app` import + the runtime sentinel).
 
+## PR 2 — server-only Slack API client (verified in isolation)
+`src/lib/server/sync/slack/slack-client.ts` (server-only). Proves **dev-token source → Slack API → normalized records**;
+it does **NOT** yet prove records → discovery facts → resolver → UI.
+- **Client:** `createSlackClient({ tokenSource, httpClient, identity }, { includeBots })` → `authTest()` + `listUsers()`.
+  The token comes ONLY from the PR #187 `ProviderTokenSource` seam (never a direct env read here); Slack is reached ONLY
+  via the **injected** `httpClient` (no global `fetch` in the module → no accidental egress) with the token in the
+  Authorization header (never the URL/log/record/error).
+- **P0 Slack calls:** `auth.test`, `users.list` (single workspace). **Required Slack scopes:** `users:read`,
+  `users:read.email`. **Not** implemented yet (future work): Enterprise Grid / `admin.users.list` (multi-workspace).
+- **Handling:** cursor pagination via `response_metadata.next_cursor` (capped at 100 pages); `ok:false` → safe Slack
+  error code; `invalid_auth` / `missing_scope`; `429` / `Retry-After` → `SlackApiError("ratelimited", retryAfterSeconds)`;
+  malformed/non-JSON/missing-field → fail closed; missing profile fields → `undefined` (not empty); deleted/restricted/
+  ultra-restricted flags explicit; **bots filtered by default** (incl. `USLACKBOT`).
+- **Normalized record** (`SlackUserRecord`): only allowlisted non-secret fields (slackUserId, teamId, email?,
+  displayName?, title?, status?, roleHint, isAdmin/Owner/PrimaryOwner/Restricted/UltraRestricted/Bot/Deleted, has2fa,
+  hasSso, lastActivityAt?, timezone?, rawProvenance{updated,tzOffset,color}). **No raw Slack object spread; no token /
+  auth header / full response / unknown object / tenant_id-from-Slack.**
+- **Tests** (`slack-client.test.ts`, 22, mocked — no network): auth.test ok/fail, users.list, pagination, `ok:false`,
+  invalid-auth/missing-scope, 429/Retry-After, malformed, with/without email, bot filtering, deleted/restricted flags,
+  no-raw-spread (hostile extra `token`/`secret` fields dropped), no-token-leak in records/errors/console, global `fetch`
+  never called, server-only boundary.
+
+### Live field-path verification (§4) — DEV-ONLY, MANUAL (the old scraper is a reference, NOT ground truth)
+Mock tests prove client BEHAVIOR; they do **not** prove Slack's current response shape. `scripts/verify-slack-field-
+paths-dev.mjs` is the **local-dev-only** command that calls real Slack once (auth.test + users.list) and prints **safe
+aggregates / field-path presence only** — never the token, an email, a name, the raw response, an auth header, or an
+`xoxb-` value. It is **allowlist-shaped** (local dev + the PR #187 opt-in) and **fails closed** in CI/staging/prod; the
+agent does NOT run it. **PR 2's live verification is DEFERRED until run locally; PR 3 (discovery-fact emitter) must NOT
+start until the real field-path report is produced and reconciled.** Exact command:
+```
+NODE_ENV=development ID_CADDIE_DEV_PROVIDER_TOKEN_SOURCE_ENABLED=1 ID_CADDIE_DEV_SLACK_TOKEN=<dev-bot-token> \
+  node scripts/verify-slack-field-paths-dev.mjs
+```
+(Mint a read-only bot token in the **disposable** Slack test workspace with scopes `users:read` + `users:read.email`;
+set it locally only; report only the safe output.)
+
 ### Constraints carried by PR 1
 - The dev-token source is for **local development proof only** and is **structurally disabled outside local/dev**.
 - It **must be removed or replaced** by the OAuth/vault/runner source **before any production connector use**.
