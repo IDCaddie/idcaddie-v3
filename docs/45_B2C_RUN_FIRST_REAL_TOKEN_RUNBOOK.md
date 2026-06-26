@@ -310,6 +310,13 @@ It reads the secret from **stdin**, encrypts immediately via the KMS/envelope bo
 to `connector_app_secrets`, and returns only a redacted `secret_id` (or a safe static reason). It is invoked **inside
 the hosted runner runtime** (which supplies the real KMS provider + the `RunnerConnection` as `connector_runner_login`).
 
+> **Runner location is PINNED (doc 46 §11, 2026-06-26):** the hosted runner is a **separate deployable** (Option A) that
+> **vendors** the `connector-vault` core at a pinned app-repo commit and runs on a **fresh ephemeral host on the current
+> IAM-user model** (the §47 EC2 `i-00335d…` is **gone** — confirmed read-only; not reused). **Adding `pg` to the app repo
+> is NOT authorized; building an in-repo runner would require a new architecture decision replacing doc 46 §11.** The one
+> remaining infra seam is the *specific* fresh-ephemeral service (VM vs ECS/Fargate one-shot) — decide explicitly before
+> building; do not guess. Phase C stays BLOCKED until that separate runner exists and is reviewed.
+
 Pre-flight first (refuses production ref / env-secret / argv-secret; emits the procedure — never holds the secret):
 ```
 node scripts/b2c-ingest-client-secret.mjs --confirm
