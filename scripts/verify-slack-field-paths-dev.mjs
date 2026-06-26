@@ -18,31 +18,54 @@ export function isLocalDevTokenEnabled(env) {
   return env.ID_CADDIE_DEV_PROVIDER_TOKEN_SOURCE_ENABLED === "1";
 }
 
-// Read EXACTLY the field paths the client reads; return presence COUNTS only (never a value).
+const isBotMember = (m) => !!m && (m.is_bot === true || m.id === "USLACKBOT");
+const hasPath = (o, p) => p.split(".").reduce((x, k) => (x && typeof x === "object" ? x[k] : undefined), o) != null;
+
+// Read EXACTLY the field paths the client reads; return presence COUNTS only (never a value). Email is broken down BY
+// USER TYPE — a workspace can return a single email that belongs to a BOT, so non-bot email presence is what matters.
 export function summarizeMembers(members) {
-  const has = (o, p) => p.split(".").reduce((x, k) => (x && typeof x === "object" ? x[k] : undefined), o) != null;
-  const c = { total: 0, bots: 0, deleted: 0, restricted: 0, ultraRestricted: 0, admins: 0, owners: 0, primaryOwners: 0,
-    withEmail: 0, missingEmail: 0, withDisplayName: 0, withRealName: 0, withTitle: 0, withTz: 0, with2fa: 0, withSso: 0, missingId: 0 };
+  const c = { total: 0, bots: 0, nonBots: 0, deleted: 0, restricted: 0, ultraRestricted: 0, admins: 0, owners: 0, primaryOwners: 0,
+    usersWithEmail: 0, botsWithEmail: 0, nonBotsWithEmail: 0, nonBotsMissingEmail: 0,
+    withDisplayName: 0, withRealName: 0, withTitle: 0, withTz: 0, with2fa: 0, withSso: 0, missingId: 0 };
   for (const m of members) {
     if (!m || typeof m !== "object") continue;
     c.total++;
-    if (!has(m, "id")) c.missingId++;
-    if (m.is_bot === true || m.id === "USLACKBOT") c.bots++;
+    const bot = isBotMember(m);
+    const email = hasPath(m, "profile.email");
+    if (bot) c.bots++; else c.nonBots++;
+    if (!hasPath(m, "id")) c.missingId++;
     if (m.deleted === true) c.deleted++;
     if (m.is_restricted === true) c.restricted++;
     if (m.is_ultra_restricted === true) c.ultraRestricted++;
     if (m.is_admin === true) c.admins++;
     if (m.is_owner === true) c.owners++;
     if (m.is_primary_owner === true) c.primaryOwners++;
-    if (has(m, "profile.email")) c.withEmail++; else c.missingEmail++;
-    if (has(m, "profile.display_name")) c.withDisplayName++;
-    if (has(m, "profile.real_name")) c.withRealName++;
-    if (has(m, "profile.title")) c.withTitle++;
-    if (has(m, "tz")) c.withTz++;
+    if (email) c.usersWithEmail++;
+    if (bot && email) c.botsWithEmail++;
+    if (!bot && email) c.nonBotsWithEmail++;
+    if (!bot && !email) c.nonBotsMissingEmail++;
+    if (hasPath(m, "profile.display_name")) c.withDisplayName++;
+    if (hasPath(m, "profile.real_name")) c.withRealName++;
+    if (hasPath(m, "profile.title")) c.withTitle++;
+    if (hasPath(m, "tz")) c.withTz++;
     if (m.has_2fa === true) c.with2fa++;
     if (m.has_sso === true) c.withSso++;
   }
   return c;
+}
+
+// Pick the field-path sample: PREFER a non-bot member WITH profile.email (the merge-gate evidence). Returns ONLY safe
+// booleans + the field-path PRESENCE block (booleans) — never the raw member, so no email/name/value can leak.
+export function pickSampledNonBot(members) {
+  const nonBots = (Array.isArray(members) ? members : []).filter((m) => m && typeof m === "object" && !isBotMember(m));
+  const withEmail = nonBots.find((m) => hasPath(m, "profile.email")) ?? null;
+  const sample = withEmail ?? nonBots[0] ?? null;
+  return {
+    sampledNonBotWithEmailFound: !!withEmail,
+    sampledNonBotHasEmail: !!sample && hasPath(sample, "profile.email"),
+    hasSample: !!sample,
+    fieldPaths: sample ? fieldPathPresence(sample) : [], // booleans only — the raw member never escapes this helper
+  };
 }
 
 // The field paths the client depends on — report present/ABSENT (so a stale/relocated old-scraper path is visible).
@@ -78,23 +101,31 @@ async function main() {
   if (auth.ok !== true) { console.error("  auth error code:", typeof auth.error === "string" ? auth.error : "unknown"); process.exit(1); }
 
   // users.list (paginate, aggregate only)
-  let cursor = "", pages = 0, all = [], firstMember = null;
+  let cursor = "", pages = 0, all = [];
   do {
     const page = await get("users.list", cursor ? { limit: "200", cursor } : { limit: "200" });
     if (page.ok !== true) { console.error("users.list error code:", typeof page.error === "string" ? page.error : "unknown"); process.exit(1); }
-    const members = Array.isArray(page.members) ? page.members : [];
-    if (!firstMember && members.length) firstMember = members.find((m) => m && m.is_bot !== true) ?? members[0];
-    all = all.concat(members);
+    all = all.concat(Array.isArray(page.members) ? page.members : []);
     cursor = (page.response_metadata && page.response_metadata.next_cursor) || "";
     pages++;
   } while (cursor && pages < 100);
 
+  const counts = summarizeMembers(all);
+  const { sampledNonBotWithEmailFound, sampledNonBotHasEmail, hasSample, fieldPaths } = pickSampledNonBot(all);
   console.log("users.list ok: true");
   console.log("  pages fetched:", pages, "| pagination handled:", pages > 1 ? "multi-page" : "single-page");
-  console.log("  aggregate counts:", JSON.stringify(summarizeMembers(all)));
-  console.log("  field-path presence (sample non-bot member):");
-  for (const { path, present } of fieldPathPresence(firstMember)) console.log(`    ${present ? "PRESENT" : "ABSENT "}  ${path}`);
-  console.log("  → any ABSENT path above is a stale/relocated old-scraper assumption to reconcile.");
+  console.log("  aggregate counts:", JSON.stringify(counts));
+  console.log("  sampledNonBotWithEmailFound:", sampledNonBotWithEmailFound);
+  console.log("  sampledNonBotHasEmail:", sampledNonBotHasEmail);
+  if (sampledNonBotWithEmailFound) {
+    console.log("  field-path presence (sampled NON-BOT member WITH email):");
+  } else {
+    console.log("  sampled non-bot with email: NOT FOUND");
+    if (hasSample) console.log("  field-path presence (fallback non-bot member, email ABSENT):");
+  }
+  for (const { path, present } of fieldPaths) console.log(`    ${present ? "PRESENT" : "ABSENT "}  ${path}`);
+  console.log("  → MERGE GATE: nonBotsWithEmail >= 1 AND profile.email PRESENT on the non-bot sample above.");
+  console.log("  → any other ABSENT path is a stale/relocated old-scraper assumption to reconcile.");
 }
 
 // Run only as a script (never on import). Top-level guard so the module is importable by its guard test.

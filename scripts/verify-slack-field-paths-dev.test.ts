@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { isLocalDevTokenEnabled, summarizeMembers, fieldPathPresence } from "./verify-slack-field-paths-dev.mjs";
+import { isLocalDevTokenEnabled, summarizeMembers, fieldPathPresence, pickSampledNonBot } from "./verify-slack-field-paths-dev.mjs";
 
 // The live verify command is dev-only and never run in CI; this proves its guard is allowlist-shaped and its output
 // carries no PII. Synthetic data only.
@@ -22,10 +22,39 @@ describe("verify-slack-field-paths-dev — allowlist guard", () => {
       { id: "B1", is_bot: true, profile: {} },
     ];
     const sum = summarizeMembers(members);
-    expect(sum).toMatchObject({ total: 2, bots: 1, withEmail: 1, missingEmail: 1, withTitle: 1, with2fa: 1 });
-    const blob = JSON.stringify(sum) + JSON.stringify(fieldPathPresence(members[0]));
+    expect(sum).toMatchObject({ total: 2, bots: 1, nonBots: 1, usersWithEmail: 1, nonBotsWithEmail: 1, botsWithEmail: 0, withTitle: 1, with2fa: 1 });
+    const blob = JSON.stringify(sum) + JSON.stringify(fieldPathPresence(members[0])) + JSON.stringify(pickSampledNonBot(members));
     expect(blob).not.toContain("secret@x.test");
     expect(blob).not.toContain("Secret Person");
-    expect(fieldPathPresence(members[0]).find((f) => f.path === "profile.email")?.present).toBe(true);
+  });
+
+  it("email is broken down by user type — a BOT-only email does NOT count as nonBotsWithEmail (the #188 ambiguity)", () => {
+    const members = [
+      { id: "B1", is_bot: true, profile: { email: "bot@x.test" } }, // bot WITH email
+      { id: "USLACKBOT", is_bot: false, profile: { email: "slackbot@x.test" } }, // USLACKBOT treated as bot
+      { id: "U1", is_bot: false, profile: {} }, // non-bot WITHOUT email
+    ];
+    const sum = summarizeMembers(members);
+    expect(sum).toMatchObject({ total: 3, bots: 2, nonBots: 1, usersWithEmail: 2, botsWithEmail: 2, nonBotsWithEmail: 0, nonBotsMissingEmail: 1 });
+    const picked = pickSampledNonBot(members);
+    expect(picked.sampledNonBotWithEmailFound).toBe(false); // no non-bot has email → merge gate NOT met
+    expect(picked.sampledNonBotHasEmail).toBe(false);
+    expect(JSON.stringify(picked)).not.toContain("@x.test"); // returns booleans only — no raw member/email
+  });
+
+  it("prefers a non-bot WITH email for the sample (merge-gate evidence) and returns NO raw member", () => {
+    const members = [
+      { id: "U_NOEMAIL", is_bot: false, profile: {} },
+      { id: "U_EMAIL", is_bot: false, profile: { email: "real@x.test" }, tz: "UTC" },
+      { id: "B1", is_bot: true, profile: { email: "bot@x.test" } },
+    ];
+    const picked = pickSampledNonBot(members);
+    expect(picked.sampledNonBotWithEmailFound).toBe(true);
+    expect(picked.sampledNonBotHasEmail).toBe(true);
+    // proves it picked the with-email non-bot (email PRESENT in the booleans-only field-path block)…
+    expect(picked.fieldPaths.find((f: { path: string; present: boolean }) => f.path === "profile.email")?.present).toBe(true);
+    // …and leaks no raw member/email value:
+    expect(JSON.stringify(picked)).not.toContain("real@x.test");
+    expect(JSON.stringify(picked)).not.toContain("U_EMAIL");
   });
 });

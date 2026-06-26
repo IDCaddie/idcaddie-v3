@@ -83,10 +83,18 @@ members (2 bots, 1 sampled non-bot): withEmail 1, missingEmail 2, withDisplayNam
   unavailable. Reconciled: `email` is **optional** in the client (records never require it; missing-email + present-email
   both tested). **PR 3 must emit `person_identity_candidate` only when `email` exists.**
 
-> **⛔ PENDING gate before PR 3:** Sam re-runs the verify command against a non-bot member **known to have an email set**.
-> If `profile.email` becomes PRESENT, email is confirmed per-user-optional-but-the-path-works → PR 3 may proceed. If it
-> is still ABSENT for a member with a known email, **STOP and investigate scope/config/path** (do not start PR 3). PR 3
-> is BLOCKED until email flow is confirmed or explicitly escalated.
+**Rerun (2026-06-26, after token rotation) — still INCONCLUSIVE for non-bots:** total 3 (2 bots, 1 non-bot),
+`withEmail` 1, sampled non-bot `profile.email` ABSENT. A single workspace-wide `withEmail` could belong to a **bot** —
+it does **not** prove email reaches a real non-bot member. The verify command was therefore upgraded to break email
+presence **by user type** and to sample a **non-bot WITH email** for the field-path block. Its safe output now reports:
+`total`, `bots`, `nonBots`, `usersWithEmail`, `botsWithEmail`, `nonBotsWithEmail`, `nonBotsMissingEmail`,
+`sampledNonBotHasEmail`, `sampledNonBotWithEmailFound`, and (if found) the field-path block from a non-bot with email
+(else `sampled non-bot with email: NOT FOUND`). It never prints emails/names/raw/token/`xoxb-`.
+
+> **⛔ EMAIL MERGE GATE for #188 (and PR-3 precondition):** #188 is merge-ready **only** when a live run shows
+> **`nonBotsWithEmail >= 1`** AND **`profile.email` PRESENT on the non-bot sample**. If `nonBotsWithEmail` stays `0`,
+> **STOP and treat Slack email flow as a blocker before PR 3** (investigate scope/config/path). PR 3 is BLOCKED until
+> this is confirmed. (Add a non-bot member with an email to the disposable workspace, then re-run the command.)
 
 ### Constraints carried by PR 1
 - The dev-token source is for **local development proof only** and is **structurally disabled outside local/dev**.
