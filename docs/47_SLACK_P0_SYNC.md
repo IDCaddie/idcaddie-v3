@@ -34,6 +34,77 @@ NOT change credential-vault / RISK-007 posture.** Customer-facing v3 credentials
   fails closed, unsupported provider fails closed, request-supplied opt-in cannot enable it, the token never appears in
   errors or console, and the server-only boundary (no `"use client"` / no `src/app` import + the runtime sentinel).
 
+## PR 2 — server-only Slack API client (verified in isolation)
+`src/lib/server/sync/slack/slack-client.ts` (server-only). Proves **dev-token source → Slack API → normalized records**;
+it does **NOT** yet prove records → discovery facts → resolver → UI.
+- **Client:** `createSlackClient({ tokenSource, httpClient, identity }, { includeBots })` → `authTest()` + `listUsers()`.
+  The token comes ONLY from the PR #187 `ProviderTokenSource` seam (never a direct env read here); Slack is reached ONLY
+  via the **injected** `httpClient` (no global `fetch` in the module → no accidental egress) with the token in the
+  Authorization header (never the URL/log/record/error).
+- **P0 Slack calls:** `auth.test`, `users.list` (single workspace). **Required Slack scopes:** `users:read`,
+  `users:read.email`. **Not** implemented yet (future work): Enterprise Grid / `admin.users.list` (multi-workspace).
+- **Handling:** cursor pagination via `response_metadata.next_cursor` (capped at 100 pages); `ok:false` → safe Slack
+  error code; `invalid_auth` / `missing_scope`; `429` / `Retry-After` → `SlackApiError("ratelimited", retryAfterSeconds)`;
+  malformed/non-JSON/missing-field → fail closed; missing profile fields → `undefined` (not empty); deleted/restricted/
+  ultra-restricted flags explicit; **bots filtered by default** (incl. `USLACKBOT`).
+- **Normalized record** (`SlackUserRecord`): only allowlisted non-secret fields (slackUserId, teamId, email?,
+  displayName?, title?, status?, roleHint, isAdmin/Owner/PrimaryOwner/Restricted/UltraRestricted/Bot/Deleted, has2fa,
+  hasSso, lastActivityAt?, timezone?, rawProvenance{updated,tzOffset,color}). **No raw Slack object spread; no token /
+  auth header / full response / unknown object / tenant_id-from-Slack.**
+- **Tests** (`slack-client.test.ts`, 22, mocked — no network): auth.test ok/fail, users.list, pagination, `ok:false`,
+  invalid-auth/missing-scope, 429/Retry-After, malformed, with/without email, bot filtering, deleted/restricted flags,
+  no-raw-spread (hostile extra `token`/`secret` fields dropped), no-token-leak in records/errors/console, global `fetch`
+  never called, server-only boundary.
+
+### Live field-path verification (§4) — DEV-ONLY, MANUAL (the old scraper is a reference, NOT ground truth)
+Mock tests prove client BEHAVIOR; they do **not** prove Slack's current response shape. `scripts/verify-slack-field-
+paths-dev.mjs` is the **local-dev-only** command that calls real Slack once (auth.test + users.list) and prints **safe
+aggregates / field-path presence only** — never the token, an email, a name, the raw response, an auth header, or an
+`xoxb-` value. It is **allowlist-shaped** (local dev + the PR #187 opt-in) and **fails closed** in CI/staging/prod; the
+agent does NOT run it. Exact command:
+```
+NODE_ENV=development ID_CADDIE_DEV_PROVIDER_TOKEN_SOURCE_ENABLED=1 ID_CADDIE_DEV_SLACK_TOKEN=<dev-bot-token> \
+  node scripts/verify-slack-field-paths-dev.mjs
+```
+(Mint a read-only bot token in the **disposable** Slack test workspace with scopes `users:read` + `users:read.email`;
+set it locally only; report only the safe output.)
+
+### Live verification result — RUN (2026-06-26, disposable test workspace; safe aggregates only)
+`auth.test ok`, `team_id`/`user_id` present; `users.list ok`, **single page** (pagination handled). Aggregate of 3
+members (2 bots, 1 sampled non-bot): withEmail 1, missingEmail 2, withDisplayName 3, withRealName 3, withTitle 3, withTz
+3, with2fa 0, withSso 0, missingId 0.
+- **PRESENT** (confirmed): `id`, `team_id`, `deleted`, `is_admin`, `is_owner`, `is_primary_owner`, `is_restricted`,
+  `is_ultra_restricted`, `is_bot`, `tz`, `updated`, `profile.display_name`, `profile.real_name`, `profile.title`,
+  `profile.status_text`.
+- **ABSENT / stale** in the P0 `users.list` shape: **`has_2fa`, `has_sso`** → reconciled: removed from required output;
+  **provenance-only when present**; defer real 2FA/SSO posture to Enterprise Grid / SCIM / a security-posture path.
+- **`profile.email`: ABSENT on the sampled non-bot member.** Small-sample caveat — the run had only 1 non-bot member,
+  who had no email set; this proves email **can** be absent (handle defensively), **not** that Slack email is
+  unavailable. Reconciled: `email` is **optional** in the client (records never require it; missing-email + present-email
+  both tested). **PR 3 must emit `person_identity_candidate` only when `email` exists.**
+
+**Rerun (2026-06-26, after token rotation) — still INCONCLUSIVE for non-bots:** total 3 (2 bots, 1 non-bot),
+`withEmail` 1, sampled non-bot `profile.email` ABSENT. A single workspace-wide `withEmail` could belong to a **bot** —
+it does **not** prove email reaches a real non-bot member. The verify command was therefore upgraded to break email
+presence **by user type** and to sample a **non-bot WITH email** for the field-path block. Its safe output now reports:
+`total`, `bots`, `nonBots`, `usersWithEmail`, `botsWithEmail`, `nonBotsWithEmail`, `nonBotsMissingEmail`,
+`sampledNonBotHasEmail`, `sampledNonBotWithEmailFound`, and (if found) the field-path block from a non-bot with email
+(else `sampled non-bot with email: NOT FOUND`). It never prints emails/names/raw/token/`xoxb-`.
+
+**Final run (2026-06-26, after adding a non-bot member with an email) — EMAIL GATE CLOSED ✅.** Safe output: total 3
+(2 bots, 1 non-bot), `usersWithEmail` 1, `botsWithEmail` 0, **`nonBotsWithEmail` 1**, `nonBotsMissingEmail` 0,
+**`sampledNonBotWithEmailFound: true`**, **`sampledNonBotHasEmail: true`**. Field-path block on the sampled non-bot
+member **with email**: **PRESENT** `id`, `team_id`, `deleted`, `is_admin`, `is_owner`, `is_primary_owner`,
+`is_restricted`, `is_ultra_restricted`, `is_bot`, `tz`, `updated`, **`profile.email`**, `profile.display_name`,
+`profile.real_name`, `profile.title`, `profile.status_text`; **ABSENT** `has_2fa`, `has_sso`.
+
+> **✅ EMAIL MERGE GATE for #188 — CLOSED.** `nonBotsWithEmail >= 1` AND `profile.email` PRESENT on a real non-bot
+> member are both confirmed. Conclusions, locked in: (a) `profile.email` is present on a real non-bot member when an
+> email exists, but remains **per-user optional** (the client never requires it); (b) **PR 3 emits
+> `person_identity_candidate` ONLY when `email` exists**; (c) `has_2fa` / `has_sso` remain **unavailable** via P0
+> `users.list` and must **not** be required (2FA/SSO posture → Enterprise Grid / SCIM / a security-posture path).
+> The PR-3 email precondition is satisfied.
+
 ### Constraints carried by PR 1
 - The dev-token source is for **local development proof only** and is **structurally disabled outside local/dev**.
 - It **must be removed or replaced** by the OAuth/vault/runner source **before any production connector use**.
