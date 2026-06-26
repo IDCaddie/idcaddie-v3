@@ -4287,3 +4287,68 @@ post-mint failure, cleanup includes provider-side revoke + vault tombstone (docs
 
 **RISK-001 remains OPEN. RISK-007 remains OPEN. Cutover remains BLOCKED.** Connector credentials are not
 production-ready. No doc 17 §5 box is ticked by this PR.
+
+## 91. Reconciled staging KMS/IAM setup for B2/B2c-run (docs only — IAM policy fix, simulation-proven)
+
+Reconciles the staging KMS/IAM facts before the live B2 runtime proof. **No live KMS call, no key minted, no real
+secret/token, no OAuth, no B2c-run happened in this record.** The only AWS mutation was a minimal IAM inline-policy fix
+(below), proven read-only via `iam simulate-principal-policy`. Account `833822972703`, region `ca-central-1`.
+
+### 91.1 Canonical staging connector-vault KEK
+- **Canonical key:** `arn:aws:kms:ca-central-1:833822972703:key/a1b7eaa9-5ed6-4fb9-8a19-f610c6407d5f` (state **Enabled**).
+- **Canonical alias:** `alias/idcaddie-staging-connector-vault` → resolves to the canonical key above (§47.3 evidence).
+- **`CONNECTOR_VAULT_KMS_KEY_ID`** must be set to that **alias** for staging B2/B2c-run. The code is **alias-agnostic**:
+  `kmsKeyProviderConfigFromEnv()` reads `CONNECTOR_VAULT_KMS_KEY_ID` from trusted env/config — no default, no pin.
+- **Gate:** the alias must resolve to the canonical key above before ANY live B2 or secret load (verify with
+  `aws kms describe-key --key-id alias/idcaddie-staging-connector-vault`).
+
+### 91.2 Superseded key — do NOT use
+- **Old/superseded (still Enabled):** `arn:aws:kms:ca-central-1:833822972703:key/5c6fd833-64a0-41f1-8723-9fdbedf6d5fa`.
+- This is **not** the current staging connector-vault KEK. The prior runner inline policy accidentally pointed to it
+  (cause of the `implicitDeny` below). **Do not use `5c6fd833…` for B2/B2c-run** unless a future reviewed rotation plan
+  explicitly reselects it.
+
+### 91.3 Active IAM-user model (current local B2 path)
+- **Runner:** `arn:aws:iam::833822972703:user/idcaddie-staging-runner`
+- **Web/request (denied side):** `arn:aws:iam::833822972703:user/idcaddie-staging-web`
+- **Operator (read-only setup checks / this IAM fix):** `arn:aws:iam::833822972703:user/sam-cli`
+- The older **EC2 assumed-role** evidence (`idc-runner-role` on instance `i-00335d464d6f7c299`, §47) is **historical
+  context**, not the current local B2 operator path. If the EC2-role path is reselected later, it needs its **own**
+  separate denied/web-identity proof.
+
+### 91.4 Runner policy (the fix applied)
+- **Inline policy `kms-runner` on `idcaddie-staging-runner` only.** Final grant:
+  - Actions: **`kms:GenerateDataKey`**, **`kms:Decrypt`** — and nothing else.
+  - Resource: the canonical key `arn:aws:kms:ca-central-1:833822972703:key/a1b7eaa9-5ed6-4fb9-8a19-f610c6407d5f` only.
+  - **No `kms:Encrypt`** (source uses only `GenerateDataKeyCommand` + `DecryptCommand`; no `EncryptCommand`,
+    `ReEncrypt`, or `DescribeKey` — `aws-kms-sdk-sender.ts`), **no `kms:DescribeKey`**, **no wildcard resource**, **no
+    production key**.
+- **KMS key policy untouched** — `a1b7eaa9…` has standard account-root delegation (`arn:aws:iam::833822972703:root`),
+  so the fix was **IAM-side only** (no lockout risk).
+
+### 91.5 Web/request denied posture (the denied-decrypt half of B2)
+- `idcaddie-staging-web` remains **denied** `kms:Decrypt` (simulation: `explicitDeny`). It was **not** touched. **Do not
+  grant decrypt to the web/request identity.**
+
+### 91.6 Verification evidence (read-only `simulate-principal-policy` against `a1b7eaa9…`)
+| Identity | Action | Before fix | After fix |
+|---|---|---|---|
+| runner | `kms:GenerateDataKey` | implicitDeny | **allowed** |
+| runner | `kms:Decrypt` | implicitDeny | **allowed** |
+| runner | `kms:Encrypt` | implicitDeny | implicitDeny (intentionally not granted) |
+| web | `kms:Decrypt` | explicitDeny | **explicitDeny** (preserved) |
+| web | `kms:GenerateDataKey` | implicitDeny | implicitDeny |
+| web | `kms:Encrypt` | implicitDeny | implicitDeny |
+
+### 91.7 Remaining work — live B2 is NOT done
+The IAM policy layer is fixed and simulation-proven; the **live B2 runtime proof has NOT run.** Before any client-secret
+load the operator must, in order: (a) mint **fresh temporary-use** access keys for `idcaddie-staging-runner` **and**
+`idcaddie-staging-web`; (b) configure the two local profiles; (c) set
+`CONNECTOR_VAULT_KMS_KEY_ID=alias/idcaddie-staging-connector-vault`; (d) run the **synthetic live KMS round-trip**
+(`verify-staging-connector-vault-dry-run.mjs`); (e) run the **live denied-decrypt** check
+(`verify-staging-kms-iam-separation-dry-run.mjs`); (f) **delete/deactivate** the temp keys and verify they are dead.
+**No Slack client secret may be loaded until live B2 is green. No B2c-run without a separate explicit GO.**
+
+**RISK-001 remains OPEN. RISK-007 remains OPEN. Cutover remains BLOCKED.** No real Slack client secret was loaded, no
+real Slack token entered the system, no OAuth exchange ran, no live B2 KMS runtime check ran in this docs PR. Connector
+credentials are not production-ready.

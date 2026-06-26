@@ -358,10 +358,18 @@ reset role; reset session authorization;
 ```
 
 ### 11.4 KMS key readiness check
-- `CONNECTOR_VAULT_KMS_KEY_ID` must be set to the **staging** KEK (a non-sensitive KMS key handle), with the runner's
-  IAM allowing `GenerateDataKey` (and `Decrypt` for later loads) on it. `createKmsKeyProvider` **fails closed** on a
-  missing client/KEK, so an unconfigured deploy can never silently use a weak path. Confirm via the staging dry-run
-  (`scripts/verify-staging-connector-vault-dry-run.mjs`, synthetic) that wrap/unwrap works under the runner IAM.
+- **Canonical staging KEK (doc 42 §91):** set `CONNECTOR_VAULT_KMS_KEY_ID=alias/idcaddie-staging-connector-vault` — it
+  must resolve to `arn:aws:kms:ca-central-1:833822972703:key/a1b7eaa9-5ed6-4fb9-8a19-f610c6407d5f` (Enabled) before any
+  live B2 / secret load (`aws kms describe-key --key-id alias/idcaddie-staging-connector-vault`). The code is
+  alias-agnostic (reads the env handle; no default). **Do NOT** use the superseded key `…key/5c6fd833…`.
+- **IAM (current local path, IAM-user model):** runner `idcaddie-staging-runner` inline policy `kms-runner` grants only
+  `kms:GenerateDataKey` + `kms:Decrypt` on the canonical key (no `kms:Encrypt`/`DescribeKey`/wildcard); web
+  `idcaddie-staging-web` stays **denied** `kms:Decrypt`. Simulation-proven (doc 42 §91.6): runner GenerateDataKey/Decrypt
+  = allowed, web Decrypt = explicitDeny. `createKmsKeyProvider` **fails closed** on a missing client/KEK.
+- **Live proof still pending:** mint fresh temp keys for both users → set the env → run the synthetic wrap/unwrap
+  (`scripts/verify-staging-connector-vault-dry-run.mjs`) + the denied-decrypt
+  (`scripts/verify-staging-kms-iam-separation-dry-run.mjs`) → delete the temp keys and verify they are dead. No
+  client-secret load until live B2 is green.
 
 ### 11.5 DB inspection after ingestion (envelope-only)
 ```sql

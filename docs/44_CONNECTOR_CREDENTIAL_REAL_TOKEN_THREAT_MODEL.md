@@ -60,6 +60,12 @@ The synthetic vault is built and request-path-fenced. The threat model is anchor
   **web/request IAM identity** is denied. (The recorded runner principal in the §47 dry-run is the EC2 assumed role
   `idc-runner-role`; the specific staging IAM profile names are an operational detail, not pinned by this doc.) The
   store-adapter DB shape passed synthetic (doc 42 §80). **No real token has ever entered any of these paths.**
+- **Reconciled staging KMS/IAM (doc 42 §91, 2026-06-25 — IAM-side policy fix, simulation-proven; live B2 NOT run).** The
+  **current local B2 path is IAM-user based**: runner `idcaddie-staging-runner` (inline policy `kms-runner` grants only
+  `kms:GenerateDataKey` + `kms:Decrypt` on the **canonical** KEK `alias/idcaddie-staging-connector-vault` →
+  `…key/a1b7eaa9…`; **no** `kms:Encrypt`/`DescribeKey`/wildcard) and web `idcaddie-staging-web` (**denied** `kms:Decrypt`,
+  `explicitDeny` — the denied-decrypt half, preserved). A superseded key `…key/5c6fd833…` exists and is **not** the
+  B2c-run KEK. The EC2-role evidence is historical; the live KMS round-trip + denied-decrypt proof are still pending.
   Production KMS/IAM separation is **unverified**.
 
 ---
