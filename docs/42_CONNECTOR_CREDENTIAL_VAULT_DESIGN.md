@@ -4344,7 +4344,11 @@ secret/token, no OAuth, no B2c-run happened in this record.** The only AWS mutat
 Phase C (real client-secret ingestion) has **no runnable entrypoint here, by design** — the committed core takes an
 **injected** `RunnerConnection` and the repo is deliberately pg-free. The hosted runner that performs C is specified in
 **[46_HOSTED_RUNNER_INGEST_ENTRYPOINT_SPEC](./46_HOSTED_RUNNER_INGEST_ENTRYPOINT_SPEC.md)** (2026-06-26 decision: keep
-pg-free; do not add a local direct-Postgres script). **Phase C remains BLOCKED until a conforming hosted runner exists.**
+pg-free; do not add a local direct-Postgres script). **Location PINNED (doc 46 §11):** separate deployable that **vendors**
+the core at a pinned commit + a **fresh ephemeral host on the IAM-user model** (the §47 EC2 `i-00335d…` is **gone** —
+confirmed read-only; not reused); the specific service (VM vs ECS/Fargate one-shot) is the one open infra decision.
+**Adding `pg` to the app repo is NOT authorized; an in-repo runner needs a new decision replacing §11.** **Phase C remains
+BLOCKED until a conforming hosted runner exists and is reviewed — even though B1/B2 are green.**
 
 ### 91.7 Remaining work — live B2 is NOT done
 The IAM policy layer is fixed and simulation-proven; the **live B2 runtime proof has NOT run.** Before any client-secret

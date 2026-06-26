@@ -2,6 +2,9 @@
 
 **Status: SPEC ONLY. No code in this repo. Phase C (real Slack client-secret ingestion) is BLOCKED until a
 conforming hosted runner exists.** RISK-001 / RISK-007 remain **OPEN**; cutover **BLOCKED**; not production-ready.
+**Location PINNED (§11, 2026-06-26):** separate deployable (Option A) · vendor the core at a pinned commit · fresh
+ephemeral host on the IAM-user model (§47 EC2 confirmed gone) · the specific service is the one open infra decision.
+**Adding `pg` to this app repo is NOT authorized; an in-repo runner would require a new decision replacing §11.**
 
 ## 0. Why this doc exists
 Phase C must load the real Slack OAuth **client secret** (the master credential) through the reviewed,
@@ -124,3 +127,59 @@ select id, app_env, provider, secret_kind, version, is_active, kek_id, aead_alg,
 
 Only when **1–4 are green** may the operator run §5 once, with Sam's explicit GO. This doc changes nothing operationally
 — it specifies the missing entrypoint and keeps Phase C **BLOCKED** until a conforming hosted runner exists.
+
+## 11. Location decision — PINNED (2026-06-26 clarification)
+§1/§9 left two seams open (import-vs-vendor; runtime target). This section pins them so the runner architecture is
+settled **before** any implementation. **No code, no `pg`, no runner project is created by this doc.**
+
+### 11.1 Classification — Option A (separate deployable) — PINNED
+The conforming runner is a **separate deployable** (its own runner repo/project), **not** a module inside
+`~/code/idcaddie-v3`:
+- the app repo **stays pg-free** — **no `pg` in `~/code/idcaddie-v3`**, no direct `connector_runner_login` pool in the
+  app repo, no local direct-Postgres ingest script, no browser/request-path route, no encrypt/insert split;
+- the runner owns `pg` / the direct Postgres / the `connector_runner_login` connection on its own host;
+- the runner build does **not** happen inside the app repo.
+
+### 11.2 Package/library mechanism — VENDOR at a pinned commit (Option B) — PINNED
+The runner **vendors (copies) the minimal `connector-vault` core modules at a pinned app-repo commit** — it does **not**
+depend on a published package.
+- **Minimal vendor set:** `client-secret-ingest-harness.ts`, `slack-client-secret-store.ts`, `crypto.ts`,
+  `kms-key-provider.ts`, `aws-kms-client.ts`, `aws-kms-sdk-sender.ts`, and the `runner-db-client.ts` `RunnerConnection`
+  type — and their tests. Nothing else.
+- **Why this preserves the pg-free boundary:** the app repo gains nothing (no `pg`, no new export surface, no release
+  pipeline); the runner is the *only* place `pg` + the vendored core meet. Publishing a package would add
+  release/versioning infrastructure before there is more than one consumer — deferred until multiple runners exist.
+- **Pinned-commit discipline:** the runner records the **exact app-repo commit SHA** it vendored from (a
+  `VENDOR.lock`/manifest). The vendored files MUST be **byte-identical** to the app repo at that SHA.
+- **Drift control:** a runner-side check diffs each vendored file against the app repo at the pinned SHA and **fails on
+  any drift**. Bumping the SHA is a **reviewed** change in the runner project.
+- **How app-core changes flow in:** any app-repo PR touching a vendored `connector-vault` module obliges a re-vendor +
+  re-review in the runner (new SHA, new diff, re-run tests). The app repo stays the source of truth.
+- **Proof the vendored code matches app behavior before any real secret:** (a) byte-identical diff at the pinned SHA,
+  and (b) the runner **re-runs the committed core's synthetic tests** (`ingest-no-disk`, harness, store) against the
+  vendored copy — green — plus the §10.3 synthetic dry-run. Only then may a real secret be considered.
+
+### 11.3 Runtime target — fresh ephemeral host on the CURRENT IAM-user model; §47 EC2 NOT reused — PINNED (with one open infra seam)
+Read-only check (2026-06-26, DESCRIBE only — no start/stop/modify):
+- **§47 EC2 instance `i-00335d464d6f7c299`: GONE** — `aws ec2 describe-instances` returns no instance (not a usable
+  running host).
+- The historical role `idc-runner-role` still exists, **but its instance does not**; doc 42 §91 records the **current**
+  model as the **IAM user `idcaddie-staging-runner`** (KMS-granted), not the EC2 assumed role.
+- **Decision:** **do NOT reuse the §47 EC2** (Option B rejected — it no longer exists). The runner runs on a **fresh,
+  ephemeral host/container using the current IAM-user model** (`idcaddie-staging-runner`, fresh temp keys minted for the
+  run + deleted after), spun up for the one controlled run and torn down after. **Vercel/Next.js request path is
+  excluded** (serverless, browser-reachable, pg-free by design — wrong trust boundary).
+- **Open infra seam (per §4):** the *specific* fresh-ephemeral service — a plain VM host vs. an ECS/Fargate one-shot
+  container vs. another one-shot runtime — is the **one remaining unresolved infrastructure decision**. It must be made
+  **explicitly** before the runner is built; **do not guess** between EC2/ECS/new host. What it must satisfy is fixed:
+  receives the `idcaddie-staging-runner` IAM identity (KMS), receives the `connector_runner_login` DB config as an
+  injected secret (never committed/logged), is server-only/not browser-reachable, staging-only, and is torn
+  down/disabled after the run.
+
+### 11.4 Hard architecture constraints (do not cross without a NEW explicit decision)
+- **Building a runner inside `~/code/idcaddie-v3` with `pg` would VIOLATE this architecture decision.**
+- **Adding `pg` to the app repo is NOT authorized.**
+- **Any future in-repo runner module would require a NEW explicit architecture decision that replaces §11.1/§11.2.**
+- **Phase C cannot proceed until the separate deployable runner exists and is reviewed.**
+- **Phase C remains BLOCKED even though B1 and B2 are green.** RISK-001 / RISK-007 remain **OPEN**; cutover **BLOCKED**;
+  connector credentials not production-ready.
