@@ -310,12 +310,16 @@ It reads the secret from **stdin**, encrypts immediately via the KMS/envelope bo
 to `connector_app_secrets`, and returns only a redacted `secret_id` (or a safe static reason). It is invoked **inside
 the hosted runner runtime** (which supplies the real KMS provider + the `RunnerConnection` as `connector_runner_login`).
 
-> **Runner location is PINNED (doc 46 §11, 2026-06-26):** the hosted runner is a **separate deployable** (Option A) that
-> **vendors** the `connector-vault` core at a pinned app-repo commit and runs on a **fresh ephemeral host on the current
-> IAM-user model** (the §47 EC2 `i-00335d…` is **gone** — confirmed read-only; not reused). **Adding `pg` to the app repo
-> is NOT authorized; building an in-repo runner would require a new architecture decision replacing doc 46 §11.** The one
-> remaining infra seam is the *specific* fresh-ephemeral service (VM vs ECS/Fargate one-shot) — decide explicitly before
-> building; do not guess. Phase C stays BLOCKED until that separate runner exists and is reviewed.
+> **Runner location + runtime + ingestion are PINNED (doc 46 §11–§12, 2026-06-26):** the hosted runner is a **separate
+> deployable** (Option A) that **vendors** the `connector-vault` core at a pinned app-repo commit, runs as an
+> **ECS/Fargate one-shot task** on the current IAM-user model (the §47 EC2 `i-00335d…` is **gone** — not reused), and
+> ingests the client secret via **AWS Secrets Manager task-read (Model B)** — **not** ECS Exec stdin (Exec session
+> logging could capture the master credential). The committed core is unchanged; only the plaintext **source** changes
+> (the task fetches the secret from Secrets Manager into memory and calls `ingestClientSecret` directly — no disk, no
+> log, no env, no laptop→task pipe). **The stdin-only command below stays valid for an *interactive* runner; for the
+> Fargate runtime, Secrets Manager task-read SUPERSEDES it** (doc 46 §12.3). **Adding `pg` to the app repo is NOT
+> authorized.** Phase C stays BLOCKED until the Fargate runtime + the Secrets Manager task-read model are implemented
+> and reviewed (doc 46 §12.8 tests first).
 
 Pre-flight first (refuses production ref / env-secret / argv-secret; emits the procedure — never holds the secret):
 ```

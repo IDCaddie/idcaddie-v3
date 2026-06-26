@@ -67,6 +67,15 @@ The synthetic vault is built and request-path-fenced. The threat model is anchor
   `explicitDeny` — the denied-decrypt half, preserved). A superseded key `…key/5c6fd833…` exists and is **not** the
   B2c-run KEK. The EC2-role evidence is historical; the live KMS round-trip + denied-decrypt proof are still pending.
   Production KMS/IAM separation is **unverified**.
+- **Fargate + Secrets Manager task-read ingestion (doc 46 §12, 2026-06-26 — SPEC, not built).** The Phase C runner is an
+  **ECS/Fargate one-shot** task that ingests the client secret via **AWS Secrets Manager task-read (Model B)**, not ECS
+  Exec stdin (Exec session logging could capture the master credential). **New secret-at-rest surface:** the plaintext
+  client secret sits in a **staging-only** Secrets Manager secret (`/idcaddie/staging/slack/oauth-client-secret`,
+  KMS-encrypted at rest) from the operator's one-time Console write until **post-ingest cleanup** (disable → prove
+  unreadable → delete). Contained by: task role reads **only** that ARN (no `secretsmanager:*`); web/request identity has
+  **no** read + stays `explicitDeny` on `kms:Decrypt`; the task passes plaintext **directly** to `ingestClientSecret`
+  (in-memory, no disk/log/env — the committed core is unchanged); CloudTrail logs the access with **no** plaintext. The
+  secret must not outlive the run. Nothing here is built; **no real secret has entered Secrets Manager.**
 
 ---
 
