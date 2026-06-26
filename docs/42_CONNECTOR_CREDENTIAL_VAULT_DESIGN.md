@@ -4346,7 +4346,10 @@ Phase C (real client-secret ingestion) has **no runnable entrypoint here, by des
 **[46_HOSTED_RUNNER_INGEST_ENTRYPOINT_SPEC](./46_HOSTED_RUNNER_INGEST_ENTRYPOINT_SPEC.md)** (2026-06-26 decision: keep
 pg-free; do not add a local direct-Postgres script). **Location PINNED (doc 46 §11):** separate deployable that **vendors**
 the core at a pinned commit + a **fresh ephemeral host on the IAM-user model** (the §47 EC2 `i-00335d…` is **gone** —
-confirmed read-only; not reused); the specific service (VM vs ECS/Fargate one-shot) is the one open infra decision.
+confirmed read-only; not reused). **Runtime + ingestion PINNED (doc 46 §12):** an **ECS/Fargate one-shot** task that
+ingests via **AWS Secrets Manager task-read (Model B)** — NOT ECS Exec stdin (Exec session logging could capture the
+master credential); the committed core is unchanged (only the plaintext source changes: SM fetch, not stdin); the task
+role reads only the one staging SM secret + uses only the canonical KEK; the SM secret is deleted post-ingest.
 **Adding `pg` to the app repo is NOT authorized; an in-repo runner needs a new decision replacing §11.** **Phase C remains
 BLOCKED until a conforming hosted runner exists and is reviewed — even though B1/B2 are green.**
 

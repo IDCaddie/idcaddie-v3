@@ -3,7 +3,11 @@
 **Status: SPEC ONLY. No code in this repo. Phase C (real Slack client-secret ingestion) is BLOCKED until a
 conforming hosted runner exists.** RISK-001 / RISK-007 remain **OPEN**; cutover **BLOCKED**; not production-ready.
 **Location PINNED (§11, 2026-06-26):** separate deployable (Option A) · vendor the core at a pinned commit · fresh
-ephemeral host on the IAM-user model (§47 EC2 confirmed gone) · the specific service is the one open infra decision.
+ephemeral host on the IAM-user model (§47 EC2 confirmed gone).
+**Runtime + ingestion PINNED (§12, 2026-06-26):** **ECS/Fargate one-shot** task · ingestion via **AWS Secrets Manager
+task-read (Model B)**, NOT ECS Exec stdin (Exec session logging could capture the master credential) · the committed
+core is unchanged (only the plaintext *source* changes: SM fetch, not stdin) · stdin-only (#183) stays valid for
+interactive models but SM task-read supersedes it for Fargate.
 **Adding `pg` to this app repo is NOT authorized; an in-repo runner would require a new decision replacing §11.**
 
 ## 0. Why this doc exists
@@ -183,3 +187,97 @@ Read-only check (2026-06-26, DESCRIBE only — no start/stop/modify):
 - **Phase C cannot proceed until the separate deployable runner exists and is reviewed.**
 - **Phase C remains BLOCKED even though B1 and B2 are green.** RISK-001 / RISK-007 remain **OPEN**; cutover **BLOCKED**;
   connector credentials not production-ready.
+
+## 12. Runtime + ingestion model — PINNED (2026-06-26)
+Resolves the one open seam from §11.3 (specific service) and the ingestion model it forces. **No AWS resource is created,
+no Secrets Manager value is written, no runner code is built by this doc.**
+
+### 12.1 Runtime = ECS/Fargate one-shot task — PINNED
+The runner is an **ECS/Fargate one-shot task** (not a VM, not the §47 EC2). Rationale:
+- **ephemeral by default** — the task runs once and **exits**; nothing long-lived to patch;
+- **no leftover state** — no SSH key, no shell history, no temp files, no persistent disk;
+- the **task IAM role maps cleanly to `idcaddie-staging-runner`** (KMS-granted, doc 42 §91);
+- **Vercel/Next.js request path stays excluded**; the **app repo stays pg-free** (the task vendors the core per §11.2 and
+  owns `pg` itself); the **§47 EC2 is gone and not reused** (§11.3).
+
+### 12.2 Ingestion model — DECISION: B (Secrets Manager task-read), NOT A (ECS Exec stdin)
+A one-shot Fargate task has **no natural interactive stdin**, which forces a choice:
+- **A — ECS Exec interactive stdin (REJECTED).** ECS Exec opens an interactive session and pipes the secret to the
+  process stdin. **ECS Exec sessions can be logged** (CloudWatch Logs / S3 session logging captures terminal I/O) — that
+  would capture the **master credential**, reintroducing exactly the exposure the #183 no-disk/no-log hardening removed.
+  Proving session logging never captures stdin is fragile, and it bolts an interactive surface onto a one-shot task.
+  **Rejected** unless a future decision proves Exec logging is provably incapable of capturing stdin.
+- **B — AWS Secrets Manager task-read (CHOSEN).** The operator writes the client secret **once** into a staging-only
+  Secrets Manager secret (server-side, no laptop→task pipe). The Fargate task's IAM role reads **only that secret** at
+  startup **into memory**, passes the plaintext **directly** to the committed `ingestClientSecret(...)`, and the secret
+  is encrypted + stored as an envelope. No interactive session, no ECS Exec, no stdin from a laptop — the natural fit
+  for a one-shot task.
+
+**The new problem, named (not hidden):** Model B moves the secret-handling question to *"how does the operator safely
+put the secret into Secrets Manager?"* — answered in §12.4 (Console no-echo write).
+
+### 12.3 Harness reconciliation — core UNCHANGED, only the plaintext SOURCE changes
+The committed `ingestClientSecret(input, deps)` consumes `input.plaintext` **directly** (`client-secret-ingest-harness.ts`);
+`readSecretFromStream(process.stdin)` is merely **one** source. Model B substitutes the source: the task **fetches the
+secret from Secrets Manager into memory** and calls `ingestClientSecret({ plaintext, appEnv: "staging", version: 1 },
+{ keyProvider, kekId, store })`. **All committed guarantees are preserved** — the secret is never written to disk (the
+core imports no fs-write API, proven by `ingest-no-disk.test.ts`), never an env var (`SLACK_CLIENT_SECRET` is **not**
+set — the task uses the SM API, not env), never argv, never logged; output is the redacted `secret_id` or a safe static
+reason; the catch surfaces no caught error. **`saveSlackClientSecret` / `encryptAppSecret` / `createRunnerAppSecretStore`
+are used unchanged.**
+- **stdin-only (#183 / doc 46 §5) remains the valid model for INTERACTIVE runner models.**
+- **For the Fargate one-shot runtime, Secrets Manager task-read SUPERSEDES the stdin source** (the laptop→stdin pipe
+  does not exist on a one-shot task).
+
+### 12.4 Model B — secret WRITE (operator → Secrets Manager, the only human-touch point)
+- Create a **staging-only** secret, name convention **`/idcaddie/staging/slack/oauth-client-secret`**
+  (`ca-central-1`, account `833822972703`). **Never** a production secret.
+- The value is entered **once** by the operator via the **AWS Console secret-value field** (or an approved no-echo CLI
+  method) — **never** a CLI argv (`--secret-string '<value>'`), **never** shell history, **never** a screenshot, **never**
+  pasted into chat/docs/PR.
+- Operator verifies the secret **exists without printing the value**:
+  `aws secretsmanager describe-secret --secret-id /idcaddie/staging/slack/oauth-client-secret` (metadata only — never
+  `get-secret-value` in the setup shell).
+
+### 12.5 Model B — task READ (Fargate startup, in-memory only)
+- The task role calls `secretsmanager:GetSecretValue` on **only that secret ARN**, reads the plaintext **into memory**,
+  passes it straight to `ingestClientSecret(...)`, and discards it. It **never** logs the secret, **never** writes it to
+  disk, **never** puts it in the task env dump.
+- **Fail-closed:** missing/empty secret, wrong secret ARN/name, missing KMS config, missing DB connection, or any save
+  failure → a redacted failure with no leak (the existing harness fail-closed semantics).
+
+### 12.6 Model B — post-ingest CLEANUP (non-optional)
+After a verified envelope-only vault row exists (the §8 query shows the active row):
+1. **Disable first** — `aws secretsmanager update-secret-version-stage` / restrict, or rotate the value, so the secret
+   is no longer usable;
+2. **Prove the task can no longer read it** — a `GetSecretValue` as the task role must now fail
+   (`ResourceNotFoundException` / `AccessDenied`);
+3. **Delete** — `aws secretsmanager delete-secret` with a **short recovery window** (e.g. 7 days) for one-time safety, or
+   `--force-delete-without-recovery` once the vault row is confirmed (decide per run; the runbook records which).
+- **No active plaintext staging secret may remain** once the runbook requires deletion.
+
+### 12.7 IAM / policy implications (Model B)
+- **Task role:** `secretsmanager:GetSecretValue` on **only** `…:secret:/idcaddie/staging/slack/oauth-client-secret-*`;
+  `kms:Decrypt` on the SM secret's encryption key as required; and **only** `kms:GenerateDataKey` + `kms:Decrypt` on the
+  canonical connector-vault KEK (`a1b7eaa9…`, doc 42 §91). **No** `secretsmanager:*`, **no** broad KMS, **no** production
+  secret, **no** other resource.
+- **Web/request identity** (`idcaddie-staging-web`) stays **denied** `kms:Decrypt` (doc 42 §91) **and** is granted **no**
+  read on the SM secret. No app/Vercel/request role can read the secret. No broad human access beyond the operator's
+  one-time Console write. **CloudTrail** records the `GetSecretValue` + KMS calls (audit), and contains **no** plaintext.
+
+### 12.8 Tests required BEFORE any real secret (synthetic only; extends §10)
+A future implementation must prove, with a marked **synthetic** secret only:
+- the task **fetches** the synthetic secret from Secrets Manager and reaches `ingestClientSecret`;
+- **no disk write** of the secret; **no** secret in stdout/stderr, CloudWatch logs, the task **env dump**, or (if ever
+  used) ECS Exec logs;
+- **missing secret** fails closed; **wrong secret ARN/name** fails closed; **production/staging guard** blocks;
+- **task-role IAM least-privilege** holds (`simulate-principal-policy`: GetSecretValue only on the one ARN; KMS only the
+  two actions on the canonical key); **web/request denied-decrypt preserved**;
+- **scanner clean**; and the **Secrets Manager cleanup/deletion proof** (the task can no longer read it after cleanup).
+Plus §10's committed-core tests + the synthetic dry-run. Only when all are green may a real secret be considered.
+
+### 12.9 Posture
+**This is docs only.** No AWS resource created, **no Secrets Manager secret written**, no runner code built, no real
+Slack client secret loaded, no live KMS run, no AWS keys minted, no OAuth, no B2c-run, production untouched. **RISK-001 /
+RISK-007 remain OPEN; cutover BLOCKED; connector credentials not production-ready. Phase C remains BLOCKED until the
+ECS/Fargate runtime + the Secrets Manager task-read model are implemented and reviewed.**
