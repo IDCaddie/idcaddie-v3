@@ -105,6 +105,37 @@ member **with email**: **PRESENT** `id`, `team_id`, `deleted`, `is_admin`, `is_o
 > `users.list` and must **not** be required (2FA/SSO posture → Enterprise Grid / SCIM / a security-posture path).
 > The PR-3 email precondition is satisfied.
 
+## PR 3 — Slack discovery-fact emitter (records → validated facts)
+`src/lib/server/connector-vault/slack-discovery-emitter.ts` (server-only). Proves **normalized Slack records →
+fact candidates → `parseDiscoveryFact` → safe fact array**. It STOPS there — **no DB staging, no resolver, no Slack
+call, no UI, no manual trigger, no OAuth/runner/KMS** (it imports only the discovery-fact contract + the existing
+`normalizeEmail` + the Slack record TYPES). Mirrors `okta-discovery-emitter.ts`.
+- **Input (injected):** the `auth.test` workspace identity + `SlackUserRecord[]` from the PR #188 client, `tenantId`
+  (authenticated arg), and `observedAt` (caller-provided ISO). `source_type = deep_provider_sync`, `source_provider =
+  slack`.
+- **Facts emitted (P0):** **app_discovery** (`Slack` / `Communication`, once, `slack:app_discovery:slack`);
+  **app_instance_identity** (once, anchored on `team_id`, `slack:app_instance:{team_id}`); **app_user_account** (one per
+  non-bot user, `slack:app_user:{team_id}:{user_id}` — **always**, even without email); **person_identity_candidate**
+  (**only when email exists**, `primary_email` = normalized lower-cased Slack email, `slack:person:{email}`);
+  **role_admin** (only admin/owner/primary_owner, priority primary_owner > owner > admin); **usage_activity** (only when
+  a real last-activity ts exists). No Enterprise Grid `group_membership` in P0.
+- **Field rules (per PR #188 live verification):** `email` is optional — missing email never drops `app_user_account`
+  and **never constructs** a `person_identity_candidate`; **`has_2fa`/`has_sso` are never read** (unavailable via P0
+  `users.list`; a future Enterprise Grid/SCIM/security-posture source may surface them); `display_name` → `real_name`
+  fallback was already applied by PR #188; `title`/`tz`/`updated`/restricted/ultra/deleted flags ride **provenance**;
+  never a raw Slack object, token, or auth header.
+- **Idempotency:** deterministic signal ids (Slack ids / team id / normalized email) — no random ids, no timestamps in
+  ids. `tenant_id` ALWAYS from the authenticated arg (a payload `tenant_id` is never read); `observed_at` from the
+  caller. Every candidate re-validated with `parseDiscoveryFact` (strict) — invalid dropped (safe count only, no raw
+  record logged), one bad record never fails the batch; bots skipped defensively.
+- **Tests** (`slack-discovery-emitter.test.ts`, 16, synthetic): all fact types, email-present/absent, no-email→no-person
+  (+ no malformed empty-email person), role priority, plain-member→role_hint-only, usage gated on activity, bot skip,
+  tenant-from-arg (payload tenant_id ignored), no-token/raw-object leak, deterministic ids, has_2fa/has_sso never read,
+  malformed-record skip, every fact passes `parseDiscoveryFact`, fail-closed on empty tenant/observed_at/team_id.
+- **Schema note:** no new `source_type` invented (`deep_provider_sync`). No schema gaps required for P0 — the six fact
+  types + provenance cover the verified Slack `users.list` shape. **Resolver write path remains the next deep-gate PR**
+  (after the emitter/staging boundary); PR 3 does **not** stage.
+
 ### Constraints carried by PR 1
 - The dev-token source is for **local development proof only** and is **structurally disabled outside local/dev**.
 - It **must be removed or replaced** by the OAuth/vault/runner source **before any production connector use**.
