@@ -47,8 +47,12 @@ const PROCEDURE = [
   "command, the prerequisites (connector_runner_login + CONNECTOR_VAULT_KMS_KEY_ID), the post-ingestion DB/scanner",
   "checks, and the cleanup steps.",
   "",
-  "NEVER type the secret, NEVER pass it as an argument, NEVER put it in an env var, NEVER echo it. Pipe it via stdin",
-  "(e.g. from a 0600 file you `shred -u` after), and disable shell history for that session (`unset HISTFILE`).",
+  "NEVER type the secret, NEVER pass it as an argument, NEVER put it in an env var, NEVER echo it. Disable shell",
+  "history first (`unset HISTFILE`). PREFER an IN-MEMORY pipe so the secret NEVER touches disk — e.g. a secrets-manager",
+  "CLI piped straight in: `pass show <ref> | <runner-invokes ingestClientSecret reading stdin>`. Do NOT write the",
+  "client secret to a temp file. If a temp file is genuinely unavoidable: `umask 077`, then portable FAIL-LOUD cleanup",
+  "`shred -u \"$f\" 2>/dev/null || rm -f \"$f\"`, then VERIFY it is gone (`[ -e \"$f\" ] && { echo 'FATAL: secret file",
+  "remains'; exit 1; }`). NEVER a bare `shred` — it does not exist on macOS and silently no-ops, leaving plaintext on disk.",
 ].join("\n");
 
 export function preflight({ argv, env, ref, confirm }) {

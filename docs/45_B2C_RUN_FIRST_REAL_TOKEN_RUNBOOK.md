@@ -149,10 +149,12 @@ first** (e.g. search for the prefix `xoxb-`, or the Slack token grammar `xox[bap
 when required to disambiguate a suspected hit, and handle it carefully:
 
 - **Never type the token/client secret directly into a shell command** (it would land in shell history + process args).
-- Pass a literal value through a **protected runtime variable read from a prompt / a temp file with `0600` perms / an
-  approved secret-handling method** that does NOT write the secret to shell history (e.g. `read -rs VAR` then use
-  `"$VAR"`, never echo it; or a temp file you `shred`/`rm` immediately).
-- **Clear any temporary secret material immediately after inspection** (`unset VAR`; remove/shred the temp file).
+- Pass a literal value through a **protected runtime variable read from a prompt** (`read -rs VAR` then use `"$VAR"`,
+  never echo it) — **prefer in-memory; do NOT write the secret to a temp file.** If a `0600` temp file is genuinely
+  unavoidable, clean it up **fail-loud and portable** (`shred -u "$f" 2>/dev/null || rm -f "$f"` then
+  `[ -e "$f" ] && { echo "FATAL: secret file remains"; exit 1; }`) — never a bare `shred` (it no-ops on macOS).
+- **Clear any temporary secret material immediately after inspection** (`unset VAR`; for any temp file use the portable
+  fail-loud cleanup + existence check above — never a silent `shred`).
 - **Never paste a token/client secret into PR comments, docs, screenshots, terminal transcripts, or chat.**
 
 > **The act of scanning for a secret must NOT create a new secret leak.** Structural-pattern-first; literal-only-when-
@@ -312,16 +314,25 @@ Pre-flight first (refuses production ref / env-secret / argv-secret; emits the p
 ```
 node scripts/b2c-ingest-client-secret.mjs --confirm
 ```
-Then, in the hosted runner, **pipe** the secret on stdin (never type it, never argv, never env):
+Then, in the hosted runner, **pipe** the secret on stdin from an **IN-MEMORY** source so it **never touches disk**
+(never type it, never argv, never env, never a temp file):
 ```
 unset HISTFILE; set +o history                 # this shell only
 CONNECTOR_VAULT_KMS_KEY_ID=<staging-KEK> \      # NON-secret config (the KEK handle), not the client secret
-  <runner-invokes ingestClientSecret reading stdin>  < /path/to/secret-0600-file
-shred -u /path/to/secret-0600-file             # clear immediately after
+  pass show <ref> | <runner-invokes ingestClientSecret reading stdin>   # secrets-manager CLI → stdin; no disk
 ```
-**WARNING — never type the client secret into argv, an env var, or an interactive prompt (shell history).** Pipe it via
-stdin (e.g. from a `0600` file you `shred -u`, or another approved one-time source). `SLACK_CLIENT_SECRET` must **not**
-be set in the environment — the harness and the launcher both refuse if it is.
+**WARNING — never type the client secret into argv, an env var, an interactive prompt (shell history), or a temp file.**
+Pipe it straight from a no-echo in-memory source. `SLACK_CLIENT_SECRET` must **not** be set in the environment — the
+harness and the launcher both refuse if it is.
+
+> If a temp file is **genuinely unavoidable**, it must be **fail-loud and portable** (a bare `shred` silently no-ops on
+> macOS, leaving the OAuth master credential in plaintext):
+> ```
+> umask 077                                    # 0600 before writing
+> ...write secret to "$f"... ; <runner reads stdin> < "$f"
+> shred -u "$f" 2>/dev/null || rm -f "$f"      # portable: shred if present, else rm
+> [ -e "$f" ] && { echo "FATAL: secret file remains"; exit 1; }   # verify gone — never silent
+> ```
 
 ### 11.2 Exact staging callback URL + trusted-redirect config check
 - **Register in Slack (verbatim):** `https://idcaddie-v3.vercel.app/connectors/oauth/callback` (no trailing slash).
@@ -385,6 +396,8 @@ secret structurally first (it must appear nowhere); the harness output is only t
 
 ### 11.7 Cleanup if ingestion fails partway
 - If the row was written but the run is aborted: **tombstone/revoke** the app-secret version (the lifecycle path) so it
-  cannot load, then re-run only after review. `shred -u` any `0600` temp file. `unset` any shell var. If a real client
+  cannot load, then re-run only after review. Prefer in-memory ingestion (no temp file); if a `0600` temp file exists,
+  clean it portably + fail-loud (`shred -u "$f" 2>/dev/null || rm -f "$f"`; then `[ -e "$f" ] && { echo "FATAL: secret
+  file remains"; exit 1; }`) — never a bare `shred`. `unset` any shell var. If a real client
   secret was exposed at any point, follow the §7/§8 containment ordering (provider-side rotation first — a tombstone is
   only a partial stopgap).
