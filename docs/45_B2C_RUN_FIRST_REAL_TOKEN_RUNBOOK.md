@@ -314,12 +314,18 @@ Pre-flight first (refuses production ref / env-secret / argv-secret; emits the p
 ```
 node scripts/b2c-ingest-client-secret.mjs --confirm
 ```
-Then, in the hosted runner, **pipe** the secret on stdin from an **IN-MEMORY** source so it **never touches disk**
-(never type it, never argv, never env, never a temp file):
+> **⛔ Phase C is BLOCKED until a conforming hosted runner exists.** The committed core takes an **injected**
+> `RunnerConnection` (a `connector_runner_login` Postgres pool); this repo is deliberately **pg-free** and owns **no**
+> runnable ingestion entrypoint. The hosted-runner entrypoint that performs Phase C is specified in
+> **[46_HOSTED_RUNNER_INGEST_ENTRYPOINT_SPEC](./46_HOSTED_RUNNER_INGEST_ENTRYPOINT_SPEC.md)** (where it runs, how it
+> injects the connection, the env, the guards, the atomicity guarantee, and the tests required before any real secret).
+
+Then, **on the hosted runner host** (per doc 46 §5), **pipe** the secret on stdin from an **IN-MEMORY** source so it
+**never touches disk** (never type it, never argv, never env, never a temp file):
 ```
 unset HISTFILE; set +o history                 # this shell only
-CONNECTOR_VAULT_KMS_KEY_ID=<staging-KEK> \      # NON-secret config (the KEK handle), not the client secret
-  pass show <ref> | <runner-invokes ingestClientSecret reading stdin>   # secrets-manager CLI → stdin; no disk
+CONNECTOR_VAULT_AWS_KMS_REGION=ca-central-1 CONNECTOR_VAULT_KMS_KEY_ID=alias/idcaddie-staging-connector-vault \
+  pass show slack/staging-client-secret | <hosted-runner ingest entrypoint reading stdin>   # doc 46 §4 wiring; no disk
 ```
 **WARNING — never type the client secret into argv, an env var, an interactive prompt (shell history), or a temp file.**
 Pipe it straight from a no-echo in-memory source. `SLACK_CLIENT_SECRET` must **not** be set in the environment — the
