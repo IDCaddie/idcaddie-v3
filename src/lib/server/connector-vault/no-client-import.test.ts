@@ -108,6 +108,9 @@ const CRYPTO_REL_HINTS = [
   "connector-vault/client-secret-ingest-harness",
   "server/connector-vault/client-secret-ingest-harness",
   "lib/server/connector-vault/client-secret-ingest-harness",
+  "connector-vault/slack-discovery-emitter",
+  "server/connector-vault/slack-discovery-emitter",
+  "lib/server/connector-vault/slack-discovery-emitter",
 ];
 
 function walk(dir: string): string[] {
