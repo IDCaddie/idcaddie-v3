@@ -61,14 +61,32 @@ Mock tests prove client BEHAVIOR; they do **not** prove Slack's current response
 paths-dev.mjs` is the **local-dev-only** command that calls real Slack once (auth.test + users.list) and prints **safe
 aggregates / field-path presence only** — never the token, an email, a name, the raw response, an auth header, or an
 `xoxb-` value. It is **allowlist-shaped** (local dev + the PR #187 opt-in) and **fails closed** in CI/staging/prod; the
-agent does NOT run it. **PR 2's live verification is DEFERRED until run locally; PR 3 (discovery-fact emitter) must NOT
-start until the real field-path report is produced and reconciled.** Exact command:
+agent does NOT run it. Exact command:
 ```
 NODE_ENV=development ID_CADDIE_DEV_PROVIDER_TOKEN_SOURCE_ENABLED=1 ID_CADDIE_DEV_SLACK_TOKEN=<dev-bot-token> \
   node scripts/verify-slack-field-paths-dev.mjs
 ```
 (Mint a read-only bot token in the **disposable** Slack test workspace with scopes `users:read` + `users:read.email`;
 set it locally only; report only the safe output.)
+
+### Live verification result — RUN (2026-06-26, disposable test workspace; safe aggregates only)
+`auth.test ok`, `team_id`/`user_id` present; `users.list ok`, **single page** (pagination handled). Aggregate of 3
+members (2 bots, 1 sampled non-bot): withEmail 1, missingEmail 2, withDisplayName 3, withRealName 3, withTitle 3, withTz
+3, with2fa 0, withSso 0, missingId 0.
+- **PRESENT** (confirmed): `id`, `team_id`, `deleted`, `is_admin`, `is_owner`, `is_primary_owner`, `is_restricted`,
+  `is_ultra_restricted`, `is_bot`, `tz`, `updated`, `profile.display_name`, `profile.real_name`, `profile.title`,
+  `profile.status_text`.
+- **ABSENT / stale** in the P0 `users.list` shape: **`has_2fa`, `has_sso`** → reconciled: removed from required output;
+  **provenance-only when present**; defer real 2FA/SSO posture to Enterprise Grid / SCIM / a security-posture path.
+- **`profile.email`: ABSENT on the sampled non-bot member.** Small-sample caveat — the run had only 1 non-bot member,
+  who had no email set; this proves email **can** be absent (handle defensively), **not** that Slack email is
+  unavailable. Reconciled: `email` is **optional** in the client (records never require it; missing-email + present-email
+  both tested). **PR 3 must emit `person_identity_candidate` only when `email` exists.**
+
+> **⛔ PENDING gate before PR 3:** Sam re-runs the verify command against a non-bot member **known to have an email set**.
+> If `profile.email` becomes PRESENT, email is confirmed per-user-optional-but-the-path-works → PR 3 may proceed. If it
+> is still ABSENT for a member with a known email, **STOP and investigate scope/config/path** (do not start PR 3). PR 3
+> is BLOCKED until email flow is confirmed or explicitly escalated.
 
 ### Constraints carried by PR 1
 - The dev-token source is for **local development proof only** and is **structurally disabled outside local/dev**.

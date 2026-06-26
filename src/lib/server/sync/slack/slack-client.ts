@@ -53,11 +53,13 @@ export type SlackUserRecord = {
   isUltraRestricted: boolean;
   isBot: boolean;
   isDeleted: boolean;
-  has2fa: boolean;
-  hasSso: boolean;
+  // NOTE: `email` is per-user OPTIONAL — the live test workspace returned `profile.email` absent on the sampled member
+  //   (users:read.email scoped). Records must never require it. (PR 3: emit person_identity_candidate only when email exists.)
   lastActivityAt?: number; // Slack `updated` (last profile change, Unix ts) — closest scalar; VERIFY against live.
   timezone?: string;
-  rawProvenance: { updated?: number; tzOffset?: number; color?: string }; // allowlisted non-secret scalars ONLY
+  // `has2fa` / `hasSso` are UNAVAILABLE via P0 `users.list` (live-verified absent) → NOT required output; captured in
+  // provenance ONLY when actually present. Defer real 2FA/SSO posture to Enterprise Grid / SCIM / a security-posture path.
+  rawProvenance: { updated?: number; tzOffset?: number; color?: string; has2fa?: boolean; hasSso?: boolean };
 };
 
 const SLACK_API = "https://slack.com/api";
@@ -111,14 +113,15 @@ export function normalizeSlackUser(member: unknown): SlackUserRecord | null {
     isUltraRestricted,
     isBot,
     isDeleted: bool(u.deleted),
-    has2fa: bool(u.has_2fa),
-    hasSso: bool(u.has_sso),
     lastActivityAt: typeof u.updated === "number" ? u.updated : undefined,
     timezone: str(u.tz),
     rawProvenance: {
       updated: typeof u.updated === "number" ? u.updated : undefined,
       tzOffset: typeof u.tz_offset === "number" ? u.tz_offset : undefined,
       color: str(u.color),
+      // has_2fa / has_sso are absent in P0 users.list (verified) — captured ONLY if a response ever includes them.
+      ...(typeof u.has_2fa === "boolean" ? { has2fa: u.has_2fa } : {}),
+      ...(typeof u.has_sso === "boolean" ? { hasSso: u.has_sso } : {}),
     },
   };
 }

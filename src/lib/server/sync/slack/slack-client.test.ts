@@ -24,9 +24,10 @@ function mockHttp(route: Route): { client: SlackHttpClient; calls: { url: string
   const client: SlackHttpClient = async (url, init) => { calls.push({ url, headers: init.headers }); return route(url); };
   return { client, calls };
 }
+// Matches the LIVE-verified P0 users.list member shape: has_2fa/has_sso are ABSENT (unavailable); email is optional.
 const member = (over: Record<string, unknown> = {}): Record<string, unknown> => ({
   id: "U001", team_id: "T1", deleted: false, is_admin: false, is_owner: false, is_primary_owner: false,
-  is_restricted: false, is_ultra_restricted: false, is_bot: false, has_2fa: true, has_sso: false, tz: "America/Toronto",
+  is_restricted: false, is_ultra_restricted: false, is_bot: false, tz: "America/Toronto",
   tz_offset: -14400, color: "9f69e7", updated: 1700000000,
   profile: { email: "a@x.test", display_name: "Ada", real_name: "Ada L", title: "Eng", status_text: "coding" }, ...over,
 });
@@ -57,7 +58,9 @@ describe("slack-client — auth.test + users.list (mocked)", () => {
     const { client } = mockHttp(() => jsonRes({ ok: true, members: [member()] }));
     const users = await createSlackClient({ tokenSource, httpClient: client, identity }).listUsers();
     expect(users).toHaveLength(1);
-    expect(users[0]).toMatchObject({ slackUserId: "U001", teamId: "T1", email: "a@x.test", displayName: "Ada", title: "Eng", status: "coding", roleHint: "member", has2fa: true, timezone: "America/Toronto", isDeleted: false });
+    expect(users[0]).toMatchObject({ slackUserId: "U001", teamId: "T1", email: "a@x.test", displayName: "Ada", title: "Eng", status: "coding", roleHint: "member", timezone: "America/Toronto", isDeleted: false });
+    expect(users[0]).not.toHaveProperty("has2fa"); // unavailable in P0 users.list — not a top-level field
+    expect(users[0]).not.toHaveProperty("hasSso");
   });
 
   it("paginates via response_metadata.next_cursor", async () => {
@@ -130,10 +133,28 @@ describe("slack-client — P0 filtering + normalization edges", () => {
     expect(all.map((u) => u.slackUserId).sort()).toEqual(["B1", "U001", "USLACKBOT"]);
   });
 
-  it("user missing email normalizes with email undefined (not empty string)", () => {
-    const rec = normalizeSlackUser(member({ profile: { real_name: "NoMail" } }));
-    expect(rec?.email).toBeUndefined();
-    expect(rec?.displayName).toBe("NoMail"); // falls back to real_name
+  // email is per-user OPTIONAL (live-verified absent on the sampled member) — both paths must work.
+  it("non-bot user WITHOUT profile.email normalizes (email undefined, record still produced)", async () => {
+    const noEmail = member({ id: "U_NOEMAIL", profile: { display_name: "NoMail", real_name: "No Mail", title: "Ops", status_text: "" } });
+    const { client } = mockHttp(() => jsonRes({ ok: true, members: [noEmail] }));
+    const users = await createSlackClient({ tokenSource, httpClient: client, identity }).listUsers();
+    expect(users).toHaveLength(1); // not dropped, not failed
+    expect(users[0].email).toBeUndefined();
+    expect(users[0].displayName).toBe("NoMail");
+  });
+  it("non-bot user WITH profile.email normalizes the email", async () => {
+    const { client } = mockHttp(() => jsonRes({ ok: true, members: [member({ id: "U_EMAIL", profile: { email: "real@x.test", display_name: "R" } })] }));
+    const users = await createSlackClient({ tokenSource, httpClient: client, identity }).listUsers();
+    expect(users[0].email).toBe("real@x.test");
+  });
+
+  it("has_2fa / has_sso: absent → not in record; present → rawProvenance ONLY (never top-level)", () => {
+    const absent = normalizeSlackUser(member()) as Record<string, unknown>;
+    expect(absent).not.toHaveProperty("has2fa");
+    expect((absent.rawProvenance as object)).not.toHaveProperty("has2fa");
+    const present = normalizeSlackUser(member({ has_2fa: true, has_sso: false })) as Record<string, unknown>;
+    expect(present).not.toHaveProperty("has2fa"); // never promoted to top-level
+    expect(present.rawProvenance).toMatchObject({ has2fa: true, hasSso: false });
   });
 
   it("deleted + restricted + ultra-restricted flags are explicit", () => {
@@ -151,7 +172,7 @@ describe("slack-client — P0 filtering + normalization edges", () => {
 
   it("NO raw spread: hostile extra fields (token/secret/raw object) never reach the normalized record", () => {
     const rec = normalizeSlackUser(member({ token: "xoxb-evil", secret_field: "s", arbitrary: { a: 1 }, profile: { email: "a@x.test", api_token: "xoxp-evil" } })) as Record<string, unknown>;
-    const allowed = ["slackUserId", "teamId", "email", "displayName", "title", "status", "roleHint", "isAdmin", "isOwner", "isPrimaryOwner", "isRestricted", "isUltraRestricted", "isBot", "isDeleted", "has2fa", "hasSso", "lastActivityAt", "timezone", "rawProvenance"];
+    const allowed = ["slackUserId", "teamId", "email", "displayName", "title", "status", "roleHint", "isAdmin", "isOwner", "isPrimaryOwner", "isRestricted", "isUltraRestricted", "isBot", "isDeleted", "lastActivityAt", "timezone", "rawProvenance"];
     expect(Object.keys(rec).sort()).toEqual([...allowed].sort());
     expect(JSON.stringify(rec)).not.toContain("xoxb-evil");
     expect(JSON.stringify(rec)).not.toContain("xoxp-evil");
