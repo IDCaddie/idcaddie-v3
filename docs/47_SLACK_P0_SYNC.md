@@ -91,10 +91,19 @@ presence **by user type** and to sample a **non-bot WITH email** for the field-p
 `sampledNonBotHasEmail`, `sampledNonBotWithEmailFound`, and (if found) the field-path block from a non-bot with email
 (else `sampled non-bot with email: NOT FOUND`). It never prints emails/names/raw/token/`xoxb-`.
 
-> **⛔ EMAIL MERGE GATE for #188 (and PR-3 precondition):** #188 is merge-ready **only** when a live run shows
-> **`nonBotsWithEmail >= 1`** AND **`profile.email` PRESENT on the non-bot sample**. If `nonBotsWithEmail` stays `0`,
-> **STOP and treat Slack email flow as a blocker before PR 3** (investigate scope/config/path). PR 3 is BLOCKED until
-> this is confirmed. (Add a non-bot member with an email to the disposable workspace, then re-run the command.)
+**Final run (2026-06-26, after adding a non-bot member with an email) — EMAIL GATE CLOSED ✅.** Safe output: total 3
+(2 bots, 1 non-bot), `usersWithEmail` 1, `botsWithEmail` 0, **`nonBotsWithEmail` 1**, `nonBotsMissingEmail` 0,
+**`sampledNonBotWithEmailFound: true`**, **`sampledNonBotHasEmail: true`**. Field-path block on the sampled non-bot
+member **with email**: **PRESENT** `id`, `team_id`, `deleted`, `is_admin`, `is_owner`, `is_primary_owner`,
+`is_restricted`, `is_ultra_restricted`, `is_bot`, `tz`, `updated`, **`profile.email`**, `profile.display_name`,
+`profile.real_name`, `profile.title`, `profile.status_text`; **ABSENT** `has_2fa`, `has_sso`.
+
+> **✅ EMAIL MERGE GATE for #188 — CLOSED.** `nonBotsWithEmail >= 1` AND `profile.email` PRESENT on a real non-bot
+> member are both confirmed. Conclusions, locked in: (a) `profile.email` is present on a real non-bot member when an
+> email exists, but remains **per-user optional** (the client never requires it); (b) **PR 3 emits
+> `person_identity_candidate` ONLY when `email` exists**; (c) `has_2fa` / `has_sso` remain **unavailable** via P0
+> `users.list` and must **not** be required (2FA/SSO posture → Enterprise Grid / SCIM / a security-posture path).
+> The PR-3 email precondition is satisfied.
 
 ### Constraints carried by PR 1
 - The dev-token source is for **local development proof only** and is **structurally disabled outside local/dev**.
