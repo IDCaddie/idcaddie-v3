@@ -71,9 +71,17 @@ describe("createSupabaseSlackResolverStore — tenant-scoped upserts via the use
     expect(escapeLike("plain@x.test")).toBe("plain@x.test");
   });
 
-  it("a DB error surfaces ONLY a safe static reason (no row data / raw error)", async () => {
-    const m = mkSupabase(() => ({ data: null, error: { code: "XX", message: "raw db detail" } }));
+  it("a DB error surfaces ONLY a safe static reason + the SAFE code — NEVER the message (which embeds emails)", async () => {
+    // a real unique/RLS violation message embeds the row VALUE (e.g. an email); the store must keep only the code.
+    const m = mkSupabase(() => ({ data: null, error: { code: "42501", message: "new row violates RLS; Key (primary_email)=(ada@x.test)" } }));
     const store = createSupabaseSlackResolverStore(m.client);
-    await expect(store.upsertApp({ tenantId: "t", externalInstanceId: "T1", name: "Slack" })).rejects.toThrow("store_write_failed");
+    await expect(store.upsertApp({ tenantId: "t", externalInstanceId: "T1", name: "Slack" })).rejects.toMatchObject({
+      message: "store_write_failed",
+      failure: { table: "apps", op: "upsert_app", code: "42501" },
+    });
+    // the thrown error must not carry the email-laden DB message anywhere
+    try { await store.upsertApp({ tenantId: "t", externalInstanceId: "T1", name: "Slack" }); } catch (e) {
+      expect(JSON.stringify((e as { failure: unknown }).failure)).not.toContain("ada@x.test");
+    }
   });
 });

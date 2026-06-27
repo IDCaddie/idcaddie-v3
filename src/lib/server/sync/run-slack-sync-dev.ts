@@ -44,6 +44,10 @@ export type RunSlackSyncDeps = {
   sourceRunId?: string;
 };
 
+export type FailedStage = "upsert_app" | "upsert_app_user" | "upsert_person" | "upsert_match" | "unknown";
+export type SafeReason = "rls_denied" | "missing_membership" | "constraint_violation" | "schema_mismatch" | "unknown";
+export type FailedTable = "apps" | "app_users" | "people" | "app_user_identity_matches";
+
 // SAFE aggregate run summary — NO token / auth header / raw Slack response / email / name / payload.
 export type RunSlackSyncSummary =
   | {
@@ -58,7 +62,40 @@ export type RunSlackSyncSummary =
       matchConflicts: number;
       skipped: number;
     }
-  | { ok: false; errorCode: string }; // a SAFE Slack error code or a static reason — never a token/raw body
+  | {
+      ok: false;
+      errorCode: string; // a SAFE Slack error code or a static reason — never a token/raw body
+      // resolver-failure diagnostics — SAFE enums/codes/counts ONLY (never token/JWT/email/name/raw):
+      failedStage?: FailedStage; // which store stage failed (from the store's value-free failure)
+      table?: FailedTable;
+      safeDbCode?: string; // the SQLSTATE / PostgREST code only (e.g. "42501")
+      safeReason?: SafeReason;
+      usersFetched?: number;
+      factsEmitted?: number;
+      factsRejected?: number;
+    };
+
+// Map a SQLSTATE / PostgREST code to a SAFE reason enum. The code is safe; this never inspects values/messages.
+function safeReasonFor(code: string | null): SafeReason {
+  switch (code) {
+    // RLS WITH CHECK / insufficient_privilege. On upsert_app this almost always means the dev-user JWT is NOT an
+    // owner/admin/editor member of SLACK_SYNC_TENANT_ID (or the membership is inactive).
+    case "42501":
+      return "rls_denied";
+    case "23502": // not_null
+    case "23503": // foreign_key
+    case "23505": // unique
+    case "23514": // check
+      return "constraint_violation";
+    case "42703": // undefined_column
+    case "42P01": // undefined_table
+    case "PGRST204": // column not in PostgREST schema cache
+    case "PGRST205": // table not found
+      return "schema_mismatch";
+    default:
+      return "unknown";
+  }
+}
 
 export async function runSlackSyncDev(deps: RunSlackSyncDeps): Promise<RunSlackSyncSummary> {
   // Fail closed outside local dev + opt-in (defense in depth; the token source #187 also refuses outside dev).
@@ -80,9 +117,23 @@ export async function runSlackSyncDev(deps: RunSlackSyncDeps): Promise<RunSlackS
   try {
     emit = emitSlackDiscoveryFacts({ workspace, users }, deps.identity.tenantId, { observedAt: deps.observedAt, ...(deps.sourceRunId ? { sourceRunId: deps.sourceRunId } : {}) });
     resolution = await applySlackDiscoveryResolution(deps.store, deps.identity.tenantId, emit.facts);
-  } catch {
-    // a resolver/store failure (e.g. RLS denial, write conflict) → SAFE static reason; never a raw error / row data.
-    return { ok: false, errorCode: "resolve_failed" };
+  } catch (e) {
+    // a resolver/store failure → SAFE structured diagnostics: stage/table/code/reason ONLY. The concrete store attaches a
+    // value-free `.failure` (table+op+SQLSTATE code, never a message that could embed an email); we never read a raw
+    // error/row. Plus the counts gathered BEFORE the failure (emit may be undefined if emission itself threw).
+    const failure = (e as { failure?: { table?: string; op?: string; code?: string | null } } | null | undefined)?.failure;
+    const code = failure && typeof failure.code === "string" ? failure.code : null;
+    return {
+      ok: false,
+      errorCode: "resolve_failed",
+      failedStage: (failure?.op as FailedStage | undefined) ?? "unknown",
+      ...(failure?.table ? { table: failure.table as FailedTable } : {}),
+      ...(code ? { safeDbCode: code } : {}),
+      safeReason: failure ? safeReasonFor(code) : "unknown",
+      usersFetched: users.length,
+      factsEmitted: emit ? emit.built - emit.rejected : 0,
+      factsRejected: emit ? emit.rejected : 0,
+    };
   }
 
   return {

@@ -251,6 +251,20 @@ job, no OAuth/runner, no public route/server action, no service-role, no product
   **RLS DENIES a cross-tenant write** (member B → tenant A ⇒ `store_write_failed`, nothing written). Run via
   `npm run test:store-it` (`scripts/test-store-it.sh` → `supabase start` + vitest) and in CI (`store-integration.yml`).
   The SQL-layer `org_rls_test.sql` Test 58 still proves the same constraints/RLS independently.
+- **Safe resolver-failure diagnostics:** a resolver/store failure returns `{ ok:false, errorCode:"resolve_failed",
+  failedStage, table, safeDbCode, safeReason, usersFetched, factsEmitted, factsRejected }`. The concrete store attaches a
+  **value-free** `StoreWriteFailure` = `{ table, op, code }` — **only** the SQLSTATE/PostgREST `code` (e.g. `42501`),
+  NEVER the DB message/details/hint (those embed row values like emails). `safeReason` maps the code:
+  `42501→rls_denied`, `23502/23503/23505/23514→constraint_violation`, `42703/42P01/PGRST204/PGRST205→schema_mismatch`,
+  else `unknown`. Unit-tested (mapping + no token/email/name/raw in the diagnostic) and the real cross-tenant RLS denial
+  in the store IT confirms the live code is `42501`.
+- **Live-run failure analysis (2026-06-27):** the first operator live run returned `resolve_failed`; tenant
+  `7a296850-…` had **0 apps / 0 app_users / 0 people / 0 matches** (no partial writes) — consistent with the FIRST store
+  write (`upsert_app`) being RLS-denied before any insert. With the new diagnostics the rerun will report
+  `failedStage:"upsert_app", table:"apps", safeDbCode:"42501", safeReason:"rls_denied"` ⇒ **the dev-user JWT
+  (`ID_CADDIE_DEV_USER_JWT`) is not an `owner`/`admin`/`editor` member of `SLACK_SYNC_TENANT_ID`** (RLS `has_tenant_role`
+  requires an active membership). Fix: sign in as / mint a JWT for a user who is an active write-role member of that
+  tenant (or add the membership), then rerun.
 - **Live end-to-end run (the one operator step):** **NOT performed by the agent** — it needs a rotated dev Slack token +
   a dev tenant-member JWT + a dev Slack workspace (operator-only secrets). The operator runs the real command above; it
   writes tenant-scoped rows (visible via the PR-5 read-only UI) and is idempotent on re-run. **This is a dev/test token

@@ -85,8 +85,16 @@ describe.runIf(RUN)("createSupabaseSlackResolverStore — real DB/RLS", () => {
     expect(pOther.personId).not.toBe(p1.personId); // `_` must NOT have matched `x` → distinct person
   });
 
-  it("RLS denies a cross-tenant write: member B cannot write into tenant A (store_write_failed)", async () => {
-    await expect(storeB.upsertApp({ tenantId: tenantA, externalInstanceId: "TWS_X", name: "Slack" })).rejects.toThrow("store_write_failed");
+  it("RLS denies a cross-tenant write: member B cannot write into tenant A (store_write_failed, code 42501)", async () => {
+    let failure: { table?: string; op?: string; code?: string | null } | undefined;
+    try {
+      await storeB.upsertApp({ tenantId: tenantA, externalInstanceId: "TWS_X", name: "Slack" });
+      expect.unreachable();
+    } catch (e) {
+      expect((e as Error).message).toBe("store_write_failed");
+      failure = (e as { failure?: typeof failure }).failure;
+    }
+    expect(failure).toMatchObject({ table: "apps", op: "upsert_app", code: "42501" }); // real RLS denial → SQLSTATE 42501 (→ safeReason rls_denied)
     const { count } = await admin.from("apps").select("*", { count: "exact", head: true }).eq("tenant_id", tenantA).eq("external_instance_id", "TWS_X");
     expect(count).toBe(0); // nothing was written
   });

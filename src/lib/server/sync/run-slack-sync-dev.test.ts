@@ -4,6 +4,7 @@ import path from "node:path";
 import { runSlackSyncDev, isDevSlackSyncRunEnabled, type RunSlackSyncDeps } from "./run-slack-sync-dev";
 import type { SlackHttpClient, SlackHttpResponse } from "./slack/slack-client";
 import type { SlackResolverStore } from "../connector-vault/slack-resolver-write";
+import { StoreWriteError } from "./supabase-slack-resolver-store";
 
 // Slack P0 PR 6 — manual run orchestrator. Synthetic only: injected token source + http client + in-memory store; NO
 // live Slack/DB. The token is a marked sentinel (the marker is IN the token so the scanner excuses it).
@@ -132,11 +133,43 @@ describe("runSlackSyncDev — fail-closed + safe failures", () => {
     expect(res.ok).toBe(false);
     if (!res.ok) expect(typeof res.errorCode).toBe("string");
   });
-  it("a resolver/store write failure returns a safe resolve_failed (no row data / raw error)", async () => {
-    const failStore = { ...memStore().store, async upsertApp() { throw new Error(`db blew up ${SENTINEL}`); } };
+  it("a resolver/store write failure with NO structured detail is still safe (unknown stage/reason)", async () => {
+    const failStore = { ...memStore().store, async upsertApp() { throw new Error(`db blew up ${SENTINEL} ada@x.test`); } };
     const res = await runSlackSyncDev(deps({ store: failStore }));
-    expect(res).toEqual({ ok: false, errorCode: "resolve_failed" });
+    expect(res).toMatchObject({ ok: false, errorCode: "resolve_failed", failedStage: "unknown", safeReason: "unknown" });
     expect(JSON.stringify(res)).not.toContain(SENTINEL);
+    expect(JSON.stringify(res)).not.toContain("ada@x.test");
+  });
+
+  it("surfaces SAFE resolver diagnostics (stage/table/code/reason) from a StoreWriteError — and only those", async () => {
+    const failStore = {
+      ...memStore().store,
+      async upsertApp(): Promise<{ appId: string }> {
+        throw new StoreWriteError({ table: "apps", op: "upsert_app", code: "42501" }); // real RLS denial shape
+      },
+    };
+    const res = await runSlackSyncDev(deps({ store: failStore }));
+    expect(res).toMatchObject({
+      ok: false, errorCode: "resolve_failed",
+      failedStage: "upsert_app", table: "apps", safeDbCode: "42501", safeReason: "rls_denied",
+      usersFetched: 1, factsEmitted: expect.any(Number), factsRejected: expect.any(Number),
+    });
+    // the diagnostic carries NO token / email / name / raw payload — only safe enums/codes/counts
+    const blob = JSON.stringify(res);
+    for (const bad of [SENTINEL, "ada@x.test", "Ada", "profile", "members", "xoxb", "Bearer"]) expect(blob).not.toContain(bad);
+  });
+
+  it.each([
+    ["42501", "rls_denied"],
+    ["23505", "constraint_violation"],
+    ["23502", "constraint_violation"],
+    ["42703", "schema_mismatch"],
+    ["PGRST204", "schema_mismatch"],
+    ["XX999", "unknown"],
+  ])("maps DB code %s → safeReason %s", async (code, reason) => {
+    const failStore = { ...memStore().store, async upsertPerson(): Promise<{ personId: string }> { throw new StoreWriteError({ table: "people", op: "upsert_person", code }); } };
+    const res = await runSlackSyncDev(deps({ store: failStore }));
+    expect(res).toMatchObject({ ok: false, failedStage: "upsert_person", table: "people", safeDbCode: code, safeReason: reason });
   });
 });
 

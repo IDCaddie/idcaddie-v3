@@ -22,11 +22,24 @@ if (typeof (globalThis as { window?: unknown }).window !== "undefined") {
   throw new Error("server/sync/supabase-slack-resolver-store is server-only and must not be imported in client code");
 }
 
-class StoreWriteError extends Error {
-  constructor() {
-    super("store_write_failed"); // SAFE static reason — never row data / a raw DB error / a token
+export type StoreWriteTable = "apps" | "app_users" | "people" | "app_user_identity_matches";
+export type StoreWriteOp = "upsert_app" | "upsert_app_user" | "upsert_person" | "upsert_match";
+// SAFE structured failure — ONLY the table, the operation, and the SQLSTATE/PostgREST `code`. The DB error message /
+// details / hint are NEVER captured: a unique/RLS violation message embeds row VALUES (e.g. an email), the code does not.
+export type StoreWriteFailure = { table: StoreWriteTable; op: StoreWriteOp; code: string | null };
+
+export class StoreWriteError extends Error {
+  readonly failure: StoreWriteFailure;
+  constructor(failure: StoreWriteFailure) {
+    super("store_write_failed"); // SAFE static message — never row data / a raw DB message / a token
     this.name = "StoreWriteError";
+    this.failure = failure;
   }
+}
+// Capture ONLY a short SQLSTATE / PostgREST code (e.g. "42501", "23505", "PGRST204") — never message/details/hint.
+function pgCode(error: unknown): string | null {
+  const c = (error as { code?: unknown } | null | undefined)?.code;
+  return typeof c === "string" && c.length > 0 && c.length <= 12 ? c : null;
 }
 const PG_UNIQUE_VIOLATION = "23505";
 
@@ -54,7 +67,7 @@ export function createSupabaseSlackResolverStore(supabase: SupabaseClient<Databa
         )
         .select("id")
         .single();
-      if (error || !data) throw new StoreWriteError();
+      if (error || !data) throw new StoreWriteError({ table: "apps", op: "upsert_app", code: pgCode(error) });
       return { appId: data.id };
     },
 
@@ -76,7 +89,7 @@ export function createSupabaseSlackResolverStore(supabase: SupabaseClient<Databa
         )
         .select("id")
         .single();
-      if (error || !data) throw new StoreWriteError();
+      if (error || !data) throw new StoreWriteError({ table: "app_users", op: "upsert_app_user", code: pgCode(error) });
       return { appUserId: data.id };
     },
 
@@ -88,7 +101,7 @@ export function createSupabaseSlackResolverStore(supabase: SupabaseClient<Databa
       const findExisting = () =>
         supabase.from("people").select("id").eq("tenant_id", input.tenantId).ilike("primary_email", emailLike).limit(1).maybeSingle();
       const existing = await findExisting();
-      if (existing.error) throw new StoreWriteError();
+      if (existing.error) throw new StoreWriteError({ table: "people", op: "upsert_person", code: pgCode(existing.error) });
       if (existing.data) return { personId: existing.data.id };
       const ins = await supabase
         .from("people")
@@ -101,7 +114,7 @@ export function createSupabaseSlackResolverStore(supabase: SupabaseClient<Databa
         const reselect = await findExisting();
         if (!reselect.error && reselect.data) return { personId: reselect.data.id };
       }
-      throw new StoreWriteError();
+      throw new StoreWriteError({ table: "people", op: "upsert_person", code: pgCode(ins.error) });
     },
 
     async getExistingMatchPersonId(input) {
@@ -111,7 +124,7 @@ export function createSupabaseSlackResolverStore(supabase: SupabaseClient<Databa
         .eq("tenant_id", input.tenantId)
         .eq("app_user_id", input.appUserId)
         .maybeSingle();
-      if (error) throw new StoreWriteError();
+      if (error) throw new StoreWriteError({ table: "app_user_identity_matches", op: "upsert_match", code: pgCode(error) });
       return data?.person_id ?? null;
     },
 
@@ -125,7 +138,7 @@ export function createSupabaseSlackResolverStore(supabase: SupabaseClient<Databa
           { onConflict: "tenant_id,app_user_id", ignoreDuplicates: true },
         )
         .select("id");
-      if (error) throw new StoreWriteError();
+      if (error) throw new StoreWriteError({ table: "app_user_identity_matches", op: "upsert_match", code: pgCode(error) });
       return { created: (data?.length ?? 0) > 0 }; // DO NOTHING returns no row on conflict → created=false
     },
   };
