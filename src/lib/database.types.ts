@@ -1430,6 +1430,87 @@ export type Database = {
           },
         ]
       }
+      manual_sync_runs: {
+        Row: {
+          app_users_written: number | null
+          connector_id: string
+          created_at: string
+          created_by: string | null
+          error_code: string | null
+          facts_emitted: number | null
+          facts_rejected: number | null
+          failed_stage: string | null
+          finished_at: string | null
+          id: string
+          match_conflicts: number | null
+          matches_written: number | null
+          people_written: number | null
+          skipped: number | null
+          source: string
+          started_at: string
+          status: string
+          tenant_id: string
+          users_fetched: number | null
+        }
+        Insert: {
+          app_users_written?: number | null
+          connector_id: string
+          created_at?: string
+          created_by?: string | null
+          error_code?: string | null
+          facts_emitted?: number | null
+          facts_rejected?: number | null
+          failed_stage?: string | null
+          finished_at?: string | null
+          id?: string
+          match_conflicts?: number | null
+          matches_written?: number | null
+          people_written?: number | null
+          skipped?: number | null
+          source: string
+          started_at?: string
+          status: string
+          tenant_id: string
+          users_fetched?: number | null
+        }
+        Update: {
+          app_users_written?: number | null
+          connector_id?: string
+          created_at?: string
+          created_by?: string | null
+          error_code?: string | null
+          facts_emitted?: number | null
+          facts_rejected?: number | null
+          failed_stage?: string | null
+          finished_at?: string | null
+          id?: string
+          match_conflicts?: number | null
+          matches_written?: number | null
+          people_written?: number | null
+          skipped?: number | null
+          source?: string
+          started_at?: string
+          status?: string
+          tenant_id?: string
+          users_fetched?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "manual_sync_runs_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "manual_sync_runs_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       oauth_pending: {
         Row: {
           attempt_count: number

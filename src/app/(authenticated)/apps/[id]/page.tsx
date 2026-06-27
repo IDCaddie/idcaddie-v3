@@ -8,6 +8,7 @@ import {
   STALE_CANDIDATE_DAYS,
 } from "@/lib/data/app-account-intelligence";
 import { classifySlackSync, SLACK_SYNC_COPY } from "@/lib/data/slack-sync-display";
+import { getLatestSlackSyncRunForCurrentTenant } from "@/lib/data/manual-sync-runs";
 
 export const metadata = { title: "App · ID Caddie" };
 
@@ -55,6 +56,8 @@ export default async function AppDetailPage({
       : null;
   // Read-only Slack-sync classification from the app's non-secret connector markers (external_instance_id + vendor).
   const slackSync = classifySlackSync(result.ok ? result.data : null);
+  // Latest manual-sync run status (RLS-scoped, safe aggregates) — only for a Slack-synced app.
+  const slackRun = slackSync.isSlackSynced ? await getLatestSlackSyncRunForCurrentTenant() : null;
 
   return (
     <main className="flex flex-1 flex-col gap-6 p-8">
@@ -94,6 +97,60 @@ export default async function AppDetailPage({
               </div>
             ) : null}
           </header>
+
+          {slackSync.isSlackSynced ? (
+            <section className="space-y-2 text-sm">
+              <h2 className="font-medium">Last Slack sync</h2>
+              <p className="text-xs text-zinc-500">
+                Status of the most recent manual Slack sync run for your tenant (RLS-scoped, read-only). Safe aggregates
+                only — no token, account emails/names, or raw data.
+              </p>
+              {!slackRun || !slackRun.ok ? (
+                <p className="text-zinc-600 dark:text-zinc-400">Could not load sync status right now.</p>
+              ) : slackRun.data === null ? (
+                <p className="text-zinc-600 dark:text-zinc-400">
+                  No sync runs yet. {SLACK_SYNC_COPY.comingNext}
+                </p>
+              ) : (
+                <div className="space-y-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span
+                      className={
+                        slackRun.data.status === "succeeded"
+                          ? "rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-800 dark:bg-green-950 dark:text-green-300"
+                          : slackRun.data.status === "failed"
+                            ? "rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-800 dark:bg-red-950 dark:text-red-300"
+                            : "rounded-full bg-zinc-100 px-2 py-0.5 text-xs font-medium text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300"
+                      }
+                    >
+                      {slackRun.data.status}
+                    </span>
+                    <span className="text-zinc-500">
+                      {slackRun.data.status === "succeeded" && slackRun.data.finishedAt
+                        ? `last successful sync ${slackRun.data.finishedAt.slice(0, 16).replace("T", " ")} UTC`
+                        : `started ${slackRun.data.startedAt.slice(0, 16).replace("T", " ")} UTC`}
+                    </span>
+                    {slackRun.data.status === "failed" && slackRun.data.errorCode ? (
+                      <span className="text-red-700 dark:text-red-400">
+                        error: {slackRun.data.errorCode}
+                        {slackRun.data.failedStage ? ` (${slackRun.data.failedStage})` : ""}
+                      </span>
+                    ) : null}
+                  </div>
+                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                    <Field label="Users fetched" value={String(slackRun.data.usersFetched ?? "—")} />
+                    <Field label="Facts emitted" value={String(slackRun.data.factsEmitted ?? "—")} />
+                    <Field label="App users written" value={String(slackRun.data.appUsersWritten ?? "—")} />
+                    <Field label="People written" value={String(slackRun.data.peopleWritten ?? "—")} />
+                    <Field label="Matches written" value={String(slackRun.data.matchesWritten ?? "—")} />
+                    <Field label="Match conflicts" value={String(slackRun.data.matchConflicts ?? "—")} />
+                    <Field label="Facts rejected" value={String(slackRun.data.factsRejected ?? "—")} />
+                    <Field label="Skipped" value={String(slackRun.data.skipped ?? "—")} />
+                  </div>
+                </div>
+              )}
+            </section>
+          ) : null}
 
           <section className="grid grid-cols-1 gap-4 text-sm sm:grid-cols-2">
             <Field label="Vendor" value={result.data.vendorName ?? "—"} />

@@ -47,4 +47,10 @@ describe("app detail page — read-only, no connect/sync CTA, no raw secret rend
   it("never renders raw_payload / source / token fields", () => {
     for (const bad of ["raw_payload", "rawPayload", "access_token", "xoxb", "Bearer "]) expect(page).not.toContain(bad);
   });
+  it("shows read-only Slack sync status with NO run/connect button and NO scheduler language", () => {
+    expect(page).toContain("getLatestSlackSyncRunForCurrentTenant"); // status is read-only via the RLS-scoped DAL
+    expect(page).toContain("Last Slack sync");
+    for (const bad of ["Run sync", "Trigger sync", "Sync now", "scheduler", "schedule", "every hour", "cron", "next sync at"])
+      expect(page.toLowerCase()).not.toContain(bad.toLowerCase());
+  });
 });

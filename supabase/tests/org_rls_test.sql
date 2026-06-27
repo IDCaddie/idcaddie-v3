@@ -3490,6 +3490,105 @@ do $$ begin
 end $$;
 
 reset role;
+
+-- ── Test 59: manual_sync_runs (0037) — tenant-scoped run lifecycle/status, as the non-superuser `authenticated` role.
+-- members READ; owner/admin/editor WRITE (insert+update); viewer read-only; cross-tenant read/write isolated;
+-- created_by defaults to auth.uid().
+-- 59a: owner_a opens a tenant-A run, created_by defaults to the JWT sub, and can close (update) it.
+select set_config('request.jwt.claims','{"sub":"0a000000-0000-0000-0000-000000000001"}',false);
+set role authenticated;
+do $$
+declare rid uuid; cb uuid;
+begin
+  insert into public.manual_sync_runs (tenant_id, source, connector_id, status)
+    values ('11111111-1111-1111-1111-111111111111','slack','slack-dev','running')
+    returning id, created_by into rid, cb;
+  assert cb = '0a000000-0000-0000-0000-000000000001', 'T59a created_by defaults to auth.uid()';
+  update public.manual_sync_runs set status='succeeded', finished_at=now(), users_fetched=1, app_users_written=1 where id=rid;
+  assert (select status from public.manual_sync_runs where id=rid) = 'succeeded', 'T59a owner can close (update) an own-tenant run';
+  assert (select count(*) from public.manual_sync_runs where tenant_id='11111111-1111-1111-1111-111111111111') >= 1, 'T59a owner reads own-tenant runs';
+end $$;
+
+-- 59b: editor (a write role) can insert.
+reset role;
+select set_config('request.jwt.claims','{"sub":"0a000000-0000-0000-0000-0000000000ed"}',false);
+set role authenticated;
+do $$ declare rid uuid; begin
+  insert into public.manual_sync_runs (tenant_id, source, connector_id, status)
+    values ('11111111-1111-1111-1111-111111111111','slack','editor-run','running') returning id into rid;
+  assert rid is not null, 'T59b editor (write role) can insert a tenant run';
+end $$;
+
+-- 59c: viewer can READ but NOT insert (read-only role).
+reset role;
+select set_config('request.jwt.claims','{"sub":"0a000000-0000-0000-0000-000000000002"}',false);
+set role authenticated;
+do $$ declare blocked boolean := false; begin
+  assert (select count(*) from public.manual_sync_runs where tenant_id='11111111-1111-1111-1111-111111111111') >= 1, 'T59c viewer reads tenant runs';
+  begin
+    insert into public.manual_sync_runs (tenant_id, source, connector_id, status)
+      values ('11111111-1111-1111-1111-111111111111','slack','viewer-x','running');
+  exception when insufficient_privilege or check_violation then blocked := true; end;
+  assert blocked, 'T59c viewer INSERT must be denied by RLS';
+end $$;
+
+-- 59d: owner_a cannot write into Tenant B (cross-tenant write denied).
+reset role;
+select set_config('request.jwt.claims','{"sub":"0a000000-0000-0000-0000-000000000001"}',false);
+set role authenticated;
+do $$ declare blocked boolean := false; begin
+  begin
+    insert into public.manual_sync_runs (tenant_id, source, connector_id, status)
+      values ('22222222-2222-2222-2222-222222222222','slack','cross','running');
+  exception when insufficient_privilege or check_violation then blocked := true; end;
+  assert blocked, 'T59d cross-tenant INSERT (owner_a -> Tenant B) must be denied';
+end $$;
+
+-- 59e: owner_b cannot READ Tenant A runs (cross-tenant read isolation; no access by source/connector label alone).
+reset role;
+select set_config('request.jwt.claims','{"sub":"0b000000-0000-0000-0000-000000000001"}',false);
+set role authenticated;
+do $$ begin
+  assert (select count(*) from public.manual_sync_runs where tenant_id='11111111-1111-1111-1111-111111111111') = 0,
+    'T59e owner_b cannot read Tenant A runs (RLS isolation)';
+end $$;
+
+-- 59f/g/h: actor-pin + append-only integrity (as owner_a in Tenant A).
+reset role;
+select set_config('request.jwt.claims','{"sub":"0a000000-0000-0000-0000-000000000001"}',false);
+set role authenticated;
+do $$
+declare rid uuid; blocked boolean;
+begin
+  -- 59f: INSERT cannot spoof created_by to a DIFFERENT actor (pinned to auth.uid()).
+  blocked := false;
+  begin
+    insert into public.manual_sync_runs (tenant_id, source, connector_id, status, created_by)
+      values ('11111111-1111-1111-1111-111111111111','slack','spoof','running','0a000000-0000-0000-0000-0000000000ad');
+  exception when insufficient_privilege or check_violation then blocked := true; end;
+  assert blocked, 'T59f INSERT with a created_by != auth.uid() must be denied';
+
+  -- open a run to mutate
+  insert into public.manual_sync_runs (tenant_id, source, connector_id, status)
+    values ('11111111-1111-1111-1111-111111111111','slack','immut','running') returning id into rid;
+
+  -- 59g: identity columns are immutable on UPDATE.
+  blocked := false;
+  begin update public.manual_sync_runs set started_at = now() - interval '1 day' where id = rid;
+  exception when others then blocked := true; end;
+  assert blocked, 'T59g UPDATE of an identity column (started_at) must be rejected';
+
+  -- the legitimate running -> succeeded close IS allowed
+  update public.manual_sync_runs set status='succeeded', finished_at=now(), users_fetched=1 where id=rid;
+
+  -- 59h: a COMPLETED run is immutable (no flipping succeeded -> failed, no count rewrite).
+  blocked := false;
+  begin update public.manual_sync_runs set status='failed' where id = rid;
+  exception when others then blocked := true; end;
+  assert blocked, 'T59h a completed run is immutable (status cannot be rewritten)';
+end $$;
+
+reset role;
 reset session authorization;
 
 do $$ begin raise notice 'ALL ORG-RLS ASSERTIONS PASSED'; end $$;
