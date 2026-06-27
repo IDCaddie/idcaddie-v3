@@ -307,6 +307,38 @@ KMS, no Connect-Slack, no service-role, no production. RISK-007 stays OPEN.**
   isolation; `created_by` default) + a TS recorder IT (`manual-sync-run-recorder.it.test.ts`) against a local Supabase
   stack (member writes; cross-tenant denial; `created_by` = the member) via `npm run test:store-it` + CI `store-integration.yml`.
 
+## PR 8 — concurrent-run locking + stale-run reconciliation
+Closes PR 7's documented gap. Proves *run starts → active-run lock acquired → duplicate refused → run finishes →
+lock released* and *stale running run → safely marked failed without pretending success*. **No scheduler, no retry
+worker, no OAuth/runner, no Connect-Slack, no service-role in product code, no production. RISK-007 stays OPEN.**
+- **Lock (migration 0038, additive — CREATE INDEX only):** a **partial unique index**
+  `manual_sync_runs (tenant_id, source, connector_id) where status = 'running'` → at most ONE active run per
+  (tenant, source, connector). The key includes `tenant_id`, so the lock is **tenant-scoped** (tenant A's active run
+  never blocks tenant B). DB-enforced — no app-code check-then-insert race: a concurrent `start()` INSERT hits the index
+  → unique_violation → the recorder returns **`run_already_active`**.
+- **Duplicate-run behavior:** a refused run **creates NO record** (the INSERT fails) and **never touches the chain** — no
+  Slack call, no emitter, no resolver write. The wrapper returns `{ ok:false, errorCode:"run_already_active" }`; the
+  existing active run is untouched.
+- **Stale reconciliation (inline, no scheduler):** at the start of each manual run, BEFORE acquiring the lock,
+  `reconcileStaleRuns` marks any run stuck in `running` past the threshold as **`failed` / `error_code=
+  "stale_run_reconciled"`** with `finished_at` set — **no success counts invented**, no token/JWT/email/name/raw. This
+  releases a stuck lock so new runs can proceed. Threshold = **`STALE_RUN_MS` = 30 minutes** (a code constant). The 0037
+  immutability trigger permits this (running→failed is not yet terminal); completed runs stay immutable and `created_by`
+  integrity holds. Tenant-scoped via RLS — a tenant cannot reconcile another tenant's runs.
+- **Safe error codes:** `run_already_active`, `stale_run_reconciled` (plus the unchanged Slack/resolve safe codes).
+- **Robustness:** the reconcile step is **best-effort** (a reconcile DB error never aborts an otherwise-valid run — `start()`
+  is the authoritative lock); and `finish()` closes **only a still-`running`** row, so if an abnormally long (>30 min)
+  run is concurrently reconciled mid-flight, its `finish()` is a safe no-op (it never trips the 0037 completed-run
+  immutability) — the record reads `stale_run_reconciled` and the chain's already-committed writes stand.
+- **UI:** no change needed — PR 7's read-only "Last Slack sync" section already shows `running`/`succeeded`/`failed`,
+  and a stale-reconciled run surfaces as `failed` with `error: stale_run_reconciled`. (`run_already_active` is a transient
+  refusal that writes no record, so it never appears as a run.)
+- **Tests:** recorder unit (start → run_already_active on 23505; reconcile marks stale failed, scoped, no counts) +
+  wrapper unit (reconcile-before-lock; duplicate → run_already_active with NO chain call) + **real DB/RLS**
+  `org_rls_test.sql` **Test 60** (the partial-index lock; tenant-scoped; lock released after a run leaves running) + a TS
+  recorder IT (second run refused + not recorded; tenant A does not block tenant B; stale reconciled then a new run
+  starts; tenant A cannot reconcile tenant B). `gen-types` 0-diff (an index changes no columns).
+
 ### Remaining PRs after PR 4
 - **PR 5** — UI display of synced Slack data. **PR 6** — manual server-only run trigger. **Later** — scheduler / run
   lifecycle. **Later** — OAuth/vault/runner production credential path (RISK-007). The concrete Supabase store impl for

@@ -3588,6 +3588,45 @@ begin
   assert blocked, 'T59h a completed run is immutable (status cannot be rewritten)';
 end $$;
 
+-- ── Test 60: manual_sync_runs active-run lock (0038 partial unique index), as the authenticated role.
+-- 60a: at most one 'running' run per (tenant, source, connector); a different connector is allowed.
+reset role;
+select set_config('request.jwt.claims','{"sub":"0a000000-0000-0000-0000-000000000001"}',false);
+set role authenticated;
+do $$ declare blocked boolean := false; begin
+  insert into public.manual_sync_runs (tenant_id, source, connector_id, status)
+    values ('11111111-1111-1111-1111-111111111111','slack','lock60','running');
+  begin
+    insert into public.manual_sync_runs (tenant_id, source, connector_id, status)
+      values ('11111111-1111-1111-1111-111111111111','slack','lock60','running');
+  exception when unique_violation then blocked := true; end;
+  assert blocked, 'T60a a 2nd active running run for the same (tenant,source,connector) must be refused by the 0038 index';
+  insert into public.manual_sync_runs (tenant_id, source, connector_id, status)
+    values ('11111111-1111-1111-1111-111111111111','slack','lock60b','running');  -- different connector → allowed
+end $$;
+
+-- 60b: the lock is TENANT-SCOPED — tenant B can hold the same connector label concurrently.
+reset role;
+select set_config('request.jwt.claims','{"sub":"0b000000-0000-0000-0000-000000000001"}',false);
+set role authenticated;
+do $$ declare rid uuid; begin
+  insert into public.manual_sync_runs (tenant_id, source, connector_id, status)
+    values ('22222222-2222-2222-2222-222222222222','slack','lock60','running') returning id into rid;
+  assert rid is not null, 'T60b tenant A active run does not block tenant B (lock is tenant-scoped)';
+end $$;
+
+-- 60c: a run leaving 'running' (here via the stale-reconcile shape) releases the lock — a new run can start.
+reset role;
+select set_config('request.jwt.claims','{"sub":"0a000000-0000-0000-0000-000000000001"}',false);
+set role authenticated;
+do $$ declare rid uuid; begin
+  update public.manual_sync_runs set status='failed', finished_at=now(), error_code='stale_run_reconciled'
+    where tenant_id='11111111-1111-1111-1111-111111111111' and source='slack' and connector_id='lock60' and status='running';
+  insert into public.manual_sync_runs (tenant_id, source, connector_id, status)
+    values ('11111111-1111-1111-1111-111111111111','slack','lock60','running') returning id into rid;
+  assert rid is not null, 'T60c after a run leaves running, a new run for the same key can start (lock released)';
+end $$;
+
 reset role;
 reset session authorization;
 
