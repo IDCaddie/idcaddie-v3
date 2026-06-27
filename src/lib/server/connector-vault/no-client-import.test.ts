@@ -111,6 +111,9 @@ const CRYPTO_REL_HINTS = [
   "connector-vault/slack-discovery-emitter",
   "server/connector-vault/slack-discovery-emitter",
   "lib/server/connector-vault/slack-discovery-emitter",
+  "connector-vault/slack-resolver-write",
+  "server/connector-vault/slack-resolver-write",
+  "lib/server/connector-vault/slack-resolver-write",
 ];
 
 function walk(dir: string): string[] {

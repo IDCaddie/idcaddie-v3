@@ -3375,4 +3375,121 @@ end $$;
 reset role;
 reset session authorization;
 
+-- ── Test 58: connector-resolver natural keys (migration 0036) — Slack P0 resolver write path ────────────────────────
+-- Proves, at the REAL Postgres + RLS layer as the `authenticated` (non-superuser) role: the three tenant-scoped natural
+-- keys exist; idempotent upsert via ON CONFLICT does NOT duplicate; a DIRECT duplicate is REFUSED by the DB unique
+-- constraint (not just by app code); the SAME provider external id in two tenants stays SEPARATE (tenant is in the key);
+-- and a tenant-A user CANNOT write a tenant-B row (RLS WITH CHECK denies). T58-namespaced fixtures.
+reset role;
+do $$ begin
+  assert exists (select 1 from pg_constraint where conname='apps_tenant_external_instance_key'), 'T58 apps UNIQUE(tenant_id, external_instance_id) (0036) missing';
+  assert exists (select 1 from pg_constraint where conname='app_users_tenant_app_external_key'), 'T58 app_users UNIQUE(tenant_id, app_id, external_user_id) (0036) missing';
+  assert exists (select 1 from pg_class where relname='people_tenant_email_lower_key' and relkind='i'), 'T58 people UNIQUE(tenant_id, lower(primary_email)) (0036) missing';
+end $$;
+
+-- act as Tenant A OWNER (an editor for RLS writes)
+select set_config('request.jwt.claims','{"sub":"0a000000-0000-0000-0000-000000000001"}',false);
+set role authenticated;
+
+-- 58a: apps idempotent upsert on (tenant_id, external_instance_id); DIRECT duplicate refused by the DB constraint.
+do $$ declare n1 int; blocked boolean := false; begin
+  insert into public.apps (tenant_id, name, external_instance_id)
+    values ('11111111-1111-1111-1111-111111111111','Slack','TSLACK58')
+    on conflict (tenant_id, external_instance_id) do update set name = excluded.name;
+  select count(*) into n1 from public.apps where tenant_id='11111111-1111-1111-1111-111111111111' and external_instance_id='TSLACK58';
+  insert into public.apps (tenant_id, name, external_instance_id)        -- re-run = idempotent
+    values ('11111111-1111-1111-1111-111111111111','Slack','TSLACK58')
+    on conflict (tenant_id, external_instance_id) do update set name = excluded.name;
+  assert (select count(*) from public.apps where tenant_id='11111111-1111-1111-1111-111111111111' and external_instance_id='TSLACK58') = n1
+         and n1 = 1, 'T58 apps upsert must be idempotent (exactly one row per tenant+external_instance_id)';
+  begin
+    insert into public.apps (tenant_id, name, external_instance_id) values ('11111111-1111-1111-1111-111111111111','dup','TSLACK58');
+  exception when unique_violation then blocked := true; end;
+  assert blocked, 'T58 a DIRECT duplicate (tenant_id, external_instance_id) must be REFUSED by the DB unique constraint';
+end $$;
+
+-- 58b: app_users idempotent upsert on (tenant_id, app_id, external_user_id); DIRECT duplicate refused.
+do $$ declare app_a uuid; n1 int; blocked boolean := false; begin
+  select id into app_a from public.apps where tenant_id='11111111-1111-1111-1111-111111111111' and external_instance_id='TSLACK58';
+  insert into public.app_users (tenant_id, app_id, external_user_id, email)
+    values ('11111111-1111-1111-1111-111111111111', app_a, 'U58', 'u58@a.test')
+    on conflict (tenant_id, app_id, external_user_id) do update set email = excluded.email;
+  select count(*) into n1 from public.app_users where tenant_id='11111111-1111-1111-1111-111111111111' and app_id=app_a and external_user_id='U58';
+  insert into public.app_users (tenant_id, app_id, external_user_id, email)
+    values ('11111111-1111-1111-1111-111111111111', app_a, 'U58', 'u58@a.test')
+    on conflict (tenant_id, app_id, external_user_id) do update set email = excluded.email;
+  assert (select count(*) from public.app_users where tenant_id='11111111-1111-1111-1111-111111111111' and app_id=app_a and external_user_id='U58') = n1
+         and n1 = 1, 'T58 app_users upsert must be idempotent';
+  begin
+    insert into public.app_users (tenant_id, app_id, external_user_id, email) values ('11111111-1111-1111-1111-111111111111', app_a, 'U58', 'dup@a.test');
+  exception when unique_violation then blocked := true; end;
+  assert blocked, 'T58 a DIRECT duplicate (tenant_id, app_id, external_user_id) must be REFUSED by the DB unique constraint';
+end $$;
+
+-- 58c: people idempotent + CASE-INSENSITIVE duplicate refused by the functional lower(primary_email) unique index.
+do $$ declare blocked boolean := false; begin
+  insert into public.people (tenant_id, primary_email) values ('11111111-1111-1111-1111-111111111111','Ada58@A.test')
+    on conflict (tenant_id, lower(primary_email)) do nothing;
+  insert into public.people (tenant_id, primary_email) values ('11111111-1111-1111-1111-111111111111','Ada58@A.test')
+    on conflict (tenant_id, lower(primary_email)) do nothing; -- re-run
+  assert (select count(*) from public.people where tenant_id='11111111-1111-1111-1111-111111111111' and lower(primary_email)='ada58@a.test') = 1,
+         'T58 people upsert must be idempotent on lower(primary_email)';
+  begin
+    insert into public.people (tenant_id, primary_email) values ('11111111-1111-1111-1111-111111111111','ADA58@a.TEST'); -- different case, same person
+  exception when unique_violation then blocked := true; end;
+  assert blocked, 'T58 a case-variant duplicate email must be REFUSED by the lower(primary_email) unique index';
+end $$;
+
+-- 58d: cross-tenant WRITE denial — Tenant A user CANNOT insert a Tenant B apps row (RLS WITH CHECK denies).
+do $$ declare denied boolean := false; begin
+  begin
+    insert into public.apps (tenant_id, name, external_instance_id) values ('22222222-2222-2222-2222-222222222222','X','TSLACK58');
+  exception when insufficient_privilege or check_violation then denied := true; end;
+  assert denied, 'T58 a Tenant A user must NOT be able to insert a Tenant B apps row (RLS)';
+end $$;
+
+-- 58f: app_user_identity_matches — idempotent on (tenant_id, app_user_id); DIRECT duplicate refused; and a re-run to a
+-- DIFFERENT person via ON CONFLICT DO NOTHING does NOT repoint (the 0028 deterministic-identity invariant the resolver
+-- must honour). Seed a T58 app_user + two people first.
+do $$ declare app_a uuid; au uuid; p1 uuid; p2 uuid; blocked boolean := false; begin
+  select id into app_a from public.apps where tenant_id='11111111-1111-1111-1111-111111111111' and external_instance_id='TSLACK58';
+  insert into public.app_users (tenant_id, app_id, external_user_id, email)
+    values ('11111111-1111-1111-1111-111111111111', app_a, 'U58M', 'u58m@a.test')
+    on conflict (tenant_id, app_id, external_user_id) do update set email = excluded.email
+    returning id into au;
+  insert into public.people (tenant_id, primary_email) values ('11111111-1111-1111-1111-111111111111','p58a@a.test') returning id into p1;
+  insert into public.people (tenant_id, primary_email) values ('11111111-1111-1111-1111-111111111111','p58b@a.test') returning id into p2;
+  -- insert the match, then re-run the SAME (idempotent), then attempt a DIFFERENT person (must NOT repoint)
+  insert into public.app_user_identity_matches (tenant_id, app_user_id, person_id, match_method)
+    values ('11111111-1111-1111-1111-111111111111', au, p1, 'auto_exact_email') on conflict (tenant_id, app_user_id) do nothing;
+  insert into public.app_user_identity_matches (tenant_id, app_user_id, person_id, match_method)
+    values ('11111111-1111-1111-1111-111111111111', au, p1, 'auto_exact_email') on conflict (tenant_id, app_user_id) do nothing; -- idempotent
+  insert into public.app_user_identity_matches (tenant_id, app_user_id, person_id, match_method)
+    values ('11111111-1111-1111-1111-111111111111', au, p2, 'auto_exact_email') on conflict (tenant_id, app_user_id) do nothing; -- DIFFERENT person → DO NOTHING
+  assert (select count(*) from public.app_user_identity_matches where tenant_id='11111111-1111-1111-1111-111111111111' and app_user_id=au) = 1,
+         'T58 exactly one match per (tenant, app_user) after re-runs';
+  assert (select person_id from public.app_user_identity_matches where tenant_id='11111111-1111-1111-1111-111111111111' and app_user_id=au) = p1,
+         'T58 a deterministic re-run must NOT repoint an existing match to a different person (0028 invariant)';
+  -- a DIRECT duplicate (no on-conflict) is refused by the 0028 unique constraint
+  begin
+    insert into public.app_user_identity_matches (tenant_id, app_user_id, person_id, match_method) values ('11111111-1111-1111-1111-111111111111', au, p2, 'auto_exact_email');
+  exception when unique_violation then blocked := true; end;
+  assert blocked, 'T58 a DIRECT duplicate (tenant_id, app_user_id) match must be REFUSED by the 0028 unique constraint';
+end $$;
+
+-- 58e: the SAME provider external id in Tenant B is a SEPARATE row (tenant is part of the key) — act as Tenant B owner.
+reset role;
+select set_config('request.jwt.claims','{"sub":"0b000000-0000-0000-0000-000000000001"}',false);
+set role authenticated;
+do $$ begin
+  insert into public.apps (tenant_id, name, external_instance_id)
+    values ('22222222-2222-2222-2222-222222222222','Slack','TSLACK58')   -- same external_instance_id, different tenant
+    on conflict (tenant_id, external_instance_id) do nothing;
+  assert (select count(*) from public.apps where external_instance_id='TSLACK58' and tenant_id='22222222-2222-2222-2222-222222222222') = 1,
+         'T58 same external_instance_id in Tenant B must create a SEPARATE row (no cross-tenant collision)';
+end $$;
+
+reset role;
+reset session authorization;
+
 do $$ begin raise notice 'ALL ORG-RLS ASSERTIONS PASSED'; end $$;

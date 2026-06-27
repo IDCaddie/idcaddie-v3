@@ -136,6 +136,55 @@ call, no UI, no manual trigger, no OAuth/runner/KMS** (it imports only the disco
   types + provenance cover the verified Slack `users.list` shape. **Resolver write path remains the next deep-gate PR**
   (after the emitter/staging boundary); PR 3 does **not** stage.
 
+## PR 4 — discovery facts → tenant-scoped resolver write path (DEEP GATE)
+`src/lib/server/connector-vault/slack-resolver-write.ts` (server-only) + migration `0036` + real RLS tests. Turns
+ALREADY-VALIDATED Slack facts (PR #189) into graph rows: **apps → app_users → people → app_user_identity_matches**,
+idempotently and tenant-scoped. **No UI, no manual trigger, no scheduler, no Slack call, no OAuth/runner/KMS, no
+service-role.**
+- **Write path = direct resolver** (the injected user-scoped store pattern of `resolver-write.ts`/`identity-match-write.ts`),
+  NOT staging-first — these facts are already validated by PR #189; the resolver writes the graph directly via an
+  RLS-enforced store. (The concrete Supabase store impl is wired in a later PR, matching the existing resolver modules;
+  this PR delivers the resolver logic + the DB-level proof.)
+- **Tables written:** `apps`, `app_users`, `people`, `app_user_identity_matches`. **Not** `identity_accounts` (RLS
+  default-deny — no authenticated write path; person matching goes via `people` + matches).
+- **Migration `0036` (staging) — tenant-scoped natural keys for idempotent upsert** (defensive preflight, additive only,
+  no RLS change): `apps UNIQUE(tenant_id, external_instance_id)` (Slack team_id; manual apps keep it NULL = distinct),
+  `app_users UNIQUE(tenant_id, app_id, external_user_id)`, `people UNIQUE(tenant_id, lower(primary_email))`. Tenant scope
+  is in **every** key (no global provider uniqueness — a Slack user id in two tenants is two rows). `app_user_identity_
+  matches` already had `UNIQUE(tenant_id, app_user_id)` (0028).
+- **Tenant isolation:** `tenant_id` ALWAYS from the authenticated `authTenantId` arg; a fact whose `tenant_id` differs is
+  a SPOOF and is **skipped** (writes nothing). RLS (`has_tenant_role([owner,admin,editor])`) is the authoritative
+  boundary; the resolver is the user-scoped caller (no service-role/admin client).
+- **Idempotency: DB-enforced**, not app-code-only — upserts target the 0036 keys; a re-run updates apps/app_users/people
+  in place. **Matches honour the 0028 deterministic-identity invariant: `ON CONFLICT (tenant_id, app_user_id) DO NOTHING`
+  + a caller-side conflict guard** (`getExistingMatchPersonId`) — a re-run whose app_user now resolves to a DIFFERENT
+  person is **left for review (`matchConflicts`), NEVER silently repointed** (same contract as `identity-match-write.ts`;
+  `match_method=auto_exact_email`). Proven in `org_rls_test.sql` **Test 58** (real Postgres + RLS, acting as the
+  `authenticated` non-superuser role) for **all four tables** (apps/app_users/people in 58a–c, matches in 58f): the keys
+  exist, ON CONFLICT re-run does not duplicate, a **direct duplicate INSERT is REFUSED by the DB constraint**, a match
+  re-run to a different person does **not** repoint, the same external id in two tenants stays separate, and a **Tenant A
+  user cannot write a Tenant B row** (RLS WITH CHECK denies).
+- **Data rules (per PR #188/#189):** `app_user` written even without email; `person`+match only when email exists
+  (skipped otherwise, never crashes); **exact-email-only matching** (`match_method=auto_exact_email`, the 0028 one-per-
+  app_user key) — **no fuzzy/name merge**; usage last-active → `app_users.last_active_at`; **`role_admin` has no role
+  column (documented schema gap)** → the safe role label rides `app_users.raw_payload` as sanitized provenance
+  (`{provider, role_hint}`) only; never a token / auth header / raw Slack object.
+- **Transaction model:** per-fact best-effort (matches the existing resolver modules); every write is tenant-scoped by
+  `authTenantId` so there is no unsafe partial cross-tenant state. One bad fact is skipped (counted), never blocks the
+  batch.
+- **Tests:** `slack-resolver-write.test.ts` (12, in-memory store modelling the natural keys — idempotency, same-id-two-
+  tenants, spoofed-tenant ignored, fail-closed empty tenant, email-optional, exact-email-only, role-gap, usage,
+  no-token-leak, bot skip) + **real DB/RLS** `org_rls_test.sql` Test 58 (the tenant-isolation property — proven, not
+  mocked).
+- **Schema gaps found (documented, not invented):** no role column on `app_users` (role → raw_payload provenance); no
+  `app_instances` table (instance identity uses the `apps` 0024 instance columns); `identity_accounts` is RLS
+  default-deny (not written in P0).
+
+### Remaining PRs after PR 4
+- **PR 5** — UI display of synced Slack data. **PR 6** — manual server-only run trigger. **Later** — scheduler / run
+  lifecycle. **Later** — OAuth/vault/runner production credential path (RISK-007). The concrete Supabase store impl for
+  the resolver is also a near-term wiring step.
+
 ### Constraints carried by PR 1
 - The dev-token source is for **local development proof only** and is **structurally disabled outside local/dev**.
 - It **must be removed or replaced** by the OAuth/vault/runner source **before any production connector use**.
