@@ -1,0 +1,25 @@
+name: Store integration test
+
+# Brings up a LOCAL Supabase stack (Docker + Supabase CLI), applies all migrations, and runs the Slack resolver store's
+# real PostgREST + RLS integration test as a tenant-member JWT (scripts/test-store-it.sh). Local-only keys; never hosted
+# Supabase, never a production credential. Mirrors rls-tests.yml.
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  store-it:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - uses: supabase/setup-cli@v1
+        with:
+          version: 2.102.0 # pin to the version the store IT is validated against (avoids local-stack/auth drift on "latest")
+      - name: Run store integration test (local Supabase stack)
+        run: npm run test:store-it

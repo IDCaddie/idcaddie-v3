@@ -211,6 +211,69 @@ Surfaces the PR #190-resolved rows in the EXISTING authenticated app surface —
   is on the already-RLS-scoped `apps` row, and the roster read is the existing RLS-proven path (`org_rls_test.sql`
   T25/T28/T29); no new read DAL crosses a tenant boundary.
 
+## PR 6 — manual server-only run trigger (LOCAL/DEV ONLY)
+Wires the merged pieces into one manual run: **dev-token source (#187) → Slack client (#188) → emitter (#189) →
+tenant-scoped resolver (#190)**. Structurally disabled outside local dev. **No UI button, no scheduler, no background
+job, no OAuth/runner, no public route/server action, no service-role, no production.**
+- **Orchestrator (`src/lib/server/sync/run-slack-sync-dev.ts`):** `runSlackSyncDev({ env, tokenSource, httpClient, store,
+  identity, observedAt })` → a **safe aggregate summary** (`{ ok, teamPresent, usersFetched, factsEmitted, factsRejected,
+  appUsersWritten, peopleWritten, matchesWritten, matchConflicts, skipped }` or `{ ok:false, errorCode }`). The token
+  comes ONLY via the #187 seam; it is **never** logged/returned/in the summary or errors. Failures surface only a SAFE
+  code (`invalid_auth`/`missing_scope`/`ratelimited`/`malformed_response`/`resolve_failed`/`run_disabled`/`missing_tenant`)
+  — never a token, raw response, email, or name. `tenant_id` is the caller's arg, never a Slack payload.
+- **Allowlist-shaped run guard** `isDevSlackSyncRunEnabled`: enabled ONLY in positively-confirmed local dev (`NODE_ENV=
+  development` + `VERCEL_ENV`∈{unset,development}) AND a distinct explicit opt-in `ID_CADDIE_DEV_SLACK_SYNC_ENABLED=1`.
+  unknown/unset/test/staging/preview/production all refuse; request input cannot enable it (env-only).
+- **User-scoped context (#5):** `dev-user-scoped-client.ts` `createDevUserScopedClient(env)` — the standard server client
+  is cookie-bound (needs a Next request), so a standalone run builds a user-scoped client from a **dev tenant-member's
+  JWT** (`ID_CADDIE_DEV_USER_JWT`) in the Authorization header over the **public anon key**. RLS applies (writes as a
+  tenant member); it is **never** service-role; the JWT is read from a server-only env var and never logged.
+- **Concrete resolver store (#6):** `supabase-slack-resolver-store.ts` implements the #190 `SlackResolverStore` over the
+  injected user-scoped client — apps/app_users via `upsert(onConflict=the 0036 tenant-scoped keys)`, people via
+  get-or-create against the functional `lower(primary_email)` index, matches via `ON CONFLICT (tenant_id, app_user_id)
+  DO NOTHING` (the 0028 no-repoint invariant). Errors surface only `store_write_failed`. **No migration** (the 0036/0028
+  keys suffice); **no service-role**.
+- **Trigger = a REAL committed command** `npm run slack:sync:dev` (`run-slack-sync-dev.liverun.test.ts`, run via vitest —
+  the repo's TS runner that resolves the chain; plain `node` cannot, no `tsx`). It builds the REAL deps (token source +
+  `slackFetchHttpClient` + `createSupabaseSlackResolverStore(createDevUserScopedClient(env))`) and invokes
+  `runSlackSyncDev`, printing ONLY the safe summary. **DOUBLE-gated** (`ID_CADDIE_DEV_SLACK_SYNC_ENABLED=1` AND
+  `SLACK_SYNC_LIVE=1`) → SKIPPED in `npm test`/CI, no client/network at import. The guarded `.mjs`
+  (`scripts/run-slack-sync-dev.mjs`) remains as a pre-flight (prints the procedure, refuses the prod ref / token-in-argv).
+  **No public route / server action / UI button.**
+- **Tests (53 + a real-DB IT):** orchestrator (guard allowlist, request-can't-enable, chain order, token-never-leaks,
+  no-email/name/raw in summary, idempotent rerun, all safe-failure paths) + concrete-store shape/safety + dev-client
+  (anon-key + JWT header, not service-role, fail-closed, no-JWT-echo) + `.mjs` guards + a server-only/no-`src/app`-import
+  static scan.
+- **Real DB/RLS proof of the TS store — RUN, not mocks.** `supabase-slack-resolver-store.it.test.ts` runs the store's
+  supabase-js/PostgREST queries against a **LOCAL Supabase stack** as a **tenant-member JWT** (service-role used for
+  fixture setup ONLY): the 0036-key upsert is idempotent (one row on re-run), the full graph (app_user+person+match)
+  writes, the get-or-create matches `_` LITERALLY (the LIKE-escape, so a `_` email can't grab the wrong person), and
+  **RLS DENIES a cross-tenant write** (member B → tenant A ⇒ `store_write_failed`, nothing written). Run via
+  `npm run test:store-it` (`scripts/test-store-it.sh` → `supabase start` + vitest) and in CI (`store-integration.yml`).
+  The SQL-layer `org_rls_test.sql` Test 58 still proves the same constraints/RLS independently.
+- **Safe resolver-failure diagnostics:** a resolver/store failure returns `{ ok:false, errorCode:"resolve_failed",
+  failedStage, table, safeDbCode, safeReason, usersFetched, factsEmitted, factsRejected }`. The concrete store attaches a
+  **value-free** `StoreWriteFailure` = `{ table, op, code }` — **only** the SQLSTATE/PostgREST `code` (e.g. `42501`),
+  NEVER the DB message/details/hint (those embed row values like emails). `safeReason` maps the code:
+  `42501→rls_denied`, `23502/23503/23505/23514→constraint_violation`, `42703/42P01/PGRST204/PGRST205→schema_mismatch`,
+  else `unknown`. Unit-tested (mapping + no token/email/name/raw in the diagnostic) and the real cross-tenant RLS denial
+  in the store IT confirms the live code is `42501`.
+- **Live-run failure analysis (2026-06-27):** the first operator live run returned `resolve_failed`; tenant
+  `7a296850-…` had **0 apps / 0 app_users / 0 people / 0 matches** (no partial writes) — consistent with the FIRST store
+  write (`upsert_app`) being RLS-denied before any insert. With the new diagnostics the rerun will report
+  `failedStage:"upsert_app", table:"apps", safeDbCode:"42501", safeReason:"rls_denied"` ⇒ **the dev-user JWT
+  (`ID_CADDIE_DEV_USER_JWT`) is not an `owner`/`admin`/`editor` member of `SLACK_SYNC_TENANT_ID`** (RLS `has_tenant_role`
+  requires an active membership). Fix: sign in as / mint a JWT for a user who is an active write-role member of that
+  tenant (or add the membership), then rerun.
+- **Live end-to-end run — SUCCEEDED (2026-06-27, operator, local/dev).** After using an active write-role member JWT for
+  the tenant, `npm run slack:sync:dev` ran the full chain (dev-token source → Slack client → emitter → resolver store →
+  tenant-scoped DB rows). **Safe summary:** `ok:true, teamPresent:true, usersFetched:1, factsEmitted:6, factsRejected:0,
+  appUsersWritten:1, peopleWritten:1, matchesWritten:1, matchConflicts:0, skipped:2`. Output was safe — **no token, JWT,
+  email, name, raw Slack response, or raw DB payload**. The written rows are visible via the PR-5 read-only UI and the run
+  is idempotent on re-run. It needed operator-only secrets (a rotated dev Slack token + a dev tenant-member JWT + a dev
+  Slack workspace), so the agent could not perform it. **This is a dev/test token run — NOT customer OAuth, NOT the
+  production runner, NOT a scheduler. RISK-001/RISK-007 remain OPEN.**
+
 ### Remaining PRs after PR 4
 - **PR 5** — UI display of synced Slack data. **PR 6** — manual server-only run trigger. **Later** — scheduler / run
   lifecycle. **Later** — OAuth/vault/runner production credential path (RISK-007). The concrete Supabase store impl for
