@@ -1,7 +1,9 @@
-select 'apps' as table_name, count(*) from public.apps where tenant_id = '7a296850-6661-485e-95c7-0a0658b1d43c'
-union all
-select 'app_users', count(*) from public.app_users where tenant_id = '7a296850-6661-485e-95c7-0a0658b1d43c'
-union all
-select 'people', count(*) from public.people where tenant_id = '7a296850-6661-485e-95c7-0a0658b1d43c'
-union all
-select 'app_user_identity_matches', count(*) from public.app_user_identity_matches where tenant_id = '7a296850-6661-485e-95c7-0a0658b1d43c';
+select
+  u.email,
+  tm.tenant_id,
+  tm.role,
+  tm.status
+from auth.users u
+join public.profiles p on p.id = u.id
+join public.tenant_memberships tm on tm.user_id = p.id
+where u.id = '35dccf96-4d93-4dc1-bed9-cba4451bd262';

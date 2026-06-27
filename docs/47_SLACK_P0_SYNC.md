@@ -265,10 +265,14 @@ job, no OAuth/runner, no public route/server action, no service-role, no product
   (`ID_CADDIE_DEV_USER_JWT`) is not an `owner`/`admin`/`editor` member of `SLACK_SYNC_TENANT_ID`** (RLS `has_tenant_role`
   requires an active membership). Fix: sign in as / mint a JWT for a user who is an active write-role member of that
   tenant (or add the membership), then rerun.
-- **Live end-to-end run (the one operator step):** **NOT performed by the agent** — it needs a rotated dev Slack token +
-  a dev tenant-member JWT + a dev Slack workspace (operator-only secrets). The operator runs the real command above; it
-  writes tenant-scoped rows (visible via the PR-5 read-only UI) and is idempotent on re-run. **This is a dev/test token
-  run — NOT customer OAuth, NOT the production runner, NOT a scheduler. RISK-001/RISK-007 remain OPEN.**
+- **Live end-to-end run — SUCCEEDED (2026-06-27, operator, local/dev).** After using an active write-role member JWT for
+  the tenant, `npm run slack:sync:dev` ran the full chain (dev-token source → Slack client → emitter → resolver store →
+  tenant-scoped DB rows). **Safe summary:** `ok:true, teamPresent:true, usersFetched:1, factsEmitted:6, factsRejected:0,
+  appUsersWritten:1, peopleWritten:1, matchesWritten:1, matchConflicts:0, skipped:2`. Output was safe — **no token, JWT,
+  email, name, raw Slack response, or raw DB payload**. The written rows are visible via the PR-5 read-only UI and the run
+  is idempotent on re-run. It needed operator-only secrets (a rotated dev Slack token + a dev tenant-member JWT + a dev
+  Slack workspace), so the agent could not perform it. **This is a dev/test token run — NOT customer OAuth, NOT the
+  production runner, NOT a scheduler. RISK-001/RISK-007 remain OPEN.**
 
 ### Remaining PRs after PR 4
 - **PR 5** — UI display of synced Slack data. **PR 6** — manual server-only run trigger. **Later** — scheduler / run
