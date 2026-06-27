@@ -45,9 +45,12 @@ describe.runIf(RUN)("createSupabaseSlackResolverStore — real DB/RLS", () => {
       const { data: u, error } = await admin.auth.admin.createUser({ email, password: pw, email_confirm: true });
       if (error || !u.user) throw new Error("IT createUser failed");
       ids.users.push(u.user.id);
-      await admin.from("profiles").insert({ id: u.user.id, email });
-      await admin.from("tenants").insert({ id: tenant, name, slug });
-      await admin.from("tenant_memberships").insert({ tenant_id: tenant, user_id: u.user.id, role: "owner", status: "active" }); // explicit, not relying on the column default
+      // fixture seeding is service-role (bypasses RLS) — fail LOUD if any insert is rejected, so a harness/key issue
+      // surfaces here (the actual error) instead of as a downstream RLS 42501 on the store writes.
+      const seed = (label: string, r: { error: unknown }) => { if (r.error) throw new Error(`IT fixture ${label} failed: ${JSON.stringify(r.error)}`); };
+      seed("profiles", await admin.from("profiles").insert({ id: u.user.id, email }));
+      seed("tenants", await admin.from("tenants").insert({ id: tenant, name, slug }));
+      seed("memberships", await admin.from("tenant_memberships").insert({ tenant_id: tenant, user_id: u.user.id, role: "owner", status: "active" })); // explicit status, not the column default
     }
     storeA = await memberStore(emailA);
     storeB = await memberStore(emailB);
