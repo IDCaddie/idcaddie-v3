@@ -211,6 +211,43 @@ Surfaces the PR #190-resolved rows in the EXISTING authenticated app surface —
   is on the already-RLS-scoped `apps` row, and the roster read is the existing RLS-proven path (`org_rls_test.sql`
   T25/T28/T29); no new read DAL crosses a tenant boundary.
 
+## PR 6 — manual server-only run trigger (LOCAL/DEV ONLY)
+Wires the merged pieces into one manual run: **dev-token source (#187) → Slack client (#188) → emitter (#189) →
+tenant-scoped resolver (#190)**. Structurally disabled outside local dev. **No UI button, no scheduler, no background
+job, no OAuth/runner, no public route/server action, no service-role, no production.**
+- **Orchestrator (`src/lib/server/sync/run-slack-sync-dev.ts`):** `runSlackSyncDev({ env, tokenSource, httpClient, store,
+  identity, observedAt })` → a **safe aggregate summary** (`{ ok, teamPresent, usersFetched, factsEmitted, factsRejected,
+  appUsersWritten, peopleWritten, matchesWritten, matchConflicts, skipped }` or `{ ok:false, errorCode }`). The token
+  comes ONLY via the #187 seam; it is **never** logged/returned/in the summary or errors. Failures surface only a SAFE
+  code (`invalid_auth`/`missing_scope`/`ratelimited`/`malformed_response`/`resolve_failed`/`run_disabled`/`missing_tenant`)
+  — never a token, raw response, email, or name. `tenant_id` is the caller's arg, never a Slack payload.
+- **Allowlist-shaped run guard** `isDevSlackSyncRunEnabled`: enabled ONLY in positively-confirmed local dev (`NODE_ENV=
+  development` + `VERCEL_ENV`∈{unset,development}) AND a distinct explicit opt-in `ID_CADDIE_DEV_SLACK_SYNC_ENABLED=1`.
+  unknown/unset/test/staging/preview/production all refuse; request input cannot enable it (env-only).
+- **User-scoped context (#5):** `dev-user-scoped-client.ts` `createDevUserScopedClient(env)` — the standard server client
+  is cookie-bound (needs a Next request), so a standalone run builds a user-scoped client from a **dev tenant-member's
+  JWT** (`ID_CADDIE_DEV_USER_JWT`) in the Authorization header over the **public anon key**. RLS applies (writes as a
+  tenant member); it is **never** service-role; the JWT is read from a server-only env var and never logged.
+- **Concrete resolver store (#6):** `supabase-slack-resolver-store.ts` implements the #190 `SlackResolverStore` over the
+  injected user-scoped client — apps/app_users via `upsert(onConflict=the 0036 tenant-scoped keys)`, people via
+  get-or-create against the functional `lower(primary_email)` index, matches via `ON CONFLICT (tenant_id, app_user_id)
+  DO NOTHING` (the 0028 no-repoint invariant). Errors surface only `store_write_failed`. **No migration** (the 0036/0028
+  keys suffice); **no service-role**.
+- **Trigger shape:** a guarded `.mjs` **pre-flight** (`scripts/run-slack-sync-dev.mjs`) — like the connector dry-runs, it
+  cannot import the TS chain, so it guards the env (local dev + opt-in; refuses the production ref; refuses a token/JWT
+  in argv) and prints the exact procedure. **No public route / server action / UI button** was added.
+- **Tests (49):** orchestrator (guard allowlist, request-can't-enable, chain order, token-never-leaks, no-email/name/raw
+  in summary, idempotent rerun, all safe-failure paths) + concrete-store shape/safety (onConflict targets, get-or-create,
+  safe error) + dev-client (anon-key + JWT header, not service-role, fail-closed, no-JWT-echo) + the `.mjs` guards +
+  a server-only / no-`src/app`-import / no-service-role static scan.
+- **Real DB/RLS + live run (honest status):** the **DB-write tenant-isolation + idempotency + no-repoint are proven at
+  the real-RLS SQL layer by `org_rls_test.sql` Test 58** — the EXACT upserts this store issues. The **TS-store-level
+  real-DB integration test is NOT run** (the repo's RLS harness is SQL-level; a Supabase-client-level harness does not
+  exist — a documented test-infra gap, NOT faked with mocks). **No live end-to-end run was performed by the agent** (no
+  dev Slack token / dev-user JWT / live Slack / TS runtime to invoke it); the live run is operator-driven in local dev
+  via the `.mjs` procedure. **This is a dev/test token run — NOT customer OAuth, NOT the production runner, NOT a
+  scheduler. RISK-001/RISK-007 remain OPEN.**
+
 ### Remaining PRs after PR 4
 - **PR 5** — UI display of synced Slack data. **PR 6** — manual server-only run trigger. **Later** — scheduler / run
   lifecycle. **Later** — OAuth/vault/runner production credential path (RISK-007). The concrete Supabase store impl for
