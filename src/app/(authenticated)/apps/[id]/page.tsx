@@ -7,6 +7,7 @@ import {
   summarizeAccountIntelligence,
   STALE_CANDIDATE_DAYS,
 } from "@/lib/data/app-account-intelligence";
+import { classifySlackSync, SLACK_SYNC_COPY } from "@/lib/data/slack-sync-display";
 
 export const metadata = { title: "App · ID Caddie" };
 
@@ -52,6 +53,8 @@ export default async function AppDetailPage({
     appUsers && appUsers.ok && matchesOk && matches && matches.ok
       ? summarizeAccountIntelligence(appUsers.data, matches.data)
       : null;
+  // Read-only Slack-sync classification from the app's non-secret connector markers (external_instance_id + vendor).
+  const slackSync = classifySlackSync(result.ok ? result.data : null);
 
   return (
     <main className="flex flex-1 flex-col gap-6 p-8">
@@ -79,6 +82,17 @@ export default async function AppDetailPage({
             <p className="text-sm text-zinc-600 dark:text-zinc-400">
               Read-only app detail. Visibility is enforced by Postgres RLS. No editing here yet.
             </p>
+            {slackSync.isSlackSynced ? (
+              <div className="mt-2 inline-flex flex-wrap items-center gap-2 rounded border border-violet-300 bg-violet-50 px-3 py-2 text-xs text-violet-900 dark:border-violet-800 dark:bg-violet-950 dark:text-violet-200">
+                <span className="rounded-full bg-violet-200 px-2 py-0.5 font-medium dark:bg-violet-900">
+                  {SLACK_SYNC_COPY.badge}
+                </span>
+                <span>{SLACK_SYNC_COPY.description}</span>
+                {slackSync.workspaceId ? (
+                  <span className="text-violet-500">workspace {slackSync.workspaceId}</span>
+                ) : null}
+              </div>
+            ) : null}
           </header>
 
           <section className="grid grid-cols-1 gap-4 text-sm sm:grid-cols-2">
@@ -164,18 +178,21 @@ export default async function AppDetailPage({
           ) : null}
 
           <section className="space-y-2 text-sm">
-            <h2 className="font-medium">App users</h2>
+            <h2 className="font-medium">{slackSync.isSlackSynced ? SLACK_SYNC_COPY.usersHeading : "App users"}</h2>
             <p className="text-xs text-zinc-500">
-              Accounts on this app that you may read (RLS-scoped). Read-only — direct roster fields
-              plus a minimal matched/unmatched status (no person names, emails, or identity-provider
-              data). No identity matching, license utilization, or provisioning.
+              {slackSync.isSlackSynced ? `${SLACK_SYNC_COPY.preview}. ` : ""}Accounts on this app that you may read
+              (RLS-scoped). Read-only — direct app_user roster fields plus a minimal matched/unmatched status; the match
+              shows status only (no matched-person name, email, or identity-provider data). No identity matching, license
+              utilization, or provisioning.
             </p>
             {!appUsers || !appUsers.ok ? (
               <p className="text-zinc-600 dark:text-zinc-400">
                 Could not load app users right now.
               </p>
             ) : appUsers.data.length === 0 ? (
-              <p className="text-zinc-600 dark:text-zinc-400">No app users you can access.</p>
+              <p className="text-zinc-600 dark:text-zinc-400">
+                {slackSync.isSlackSynced ? SLACK_SYNC_COPY.emptyUsers : "No app users you can access."}
+              </p>
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full border-collapse text-left">

@@ -8,7 +8,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const createClient = vi.fn();
 vi.mock("@/lib/supabase/server", () => ({ createClient: () => createClient() }));
 
-import { listAppsWithCountsForCurrentUser } from "./apps";
+import { listAppsWithCountsForCurrentUser, getAppDetailForCurrentUser } from "./apps";
 
 type TableData = { data: unknown[] | null; error: unknown };
 
@@ -105,5 +105,28 @@ describe("listAppsWithCountsForCurrentUser", () => {
     );
     const res = await listAppsWithCountsForCurrentUser();
     expect(res).toEqual({ ok: false, error: "query_failed" });
+  });
+});
+
+describe("getAppDetailForCurrentUser — exposes the non-secret connector-instance markers (PR 5)", () => {
+  const single = (row: Record<string, unknown> | null) => ({
+    from: () => ({ select: () => ({ eq: () => ({ maybeSingle: () => Promise.resolve({ data: row, error: null }) }) }) }),
+  });
+  const row = (over: Record<string, unknown>) => ({
+    id: "app1", name: "Slack", vendor_name: "Slack", category: "Communication", status: "active",
+    external_instance_id: null, instance_url: null, responsible_org_id: null, paying_org_id: null,
+    procurement_owner_org_id: null, created_at: "2026-06-27T00:00:00Z", updated_at: "2026-06-27T00:00:00Z", ...over,
+  });
+  it("returns externalInstanceId + instanceUrl (used to identify a synced Slack app)", async () => {
+    createClient.mockResolvedValue(single(row({ external_instance_id: "TWORKSPACE", instance_url: "https://acme.slack.com" })));
+    const res = await getAppDetailForCurrentUser("app1");
+    expect(res.ok && res.data.externalInstanceId).toBe("TWORKSPACE");
+    expect(res.ok && res.data.instanceUrl).toBe("https://acme.slack.com");
+    expect(res.ok && res.data.vendorName).toBe("Slack");
+  });
+  it("a manual app returns null markers (not Slack-synced)", async () => {
+    createClient.mockResolvedValue(single(row({ vendor_name: null })));
+    const res = await getAppDetailForCurrentUser("app2");
+    expect(res.ok && res.data.externalInstanceId).toBeNull();
   });
 });

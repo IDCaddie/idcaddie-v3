@@ -34,6 +34,11 @@ export type AppDetail = {
   vendorName: string | null;
   category: string | null;
   status: string;
+  // Connector-instance markers (migration 0024) — NON-secret. `externalInstanceId` is the provider workspace id (e.g.
+  // the Slack team_id) the resolver set for a synced instance; its presence is how a read-only view identifies a
+  // connector-synced app (NOT a token/secret). `instanceUrl` is the workspace URL.
+  externalInstanceId: string | null;
+  instanceUrl: string | null;
   responsibleOrgId: string | null;
   payingOrgId: string | null;
   procurementOrgId: string | null;
@@ -56,7 +61,7 @@ export async function getAppDetailForCurrentUser(appId: string): Promise<AppDeta
   const { data, error } = await supabase
     .from("apps")
     .select(
-      "id, name, vendor_name, category, status, responsible_org_id, paying_org_id, procurement_owner_org_id, created_at, updated_at",
+      "id, name, vendor_name, category, status, external_instance_id, instance_url, responsible_org_id, paying_org_id, procurement_owner_org_id, created_at, updated_at",
     )
     .eq("id", appId)
     .maybeSingle();
@@ -77,6 +82,8 @@ export async function getAppDetailForCurrentUser(appId: string): Promise<AppDeta
       vendorName: data.vendor_name,
       category: data.category,
       status: data.status,
+      externalInstanceId: data.external_instance_id,
+      instanceUrl: data.instance_url,
       responsibleOrgId: data.responsible_org_id,
       payingOrgId: data.paying_org_id,
       procurementOrgId: data.procurement_owner_org_id,

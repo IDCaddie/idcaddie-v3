@@ -180,6 +180,37 @@ service-role.**
   `app_instances` table (instance identity uses the `apps` 0024 instance columns); `identity_accounts` is RLS
   default-deny (not written in P0).
 
+## PR 5 — read-only UI display of synced Slack data
+Surfaces the PR #190-resolved rows in the EXISTING authenticated app surface — **read-only**, RLS-scoped, no writes.
+- **UI surface extended:** the existing **app detail page** (`src/app/(authenticated)/apps/[id]/page.tsx`), which already
+  renders the RLS-scoped `app_users` roster (the app_user's own name/email/external-id/status/last-active + a
+  matched/unmatched status only — no matched-person PII, no `raw_payload`, no token). PR 5 adds a
+  **"Synced from Slack" marker** + reframes the roster heading to **"Synced Slack users" (read-only preview)** when the
+  app is a connector-synced Slack workspace, with a Slack-specific empty state.
+- **Read path / DAL:** the existing `getAppDetailForCurrentUser` + `listAppUsersForApp` (user-scoped `createClient`, RLS-
+  enforced, **no service-role**, no `tenant_id` from the caller, `raw_payload`/`source` excluded). The only DAL change is
+  additive + read-only: `AppDetail` now exposes the **non-secret** connector markers `external_instance_id` + `instance_url`
+  (migration 0024) so the UI can identify a synced app.
+- **Identification (read-model):** a pure `classifySlackSync({ externalInstanceId, vendorName })` → an app is Slack-synced
+  when it has an `external_instance_id` (the resolver set it to the Slack team_id — a **structural** marker, not display-
+  name-only) AND `vendor_name="Slack"`. **Read-model note (gap, not a blocker):** there is no first-class `provider`/`source`
+  enum column today (the provider also lives in `app_users.raw_payload`, which the read DAL excludes); identification uses
+  the instance marker + vendor. A future schema enhancement could add a dedicated `source='slack'` column.
+- **What appears:** the Slack workspace app + its synced users (display name, email when present, status, last active,
+  matched/unmatched status). **Role/admin hint is NOT shown** — it lives in `app_users.raw_payload` which the safe DAL
+  excludes (the PR #4 no-role-column gap); surfacing it would need a real column (deferred). No raw payload, no token, no
+  cross-tenant data, no people/identity-account-table PII (the matched person's name/identity-account details are never shown).
+- **No false readiness:** copy is read-only-preview only ("Synced from Slack", "Read-only Slack sync preview", "Manual run
+  coming next") — never "Connect Slack" / "Run sync" / OAuth / "production connector ready"; no connect/sync button (the
+  pre-existing disabled "Connector sync — Not built yet" chip stays).
+- **Empty/missing-data safe:** no app row → standard not-found; Slack app with no users → "No synced Slack users yet…";
+  users without email / last-active / role → render safely ("—"), never crash.
+- **Tests:** `slack-sync-display.test.ts` (classifier matrix, copy has no false-readiness CTA / no token, and a static
+  scan that the page identifies rows via `classifySlackSync` and renders no active connect/sync CTA and no `raw_payload`/
+  token) + extended `apps.test.ts` (the DAL returns the new markers). **No new RLS test needed:** `external_instance_id`
+  is on the already-RLS-scoped `apps` row, and the roster read is the existing RLS-proven path (`org_rls_test.sql`
+  T25/T28/T29); no new read DAL crosses a tenant boundary.
+
 ### Remaining PRs after PR 4
 - **PR 5** — UI display of synced Slack data. **PR 6** — manual server-only run trigger. **Later** — scheduler / run
   lifecycle. **Later** — OAuth/vault/runner production credential path (RISK-007). The concrete Supabase store impl for
