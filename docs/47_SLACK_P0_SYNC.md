@@ -339,6 +339,40 @@ worker, no OAuth/runner, no Connect-Slack, no service-role in product code, no p
   recorder IT (second run refused + not recorded; tenant A does not block tenant B; stale reconciled then a new run
   starts; tenant A cannot reconcile tenant B). `gen-types` 0-diff (an index changes no columns).
 
+## PR 9 — controlled internal run-trigger exposure
+Lets an authorized internal operator start a Slack sync **without the terminal command** — through a tightly gated
+internal-dev surface. Proves *internal authorized trigger → guard checks → run lock acquired → chain executes →
+manual_sync_runs records status/counts/errors → UI-readable status*. **No scheduler, no retry worker, no OAuth/runner,
+no KMS, no customer-facing Connect-Slack, no production enablement, no service-role in product code. RISK-007 stays OPEN.**
+- **Trigger shape:** a `"use server"` **server action** (`internal/slack-sync/actions.ts`) over a server-only
+  orchestrator (`internal-slack-trigger.ts`), invoked from a **hidden, flag-gated internal page**
+  (`internal/slack-sync/page.tsx` — **not in the nav**). No public/unauthenticated route, no customer-facing button.
+  Because it runs in a request context it uses the **cookie `createClient()`** (the authenticated operator's own
+  user-scoped client) — RLS-governed as that user, **never service-role, never a dev JWT**.
+- **Env guard `isInternalSlackTriggerEnabled`:** allowlist-shaped, fail-closed — enabled ONLY in positively-confirmed
+  local dev (`NODE_ENV=development`, `VERCEL_ENV`∈{unset,development}) AND a **distinct** opt-in
+  `ID_CADDIE_INTERNAL_SLACK_TRIGGER_ENABLED=1`. unknown/unset/test/preview/production refuse; a request cannot enable it.
+- **Authorization (`authorizeInternalTrigger`, pure):** requires an authenticated user AND a **single active write-role
+  (owner/admin/editor) tenant membership**, with `tenant_id` resolved server-side from `resolveTenantContext` — NEVER
+  from the request (there is no tenant/connector request input to spoof; `connector_id` is a fixed server label). Refuses
+  `unauthenticated` / `no_active_tenant` / `tenant_switch_required` (multiple tenants) / `insufficient_role` (viewer).
+- **Execution:** reuses the existing chain end-to-end (token source #187 → client #188 → emitter #189 → resolver store
+  #190 → recorder + lock/stale-reconcile #194/#195) via `recordedSlackSyncRun` — no duplicated chain logic. A refused
+  trigger and a **duplicate active run (`run_already_active`) never call Slack/emitter/resolver** and write no record.
+- **Safe response:** the orchestrator returns the safe `RunSlackSyncSummary` (ok/status/errorCode/failedStage/safeReason
+  + counts/runId) — **no token, JWT, email, name, raw Slack response, raw DB payload, auth header, request body, or
+  stack trace**. Surfaced via the page's "Last run" status (RLS-scoped `getLatestSlackSyncRunForCurrentTenant`).
+- **UI:** a hidden internal-dev page labeled **"Internal dev Slack sync"** — the form button renders ONLY when the env
+  flag is on AND the user is a write-role member; in any deployed/non-dev environment it shows "not enabled" (no button).
+  Not in the nav, not customer-facing, no Connect-Slack/OAuth/scheduler/production language.
+- **No migration, no new RLS:** the write path is the PR #194/#195 recorder (RLS already proven by `org_rls_test` Test
+  59/60 + the recorder IT — cross-tenant write/reconcile denied); this PR adds an **app-layer** authz gate on top.
+- **Tests:** `internal-slack-trigger.test.ts` — env-guard allowlist matrix; the authz matrix (owner/admin/editor allowed;
+  unauthenticated/viewer/no-tenant/multi-tenant/disabled refused; request can't enable); the orchestration (authorized →
+  chain called with the auth-derived tenant; refused → chain NEVER called; duplicate → `run_already_active` passthrough;
+  safe summary has no token/email/name/raw) + a page/action static scan (flag-gated, internal-dev label, no
+  customer-facing/scheduler CTA, no token/raw, action takes no caller input).
+
 ### Remaining PRs after PR 4
 - **PR 5** — UI display of synced Slack data. **PR 6** — manual server-only run trigger. **Later** — scheduler / run
   lifecycle. **Later** — OAuth/vault/runner production credential path (RISK-007). The concrete Supabase store impl for
