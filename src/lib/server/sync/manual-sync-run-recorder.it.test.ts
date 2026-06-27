@@ -57,8 +57,14 @@ describe.runIf(RUN)("createSupabaseManualSyncRunRecorder — real DB/RLS", () =>
     for (const uid of ids.users) await admin.auth.admin.deleteUser(uid).catch(() => {});
   });
 
+  const openA = async (connectorId: string) => {
+    const r = await recA.start({ tenantId: tenantA, source: "slack", connectorId });
+    if (!r.ok) throw new Error(`start refused: ${r.reason}`);
+    return r.runId;
+  };
+
   it("a tenant member opens a 'running' run then closes it 'succeeded' (created_by = the member, RLS-enforced)", async () => {
-    const { runId } = await recA.start({ tenantId: tenantA, source: "slack", connectorId: "slack-dev" });
+    const runId = await openA("ok-run");
     const ok: RunSlackSyncSummary = { ok: true, teamPresent: true, usersFetched: 1, factsEmitted: 6, factsRejected: 0, appUsersWritten: 1, peopleWritten: 1, matchesWritten: 1, matchConflicts: 0, skipped: 2 };
     await recA.finish({ runId, summary: ok });
     const { data } = await admin.from("manual_sync_runs").select("status, users_fetched, created_by, tenant_id").eq("id", runId).single();
@@ -69,10 +75,58 @@ describe.runIf(RUN)("createSupabaseManualSyncRunRecorder — real DB/RLS", () =>
   });
 
   it("a failed run records failed + the safe error_code/failed_stage", async () => {
-    const { runId } = await recA.start({ tenantId: tenantA, source: "slack", connectorId: "slack-dev" });
+    const runId = await openA("fail-run");
     await recA.finish({ runId, summary: { ok: false, errorCode: "resolve_failed", failedStage: "upsert_app", safeReason: "rls_denied", usersFetched: 1 } });
     const { data } = await admin.from("manual_sync_runs").select("status, error_code, failed_stage").eq("id", runId).single();
     expect(data).toMatchObject({ status: "failed", error_code: "resolve_failed", failed_stage: "upsert_app" });
+  });
+
+  it("the active-run lock: a SECOND running run for the same (tenant, source, connector) is refused, NOT recorded", async () => {
+    const first = await recA.start({ tenantId: tenantA, source: "slack", connectorId: "lock-c" });
+    expect(first.ok).toBe(true);
+    const second = await recA.start({ tenantId: tenantA, source: "slack", connectorId: "lock-c" });
+    expect(second).toEqual({ ok: false, reason: "run_already_active" }); // DB partial unique index → no second record
+    const { count } = await admin.from("manual_sync_runs").select("*", { count: "exact", head: true }).eq("tenant_id", tenantA).eq("connector_id", "lock-c").eq("status", "running");
+    expect(count).toBe(1);
+    // after the first finishes, a new run for the same key CAN start (lock released)
+    if (first.ok) await recA.finish({ runId: first.runId, summary: { ok: true, teamPresent: true, usersFetched: 0, factsEmitted: 0, factsRejected: 0, appUsersWritten: 0, peopleWritten: 0, matchesWritten: 0, matchConflicts: 0, skipped: 0 } });
+    expect((await recA.start({ tenantId: tenantA, source: "slack", connectorId: "lock-c" })).ok).toBe(true);
+  });
+
+  it("the lock is TENANT-SCOPED: tenant A's active run does not block tenant B", async () => {
+    expect((await recA.start({ tenantId: tenantA, source: "slack", connectorId: "shared" })).ok).toBe(true);
+    expect((await recB.start({ tenantId: tenantB, source: "slack", connectorId: "shared" })).ok).toBe(true); // different tenant → own lock
+  });
+
+  it("a stale 'running' run is reconciled to failed (stale_run_reconciled), then a new run can start", async () => {
+    // seed a STALE running row (service-role setup only) with an old started_at
+    const { data: stale } = await admin.from("manual_sync_runs")
+      .insert({ tenant_id: tenantA, source: "slack", connector_id: "stale-c", status: "running", started_at: "2020-01-01T00:00:00Z" })
+      .select("id").single();
+    const res = await recA.reconcileStaleRuns({ tenantId: tenantA, source: "slack", connectorId: "stale-c", staleBeforeIso: "2025-01-01T00:00:00Z" });
+    expect(res.reconciled).toBe(1);
+    const { data: row } = await admin.from("manual_sync_runs").select("status, error_code, finished_at, users_fetched").eq("id", stale!.id).single();
+    expect(row).toMatchObject({ status: "failed", error_code: "stale_run_reconciled" });
+    expect(row?.finished_at).not.toBeNull();
+    expect(row?.users_fetched).toBeNull(); // no success counts invented
+    expect((await recA.start({ tenantId: tenantA, source: "slack", connectorId: "stale-c" })).ok).toBe(true); // lock released
+  });
+
+  it("tenant A cannot reconcile tenant B's stale run (cross-tenant reconcile isolated)", async () => {
+    await admin.from("manual_sync_runs").insert({ tenant_id: tenantB, source: "slack", connector_id: "b-stale", status: "running", started_at: "2020-01-01T00:00:00Z" });
+    const res = await recA.reconcileStaleRuns({ tenantId: tenantB, source: "slack", connectorId: "b-stale", staleBeforeIso: "2025-01-01T00:00:00Z" });
+    expect(res.reconciled).toBe(0); // RLS: member A may not update tenant B rows
+    const { data } = await admin.from("manual_sync_runs").select("status").eq("tenant_id", tenantB).eq("connector_id", "b-stale").single();
+    expect(data?.status).toBe("running"); // tenant B's stale run is untouched by A
+  });
+
+  it("finish() on an already-terminal run is a safe no-op (never trips the 0037 completed-run immutability)", async () => {
+    const okSummary: RunSlackSyncSummary = { ok: true, teamPresent: true, usersFetched: 0, factsEmitted: 0, factsRejected: 0, appUsersWritten: 0, peopleWritten: 0, matchesWritten: 0, matchConflicts: 0, skipped: 0 };
+    const runId = await openA("double-finish");
+    await recA.finish({ runId, summary: okSummary }); // running -> succeeded
+    await expect(recA.finish({ runId, summary: { ok: false, errorCode: "resolve_failed" } })).resolves.toBeUndefined(); // 2nd close: 0 rows (not running) -> no throw, no change
+    const { data } = await admin.from("manual_sync_runs").select("status").eq("id", runId).single();
+    expect(data?.status).toBe("succeeded"); // unchanged — the completed run is immutable
   });
 
   it("RLS denies a cross-tenant run write: member B cannot open a run for tenant A (run_record_failed)", async () => {
