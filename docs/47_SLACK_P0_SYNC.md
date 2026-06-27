@@ -233,20 +233,28 @@ job, no OAuth/runner, no public route/server action, no service-role, no product
   get-or-create against the functional `lower(primary_email)` index, matches via `ON CONFLICT (tenant_id, app_user_id)
   DO NOTHING` (the 0028 no-repoint invariant). Errors surface only `store_write_failed`. **No migration** (the 0036/0028
   keys suffice); **no service-role**.
-- **Trigger shape:** a guarded `.mjs` **pre-flight** (`scripts/run-slack-sync-dev.mjs`) — like the connector dry-runs, it
-  cannot import the TS chain, so it guards the env (local dev + opt-in; refuses the production ref; refuses a token/JWT
-  in argv) and prints the exact procedure. **No public route / server action / UI button** was added.
-- **Tests (49):** orchestrator (guard allowlist, request-can't-enable, chain order, token-never-leaks, no-email/name/raw
-  in summary, idempotent rerun, all safe-failure paths) + concrete-store shape/safety (onConflict targets, get-or-create,
-  safe error) + dev-client (anon-key + JWT header, not service-role, fail-closed, no-JWT-echo) + the `.mjs` guards +
-  a server-only / no-`src/app`-import / no-service-role static scan.
-- **Real DB/RLS + live run (honest status):** the **DB-write tenant-isolation + idempotency + no-repoint are proven at
-  the real-RLS SQL layer by `org_rls_test.sql` Test 58** — the EXACT upserts this store issues. The **TS-store-level
-  real-DB integration test is NOT run** (the repo's RLS harness is SQL-level; a Supabase-client-level harness does not
-  exist — a documented test-infra gap, NOT faked with mocks). **No live end-to-end run was performed by the agent** (no
-  dev Slack token / dev-user JWT / live Slack / TS runtime to invoke it); the live run is operator-driven in local dev
-  via the `.mjs` procedure. **This is a dev/test token run — NOT customer OAuth, NOT the production runner, NOT a
-  scheduler. RISK-001/RISK-007 remain OPEN.**
+- **Trigger = a REAL committed command** `npm run slack:sync:dev` (`run-slack-sync-dev.liverun.test.ts`, run via vitest —
+  the repo's TS runner that resolves the chain; plain `node` cannot, no `tsx`). It builds the REAL deps (token source +
+  `slackFetchHttpClient` + `createSupabaseSlackResolverStore(createDevUserScopedClient(env))`) and invokes
+  `runSlackSyncDev`, printing ONLY the safe summary. **DOUBLE-gated** (`ID_CADDIE_DEV_SLACK_SYNC_ENABLED=1` AND
+  `SLACK_SYNC_LIVE=1`) → SKIPPED in `npm test`/CI, no client/network at import. The guarded `.mjs`
+  (`scripts/run-slack-sync-dev.mjs`) remains as a pre-flight (prints the procedure, refuses the prod ref / token-in-argv).
+  **No public route / server action / UI button.**
+- **Tests (53 + a real-DB IT):** orchestrator (guard allowlist, request-can't-enable, chain order, token-never-leaks,
+  no-email/name/raw in summary, idempotent rerun, all safe-failure paths) + concrete-store shape/safety + dev-client
+  (anon-key + JWT header, not service-role, fail-closed, no-JWT-echo) + `.mjs` guards + a server-only/no-`src/app`-import
+  static scan.
+- **Real DB/RLS proof of the TS store — RUN, not mocks.** `supabase-slack-resolver-store.it.test.ts` runs the store's
+  supabase-js/PostgREST queries against a **LOCAL Supabase stack** as a **tenant-member JWT** (service-role used for
+  fixture setup ONLY): the 0036-key upsert is idempotent (one row on re-run), the full graph (app_user+person+match)
+  writes, the get-or-create matches `_` LITERALLY (the LIKE-escape, so a `_` email can't grab the wrong person), and
+  **RLS DENIES a cross-tenant write** (member B → tenant A ⇒ `store_write_failed`, nothing written). Run via
+  `npm run test:store-it` (`scripts/test-store-it.sh` → `supabase start` + vitest) and in CI (`store-integration.yml`).
+  The SQL-layer `org_rls_test.sql` Test 58 still proves the same constraints/RLS independently.
+- **Live end-to-end run (the one operator step):** **NOT performed by the agent** — it needs a rotated dev Slack token +
+  a dev tenant-member JWT + a dev Slack workspace (operator-only secrets). The operator runs the real command above; it
+  writes tenant-scoped rows (visible via the PR-5 read-only UI) and is idempotent on re-run. **This is a dev/test token
+  run — NOT customer OAuth, NOT the production runner, NOT a scheduler. RISK-001/RISK-007 remain OPEN.**
 
 ### Remaining PRs after PR 4
 - **PR 5** — UI display of synced Slack data. **PR 6** — manual server-only run trigger. **Later** — scheduler / run

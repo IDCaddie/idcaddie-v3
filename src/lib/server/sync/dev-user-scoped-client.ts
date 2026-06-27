@@ -10,7 +10,7 @@
 // SERVER-ONLY: under `src/lib/server/`, the runtime browser sentinel below, and `no-client-import.test.ts`.
 
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import { supabaseEnv } from "@/lib/supabase/env";
+import { supabaseEnv } from "../../supabase/env"; // relative (not "@/…") so the manual-run entrypoint resolves it outside the bundler
 import type { Database } from "@/lib/database.types";
 import { isDevSlackSyncRunEnabled } from "./run-slack-sync-dev";
 

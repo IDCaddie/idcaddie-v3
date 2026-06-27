@@ -143,7 +143,7 @@ describe("runSlackSyncDev — fail-closed + safe failures", () => {
 describe("manual run is server-only, with no public route / server action / UI trigger added", () => {
   const SYNC = path.resolve(__dirname);
   const SRC = path.resolve(__dirname, "..", "..", "..");
-  const modules = ["run-slack-sync-dev.ts", "dev-user-scoped-client.ts", "supabase-slack-resolver-store.ts"];
+  const modules = ["run-slack-sync-dev.ts", "dev-user-scoped-client.ts", "supabase-slack-resolver-store.ts", "slack-fetch-http-client.ts"];
   const walk = (dir: string): string[] => fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
     const full = path.join(dir, e.name);
     if (e.isDirectory()) return e.name === "node_modules" || e.name === ".next" ? [] : walk(full);

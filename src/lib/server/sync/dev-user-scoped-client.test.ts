@@ -8,7 +8,7 @@ const created: { url: string; key: string; opts: { global?: { headers?: Record<s
 vi.mock("@supabase/supabase-js", () => ({
   createClient: (url: string, key: string, opts: { global?: { headers?: Record<string, string> } }) => { created.push({ url, key, opts }); return { __mock: true }; },
 }));
-vi.mock("@/lib/supabase/env", () => ({ supabaseEnv: () => ({ url: "http://localhost:54321", anonKey: "ANON_PUBLIC_KEY" }) }));
+vi.mock("../../supabase/env", () => ({ supabaseEnv: () => ({ url: "http://localhost:54321", anonKey: "ANON_PUBLIC_KEY" }) }));
 
 import { createDevUserScopedClient } from "./dev-user-scoped-client";
 
