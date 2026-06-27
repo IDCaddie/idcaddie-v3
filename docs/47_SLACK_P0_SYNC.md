@@ -373,6 +373,56 @@ no KMS, no customer-facing Connect-Slack, no production enablement, no service-r
   safe summary has no token/email/name/raw) + a page/action static scan (flag-gated, internal-dev label, no
   customer-facing/scheduler CTA, no token/raw, action takes no caller input).
 
+## PR 10 — scheduler/retry worker (LOCAL/DEV/INTERNAL ONLY)
+A guarded scheduler/retry worker that runs the Slack sync automatically, reusing the PR #194/#195 run lifecycle + lock +
+stale-reconcile. Proves *tick → eligible target selected → stale runs reconciled → lock acquired → chain executes →
+`manual_sync_runs` records succeeded/failed → duplicate active runs skipped (`run_already_active`)*. **No OAuth/runner,
+no KMS, no customer-facing Connect-Slack, no production enablement, no service-role in product code. RISK-007 stays OPEN.**
+- **Scheduler shape — ROUTE-based + worker function.** A worker tick `runSlackSyncSchedulerTick` (eligibility + per-target
+  run via `recordedSlackSyncRun`) plus a **cron-secret + env-flag gated POST route** `/api/internal/slack-scheduler` (a
+  thin wrapper over the testable `handleSlackSchedulerRequest`). The route is **PRODUCTION-DISABLED** (the allowlist env
+  flag is false outside local dev) and **NOT a public unauthenticated route** (a cron secret header gates it; when
+  disabled it returns 404). **Production cron INFRA (a Vercel cron that hits the route) is NOT wired** — deferred.
+- **Enablement flags (all required, fail-closed):** `ID_CADDIE_SLACK_SCHEDULER_ENABLED=1` (the scheduler opt-in) +
+  `ID_CADDIE_SLACK_SCHEDULER_SECRET=<cron secret>` (the route header `x-scheduler-secret` must match, constant-time) +
+  `ID_CADDIE_SLACK_SCHEDULER_CONNECTORS=<comma-separated connector ids>` + `SLACK_SYNC_TENANT_ID` (the dev tenant) +
+  the chain's own flags (`ID_CADDIE_DEV_SLACK_SYNC_ENABLED`, the dev token, `ID_CADDIE_DEV_USER_JWT`).
+- **Environment guard `isSlackSchedulerEnabled`:** allowlist-shaped — ONLY `NODE_ENV=development` +
+  `VERCEL_ENV`∈{unset,development} + the distinct scheduler opt-in. unknown/unset/test/preview/production refuse; a
+  request cannot enable it. **Local/dev/internal ONLY** (the chain itself only runs in local dev).
+- **Write identity (§8 — a tick has no browser session):** the worker writes via the **existing dev-user-JWT client**
+  (`createDevUserScopedClient`, PR #192) — a **user-scoped (RLS) client, NEVER service-role**. Every write is RLS-governed
+  as that dev tenant member; tenant isolation is the DB's, identical to the manual run. **No service-role shortcut.**
+- **Tenant/connector eligibility (§5):** an explicit **tenant-scoped connector allowlist** (`parseSchedulerTargets` →
+  `(SLACK_SYNC_TENANT_ID, connector_id)` pairs). Tenant-scoped + connector-scoped; **never "run all tenants"**, no
+  cross-tenant lookup, no request-supplied tenant.
+- **Duplicate runs:** handled by the PR #195 lock — `recordedSlackSyncRun` reconciles stale, then acquires the per-target
+  lock; a concurrent active run returns **`run_already_active`** and **never calls Slack/emitter/resolver**.
+- **Stale runs:** reconciled to `failed`/`stale_run_reconciled` by the existing PR #195 path (inside `recordedSlackSyncRun`)
+  before the lock — never invented success, completed-run immutability + actor pin intact.
+- **Retry/backoff policy (`classifyTargetEligibility`):** per tick, each target runs at most once (no in-tick loop, no
+  rapid Slack calls). Retry is an **allowlist (fail-closed)**: ONLY known-transient failures
+  (`ratelimited`/`slack_error`/`http_error`/`malformed_response`/`run_crashed`/`resolve_failed`/`store_write_failed`/
+  `stale_run_reconciled`) are retried — **every other failure, including auth/scope/config AND any unknown/permanent
+  Slack token code (e.g. `token_revoked`, `account_inactive`), fails closed = NOT retried**. A transient failure or a
+  success is eligible again only **after a 30-minute backoff** (`SCHEDULER_INTERVAL_MS`); a stale `running` becomes
+  eligible (the chain then reconciles + re-locks it). Rate-limit handling follows the Slack client's safe error behavior.
+- **Credential source:** the existing **dev/internal** token source (#187) + the dev-user-JWT client only. **No customer
+  credentials, no production OAuth/vault/runner, no pasted token, no token in DB/logs/docs/run-records/test output.**
+- **Safe to log/return:** the tick result is **connector label + status/errorCode + counts ONLY** — never a token, JWT,
+  email, name, raw Slack response, raw DB payload, or auth header. The route returns this JSON; a tick error is a safe 500.
+- **How to operate it (local dev):** set the flags above + the dev token/JWT, run `next dev`, then `POST
+  /api/internal/slack-scheduler` with `x-scheduler-secret: <secret>` (a local cron entry or `curl`). Each tick reconciles
+  stale runs, runs eligible connectors, and records safe status; results are visible via the PR #5 "Last Slack sync" /
+  PR #9 "Last run" status. **Disabled by default — does nothing without all flags.**
+- **How to test it:** `npm test` (`slack-sync-scheduler.test.ts` — env-guard matrix; eligibility/retry/backoff matrix;
+  target parsing; constant-time secret; the route handler 404/401/200/500; tick orchestration with injected deps:
+  disabled→no work, eligible→runs, ineligible→skipped, duplicate→`run_already_active`, safe results). No new
+  migration/RLS — the write path is the PR #194/#195 recorder (RLS proven by `org_rls_test` Test 59/60 + the recorder IT).
+- **Out of scope / remains unsafe-incomplete:** OAuth/vault/runner production credential source (RISK-007, still OPEN);
+  customer-facing Connect-Slack; **production scheduler enablement (Vercel cron infra) — DEFERRED, not wired**;
+  first-class connector lifecycle/status; Google Workspace; value-layer/license/spend reporting. **RISK-007 remains OPEN.**
+
 ### Remaining PRs after PR 4
 - **PR 5** — UI display of synced Slack data. **PR 6** — manual server-only run trigger. **Later** — scheduler / run
   lifecycle. **Later** — OAuth/vault/runner production credential path (RISK-007). The concrete Supabase store impl for

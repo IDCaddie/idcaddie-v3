@@ -176,7 +176,7 @@ describe("runSlackSyncDev — fail-closed + safe failures", () => {
 describe("manual run is server-only, with no public route / server action / UI trigger added", () => {
   const SYNC = path.resolve(__dirname);
   const SRC = path.resolve(__dirname, "..", "..", "..");
-  const modules = ["run-slack-sync-dev.ts", "dev-user-scoped-client.ts", "supabase-slack-resolver-store.ts", "slack-fetch-http-client.ts", "manual-sync-run-recorder.ts", "recorded-slack-sync-run.ts", "internal-slack-trigger.ts"];
+  const modules = ["run-slack-sync-dev.ts", "dev-user-scoped-client.ts", "supabase-slack-resolver-store.ts", "slack-fetch-http-client.ts", "manual-sync-run-recorder.ts", "recorded-slack-sync-run.ts", "internal-slack-trigger.ts", "slack-sync-scheduler.ts"];
   const walk = (dir: string): string[] => fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
     const full = path.join(dir, e.name);
     if (e.isDirectory()) return e.name === "node_modules" || e.name === ".next" ? [] : walk(full);
@@ -196,5 +196,12 @@ describe("manual run is server-only, with no public route / server action / UI t
     const appDir = path.join(SRC, "app");
     const offenders = walk(appDir).filter((f) => { const s = fs.readFileSync(f, "utf8"); return hints.some((h) => s.includes(h)); });
     expect(offenders).toEqual([]);
+  });
+
+  it("slack-sync-scheduler is imported by ONLY the scheduler route under src/app (no client/page importer can bundle the dev-JWT client)", () => {
+    const appDir = path.join(SRC, "app");
+    const importers = walk(appDir).filter((f) => fs.readFileSync(f, "utf8").includes("sync/slack-sync-scheduler"));
+    expect(importers.map((f) => path.relative(SRC, f).replace(/\\/g, "/"))).toEqual(["app/api/internal/slack-scheduler/route.ts"]);
+    for (const f of importers) expect(fs.readFileSync(f, "utf8")).not.toContain('"use client"');
   });
 });
