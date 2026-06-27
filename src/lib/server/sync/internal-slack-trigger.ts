@@ -12,7 +12,7 @@
 
 import { recordedSlackSyncRun } from "./recorded-slack-sync-run";
 import type { RunSlackSyncSummary } from "./run-slack-sync-dev";
-import { createDevProviderTokenSource } from "./provider-token-source";
+import { createProviderTokenSource } from "./provider-token-source-selector";
 import { createSupabaseSlackResolverStore } from "./supabase-slack-resolver-store";
 import { createSupabaseManualSyncRunRecorder } from "./manual-sync-run-recorder";
 import { slackFetchHttpClient } from "./slack-fetch-http-client";
@@ -71,7 +71,7 @@ async function defaultRunChain(tenantId: string): Promise<RunSlackSyncSummary> {
   const { summary } = await recordedSlackSyncRun(
     {
       env,
-      tokenSource: createDevProviderTokenSource(env),
+      tokenSource: createProviderTokenSource(env), // selector: dev source in local-dev+opt-in, else the fail-closed vault source
       httpClient: slackFetchHttpClient,
       store: createSupabaseSlackResolverStore(supabase),
       identity: { tenantId, connectorId: CONNECTOR_ID },

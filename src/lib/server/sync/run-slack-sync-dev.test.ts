@@ -176,7 +176,7 @@ describe("runSlackSyncDev — fail-closed + safe failures", () => {
 describe("manual run is server-only, with no public route / server action / UI trigger added", () => {
   const SYNC = path.resolve(__dirname);
   const SRC = path.resolve(__dirname, "..", "..", "..");
-  const modules = ["run-slack-sync-dev.ts", "dev-user-scoped-client.ts", "supabase-slack-resolver-store.ts", "slack-fetch-http-client.ts", "manual-sync-run-recorder.ts", "recorded-slack-sync-run.ts", "internal-slack-trigger.ts", "slack-sync-scheduler.ts"];
+  const modules = ["run-slack-sync-dev.ts", "dev-user-scoped-client.ts", "supabase-slack-resolver-store.ts", "slack-fetch-http-client.ts", "manual-sync-run-recorder.ts", "recorded-slack-sync-run.ts", "internal-slack-trigger.ts", "slack-sync-scheduler.ts", "vault-provider-token-source.ts", "provider-token-source-selector.ts"];
   const walk = (dir: string): string[] => fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
     const full = path.join(dir, e.name);
     if (e.isDirectory()) return e.name === "node_modules" || e.name === ".next" ? [] : walk(full);
@@ -192,7 +192,7 @@ describe("manual run is server-only, with no public route / server action / UI t
   });
 
   it("NO file under src/app imports the manual run / dev client / store (no route, no server action, no UI trigger)", () => {
-    const hints = ["sync/run-slack-sync-dev", "sync/dev-user-scoped-client", "sync/supabase-slack-resolver-store", "sync/manual-sync-run-recorder", "sync/recorded-slack-sync-run"];
+    const hints = ["sync/run-slack-sync-dev", "sync/dev-user-scoped-client", "sync/supabase-slack-resolver-store", "sync/manual-sync-run-recorder", "sync/recorded-slack-sync-run", "sync/vault-provider-token-source", "sync/provider-token-source-selector"];
     const appDir = path.join(SRC, "app");
     const offenders = walk(appDir).filter((f) => { const s = fs.readFileSync(f, "utf8"); return hints.some((h) => s.includes(h)); });
     expect(offenders).toEqual([]);

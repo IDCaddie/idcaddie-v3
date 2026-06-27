@@ -423,6 +423,66 @@ no KMS, no customer-facing Connect-Slack, no production enablement, no service-r
   customer-facing Connect-Slack; **production scheduler enablement (Vercel cron infra) — DEFERRED, not wired**;
   first-class connector lifecycle/status; Google Workspace; value-layer/license/spend reporting. **RISK-007 remains OPEN.**
 
+## PR 11 — Slack production credential path FOUNDATION (vault token source, fail-closed)
+Moves the token model from "dev source only" toward "OAuth/vault/runner source → existing Slack chain" — but keeps every
+risky production enablement **disabled**. **RISK-007 stays OPEN.** No real OAuth, no customer Connect-Slack, no production
+token exchange, no customer/production credentials, no service-role, no KMS/IAM change, no migration, no production touch.
+- **What PR #198 adds:** (1) `vault-provider-token-source.ts` — `createVaultProviderTokenSource()`, a **typed FAIL-CLOSED
+  placeholder** implementing the same `ProviderTokenSource` seam whose `getProviderToken` **always throws** a generic
+  error (no token loading, no fake/mock, no fallback); (2) `provider-token-source-selector.ts` —
+  `createProviderTokenSource(env)`, an **env-driven selector** that wires the chain to choose its token source by
+  environment/config; (3) the three chain callers (scheduler, internal trigger, manual-run entrypoint) now build the
+  token source via the selector instead of the dev source directly.
+- **Why a placeholder (verified from source, not assumed):** a real reader cannot be wired yet — **all of**: no hosted
+  runner exists and an in-repo runner is architecturally forbidden (**doc 46 §11** — the app stays pg-free); production
+  KMS/IAM is **unverified/unprovisioned** (**doc 44 §0**; the real AWS-SDK KMS sender is imported by nothing but its
+  test); the OAuth callback is **fully synthetic + production-disabled** (no real exchange, no real client secret); and
+  the **doc 44 §5 first-real-token dry-run (the 17-item executed-proof) has NOT run**. The contract IS concrete (the
+  `connector_secrets` envelope can hold Slack tokens; `loadConnectorSecret`/`RunnerConnection` exist), so the future swap
+  is a documented zero-caller-change drop-in — but building a real reader now would require faking it. **Hard-stops 1–7
+  all apply → typed fail-closed placeholder.**
+- **Dev source vs vault source:** the **dev source** (`createDevProviderTokenSource`, PR #187) reads a server-only
+  `ID_CADDIE_DEV_SLACK_TOKEN`, is enabled ONLY in positively-confirmed local dev + opt-in, and returns an in-memory
+  `{provider, token}` for LOCAL proof. The **vault source** is the production-shaped seam that will (in a future PR) load
+  the token through the runner/KMS/vault boundary; **today it loads nothing and always fails closed**. The dev token env
+  is read by the dev source ONLY (static-scanned); the vault source + selector never read it.
+- **Guard behavior (allowlist-shaped, fail-closed):** `isDevProviderTokenSourceEnabled` = local dev + opt-in (unchanged).
+  `isVaultProviderTokenSourceEnabled` is **always false** (no provisioned/approved production-credential-ready state; even
+  if a future flag were set, `getProviderToken` still throws). A request can never enable either (env-only).
+- **Token-source SELECTION rules:** `createProviderTokenSource(env)` returns the **dev source ONLY** when
+  `isDevProviderTokenSourceEnabled(env)` (local dev + opt-in); **every other environment** (unknown/unset/test/staging/
+  preview/production) gets the **vault source**, which fails closed. **There is NO vault→dev fallback** — outside local
+  dev the chain can only get the throwing vault source, never the dev token (proven: production WITH the dev token env
+  present still fails closed).
+- **Effect on scheduler / manual run / internal trigger:** all three now select the token source by env. In local
+  dev + opt-in nothing changes (they get the dev source). In any deployed/non-dev environment they get the fail-closed
+  vault source, so the chain refuses (no token) — which is the desired posture until the production path is real.
+- **The future OAuth → vault → runner → sync handoff (documented, NOT coded):** Slack OAuth callback → token exchange →
+  `connector_secrets` envelope (KMS-wrapped DEK, doc 42) → the **hosted runner** (a separate deployable, doc 46 §11)
+  reads it via `loadConnectorSecret(capability, {context, store})`, `capability =
+  acquireRunnerDecryptCapability({runnerEnv: CONNECTOR_VAULT_RUNNER, keyProvider})`, `keyProvider =
+  createKmsKeyProvider(createAwsKmsClient(createAwsKmsSdkSenderFromEnv()))`. None of this is imported or instantiated in
+  this PR.
+- **What remains for RISK-007 (still OPEN):** the **doc 44 §5** first-real-token staging dry-run (17 executed-proof
+  evidence items: zero token across all log surfaces, envelope-only DB row, web-identity-cannot-decrypt negative,
+  wrong-tenant fails query+AEAD, revoked-cannot-load, audit-failure rollback, provider revoke, cleanup); a **hosted
+  runner** built as a separate deployable (doc 46 §11/§12, ECS/Fargate one-shot, Secrets Manager task-read); **production
+  KMS/IAM** provisioned + verified by a LIVE round-trip + executed AccessDenied negative (doc 44 §5 item 6, not
+  simulate-only); the **B2c-run** first-real-token runbook (doc 45, gated, not authorized); a reviewed migration for the
+  `connector_runner_login` identity. Only then is the runner-backed vault source wired, gated behind a future approved
+  production-credential-ready flag.
+- **Why customer-facing Connect-Slack is still NOT ready:** there is no real OAuth exchange, no real token in the vault,
+  no hosted runner to decrypt it, and no verified production KMS/IAM — so no customer credential can be born or used.
+- **Test evidence:** `vault-provider-token-source.test.ts` (always throws regardless of env/request; enable flag always
+  false; error carries no token/env/request; imports nothing from the vault/runner/KMS/AWS layer + reads no token env) +
+  `provider-token-source-selector.test.ts` (dev source only in local-dev+opt-in; every other env → fail-closed vault;
+  **no vault→dev fallback** even with the dev token present; request can't enable; no leak) + the server-only static scan
+  (sentinel + no-`src/app`-import) + the no-direct-token-env-read invariant (only the dev source reads it).
+- **Operator notes:** nothing to enable. The vault source is intentionally inert. Do NOT set
+  `ID_CADDIE_VAULT_PROVIDER_TOKEN_SOURCE_ENABLED` (no effect — the source still throws) and do NOT add any
+  `CONNECTOR_VAULT_AWS_KMS_REGION`/`CONNECTOR_VAULT_RUNNER`/`CONNECTOR_VAULT_KMS_KEY_ID` defaults; production stays
+  blocked. See **docs 42/44/45/46** + **doc 04 RISK-007** for the full closure path. **RISK-007 remains OPEN.**
+
 ### Remaining PRs after PR 4
 - **PR 5** — UI display of synced Slack data. **PR 6** — manual server-only run trigger. **Later** — scheduler / run
   lifecycle. **Later** — OAuth/vault/runner production credential path (RISK-007). The concrete Supabase store impl for
