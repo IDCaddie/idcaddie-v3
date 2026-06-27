@@ -274,6 +274,39 @@ job, no OAuth/runner, no public route/server action, no service-role, no product
   Slack workspace), so the agent could not perform it. **This is a dev/test token run — NOT customer OAuth, NOT the
   production runner, NOT a scheduler. RISK-001/RISK-007 remain OPEN.**
 
+## PR 7 — run lifecycle/status for the manual Slack sync
+Adds a minimal, auditable, tenant-scoped run record so each manual sync has safe status/counts/error visibility. Proves
+*manual Slack sync run → run status/counts/error summary → read-only visibility*. **No scheduler, no OAuth, no runner, no
+KMS, no Connect-Slack, no service-role, no production. RISK-007 stays OPEN.**
+- **Table — `manual_sync_runs` (migration 0037, additive + RLS).** Distinct from `connector_runs` (0017): that table is
+  keyed to an OAuth-connected `connectors` row (FK) and reserved for the future server-only runner; the dev manual sync
+  has NO connectors/vault row, so reusing it would force a fake "connected" connector + expand the connectors write
+  surface. `connector_id` here is a plain LABEL (not an FK). Columns: `tenant_id`, `source` (='slack'), `connector_id`,
+  `status` (running|succeeded|failed), `started_at`, `finished_at`, `error_code`, `failed_stage`, the eight counts
+  (`users_fetched`, `facts_emitted`, `facts_rejected`, `app_users_written`, `people_written`, `matches_written`,
+  `match_conflicts`, `skipped`), `created_by` (`default auth.uid()` — the actor from the JWT), timestamps. **Never** a
+  token / JWT / email / name / raw Slack response / raw user record / raw DB payload.
+- **RLS:** members READ (`is_tenant_member`); owner/admin/editor WRITE (`has_tenant_role`); no DELETE (append-only audit
+  log). Tenant-scoped; no cross-tenant access by source/connector label alone.
+- **Write path:** `manual-sync-run-recorder.ts` (`createSupabaseManualSyncRunRecorder`, over the injected user-scoped
+  client — RLS, never service-role): `start()` opens a `running` row; `finish()` closes it from the SAFE
+  `RunSlackSyncSummary` → `succeeded` (+counts) or `failed` (+`error_code`/`failed_stage`). `recorded-slack-sync-run.ts`
+  wraps the chain: refused runs make NO record; `start` BEFORE the chain, `finish` AFTER. **A process crash between
+  start and finish leaves the row `running` — never a misleading `succeeded`.** The live entrypoint now records.
+- **Read/UI:** `getLatestSlackSyncRunForCurrentTenant` (RLS-scoped read DAL, safe DTO) drives a read-only **"Last Slack
+  sync"** section on the existing app detail page (Slack-synced apps) — status, last-successful-sync time, latest safe
+  error code, and the counts. Empty state when no runs. **No Run button, no Connect button, no scheduler language.**
+- **Concurrent-run locking — deferred (next PR).** No existing safe locking pattern in the repo; a DB lock (e.g. a
+  partial unique index on active runs) needs stale-run reconciliation to avoid a stuck `running` blocking all future
+  runs. The start→finish status model already prevents a misleading success; concurrent-run locking + stale-run
+  reconciliation are the next PR.
+- **Tests:** recorder unit (start/finish mapping; only safe columns written; safe error) + wrapper unit (guard → no
+  record; start-before/finish-after; crash → failed, never misleading-success) + read-DAL unit (safe DTO; empty state) +
+  page static scan (read-only status, no run/connect button, no scheduler language, no token/raw). **Real DB/RLS:**
+  `org_rls_test.sql` **Test 59** (member read; owner/admin/editor write; viewer read-only; cross-tenant read+write
+  isolation; `created_by` default) + a TS recorder IT (`manual-sync-run-recorder.it.test.ts`) against a local Supabase
+  stack (member writes; cross-tenant denial; `created_by` = the member) via `npm run test:store-it` + CI `store-integration.yml`.
+
 ### Remaining PRs after PR 4
 - **PR 5** — UI display of synced Slack data. **PR 6** — manual server-only run trigger. **Later** — scheduler / run
   lifecycle. **Later** — OAuth/vault/runner production credential path (RISK-007). The concrete Supabase store impl for
