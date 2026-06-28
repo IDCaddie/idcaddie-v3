@@ -35,6 +35,35 @@ committed); 3. `aws ecs run-task` as a one-shot Fargate task on the `idcaddie-st
 reads the Secrets Manager secret into memory, calls the committed `ingestClientSecret(...)`, exits; 5. the staging
 secret is disabled → proven unreadable → deleted (doc 46 §12.6). **None of this is executed by this repo.**
 
+## Infra preflight (read-only, operator-run — PR #204)
+Before any provisioning/round-trip, an operator can run a **read-only** preflight that DESCRIBES the AWS/KMS/IAM/Secrets-
+Manager shape — it performs **no deploy, no KMS crypto, no secret read, no DB connection, no state change**. The agent
+and CI never run it live (CI only runs its guard self-test). It is fail-closed and opt-in:
+
+```
+ID_CADDIE_RUNNER_PREFLIGHT=1 \
+AWS_PROFILE=<your read-only profile> \
+AWS_REGION=ca-central-1 \
+ID_CADDIE_RUNNER_PREFLIGHT_EXPECTED_ACCOUNT=<staging account id — see doc 42 §91> \
+ID_CADDIE_RUNNER_PREFLIGHT_ENV=staging \
+bash scripts/check-runner-infra-preflight.sh
+```
+
+It checks: caller account == expected staging account (ca-central-1); the KMS alias `alias/idcaddie-staging-connector-vault`
+resolves to the canonical Enabled key (not the superseded key); IAM users `idcaddie-staging-runner` / `idcaddie-staging-web`
+exist; `simulate-principal-policy` shows runner `GenerateDataKey`+`Decrypt` allowed / `Encrypt` not / web `Decrypt`
+explicitDeny; the Secrets Manager secret `/idcaddie/staging/slack/oauth-client-secret` metadata (NOT-YET-CREATED is the
+expected state); and the §47 EC2 host is gone. It **refuses** without opt-in / profile / region / expected-account / env,
+and **hard-aborts** if pointed at the production project ref `dzbfxulvxchdemcettrx`.
+
+Allowed (read-only): `sts get-caller-identity`, `kms describe-key`, `iam get-user`/`simulate-principal-policy`,
+`secretsmanager describe-secret`, `ec2 describe-instances`. **Never:** secret-value reads, KMS crypto, ECS run-task, any
+IAM/KMS/secret write, or a Postgres connection. Output is a redacted PASS/FAIL/UNKNOWN checklist — never a secret value,
+key material, or raw policy/secret JSON.
+
+**A PASS proves SHAPE/IDENTITY only** — no cryptography verified, no secret read, the live KMS round-trip + AccessDenied
+negative are a separate future step, and **RISK-007 stays OPEN**.
+
 ## Next steps before RISK-007 can close
 provision staging runner infra · provision/verify KMS/IAM (live round-trip + AccessDenied negative) · Secrets Manager
 task-read · first-real-token staging dry-run (doc 44 §5) · B2c-run runbook (doc 45) · reviewed `connector_runner_login`
