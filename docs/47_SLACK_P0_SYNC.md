@@ -605,6 +605,33 @@ all `REPLACE_WITH_*` placeholders). **RISK-007 stays OPEN.**
   (doc 45) · reviewed `connector_runner_login` provisioning · real runner-backed `VaultProviderTokenSource`.
   **RISK-001/RISK-007 remain OPEN; cutover BLOCKED.**
 
+## PR 16 — read-only staging runner infra PREFLIGHT (fail-closed, operator-run)
+A safe read-only preflight that verifies the intended AWS/KMS/IAM/Secrets-Manager runner shape **without deploying or
+reading secrets**. **RISK-007 stays OPEN.**
+- **Script:** `scripts/check-runner-infra-preflight.sh`. **Required env (operator):** `ID_CADDIE_RUNNER_PREFLIGHT=1`,
+  `AWS_PROFILE`, `AWS_REGION=ca-central-1`, `ID_CADDIE_RUNNER_PREFLIGHT_EXPECTED_ACCOUNT` (the staging account, verified
+  vs live `sts`), `ID_CADDIE_RUNNER_PREFLIGHT_ENV=staging`. Fail-closed; refuses on any missing/wrong value and
+  **hard-aborts** on the production project ref.
+- **What it checks (read-only):** caller account == expected (ca-central-1); KMS alias resolves to the canonical Enabled
+  key (not the superseded key); IAM `idcaddie-staging-runner`/`idcaddie-staging-web` exist; `simulate-principal-policy`
+  shows runner `GenerateDataKey`+`Decrypt` allowed / `Encrypt` not / web `Decrypt` explicitDeny; Secrets Manager secret
+  metadata (NOT-YET-CREATED expected); §47 EC2 host gone.
+- **Commands allowed:** `sts get-caller-identity`, `kms describe-key`, `iam get-user`/`simulate-principal-policy`,
+  `secretsmanager describe-secret`, `ec2 describe-instances`. **Explicitly forbidden:** `get-secret-value`, `kms
+  decrypt`/`encrypt`/`generate-data-key`, `ecs run-task`, any IAM/KMS/secret write, Postgres connection,
+  Terraform/CDK/deploy.
+- **What it refuses to do:** read any secret value, run any crypto, change any state, touch production, enable the runner
+  or `VaultProviderTokenSource`. Output is a redacted PASS/FAIL/UNKNOWN checklist — never a secret/key/password/raw JSON.
+- **What a PASS means:** the resource SHAPE/IDENTITY exists and the IAM allow/deny simulation matches the design. **What
+  a PASS does NOT mean:** no cryptography was verified, no secret was read, the live KMS round-trip + AccessDenied
+  negative were NOT run, the runner is NOT deployed/enabled, and **RISK-007 is NOT closed**.
+- **No live run by the agent or CI** (no AWS creds; opt-in unset). CI runs only the guard self-test; a vitest test bounds
+  the script to allowlisted read-only actions. No dependency / migration / production change.
+- **Next steps after preflight:** actual staging runner infra provisioning · Secrets Manager task-read wiring · KMS live
+  round-trip + AccessDenied negative · first-real-token staging dry-run (doc 44 §5) · B2c-run runbook (doc 45) · reviewed
+  `connector_runner_login` provisioning · real runner-backed `VaultProviderTokenSource`. **RISK-001/RISK-007 remain
+  OPEN; cutover BLOCKED.**
+
 ### Remaining PRs after PR 4
 - **PR 5** — UI display of synced Slack data. **PR 6** — manual server-only run trigger. **Later** — scheduler / run
   lifecycle. **Later** — OAuth/vault/runner production credential path (RISK-007). The concrete Supabase store impl for

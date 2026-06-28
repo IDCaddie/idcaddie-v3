@@ -339,3 +339,16 @@ absent), `env.example` (reference placeholders), and `deploy/README.md` (runbook
 present, **no real account/ARN/KMS-UUID/token/DB-url**, **no executable deploy/apply command** in templates, and no
 Dockerfile secret build args. Runner stays disabled/fail-closed; app stays pg/AWS/KMS-free. Phase C **BLOCKED**;
 **RISK-001/RISK-007 remain OPEN.**
+
+## 17. PR #204 — read-only staging infra PREFLIGHT (step-0, before the live KMS round-trip) · 2026-06-28
+PR #204 adds `scripts/check-runner-infra-preflight.sh`: a **read-only, fail-closed, opt-in** preflight that DESCRIBES the
+staging AWS/KMS/IAM/Secrets-Manager shape **before** any provisioning or the live B2 KMS round-trip (§91.7 of doc 42).
+It performs **no deploy, no KMS crypto (Decrypt/Encrypt/GenerateDataKey), no Secrets-Manager GetSecretValue, no Postgres
+connection, no IAM/KMS/secret state change**. Allowed read-only calls: `sts get-caller-identity`, `kms describe-key`,
+`iam get-user`/`simulate-principal-policy`, `secretsmanager describe-secret` (metadata only — §12.4, value never read),
+`ec2 describe-instances`. Guards (fail-closed, in order): opt-in `ID_CADDIE_RUNNER_PREFLIGHT=1` → `AWS_PROFILE` →
+`AWS_REGION=ca-central-1` → explicit 12-digit `ID_CADDIE_RUNNER_PREFLIGHT_EXPECTED_ACCOUNT` (verified vs live `sts`) →
+`ID_CADDIE_RUNNER_PREFLIGHT_ENV=staging` → production project-ref `dzbfxulvxchdemcettrx` hard-abort. The agent and CI
+never run it live (CI runs only the guard self-test; the static-analysis test bounds it to allowlisted read-only
+actions). **A PASS proves SHAPE/IDENTITY only** — no cryptography verified, no secret read, the Secrets Manager secret
+stays NOT-YET-CREATED (§12.9). RISK-001/RISK-007 remain **OPEN**; Phase C **BLOCKED**.

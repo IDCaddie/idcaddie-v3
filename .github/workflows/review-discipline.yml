@@ -39,6 +39,9 @@ jobs:
         run: |
           bash scripts/check-deploy-templates.sh selftest
           bash scripts/check-deploy-templates.sh
+      - name: Runner infra preflight guards (self-test only — no AWS)
+        # exercises the fail-closed guard refusals; CI never runs the live read-only preflight (no AWS creds, opt-in unset)
+        run: bash scripts/check-runner-infra-preflight.sh selftest
       - name: Docs-drift gate (must not fail open)
         env:
           REQUIRE_BASE: "1"
