@@ -29,6 +29,11 @@ jobs:
         run: |
           bash scripts/check-auth-safety.sh selftest
           bash scripts/check-auth-safety.sh
+      - name: App↔runner import boundary (self-test + scan src/)
+        # app stays pg-free + no Secrets-Manager; src/app holds no runner internals/KMS; KMS confined to the adapters (doc 46 §11)
+        run: |
+          bash scripts/check-app-runtime-imports.sh selftest
+          bash scripts/check-app-runtime-imports.sh
       - name: Docs-drift gate (must not fail open)
         env:
           REQUIRE_BASE: "1"

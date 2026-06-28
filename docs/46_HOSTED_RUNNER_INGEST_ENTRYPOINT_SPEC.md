@@ -281,3 +281,17 @@ Plus §10's committed-core tests + the synthetic dry-run. Only when all are gree
 Slack client secret loaded, no live KMS run, no AWS keys minted, no OAuth, no B2c-run, production untouched. **RISK-001 /
 RISK-007 remain OPEN; cutover BLOCKED; connector credentials not production-ready. Phase C remains BLOCKED until the
 ECS/Fargate runtime + the Secrets Manager task-read model are implemented and reviewed.**
+
+## 13. PR #199 — in-repo TYPED SEAM landed (skeleton only) · 2026-06-28
+PR #199 added **only the typed app↔runner boundary** in the app repo —
+`src/lib/server/connector-vault/runner-ingest-entrypoint.ts`: the `RunnerIngestEntrypoint` contract
+(`run(request, deps?)`), the non-secret `RunnerIngestRequest`, the redacted `RunnerIngestResult` /
+safe `RunnerIngestReason`, `validateRunnerIngestRequest`, an always-false `isRunnerIngestEntrypointEnabled`,
+and a `createDisabledRunnerIngestEntrypoint()` placeholder whose `run()` always fails closed
+(`reason:'disabled'`). It reaffirms **§11.1/§11.2/§11.4**: the runtime/CLI/`pg`/AWS stay in the
+**separate runner deployable**; the app gains **no `pg`, no new runtime dependency, no entrypoint
+script** (its only import is a TYPE import from the committed core, so the separate runner vendoring
+this file + the core is a zero-contract-change drop-in). New boundary scan
+`scripts/check-app-runtime-imports.sh` enforces the app stays pg/`@aws-sdk/client-secretsmanager`-free,
+`src/app` imports no runner internals/`@aws-sdk/client-kms`, and KMS stays confined to the two adapters.
+**Phase C stays BLOCKED; RISK-001/RISK-007 remain OPEN; no real secret, no runtime, no AWS resource.**

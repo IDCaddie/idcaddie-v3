@@ -483,6 +483,48 @@ token exchange, no customer/production credentials, no service-role, no KMS/IAM 
   `CONNECTOR_VAULT_AWS_KMS_REGION`/`CONNECTOR_VAULT_RUNNER`/`CONNECTOR_VAULT_KMS_KEY_ID` defaults; production stays
   blocked. See **docs 42/44/45/46** + **doc 04 RISK-007** for the full closure path. **RISK-007 remains OPEN.**
 
+## PR 12 — hosted connector runner SKELETON (typed app↔runner seam, fail-closed)
+Lands the **typed boundary** the future hosted runner implements — **without** building an in-repo runner or enabling any
+credential use. **RISK-007 stays OPEN.** No real Slack token load, no real KMS/AWS/pg, no real OAuth, no production touch,
+no KMS/IAM change, no migration, no new dependency.
+- **Why a SEAM, not an in-repo runner (doc 46 §11, PINNED):** the conforming runner is a **separate deployable in its own
+  repo** (Option A) that **vendors** the committed connector-vault core at a pinned commit (Option B). The app repo
+  **stays pg-free** — adding `pg` here is NOT authorized, and an in-repo runner would require a new decision replacing
+  §11. So PR #199 ships **only the typed contract + a disabled placeholder** the separate runner will implement.
+- **Runner skeleton location:** `src/lib/server/connector-vault/runner-ingest-entrypoint.ts` (server-only) — co-located
+  with the committed core the runner vendors. It defines: the **`RunnerIngestEntrypoint`** seam (`run(request, deps?)`),
+  **`RunnerIngestRequest`** (a NON-secret envelope — provider/tenant/connector/purpose/secretKind/appEnv/version; carries
+  NO plaintext), **`RunnerIngestResult`** (redacted: `{ok, secretId|reason, provider}`), the closed **`RunnerIngestReason`**
+  enum (reuses the harness `IngestReason` + `disabled`/`unsupported_provider`/`unsupported_purpose`/`missing_tenant`/
+  `missing_connector`), a pure **`validateRunnerIngestRequest`**, the **`isRunnerIngestEntrypointEnabled`** guard, and the
+  **`createDisabledRunnerIngestEntrypoint`** placeholder.
+- **What is intentionally DISABLED:** `isRunnerIngestEntrypointEnabled` is **always false** (`productionRunnerReady`
+  hardcoded false — no separate runner deployable, no provisioned/verified prod KMS-IAM, no first-real-token; even the
+  future opt-in flag has no effect). `createDisabledRunnerIngestEntrypoint().run()` **always returns `{ok:false,
+  reason:"disabled"}`** — it loads NO token, instantiates NO pg/KMS/AWS/RunnerConnection, logs NO request fields.
+- **Why no real token is loaded yet:** the real ingest (Secrets-Manager-read plaintext → `ingestClientSecret` →
+  `runSequence([SET ROLE, INSERT])`) lives in the SEPARATE runner. The app repo holds only the typed seam; the future
+  swap is zero-contract-change (the runner vendors this contract + the committed core).
+- **Boundary rules (app ↔ runner):** the app runtime never imports the runner internals from a route/request surface, is
+  **pg-free**, and never imports `@aws-sdk/client-secretsmanager`; `@aws-sdk/client-kms` is confined to the two committed
+  KMS adapters. Enforced by a new scan **`scripts/check-app-runtime-imports.sh`** (+ selftest), plus the extended
+  connector-vault **no-client-import** (the entrypoint can't be imported by `src/app`/`"use client"`) and **no-disk**
+  (the entrypoint imports only `node:crypto` + relative; no fs/tmpdir sink) scans.
+- **Relation to RISK-007 / `VaultProviderTokenSource`:** this is a **gate, not closure**. `VaultProviderTokenSource`
+  (PR #198) stays fail-closed; this seam is the runner side of the same future path. RISK-007 stays OPEN.
+- **Test evidence:** `runner-ingest-entrypoint.test.ts` — the enable guard is always false (incl. opt-in set); `run()`
+  always fails closed with `disabled` and leaks no input/token; `validateRunnerIngestRequest` returns each safe static
+  reason; a `MUSTNOTLEAK` request field never appears in any result; the module's ONLY import is a single TYPE import
+  from the committed harness (so no value from the vault/runner/KMS/AWS layer is imported/instantiated). The three
+  boundary scans pass; `check-no-real-tokens`/`check-auth-safety` unchanged-green.
+- **What remains before `VaultProviderTokenSource` can be real (RISK-007 closure):** the conforming hosted runner built
+  as a **separate deployable** that vendors the core byte-identical (doc 46 §11) on **ECS/Fargate one-shot + Secrets
+  Manager task-read** (doc 46 §12); **production/staging KMS + IAM provisioned and VERIFIED** by a live round-trip +
+  executed AccessDenied negative (doc 42 §91 / doc 44 §0); the **doc 44 §5 first-real-token staging dry-run** (17
+  executed-proof items); a **reviewed `connector_runner_login` provisioning** (staging-only, doc 45); the **doc 45 B2c-run
+  first-real-token runbook** executed with explicit GO; then the runner-backed vault source wired behind a future approved
+  production-credential-ready flag. **RISK-001/RISK-007 remain OPEN; cutover BLOCKED; not customer-production-ready.**
+
 ### Remaining PRs after PR 4
 - **PR 5** — UI display of synced Slack data. **PR 6** — manual server-only run trigger. **Later** — scheduler / run
   lifecycle. **Later** — OAuth/vault/runner production credential path (RISK-007). The concrete Supabase store impl for
