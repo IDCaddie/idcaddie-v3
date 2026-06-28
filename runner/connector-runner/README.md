@@ -53,8 +53,10 @@ repo; the production runner owns the live infra, §11.1/§11.3):
   it), reads only the trusted env map, and performs no decrypt/resolve/connect.
 - **Cleanup pointer:** after a real ingest the staging Secrets Manager secret is disabled → proven unreadable → deleted
   (doc 46 §12.6). No such secret exists yet.
-- **Inert:** no Dockerfile / ECS task-definition / Terraform / CDK / CloudFormation / aws-cli command that can apply
-  anything is committed here. Phase C stays **BLOCKED**; **RISK-007 stays OPEN** until the items below land.
+- **Inert:** no Terraform / CDK / CloudFormation / aws-cli command that can apply anything is committed. The inert
+  ECS/Fargate deploy package skeleton (PR #202) lives in **[`deploy/`](deploy/README.md)** — placeholders only,
+  fail-closed Dockerfile, no deploy command; validated by `scripts/check-deploy-templates.sh` (CI). Phase C stays
+  **BLOCKED**; **RISK-007 stays OPEN** until the items below land.
 
 ## Remaining before RISK-007 can close
 real hosted runner deploy (ECS/Fargate one-shot) · Secrets Manager task-read · production KMS/IAM provisioned + verified ·

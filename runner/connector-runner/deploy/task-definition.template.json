@@ -1,0 +1,38 @@
+{
+  "__comment": "INERT ECS/Fargate one-shot task-definition TEMPLATE for the connector runner (PR #202). PLACEHOLDERS ONLY — no real account id / ARN / region / secret / KMS key / DB url. NOT registered or run by this repo. Intended to run as a one-shot Fargate task (see deploy/README.md, Future run command — NOT IMPLEMENTED), never a long-lived service. RISK-007 OPEN.",
+  "family": "connector-runner",
+  "requiresCompatibilities": ["FARGATE"],
+  "networkMode": "awsvpc",
+  "cpu": "256",
+  "memory": "512",
+  "executionRoleArn": "arn:aws:iam::REPLACE_WITH_ACCOUNT_ID:role/REPLACE_WITH_EXECUTION_ROLE",
+  "taskRoleArn": "arn:aws:iam::REPLACE_WITH_ACCOUNT_ID:role/REPLACE_WITH_RUNNER_TASK_ROLE",
+  "containerDefinitions": [
+    {
+      "name": "connector-runner",
+      "image": "REPLACE_WITH_ACCOUNT_ID.dkr.ecr.REPLACE_WITH_REGION.amazonaws.com/connector-runner:REPLACE_WITH_IMAGE_TAG",
+      "essential": true,
+      "environment": [
+        { "name": "RUNNER_RUNTIME_TARGET", "value": "ecs-fargate" },
+        { "name": "RUNNER_INGESTION_MODEL", "value": "secrets-manager-task-read" },
+        { "name": "RUNNER_APP_ENV", "value": "staging" },
+        { "name": "CONNECTOR_VAULT_AWS_KMS_REGION", "value": "REPLACE_WITH_REGION" },
+        { "name": "CONNECTOR_VAULT_KMS_KEY_ID", "value": "REPLACE_WITH_KMS_KEY_REF" },
+        { "name": "CONNECTOR_RUNNER_DB_URL_REF", "value": "REPLACE_WITH_DB_REF" },
+        { "__comment": "ID_CADDIE_CONNECTOR_RUNNER_ENABLED is intentionally ABSENT — the runner is disabled in this skeleton." }
+      ],
+      "secrets": [
+        { "__comment": "Secrets Manager task-read (Model B, doc 46 §12.2): the task reads the secret REFERENCE into memory at startup. valueFrom is a secret ARN PLACEHOLDER — never an inline secret value.",
+          "name": "CONNECTOR_VAULT_SECRET", "valueFrom": "REPLACE_WITH_SECRET_REF" }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "REPLACE_WITH_LOG_GROUP",
+          "awslogs-region": "REPLACE_WITH_REGION",
+          "awslogs-stream-prefix": "connector-runner"
+        }
+      }
+    }
+  ]
+}
