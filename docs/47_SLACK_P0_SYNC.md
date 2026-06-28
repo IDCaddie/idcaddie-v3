@@ -586,6 +586,25 @@ Manager/pg/token; runner stays disabled. **RISK-007 stays OPEN.**
   reviewed `connector_runner_login` provisioning · real runner-backed `VaultProviderTokenSource`. **RISK-001/RISK-007
   remain OPEN; cutover BLOCKED.**
 
+## PR 15 — ECS/Fargate connector runner deploy PACKAGE skeleton (inert)
+The concrete-but-inert deploy package shape under `runner/connector-runner/deploy/`. **No deployment was performed; no
+AWS/KMS/Secrets-Manager/pg call exists; no real config values are present** (account/region/ARN/secret/KMS key/DB url are
+all `REPLACE_WITH_*` placeholders). **RISK-007 stays OPEN.**
+- **Files:** `Dockerfile` (no secret build args; default `CMD` fails closed / exits non-zero — no secret/AWS/network),
+  `task-definition.template.json` (ECS/Fargate one-shot; `secrets[].valueFrom` is a Secrets Manager **placeholder** =
+  task-read Model B; runner-enable flag absent → disabled), `env.example` (reference placeholders), `deploy/README.md`
+  (runbook; the real run command is **prose-only, "future, not implemented"**).
+- **What placeholders exist:** `REPLACE_WITH_ACCOUNT_ID` / `REPLACE_WITH_REGION` / `REPLACE_WITH_SECRET_REF` /
+  `REPLACE_WITH_KMS_KEY_REF` / `REPLACE_WITH_DB_REF` (+ execution/task-role, image tag, log group).
+- **What validation protects:** `scripts/check-deploy-templates.sh` (CI, scoped to `deploy/`) — placeholders present;
+  **no real 12-digit account / ARN / KMS UUID / Slack-or-AWS token / DB url with password**; **no executable
+  deploy/apply command** in templates; no Dockerfile secret build args.
+- **Runner remains disabled/fail-closed**, app stays pg/AWS/KMS-free, **no dependency / migration / infra-apply added**.
+- **Next steps before RISK-007 can close:** provision staging runner infra · provision/verify KMS/IAM (live round-trip +
+  AccessDenied negative) · Secrets Manager task-read · first-real-token staging dry-run (doc 44 §5) · B2c-run runbook
+  (doc 45) · reviewed `connector_runner_login` provisioning · real runner-backed `VaultProviderTokenSource`.
+  **RISK-001/RISK-007 remain OPEN; cutover BLOCKED.**
+
 ### Remaining PRs after PR 4
 - **PR 5** — UI display of synced Slack data. **PR 6** — manual server-only run trigger. **Later** — scheduler / run
   lifecycle. **Later** — OAuth/vault/runner production credential path (RISK-007). The concrete Supabase store impl for
