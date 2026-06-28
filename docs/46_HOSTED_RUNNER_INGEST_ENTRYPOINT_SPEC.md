@@ -352,3 +352,18 @@ connection, no IAM/KMS/secret state change**. Allowed read-only calls: `sts get-
 never run it live (CI runs only the guard self-test; the static-analysis test bounds it to allowlisted read-only
 actions). **A PASS proves SHAPE/IDENTITY only** — no cryptography verified, no secret read, the Secrets Manager secret
 stays NOT-YET-CREATED (§12.9). RISK-001/RISK-007 remain **OPEN**; Phase C **BLOCKED**.
+
+## 18. PR #205 — live KMS round-trip verification (step-1 after the preflight) · 2026-06-28
+PR #205 (a) RECORDS the safe, redacted result of the PR #204 preflight operator run (docs/47 — staging account/region/
+KMS-alias/IAM identities/simulate decisions all PASS; the SM secret stays NOT-YET-CREATED), and (b) adds
+`scripts/check-runner-kms-roundtrip.sh`: an **operator-run-only** LIVE KMS round-trip that proves the staging decrypt
+boundary with **synthetic data-key material only**. It invokes only `sts get-caller-identity`, `kms generate-data-key`,
+`kms decrypt` (the runner's only KMS grants) — runner GenerateDataKey + Decrypt round-trip (recovered == generated), web
+Decrypt of the same wrapped key MUST be AccessDenied (the live negative). The canonical-key check derives from the
+`GenerateDataKey` `KeyId` (the runner is **not** granted `kms:DescribeKey`, §91.4). It never attempts `kms:Encrypt`
+(policy forbids it, §91.4), reads no Secrets-Manager value, connects to no Postgres, changes no state, and is fail-closed/opt-in/staging-only
+(production project-ref hard-abort). Key material lives only in shell vars (`umask 077`), is compared in-shell, and is
+NEVER printed — output is a redacted PASS/FAIL checklist + safe error class. The agent and CI NEVER run the live path
+(CI runs only the guard self-test; a vitest test bounds the script to the 4 allowlisted actions and asserts no
+key-material is printed). **A green run proves the LIVE decrypt boundary (synthetic) only** — it stores no real secret;
+the live result is PENDING until the operator runs it. RISK-001/RISK-007 remain **OPEN**; Phase C **BLOCKED**.

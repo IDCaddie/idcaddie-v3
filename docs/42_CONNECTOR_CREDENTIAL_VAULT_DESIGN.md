@@ -4362,6 +4362,12 @@ load the operator must, in order: (a) mint **fresh temporary-use** access keys f
 (`verify-staging-kms-iam-separation-dry-run.mjs`); (f) **delete/deactivate** the temp keys and verify they are dead.
 **No Slack client secret may be loaded until live B2 is green. No B2c-run without a separate explicit GO.**
 
+PR #205 adds `scripts/check-runner-kms-roundtrip.sh` — a fail-closed, opt-in, staging-only bash checker (preflight-style)
+that performs steps (d)+(e) in one run: runner GenerateDataKey + Decrypt round-trip (synthetic data key) and web
+Decrypt = AccessDenied negative, redacted output, key material never printed, `kms:Encrypt` never attempted. It is the
+preflight-style sibling of the `.mjs` emitters (both remain valid); **the live result is still PENDING** until the
+operator runs it. The PR #204 read-only preflight passed (shape/identity only — docs/47); live B2 crypto is the next step.
+
 **RISK-001 remains OPEN. RISK-007 remains OPEN. Cutover remains BLOCKED.** No real Slack client secret was loaded, no
 real Slack token entered the system, no OAuth exchange ran, no live B2 KMS runtime check ran in this docs PR. Connector
 credentials are not production-ready.

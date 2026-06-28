@@ -42,6 +42,9 @@ jobs:
       - name: Runner infra preflight guards (self-test only — no AWS)
         # exercises the fail-closed guard refusals; CI never runs the live read-only preflight (no AWS creds, opt-in unset)
         run: bash scripts/check-runner-infra-preflight.sh selftest
+      - name: Runner KMS round-trip guards (self-test only — no AWS, no crypto)
+        # exercises the fail-closed guard refusals; CI never runs the live KMS round-trip (no AWS creds, opt-in unset)
+        run: bash scripts/check-runner-kms-roundtrip.sh selftest
       - name: Docs-drift gate (must not fail open)
         env:
           REQUIRE_BASE: "1"
