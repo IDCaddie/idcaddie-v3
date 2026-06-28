@@ -632,6 +632,47 @@ reading secrets**. **RISK-007 stays OPEN.**
   `connector_runner_login` provisioning · real runner-backed `VaultProviderTokenSource`. **RISK-001/RISK-007 remain
   OPEN; cutover BLOCKED.**
 
+### Operator preflight run — RESULT (2026-06-28, recorded in PR #205)
+The operator ran `scripts/check-runner-infra-preflight.sh` against staging. Safe, redacted result (no raw JSON, no
+secret/key value):
+- staging project ref confirmed `ycdpzduxugdsffjqyoai`; AWS account matched expected `833822972703`; region `ca-central-1`;
+  caller principal `arn:aws:iam::833822972703:user/sam-cli` — **PASS**.
+- KMS alias `alias/idcaddie-staging-connector-vault` resolves to the canonical key, state **Enabled** — **PASS**.
+- IAM users exist: `idcaddie-staging-runner`, `idcaddie-staging-web` — **PASS**.
+- `simulate-principal-policy`: runner `kms:GenerateDataKey` = allowed, runner `kms:Decrypt` = allowed, runner
+  `kms:Encrypt` = not allowed / implicitDeny, web `kms:Decrypt` = **explicitDeny** — **PASS** (inline policy of record:
+  `kms-runner`).
+- Secrets Manager `/idcaddie/staging/slack/oauth-client-secret` — **missing reference, expected** (NOT-YET-CREATED).
+- §47 EC2 host — **gone** (PASS).
+- **What this PROVED:** the staging AWS/KMS/IAM **shape/identity** exists and the IAM allow/deny *simulation* matches the
+  design. **What it did NOT prove:** no cryptography was verified, no secret was read, the live KMS round-trip +
+  AccessDenied negative were **not** run, and **RISK-007 stays OPEN**. The missing secret reference remains expected.
+
+## PR 17 — live staging KMS round-trip verification (operator-run; synthetic only)
+Adds `scripts/check-runner-kms-roundtrip.sh` — the **next** operator-run step after the preflight: a LIVE KMS round-trip
+that proves the decrypt boundary with **synthetic data-key material only**. No real Slack token/secret, no OAuth, no
+Secrets-Manager value read, no Encrypt, no Postgres, no production, no state change. **RISK-007 stays OPEN.**
+- **Exact command (operator):**
+  `ID_CADDIE_RUNNER_KMS_ROUNDTRIP=1 AWS_PROFILE=<runner> ID_CADDIE_RUNNER_KMS_ROUNDTRIP_WEB_PROFILE=<web>
+  AWS_REGION=ca-central-1 ID_CADDIE_RUNNER_KMS_ROUNDTRIP_EXPECTED_ACCOUNT=<staging account, see doc 42 §91>
+  ID_CADDIE_RUNNER_KMS_ROUNDTRIP_ENV=staging bash scripts/check-runner-kms-roundtrip.sh`
+- **What it will prove:** runner `kms:GenerateDataKey` on the canonical KEK + runner `kms:Decrypt` of that synthetic
+  wrapped data key **round-trips** (recovered == generated), and web `kms:Decrypt` of the same wrapped key returns
+  **AccessDenied** (the live negative). It never attempts `kms:Encrypt` (policy forbids it). The canonical-key check
+  uses the `GenerateDataKey` response's `KeyId` (the runner is **not** granted `kms:DescribeKey` — least-privilege, doc
+  42 §91.4).
+- **Allowed AWS:** `sts get-caller-identity`, `kms generate-data-key`, `kms decrypt` (the runner's only KMS grants + sts).
+  **Forbidden:** `get-secret-value`, `kms encrypt`/`re-encrypt`/`describe-key`/policy-writes, ECS run-task, IAM writes,
+  Postgres. Output is a redacted PASS/FAIL checklist + safe error class only — never the plaintext data key, ciphertext,
+  recovered value, key ARN, or raw JSON.
+- **No live run by the agent or CI** (no AWS creds; opt-in unset). CI runs only the guard self-test; a vitest test bounds
+  the script to the 4 allowlisted actions and asserts key material is never printed. **Live KMS result: PENDING** (the
+  operator has not yet run it). No dependency / migration.
+- **What remains after the KMS round-trip:** delete the operator's fresh temp IAM keys and verify dead · Secrets Manager
+  secret provisioning + task-read · first-real-token staging dry-run (doc 44 §5) · B2c-run runbook (doc 45) · reviewed
+  `connector_runner_login` provisioning · real runner-backed `VaultProviderTokenSource`. **RISK-001/RISK-007 remain OPEN;
+  cutover BLOCKED.**
+
 ### Remaining PRs after PR 4
 - **PR 5** — UI display of synced Slack data. **PR 6** — manual server-only run trigger. **Later** — scheduler / run
   lifecycle. **Later** — OAuth/vault/runner production credential path (RISK-007). The concrete Supabase store impl for
