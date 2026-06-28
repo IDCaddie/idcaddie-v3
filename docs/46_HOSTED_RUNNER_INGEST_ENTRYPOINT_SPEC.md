@@ -295,3 +295,20 @@ this file + the core is a zero-contract-change drop-in). New boundary scan
 `scripts/check-app-runtime-imports.sh` enforces the app stays pg/`@aws-sdk/client-secretsmanager`-free,
 `src/app` imports no runner internals/`@aws-sdk/client-kms`, and KMS stays confined to the two adapters.
 **Phase C stays BLOCKED; RISK-001/RISK-007 remain OPEN; no real secret, no runtime, no AWS resource.**
+
+## 14. PR #200 — in-repo runner SKELETON: the explicit decision §11.4 required · 2026-06-28
+§11.4 says *"any future in-repo runner module would require a NEW explicit architecture decision that replaces
+§11.1/§11.2."* PR #200 is directed by the architecture owner and **records that decision here**, EXTENDING (not
+weakening) §11:
+- **What changed:** the conforming runner's **skeleton** now lives in-repo at `runner/connector-runner/` (a structurally
+  separate, app-build-excluded directory with its own `tsconfig.json` + `npm run runner:typecheck` / `npm run
+  runner:test`). It implements the PR #199 typed seam, **vendoring** the contract (`src/contract.ts`, self-contained —
+  it does not import app `src/`), and is **fail-closed** (`run()` always returns `{ok:false, reason:"runner_disabled"}`).
+- **What is PRESERVED (the §11.4 hard line holds):** the skeleton has **NO `pg`, NO AWS SDK, NO KMS client, NO Secrets
+  Manager, NO Postgres, NO vault reader** — so the forbidden case ("a runner inside `~/code/idcaddie-v3` **with `pg`**")
+  is NOT crossed. The app `src/` stays pg-free and **does not import the runner** (enforced by
+  `scripts/check-app-runtime-imports.sh`, which now also scans `runner/` for forbidden imports — run in CI). The
+  production runner (with `pg` + real KMS/Secrets-Manager + `connector_runner_login` + its own host, §11.1/§11.3) is
+  still future work and **may become its own repo**; vendoring discipline (§11.2) governs how it copies the core.
+- **What is NOT changed:** Phase C stays **BLOCKED**; no real token/KMS/AWS/pg; no production deploy (no Docker/ECS that
+  could run); **RISK-001 / RISK-007 remain OPEN**; cutover BLOCKED; connector credentials not production-ready.

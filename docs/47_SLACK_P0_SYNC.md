@@ -525,6 +525,41 @@ no KMS/IAM change, no migration, no new dependency.
   first-real-token runbook** executed with explicit GO; then the runner-backed vault source wired behind a future approved
   production-credential-ready flag. **RISK-001/RISK-007 remain OPEN; cutover BLOCKED; not customer-production-ready.**
 
+## PR 13 — separate hosted connector runner DEPLOYABLE skeleton (`runner/connector-runner/`, fail-closed)
+Implements the PR #199 typed runner seam as a **structurally separate, in-repo deployable skeleton** — disabled,
+fail-closed, **pg/AWS/KMS-free**, loads no real secret. **RISK-007 stays OPEN.** No real token/OAuth/KMS-decrypt/Secrets-
+Manager/Postgres, no production deploy, no production env, no service-role.
+- **§11 decision (recorded):** doc 46 §11.4 required a new explicit decision for any in-repo runner; PR #200 records it
+  in **doc 46 §14** — the runner SKELETON now lives in-repo, EXTENDING §11 while preserving its hard line (no `pg`/AWS in
+  the app; the app stays pg-free; production runner repo-separation still per §11).
+- **Runner location:** `runner/connector-runner/` (a top-level directory, **outside `src/`**) — its own `tsconfig.json`,
+  `npm run runner:typecheck` (independent compile, run in CI) and `npm run runner:test` (independent test run). Excluded
+  from the app build (root `tsconfig.json` `exclude`).
+- **Separate from the app runtime:** the app `src/` **never imports the runner** (enforced by
+  `scripts/check-app-runtime-imports.sh`, now also scanning `runner/`); the runner **vendors** the typed contract
+  (`src/contract.ts`, self-contained — no app-`src/` import), mirroring doc 46 §11.2.
+- **What it implements (from the PR #199 seam):** `ConnectorRunner.run(request)` → a redacted `RunnerResult`
+  (`{ok, secretId|reason, provider}`); a **non-secret** `RunnerRequest` (provider/tenant/connector/purpose/secretKind/
+  appEnv/version + optional `requestId`; no plaintext); `validateRunnerRequest`; `isConnectorRunnerEnabled` (allowlist,
+  **always false** — `productionRunnerProvisioned` hardcoded false); `createConnectorRunner` (fail-closed: `run()` always
+  returns `{ok:false, reason:"runner_disabled"}`); a safe `main()` (prints a static line, exits 1).
+- **Still disabled / why no real secret:** the real ingest (Secrets-Manager-read plaintext → `ingestClientSecret` →
+  `runSequence`) needs the production runner host + provisioned/verified KMS-IAM + the first-real-token dry-run — none
+  exist. The skeleton must NOT gain `pg`/AWS until that decision (§11.1/§11.3) + RISK-007 closure.
+- **No secret access (§6):** the runner imports NO AWS SDK / KMS / Secrets-Manager / pg / vault reader / fs secret
+  writer — types only. Enforced by `check-app-runtime-imports.sh` (scans `runner/` for forbidden imports) + the runner's
+  own static self-test.
+- **No new dependency:** uses the root's `typescript`/`vitest`; no AWS/pg deps added.
+- **Test evidence:** `runner/connector-runner/src/entrypoint.test.ts` — runner disabled by default; unsupported
+  provider/purpose + missing tenant/connector rejected with safe reasons; request can't enable; no token/secret in
+  output or errors; the runner imports nothing from pg/AWS/KMS/Secrets-Manager/app-`src/` (static); `main()` exits 1.
+  The boundary scan's selftest covers app→runner and runner→forbidden-import cases. `runner:typecheck` proves
+  independent compilation.
+- **What remains before RISK-007 can close:** the real hosted runner deploy (ECS/Fargate one-shot) · Secrets Manager
+  task-read · production KMS/IAM provisioned + verified · first-real-token staging dry-run (doc 44 §5) · B2c-run runbook
+  (doc 45) · reviewed `connector_runner_login` provisioning · real runner-backed `VaultProviderTokenSource`.
+  **RISK-001/RISK-007 remain OPEN; cutover BLOCKED.**
+
 ### Remaining PRs after PR 4
 - **PR 5** — UI display of synced Slack data. **PR 6** — manual server-only run trigger. **Later** — scheduler / run
   lifecycle. **Later** — OAuth/vault/runner production credential path (RISK-007). The concrete Supabase store impl for

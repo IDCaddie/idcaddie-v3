@@ -9,7 +9,9 @@
     "lint": "eslint",
     "test": "vitest run",
     "slack:sync:dev": "vitest run src/lib/server/sync/run-slack-sync-dev.liverun.test.ts",
-    "test:store-it": "bash scripts/test-store-it.sh"
+    "test:store-it": "bash scripts/test-store-it.sh",
+    "runner:typecheck": "tsc -p runner/connector-runner/tsconfig.json",
+    "runner:test": "vitest run runner/connector-runner"
   },
   "dependencies": {
     "@aws-sdk/client-kms": "^3.1073.0",
