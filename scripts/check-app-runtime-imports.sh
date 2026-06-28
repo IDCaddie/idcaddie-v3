@@ -40,6 +40,24 @@ scan_dir() {
   _flag "@aws-sdk/client-kms imported outside the committed KMS adapters (aws-kms-client.ts / aws-kms-sdk-sender.ts)" \
     "$(grep -rIlE --include="*.ts" --include="*.tsx" --exclude="*.test.ts" --exclude="*.test.tsx" "['\"]@aws-sdk/client-kms['\"]" "$src" 2>/dev/null | grep -vE "(aws-kms-client|aws-kms-sdk-sender)\.ts$" || true)"
 
+  # the app runtime must NOT import the separate connector-runner deployable (doc 46 §11)
+  _flag "src/ imports the connector-runner deployable (the app runtime must not import the runner — doc 46 §11)" \
+    "$(grep -rInE --include="*.ts" --include="*.tsx" --exclude="*.test.ts" --exclude="*.test.tsx" "['\"][^'\"]*connector-runner[^'\"]*['\"]" "$src" 2>/dev/null || true)"
+
+  return $rc
+}
+
+# The connector-runner skeleton must import NO secret-access module (pg/AWS/KMS/Secrets-Manager/vault reader) and must
+# NOT reach into the app `src/` (it vendors the contract; doc 46 §11.2 / §6 of PR #200).
+scan_runner() {
+  local runner="$1" rc=0
+  if [ ! -d "$runner" ]; then return 0; fi
+  _flag2() { if [ -n "$2" ]; then echo "VIOLATION: $1"; printf '%s\n' "$2" | sed 's/^/    /'; rc=1; fi; }
+  # form-agnostic + comment-safe: the forbidden token must be a QUOTED import specifier, so this catches static
+  # `from "pg"`, `require("pg")`, side-effect `import "pg"`, and dynamic `import("pg")` (mirroring scan_dir's pg rule),
+  # while never matching prose that merely mentions pg/aws/etc.
+  _flag2 "connector-runner imports a forbidden module (pg/AWS/KMS/Secrets-Manager/vault reader) or reaches into app src/" \
+    "$(grep -rInE --include="*.ts" --exclude="*.test.ts" "['\"](pg|postgres)['\"]|['\"][^'\"]*(@aws-sdk|client-secretsmanager|secret-vault|connector-secret-store|runner-db-client|kms-key-provider)[^'\"]*['\"]|['\"]@/[^'\"]*['\"]|['\"][^'\"]*\.\./src/[^'\"]*['\"]" "$runner" 2>/dev/null || true)"
   return $rc
 }
 
@@ -64,11 +82,33 @@ selftest() {
   printf 'import x from "@aws-sdk/client-kms";\n' > "$tmp/src/app/d.ts"; _case "src/app imports KMS client" bad
   printf 'import x from "@aws-sdk/client-kms";\n' > "$tmp/src/other.ts"; _case "KMS import outside the adapters" bad
   printf 'import x from "@aws-sdk/client-kms";\n' > "$tmp/src/aws-kms-client.ts"; _case "KMS import in an adapter is allowed" ok
+  printf 'import x from "../../runner/connector-runner/src/entrypoint";\n' > "$tmp/src/e.ts"; _case "src/ imports the connector-runner" bad
+
+  # runner-side checks
+  mkdir -p "$tmp/runner"
+  _rcase() { # <name> <expect ok|bad>
+    local got=ok; scan_runner "$tmp/runner" >/dev/null 2>&1 || got=bad
+    if [ "$got" = "$2" ]; then echo "  ok: $1"; pass=$((pass+1)); else echo "  FAIL: $1 (expected $2, got $got)"; fail=$((fail+1)); fi
+    rm -f "$tmp/runner"/*.ts
+  }
+  printf 'import type { X } from "./contract";\n' > "$tmp/runner/ok.ts"; _rcase "runner clean vendored import" ok
+  printf 'import { Pool } from "pg";\n' > "$tmp/runner/a.ts"; _rcase "runner imports pg (static)" bad
+  printf 'import "pg";\n' > "$tmp/runner/a.ts"; _rcase "runner imports pg (side-effect)" bad
+  printf 'const p = await import("pg");\n' > "$tmp/runner/a.ts"; _rcase "runner imports pg (dynamic)" bad
+  printf 'import x from "@aws-sdk/client-kms";\n' > "$tmp/runner/a.ts"; _rcase "runner imports KMS" bad
+  printf 'import "@aws-sdk/client-kms";\n' > "$tmp/runner/a.ts"; _rcase "runner imports KMS (side-effect)" bad
+  printf 'import x from "@aws-sdk/client-secretsmanager";\n' > "$tmp/runner/a.ts"; _rcase "runner imports Secrets Manager" bad
+  printf 'import "../../src/lib/server/connector-vault/crypto";\n' > "$tmp/runner/a.ts"; _rcase "runner reaches into app src (side-effect)" bad
+  printf 'import x from "@/lib/server/connector-vault/crypto";\n' > "$tmp/runner/a.ts"; _rcase "runner reaches into app via @/" bad
 
   echo "  selftest: $pass passed, $fail failed"; [ "$fail" -eq 0 ]
 }
 
 if [ "${1:-}" = "selftest" ]; then selftest; else
-  echo "==> checking app↔runner import boundary under src/"
-  scan_dir "$REPO/src" && echo "==> app runtime import boundary checks passed"
+  echo "==> checking app↔runner import boundary under src/ + runner/"
+  rc=0
+  scan_runner "$REPO/runner" || rc=1   # || avoids set -e short-circuit so BOTH scans report
+  scan_dir "$REPO/src" || rc=1
+  [ "$rc" -eq 0 ] && echo "==> app↔runner import boundary checks passed"
+  exit "$rc"
 fi

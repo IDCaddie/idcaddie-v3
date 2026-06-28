@@ -27,5 +27,7 @@ jobs:
         run: npm test
       - name: Typecheck
         run: npx tsc --noEmit
+      - name: Runner skeleton typecheck (separate deployable, independent of the app)
+        run: npm run runner:typecheck
       - name: Build
         run: npm run build

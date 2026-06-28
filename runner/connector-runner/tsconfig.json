@@ -1,0 +1,17 @@
+{
+  "//": "Standalone tsconfig for the SEPARATE connector-runner deployable skeleton (doc 46 §11). It does NOT extend the app tsconfig and does NOT reference app `src/` — the runner is self-contained (it vendors the typed contract). `npm run runner:typecheck` proves it compiles independently of the app.",
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "isolatedModules": true,
+    "skipLibCheck": true,
+    "types": ["node"]
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules"]
+}
