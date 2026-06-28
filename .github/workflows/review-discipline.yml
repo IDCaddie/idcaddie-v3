@@ -34,6 +34,11 @@ jobs:
         run: |
           bash scripts/check-app-runtime-imports.sh selftest
           bash scripts/check-app-runtime-imports.sh
+      - name: Connector-runner deploy templates inert (self-test + scan deploy/)
+        # placeholders only; no real account/ARN/KMS-id/token/DB-url; no executable deploy command; Dockerfile no secret build args
+        run: |
+          bash scripts/check-deploy-templates.sh selftest
+          bash scripts/check-deploy-templates.sh
       - name: Docs-drift gate (must not fail open)
         env:
           REQUIRE_BASE: "1"

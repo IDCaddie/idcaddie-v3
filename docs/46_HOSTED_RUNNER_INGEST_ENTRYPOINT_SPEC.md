@@ -326,3 +326,16 @@ decrypt/resolve/connect. It is self-contained (no app-`src/`/pg/AWS/KMS import �
 ARN/account/key-material/DB-URL**. Also fixes the README cross-reference (`§11.5` → `§14`). **No runnable infra is
 committed** (no Dockerfile/ECS-taskdef/Terraform/CDK/CFN/aws-cli). Phase C stays **BLOCKED**; **RISK-001/RISK-007 remain
 OPEN.**
+
+## 16. PR #202 — in-repo ECS/Fargate deploy PACKAGE skeleton (inert) · 2026-06-28
+PR #202 adds the **inert deploy package skeleton** under `runner/connector-runner/deploy/` — the concrete shape for the
+future ECS/Fargate one-shot deploy, **without making it deployable**. **No deployment was performed**; there is **no
+AWS/KMS/Secrets-Manager/pg call** and **no real config value** (account/region/ARN/secret/KMS key/DB url are all
+`REPLACE_WITH_*` placeholders). Files: `Dockerfile` (no secret build args; default `CMD` fails closed), a
+`task-definition.template.json` (ECS/Fargate one-shot; `secrets[].valueFrom` is a Secrets Manager **placeholder** =
+task-read Model B §12.2; non-secret config in `environment`; runner disabled — `ID_CADDIE_CONNECTOR_RUNNER_ENABLED`
+absent), `env.example` (reference placeholders), and `deploy/README.md` (runbook; the real run command is **prose-only,
+"future, not implemented"**). New `scripts/check-deploy-templates.sh` (CI, scoped to `deploy/`) asserts placeholders
+present, **no real account/ARN/KMS-UUID/token/DB-url**, **no executable deploy/apply command** in templates, and no
+Dockerfile secret build args. Runner stays disabled/fail-closed; app stays pg/AWS/KMS-free. Phase C **BLOCKED**;
+**RISK-001/RISK-007 remain OPEN.**
