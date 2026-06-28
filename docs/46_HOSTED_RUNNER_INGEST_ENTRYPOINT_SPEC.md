@@ -312,3 +312,17 @@ weakening) §11:
   still future work and **may become its own repo**; vendoring discipline (§11.2) governs how it copies the core.
 - **What is NOT changed:** Phase C stays **BLOCKED**; no real token/KMS/AWS/pg; no production deploy (no Docker/ECS that
   could run); **RISK-001 / RISK-007 remain OPEN**; cutover BLOCKED; connector credentials not production-ready.
+
+## 15. PR #201 — in-repo deployment-contract skeleton (typed, fail-closed) · 2026-06-28
+PR #201 lands the **deployment CONTRACT only** for the separate runner — no real deploy, no AWS/KMS/Secrets-Manager/pg,
+no real token. It adds `runner/connector-runner/src/deploy-config.ts`: a typed `validateDeployConfig(env)` that validates
+the SHAPE of the future ECS/Fargate runtime config (runtime target = ECS/Fargate one-shot §12.1; ingestion = Secrets
+Manager task-read Model B §12.2; staging-only §6; KMS via alias reference §9; the `connector_runner_login` DB password
+referenced by env-var NAME, never a connection string). It accepts only **references** (names/aliases/ARNs/env-var-names)
+and hard-rejects any raw secret VALUE (`secret_value_supplied`); it is **disabled by default** (`deploy_disabled` —
+`productionRunnerProvisioned` hardcoded false; reads the trusted env map only; a request can't enable it) and performs no
+decrypt/resolve/connect. It is self-contained (no app-`src/`/pg/AWS/KMS import — covered by the runner self-test +
+`check-app-runtime-imports.sh scan_runner`), and a runner test asserts the committed config + README carry **no real
+ARN/account/key-material/DB-URL**. Also fixes the README cross-reference (`§11.5` → `§14`). **No runnable infra is
+committed** (no Dockerfile/ECS-taskdef/Terraform/CDK/CFN/aws-cli). Phase C stays **BLOCKED**; **RISK-001/RISK-007 remain
+OPEN.**

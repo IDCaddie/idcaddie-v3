@@ -44,7 +44,7 @@ describe("connector-runner — separate deployable skeleton, fail-closed", () =>
   });
 
   it("the runner imports NOTHING from pg/AWS/KMS/Secrets-Manager/vault-reader/fs (static, self-contained)", () => {
-    for (const file of ["contract.ts", "entrypoint.ts"]) {
+    for (const file of ["contract.ts", "entrypoint.ts", "deploy-config.ts"]) {
       const src = fs.readFileSync(path.resolve(__dirname, file), "utf8");
       const importLines = src.split("\n").filter((l) => /^import\b/.test(l));
       for (const line of importLines) for (const bad of ["@aws-sdk", '"pg"', "postgres", "client-secretsmanager", "secret-vault", "connector-secret-store", "runner-db-client", "../../src/", "@/"])

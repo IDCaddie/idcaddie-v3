@@ -560,6 +560,32 @@ Manager/Postgres, no production deploy, no production env, no service-role.
   (doc 45) · reviewed `connector_runner_login` provisioning · real runner-backed `VaultProviderTokenSource`.
   **RISK-001/RISK-007 remain OPEN; cutover BLOCKED.**
 
+## PR 14 — connector runner deployment-CONTRACT skeleton (typed, fail-closed)
+Defines the deployment contract for the separate runner **without making it live**. No real deploy/AWS/KMS/Secrets-
+Manager/pg/token; runner stays disabled. **RISK-007 stays OPEN.**
+- **Deploy contract (doc):** a "Deployment contract (skeleton)" section in `runner/connector-runner/README.md` (+ doc 46
+  §15) — by reference only: ECS/Fargate one-shot (§12.1), Secrets Manager task-read Model B not ECS-Exec (§12.2), KMS
+  alias reference (§9), `connector_runner_login` DB referenced by env-var NAME, post-ingest cleanup pointer (§12.6).
+- **Typed config validator:** `runner/connector-runner/src/deploy-config.ts` — `validateDeployConfig(env)` validates the
+  SHAPE of `RUNNER_RUNTIME_TARGET`/`RUNNER_INGESTION_MODEL`/`RUNNER_APP_ENV`/`CONNECTOR_VAULT_AWS_KMS_REGION`/
+  `CONNECTOR_VAULT_KMS_KEY_ID`/`CONNECTOR_VAULT_SECRET_REF`/`CONNECTOR_RUNNER_DB_URL_REF`. Accepts only **references**;
+  rejects raw secret VALUES (`secret_value_supplied`); **disabled by default** (`deploy_disabled`,
+  `productionRunnerProvisioned` hardcoded false, env-only, request can't enable); no decrypt/resolve/connect; self-
+  contained (no app-`src/`/pg/AWS/KMS import).
+- **How Secrets Manager task-read fits later:** the task reads the staging secret into memory at startup and calls the
+  committed `ingestClientSecret(...)` (Model B); plaintext never touches disk/env/argv/logs; the secret is then
+  disabled→proven-unreadable→deleted (§12.6).
+- **How KMS verification still blocks RISK-007:** closure needs production KMS/IAM provisioned + **verified** by a live
+  round-trip (runner `GenerateDataKey`/`Decrypt` allowed) **and** an executed AccessDenied negative (web `Decrypt`
+  denied) — neither done; staging-only is green (doc 42 §91), production is UNVERIFIED.
+- **No dependency / no runnable infra:** no AWS/pg deps; no Dockerfile/ECS-taskdef/Terraform/CDK/CFN/aws-cli. Tests:
+  deploy-config fail-closed + reference-only + no-secret-leak + no-real-ARN (runner suite 6 → 14). Fixed the README
+  `§11.5`→`§14` cross-reference.
+- **What remains before RISK-007 can close:** actual ECS/Fargate deploy package · AWS/IAM/KMS provisioning · live
+  round-trip + AccessDenied negative · first-real-token staging dry-run (doc 44 §5) · B2c-run runbook (doc 45) ·
+  reviewed `connector_runner_login` provisioning · real runner-backed `VaultProviderTokenSource`. **RISK-001/RISK-007
+  remain OPEN; cutover BLOCKED.**
+
 ### Remaining PRs after PR 4
 - **PR 5** — UI display of synced Slack data. **PR 6** — manual server-only run trigger. **Later** — scheduler / run
   lifecycle. **Later** — OAuth/vault/runner production credential path (RISK-007). The concrete Supabase store impl for
