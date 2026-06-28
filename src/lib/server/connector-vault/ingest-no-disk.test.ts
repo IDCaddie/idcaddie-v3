@@ -13,7 +13,7 @@ import type { ConnectorVaultKeyProvider } from "./crypto";
 const SENTINEL = "MUSTNOTLEAK-c-pre-ingest-no-disk-sentinel";
 const HERE = path.resolve(__dirname);
 const REPO = path.resolve(HERE, "..", "..", "..", "..");
-const CODE_MODULES = ["client-secret-ingest-harness.ts", "slack-client-secret-store.ts", "crypto.ts"];
+const CODE_MODULES = ["client-secret-ingest-harness.ts", "slack-client-secret-store.ts", "crypto.ts", "runner-ingest-entrypoint.ts"];
 
 const memKeyProvider: ConnectorVaultKeyProvider = {
   async generateDataKey() { return { dek: Buffer.alloc(32, 7), wrappedDek: Buffer.from("wrapped") }; },

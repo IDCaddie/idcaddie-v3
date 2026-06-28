@@ -114,6 +114,9 @@ const CRYPTO_REL_HINTS = [
   "connector-vault/slack-resolver-write",
   "server/connector-vault/slack-resolver-write",
   "lib/server/connector-vault/slack-resolver-write",
+  "connector-vault/runner-ingest-entrypoint",
+  "server/connector-vault/runner-ingest-entrypoint",
+  "lib/server/connector-vault/runner-ingest-entrypoint",
 ];
 
 function walk(dir: string): string[] {
