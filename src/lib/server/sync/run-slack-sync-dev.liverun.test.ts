@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { isDevSlackSyncRunEnabled } from "./run-slack-sync-dev";
 import { recordedSlackSyncRun } from "./recorded-slack-sync-run";
-import { createDevProviderTokenSource } from "./provider-token-source";
+import { createProviderTokenSource } from "./provider-token-source-selector";
 import { createDevUserScopedClient } from "./dev-user-scoped-client";
 import { createSupabaseSlackResolverStore } from "./supabase-slack-resolver-store";
 import { createSupabaseManualSyncRunRecorder } from "./manual-sync-run-recorder";
@@ -27,7 +27,7 @@ describe.runIf(LIVE)("LIVE manual Slack sync run (local dev only)", () => {
     const { runId, summary } = await recordedSlackSyncRun(
       {
         env,
-        tokenSource: createDevProviderTokenSource(env),
+        tokenSource: createProviderTokenSource(env), // selector: dev source in local-dev+opt-in, else the fail-closed vault source
         httpClient: slackFetchHttpClient,
         store: createSupabaseSlackResolverStore(client),
         identity: { tenantId: env.SLACK_SYNC_TENANT_ID ?? "", connectorId: env.SLACK_SYNC_CONNECTOR_ID ?? "slack-dev" },

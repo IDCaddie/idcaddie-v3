@@ -17,7 +17,7 @@ import type { Database } from "@/lib/database.types";
 import { createDevUserScopedClient } from "./dev-user-scoped-client";
 import { recordedSlackSyncRun } from "./recorded-slack-sync-run";
 import type { RunSlackSyncSummary } from "./run-slack-sync-dev";
-import { createDevProviderTokenSource } from "./provider-token-source";
+import { createProviderTokenSource } from "./provider-token-source-selector";
 import { createSupabaseSlackResolverStore } from "./supabase-slack-resolver-store";
 import { createSupabaseManualSyncRunRecorder } from "./manual-sync-run-recorder";
 import { slackFetchHttpClient } from "./slack-fetch-http-client";
@@ -127,7 +127,7 @@ async function runOneTarget(env: Record<string, string | undefined>, client: Sup
   const { summary } = await recordedSlackSyncRun(
     {
       env,
-      tokenSource: createDevProviderTokenSource(env),
+      tokenSource: createProviderTokenSource(env), // selector: dev source in local-dev+opt-in, else the fail-closed vault source
       httpClient: slackFetchHttpClient,
       store: createSupabaseSlackResolverStore(client),
       identity: { tenantId: t.tenantId, connectorId: t.connectorId },
