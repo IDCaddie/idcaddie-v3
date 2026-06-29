@@ -4372,6 +4372,12 @@ no real secret stored (evidence in docs/47). The PR #204 read-only preflight als
 first-real-token dry-run, and B2c-run. A green round-trip is a prerequisite, **not** RISK-007 closure — RISK-001/RISK-007
 remain **OPEN**; Phase C **BLOCKED**.
 
+PR #207 adds `scripts/check-runner-keys-revoked.sh` — a fail-closed, opt-in, **read-only** verifier for step (f): it runs
+ONLY `sts get-caller-identity` on the old runner/web profiles and PASSes iff each **FAILS** with a dead-key error class
+(it creates/deletes/deactivates no key — deletion stays operator-manual in the IAM Console — and prints no key id /
+secret / ARN). PR #207 also documents the §91.7(f) runbook + a redacted dead-key evidence template in docs/47. **Step (f)
+status remains PENDING** (the operator has not yet confirmed deletion); RISK-001/RISK-007 stay **OPEN**.
+
 **RISK-001 remains OPEN. RISK-007 remains OPEN. Cutover remains BLOCKED.** No real Slack client secret was loaded, no
 real Slack token entered the system, no OAuth exchange ran, no live B2 KMS runtime check ran in this docs PR. Connector
 credentials are not production-ready.

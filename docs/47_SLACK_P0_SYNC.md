@@ -724,6 +724,43 @@ result (no key material, no secret value, no raw JSON):
   dry-run / B2c-run have not run, and **RISK-007 stays OPEN** (a green round-trip is one prerequisite, not closure). Next:
   delete the operator's fresh temp IAM keys and verify dead (doc 42 §91.7(f)).
 
+## PR 19 — temp IAM key cleanup + dead-key verification (doc 42 §91.7(f))
+After the KMS round-trip, the **temporary-use** IAM access keys the operator minted for `idcaddie-staging-runner` and
+`idcaddie-staging-web` (to run the PR #204 preflight + PR #205/#206 round-trip) must be **deleted/deactivated and verified
+dead** before any further step. This PR ships the runbook + a read-only verifier; the live result is **PENDING** (the
+operator has not yet confirmed deletion). **No key is created/deleted by committed code; no IAM/KMS/Secrets-Manager call;
+no production touch. RISK-007 stays OPEN.**
+
+**Operator steps (§91.7(f)):**
+1. **Delete** the temp access key in the IAM Console for **`idcaddie-staging-runner`** (IAM → Users → *user* → Security
+   credentials → the temp access key → Actions → **Delete**). Repeat for **`idcaddie-staging-web`**. (Deletion is
+   operator-manual in the Console — never scripted.)
+2. **Confirm** each user's Security-credentials list shows the key is **gone** (not merely deactivated).
+3. **Verify dead** with the read-only checker (each old profile's `sts get-caller-identity` must **fail**):
+   `ID_CADDIE_RUNNER_KEYS_REVOKED=1 AWS_PROFILE=idcaddie-staging-runner
+   ID_CADDIE_RUNNER_KEYS_REVOKED_WEB_PROFILE=idcaddie-staging-web AWS_REGION=ca-central-1
+   ID_CADDIE_RUNNER_KEYS_REVOKED_ENV=staging bash scripts/check-runner-keys-revoked.sh` → expect **PASS** for both
+   (`sts` rejected with a dead-key error class, e.g. `InvalidClientTokenId`). The script prints **only** PASS/FAIL + the
+   error class — never an access key id, secret, ARN, or account.
+4. **Remove** the now-dead profiles' local credentials (delete the `[idcaddie-staging-runner]` / `[idcaddie-staging-web]`
+   blocks from `~/.aws/credentials`).
+5. **Confirm** no access keys are stored in shell history / docs / repo (`history | grep -i aws` should show no pasted
+   secret; never commit a key).
+
+### Operator temp-key revocation — §91.7(f) dead-key verification · STATUS: PENDING (no operator run recorded yet)
+Fill in **only** after the operator deletes both keys and runs the verifier. Record safe, **redacted** results only — no
+access key id, no secret, no ARN, no account.
+- old runner temp key (`idcaddie-staging-runner`) deleted in IAM Console: ☐ · date: ____
+- old web temp key (`idcaddie-staging-web`) deleted in IAM Console: ☐ · date: ____
+- `sts get-caller-identity` on the old **runner** profile **FAILED** (error class: ______, e.g. `InvalidClientTokenId`) → DEAD ☐
+- `sts get-caller-identity` on the old **web** profile **FAILED** (error class: ______) → DEAD ☐
+- `check-runner-keys-revoked.sh` printed **PASS** for both profiles ☐ · failure (not success) is the proof; no key/secret recorded
+- **RISK-007 remains OPEN** — temp-key cleanup is a prerequisite gate, not closure; Phase C BLOCKED.
+
+**What remains after dead-key verification:** Secrets Manager secret provisioning + task-read · first-real-token staging
+dry-run (doc 44 §5) · B2c-run runbook (doc 45) · reviewed `connector_runner_login` provisioning · real runner-backed
+`VaultProviderTokenSource`. **RISK-001/RISK-007 remain OPEN; cutover BLOCKED.**
+
 ### Remaining PRs after PR 4
 - **PR 5** — UI display of synced Slack data. **PR 6** — manual server-only run trigger. **Later** — scheduler / run
   lifecycle. **Later** — OAuth/vault/runner production credential path (RISK-007). The concrete Supabase store impl for
