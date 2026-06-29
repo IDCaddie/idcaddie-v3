@@ -366,4 +366,6 @@ Decrypt of the same wrapped key MUST be AccessDenied (the live negative). The ca
 NEVER printed — output is a redacted PASS/FAIL checklist + safe error class. The agent and CI NEVER run the live path
 (CI runs only the guard self-test; a vitest test bounds the script to the 4 allowlisted actions and asserts no
 key-material is printed). **A green run proves the LIVE decrypt boundary (synthetic) only** — it stores no real secret;
-the live result is PENDING until the operator runs it. RISK-001/RISK-007 remain **OPEN**; Phase C **BLOCKED**.
+the live result is **PASSED** (operator run 2026-06-28, PR #206: runner GenerateDataKey+Decrypt round-trip matched, web
+Decrypt = AccessDenied, no Encrypt, no secret read, no real secret stored — docs/47). A green round-trip proves the live
+decrypt boundary only; RISK-001/RISK-007 remain **OPEN**; Phase C **BLOCKED**.

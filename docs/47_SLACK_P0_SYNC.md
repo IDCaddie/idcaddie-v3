@@ -653,9 +653,45 @@ Adds `scripts/check-runner-kms-roundtrip.sh` — the **next** operator-run step 
 that proves the decrypt boundary with **synthetic data-key material only**. No real Slack token/secret, no OAuth, no
 Secrets-Manager value read, no Encrypt, no Postgres, no production, no state change. **RISK-007 stays OPEN.**
 - **Exact command (operator):**
-  `ID_CADDIE_RUNNER_KMS_ROUNDTRIP=1 AWS_PROFILE=<runner> ID_CADDIE_RUNNER_KMS_ROUNDTRIP_WEB_PROFILE=<web>
-  AWS_REGION=ca-central-1 ID_CADDIE_RUNNER_KMS_ROUNDTRIP_EXPECTED_ACCOUNT=<staging account, see doc 42 §91>
-  ID_CADDIE_RUNNER_KMS_ROUNDTRIP_ENV=staging bash scripts/check-runner-kms-roundtrip.sh`
+  `ID_CADDIE_RUNNER_KMS_ROUNDTRIP=1 AWS_PROFILE=idcaddie-staging-runner
+  ID_CADDIE_RUNNER_KMS_ROUNDTRIP_WEB_PROFILE=idcaddie-staging-web AWS_REGION=ca-central-1
+  ID_CADDIE_RUNNER_KMS_ROUNDTRIP_EXPECTED_ACCOUNT=833822972703 ID_CADDIE_RUNNER_KMS_ROUNDTRIP_ENV=staging
+  bash scripts/check-runner-kms-roundtrip.sh`
+
+### Operator AWS profile setup (runner + web — both required)
+The round-trip needs **two** local AWS profiles: `AWS_PROFILE` = the **runner** identity (positive `GenerateDataKey`/
+`Decrypt` test) and `ID_CADDIE_RUNNER_KMS_ROUNDTRIP_WEB_PROFILE` = the **web** identity (negative `Decrypt`-must-be-denied
+test). A bare `default` profile is your operator (`sam-cli`) identity and is **neither** — so the script refuses with
+`missing_web_profile` / wrong identity until both are configured. The web negative is **required evidence**; the script
+will not run without it.
+
+Both are **IAM users**, not roles — there is no role to assume (doc 42 §91.3):
+`arn:aws:iam::833822972703:user/idcaddie-staging-runner` and `arn:aws:iam::833822972703:user/idcaddie-staging-web`.
+
+1. **Mint fresh, temporary-use access keys** for `idcaddie-staging-runner` **and** `idcaddie-staging-web` in the AWS
+   Console (IAM → Users → *user* → Security credentials → Create access key). Per doc 42 §91.7(a) these are
+   temporary-use; you delete them in step 5.
+2. **Configure two named profiles WITHOUT putting keys in shell history or on screen as a command.** Use the interactive
+   configurer — it writes `~/.aws/credentials` directly, not your shell history (paste the keys at the prompts):
+   ```
+   aws configure --profile idcaddie-staging-runner   # paste runner key id + secret; region ca-central-1; output json
+   aws configure --profile idcaddie-staging-web       # paste web key id + secret;    region ca-central-1; output json
+   ```
+   Or edit `~/.aws/credentials` in an editor under `[idcaddie-staging-runner]` / `[idcaddie-staging-web]` blocks (also
+   keeps keys out of shell history). **Never** pass keys as CLI args (`aws configure set aws_secret_access_key …`) or
+   `export AWS_SECRET_ACCESS_KEY=…` on the command line — those land in shell history. The script reads **only**
+   `--profile`; it never reads or prints the access keys.
+3. **Verify each profile resolves to the right IAM user** (no secret printed):
+   ```
+   aws --profile idcaddie-staging-runner sts get-caller-identity --query Arn --output text
+   # expect: arn:aws:iam::833822972703:user/idcaddie-staging-runner
+   aws --profile idcaddie-staging-web    sts get-caller-identity --query Arn --output text
+   # expect: arn:aws:iam::833822972703:user/idcaddie-staging-web
+   ```
+4. **Rerun** the round-trip with the exact command above.
+5. **After a green run, delete/deactivate BOTH temp keys and verify they are dead** (doc 42 §91.7(f)): IAM Console →
+   *user* → delete the access key; then `aws --profile idcaddie-staging-web sts get-caller-identity` must **fail**.
+
 - **What it will prove:** runner `kms:GenerateDataKey` on the canonical KEK + runner `kms:Decrypt` of that synthetic
   wrapped data key **round-trips** (recovered == generated), and web `kms:Decrypt` of the same wrapped key returns
   **AccessDenied** (the live negative). It never attempts `kms:Encrypt` (policy forbids it). The canonical-key check
@@ -666,12 +702,27 @@ Secrets-Manager value read, no Encrypt, no Postgres, no production, no state cha
   Postgres. Output is a redacted PASS/FAIL checklist + safe error class only — never the plaintext data key, ciphertext,
   recovered value, key ARN, or raw JSON.
 - **No live run by the agent or CI** (no AWS creds; opt-in unset). CI runs only the guard self-test; a vitest test bounds
-  the script to the 4 allowlisted actions and asserts key material is never printed. **Live KMS result: PENDING** (the
-  operator has not yet run it). No dependency / migration.
+  the script to the 3 allowlisted actions and asserts key material is never printed. **Live KMS result: PASSED** (operator
+  run recorded below). No dependency / migration.
 - **What remains after the KMS round-trip:** delete the operator's fresh temp IAM keys and verify dead · Secrets Manager
   secret provisioning + task-read · first-real-token staging dry-run (doc 44 §5) · B2c-run runbook (doc 45) · reviewed
   `connector_runner_login` provisioning · real runner-backed `VaultProviderTokenSource`. **RISK-001/RISK-007 remain OPEN;
   cutover BLOCKED.**
+
+### Operator KMS round-trip run — RESULT: PASS (2026-06-28, recorded in PR #206)
+The operator ran `scripts/check-runner-kms-roundtrip.sh` against staging (synthetic data-key only). Safe, redacted
+result (no key material, no secret value, no raw JSON):
+- runner caller account matched the expected staging account — **PASS**.
+- runner `kms:GenerateDataKey` succeeded using a synthetic data key — **PASS**.
+- the data key was generated under the **canonical KEK** (not the superseded key) — **PASS**.
+- runner `kms:Decrypt` round-trip **matched** the synthetic data (recovered == generated) — **PASS**.
+- web `kms:Decrypt` = **AccessDenied** (the negative confirmed) — **PASS**.
+- no `kms:Encrypt` attempted; no Secrets Manager value read; **no real secret stored**.
+- **What this PROVED:** the **live** staging KMS decrypt boundary with synthetic material — the runner identity can
+  `GenerateDataKey`+`Decrypt` on the canonical KEK, and the web identity is denied `Decrypt`. **What it did NOT prove /
+  change:** no real Slack secret exists or was ingested, no Secrets Manager secret was created, the first-real-token
+  dry-run / B2c-run have not run, and **RISK-007 stays OPEN** (a green round-trip is one prerequisite, not closure). Next:
+  delete the operator's fresh temp IAM keys and verify dead (doc 42 §91.7(f)).
 
 ### Remaining PRs after PR 4
 - **PR 5** — UI display of synced Slack data. **PR 6** — manual server-only run trigger. **Later** — scheduler / run

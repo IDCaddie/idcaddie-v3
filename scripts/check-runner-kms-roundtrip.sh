@@ -35,8 +35,8 @@ _row() { printf '  [%s] %s\n' "$1" "$2"; }
 # Fail-closed guards (pure — no AWS, no crypto). Returns 0 only for a valid staging round-trip request.
 check_guards() {
   [ "${ID_CADDIE_RUNNER_KMS_ROUNDTRIP:-}" = "1" ] || { refuse "roundtrip_disabled (set ID_CADDIE_RUNNER_KMS_ROUNDTRIP=1)"; return 1; }
-  [ -n "${AWS_PROFILE:-}" ] || { refuse "missing_runner_profile (set AWS_PROFILE)"; return 1; }
-  [ -n "${ID_CADDIE_RUNNER_KMS_ROUNDTRIP_WEB_PROFILE:-}" ] || { refuse "missing_web_profile (set ID_CADDIE_RUNNER_KMS_ROUNDTRIP_WEB_PROFILE)"; return 1; }
+  [ -n "${AWS_PROFILE:-}" ] || { refuse "missing_runner_profile (set AWS_PROFILE to the idcaddie-staging-runner profile — see docs/47 'Operator AWS profile setup')"; return 1; }
+  [ -n "${ID_CADDIE_RUNNER_KMS_ROUNDTRIP_WEB_PROFILE:-}" ] || { refuse "missing_web_profile (the web AccessDenied negative is required evidence; set ID_CADDIE_RUNNER_KMS_ROUNDTRIP_WEB_PROFILE to the idcaddie-staging-web profile — see docs/47 'Operator AWS profile setup')"; return 1; }
   [ -n "${AWS_REGION:-}" ] || { refuse "missing_region (set AWS_REGION)"; return 1; }
   [ "${AWS_REGION:-}" = "$EXPECT_REGION" ] || { refuse "wrong_region (expected $EXPECT_REGION)"; return 1; }
   local acct="${ID_CADDIE_RUNNER_KMS_ROUNDTRIP_EXPECTED_ACCOUNT:-}"
