@@ -457,3 +457,54 @@ verification). **IAM simulation only — no `get-secret-value`, no secret value 
 redacted evidence: no raw ARN, no KMS key id / full KMS ARN, no access key, no secret value. Docs-only. The **live**
 task-read (a real ECS task issuing `GetSecretValue`) remains PENDING. RISK-001/RISK-007 remain **OPEN**; Phase C
 **BLOCKED**.
+
+## 24. PR #215 — live task-read → `ingestClientSecret` implementation plan + typed seam (separate runner)
+The reviewed plan + the typed fail-closed composition seam for the SEPARATE runner's live task-read. **No real SDK/pg
+code is added to this app repo** (doc 46 §11 — the real runner is a separate deployable that vendors the core; the
+in-repo skeleton stays AWS-SDK-free). The app runtime stays **GetSecretValue-free** (scan-enforced) and CI never calls
+GetSecretValue. RISK-001/RISK-007 remain **OPEN**; Phase C **BLOCKED**.
+
+### 24.1 The typed seam (in-repo skeleton)
+`runner/connector-runner/src/task-read-ingest.ts` — self-contained (no app-`src/` import), **imports nothing at runtime**
+(no AWS SDK, no Secrets Manager client, no pg). `GetSecretValue` appears only in comments.
+- `TaskReadIngest.run(request)` → a **redacted** `TaskReadIngestResult` (`{ok, provider, secretId|reason}`) — never the
+  value/plaintext/ciphertext/ARN/KMS material.
+- `createDisabledTaskReadIngest()` — the **operator-run guard**: `isTaskReadIngestEnabled` is **always false**
+  (`productionRunnerReady` hardcoded false); `run()` always returns `{ok:false, reason:"task_read_disabled"}` and reads/
+  ingests nothing.
+- `composeTaskReadIngest(reader, ingest)` — the **reference orchestration** the real runner drops in: it wires an injected
+  `reader` (which GetSecretValue-s the pinned secret) to an injected `ingest` (which wraps `ingestClientSecret`). The
+  plaintext is delivered **only** via the `consume(plaintext)` callback → `ingest`, in-scope; it is never returned,
+  stored, or logged (proven by the leak-proof unit test — a synthetic sentinel reaches `ingest` but never the result).
+
+### 24.2 The live flow (in the SEPARATE runner, NOT this repo)
+```
+runner (ECS/Fargate one-shot, idcaddie-staging-slack-taskread identity):
+  reader = <real TaskSecretReader>            // Secrets Manager GetSecretValue on ONLY the pinned ARN → plaintext in memory
+  ingest = (input) => ingestClientSecret(input, { keyProvider, kekId, store })   // committed core (§4), envelope-only
+  result = await composeTaskReadIngest(reader, ingest).run({ provider:"slack", secretRef, secretKind:"oauth_client_secret", appEnv:"staging" })
+  // plaintext lives ONLY inside consume → ingest; encrypted (KMS GenerateDataKey + AES-256-GCM) → envelope-only INSERT → discarded
+```
+- **GetSecretValue** happens **only** in the runner's `reader` (the isolated runner), on **only** the pinned ARN
+  (task-role least-privilege, §12.7; verified PR #214).
+- Plaintext is **in-memory only** → straight to `ingestClientSecret` → **discarded**. **Never** logged, **never** written
+  to disk, **never** in env/argv, **never** in the task env dump. Output is a redacted `secret_id` or a safe static reason.
+- Atomic envelope-only write (§7); the committed core is unchanged (only the plaintext *source* is SM, §12.3).
+
+### 24.3 Hard boundaries (enforced)
+- **App runtime stays GetSecretValue-free** — `scripts/check-app-runtime-imports.sh` forbids `@aws-sdk/client-secretsmanager`
+  and the `GetSecretValue`/`get-secret-value` API name under `src/`, and forbids the runner-skeleton from importing the
+  SM SDK (scan_runner). **CI never calls GetSecretValue** (no AWS creds; no live path; the runner tests use in-memory
+  mocks). If real SDK code is ever added it must live in the **separate runner repo**, never `src/app`.
+- The seam is **operator-run guarded** (always-false enable) and self-contained; the real runner supplies the SDK reader
+  + the `connector_runner_login` connection out-of-repo.
+
+### 24.4 Cleanup / deletion proof (non-optional; §12.6) — record evidence LATER, not in this PR
+After a **successful** ingest (an envelope-only vault row exists, §8):
+1. **Disable/deactivate** the staging SM secret (`update-secret-version-stage` / restrict / rotate, or
+   `delete-secret` with a short recovery window) per the operator runbook — so it is no longer usable.
+2. **Prove the task role can no longer read it** — a `GetSecretValue` as the task role must now **fail**
+   (`ResourceNotFoundException` / `AccessDenied`); capture only the **error class**, never a value. (Metadata-only
+   `describe-secret` also flips to not-found/deleted.)
+3. **No active plaintext staging secret remains.** Record the safe result (disabled/deleted; the post-cleanup read
+   failed with the error class) **in a later docs-only PR — only after the operator actually runs it**, never here.

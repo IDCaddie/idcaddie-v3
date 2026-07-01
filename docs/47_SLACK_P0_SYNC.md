@@ -981,6 +981,30 @@ Recorded from the operator run of `scripts/check-runner-task-read.sh` against th
 · first-real-token staging dry-run (doc 44 §5) · B2c-run runbook (doc 45) · reviewed `connector_runner_login` provisioning
 · real runner-backed `VaultProviderTokenSource`. **RISK-001/RISK-007 remain OPEN; cutover BLOCKED.**
 
+## PR 27 — live task-read → `ingestClientSecret` plan + typed seam (separate runner)
+The reviewed implementation **plan + a typed fail-closed composition seam** for the separate runner's live task-read
+(doc 46 §24). **No real SDK/pg code is added to this app repo** (§11 — the real runner is a separate deployable); the
+in-repo skeleton stays AWS-SDK-free, the app runtime stays **GetSecretValue-free** (scan-enforced), and CI never calls
+GetSecretValue. RISK-007 stays OPEN.
+- **Seam (`runner/connector-runner/src/task-read-ingest.ts`):** `TaskReadIngest.run(request)` → a **redacted**
+  `{ok, provider, secretId|reason}` (never the value/plaintext/ciphertext/ARN). `createDisabledTaskReadIngest()` is the
+  **operator-run guard** — `isTaskReadIngestEnabled` **always false**, `run()` always `task_read_disabled`, reads/ingests
+  nothing. `composeTaskReadIngest(reader, ingest)` is the reference orchestration: the plaintext flows **only** via the
+  `consume(plaintext)` callback → `ingest` (→ `ingestClientSecret`) in-scope, never returned/logged (proven by a leak-proof
+  unit test — a synthetic sentinel reaches `ingest` but never the result). Self-contained (no app-`src/` import); imports
+  nothing at runtime; `GetSecretValue` only in comments.
+- **Live flow (separate runner only):** task role GetSecretValue on **only** the pinned ARN → plaintext in memory →
+  `consume` → `ingestClientSecret({plaintext, appEnv:"staging", version:1}, deps)` → envelope-only INSERT → discarded;
+  never logged/disk/env/argv; redacted output.
+- **Cleanup/deletion proof (§12.6, later PR):** after a successful ingest, disable/deactivate/delete the staging SM
+  secret per runbook, then prove the task role's `GetSecretValue` now **fails** (error class only, no value). Record that
+  evidence in a later docs-only PR — only after the operator runs it, never here.
+- **Boundary proof:** `check-app-runtime-imports.sh` keeps `src/` free of `@aws-sdk/client-secretsmanager` +
+  `GetSecretValue`/`get-secret-value`, and keeps the runner skeleton SDK-free (scan_runner). Selftests + the runner
+  self-contained-imports check cover the new seam.
+- **Live task-read result: PENDING** (the real separate-repo runner is not built; the agent and CI run no live path).
+  **RISK-001/RISK-007 remain OPEN; Phase C BLOCKED.**
+
 ### Remaining PRs after PR 4
 - **PR 5** — UI display of synced Slack data. **PR 6** — manual server-only run trigger. **Later** — scheduler / run
   lifecycle. **Later** — OAuth/vault/runner production credential path (RISK-007). The concrete Supabase store impl for
