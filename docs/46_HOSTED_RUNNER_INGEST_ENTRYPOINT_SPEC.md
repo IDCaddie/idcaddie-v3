@@ -369,3 +369,19 @@ key-material is printed). **A green run proves the LIVE decrypt boundary (synthe
 the live result is **PASSED** (operator run 2026-06-28, PR #206: runner GenerateDataKey+Decrypt round-trip matched, web
 Decrypt = AccessDenied, no Encrypt, no secret read, no real secret stored — docs/47). A green round-trip proves the live
 decrypt boundary only; RISK-001/RISK-007 remain **OPEN**; Phase C **BLOCKED**.
+
+## 19. PR #209 — Secrets Manager secret provisioning + metadata verification (operator-run) · 2026-07-01
+PR #209 adds the safe operator runbook to provision the staging Slack OAuth client-secret reference
+`/idcaddie/staging/slack/oauth-client-secret` (§12.4: Console/stdin value entry — never argv/history/chat/docs) plus
+`scripts/check-runner-secret-metadata.sh`: a fail-closed, opt-in, **read-only, metadata-only** verifier. It invokes ONLY
+`sts get-caller-identity` and `secretsmanager describe-secret` (which returns metadata, **never** the value) — it NEVER
+calls `get-secret-value`, never reads/prints/logs the secret value, makes no KMS crypto / IAM / ECS / Postgres call, and
+changes no state. It checks the secret exists with the expected name / region / account / KMS association (default vs a
+supplied expected key) + version count + tag keys, and prints a redacted PASS/FAIL/INFO checklist (no value, no raw ARN,
+no KMS id). Guards: opt-in + profile + `AWS_REGION=ca-central-1` + 12-digit expected account (verified vs live `sts`) +
+`env=staging` + production project-ref hard-abort; missing secret fails closed (NOT-YET-CREATED → provision first). The
+agent and CI never run the live path (CI runs only the guard self-test; a vitest static test bounds it to the two
+allowlisted actions and forbids `get-secret-value`; a vitest behavioral test proves at runtime that `get-secret-value` is
+never invoked). **Live provisioning result is PENDING** (the operator has not yet created the secret). This is the
+provisioning + metadata-verification prerequisite; the ECS/Fargate **task-read** (§12.5) is a later step. RISK-001/
+RISK-007 remain **OPEN**; Phase C **BLOCKED**.

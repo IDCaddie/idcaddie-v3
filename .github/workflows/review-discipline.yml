@@ -48,6 +48,9 @@ jobs:
       - name: Runner temp-key revocation guards (self-test only — no AWS)
         # exercises the fail-closed guard refusals; CI never runs the live sts dead-key check (no AWS creds, opt-in unset)
         run: bash scripts/check-runner-keys-revoked.sh selftest
+      - name: Secrets Manager metadata guards (self-test only — no AWS, no get-secret-value)
+        # exercises the fail-closed guard refusals; CI never runs the live describe-secret (no AWS creds, opt-in unset)
+        run: bash scripts/check-runner-secret-metadata.sh selftest
       - name: Docs-drift gate (must not fail open)
         env:
           REQUIRE_BASE: "1"
