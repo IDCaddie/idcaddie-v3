@@ -508,3 +508,71 @@ After a **successful** ingest (an envelope-only vault row exists, §8):
    `describe-secret` also flips to not-found/deleted.)
 3. **No active plaintext staging secret remains.** Record the safe result (disabled/deleted; the post-cleanup read
    failed with the error class) **in a later docs-only PR — only after the operator actually runs it**, never here.
+
+## 25. PR #217 — separate-runner live task-read: implementation boundary + execution plan
+The consolidated execution runbook for the REAL live task-read → `ingestClientSecret` run, answering the ten open
+questions. Docs-only; it ties together §4/§6/§8/§11/§12.5/§12.6/§24 (no duplication) and fixes the last open decisions
+(repo name, exact command, env, evidence list). **No code here; the app repo stays `pg`-free and GetSecretValue-free
+(scan-enforced); CI runs no live path. RISK-001/RISK-007 remain OPEN; Phase C BLOCKED.**
+
+**Q1 — Where will the separate runner code live?** A **separate repo**, proposed name **`idcaddie-connector-runner`**
+(Option A, §11.1) — NOT a module in this app repo. It **vendors** the minimal `connector-vault` core at a pinned app-repo
+commit SHA (§11.2: `client-secret-ingest-harness.ts`, `slack-client-secret-store.ts`, `crypto.ts`, `kms-key-provider.ts`,
+`aws-kms-client.ts`, `aws-kms-sdk-sender.ts`, the `RunnerConnection` type, + their tests) with a `VENDOR.lock` recording
+the SHA and a drift check that fails on any byte difference. The runner is the **only** place `pg` + `@aws-sdk` + the
+vendored core meet. It implements the two in-repo seams: a real `TaskSecretReader` (§24) and a real `RunnerConnection`
+(§2/§3).
+
+**Q2 — What exact command will ECS/Fargate run?** A **one-shot Fargate task** whose container entrypoint is the runner's
+Model-B ingest command — **non-secret flags only**, no secret on argv/env:
+`node dist/ingest-task-read.js --app-env staging --version 1 --confirm`. It resolves the pinned secret ARN from config,
+runs `composeTaskReadIngest(realReader, ingest).run(request)` (§24), and exits non-zero on any fail-closed reason. The
+committed `assertSafeInvocation` still refuses a secret in env/argv. Task runs to completion and stops (no long-lived
+service, no public route).
+
+**Q3 — What env/config will be passed?** All **non-secret**: AWS creds come from the **task role** (`idcaddie-staging-
+slack-taskread`, §12.7 — no static keys); the pinned secret ref (name/ARN, non-secret); **two region vars** — the
+Secrets Manager SDK reads the default `AWS_REGION=ca-central-1`, and the **vault KMS core reads only the vault-specific
+`CONNECTOR_VAULT_AWS_KMS_REGION=ca-central-1`** (§4/§9 — the committed `createAwsKmsSdkSenderFromEnv` fails closed if it is
+unset; it does **not** fall back to `AWS_REGION`); `CONNECTOR_VAULT_KMS_KEY_ID=alias/idcaddie-staging-connector-vault`
+(must resolve to the canonical KEK, §6);
+`CONNECTOR_RUNNER_DB_URL` = the `connector_runner_login` connection (injected from the runner host's secret store at
+runtime — never committed, never logged, never argv, §3); the staging project-ref guard `ycdpzduxugdsffjqyoai`
+(production `dzbfxulvxchdemcettrx` → hard abort). **No secret value** is ever an env var.
+
+**Q4 — How will it call GetSecretValue only inside the runner?** The real `TaskSecretReader` (in the separate repo only)
+uses `@aws-sdk/client-secretsmanager` `GetSecretValueCommand` on **only** the pinned ARN, under the task role
+(least-privilege proven, PR #214). That SDK **never** enters this app repo — `scripts/check-app-runtime-imports.sh`
+forbids `@aws-sdk/client-secretsmanager` + the `GetSecretValue` API name under `src/` and in the in-repo runner skeleton.
+CI has no AWS creds and calls no live path.
+
+**Q5 — How will plaintext be handed directly to `ingestClientSecret`?** Via the leak-proof `composeTaskReadIngest(reader,
+ingest)` (§24): the reader delivers the plaintext **only** through the `consume(plaintext)` callback → `ingest` wraps
+`ingestClientSecret({ plaintext, appEnv:"staging", version:1 }, { keyProvider, kekId, store })` **in-scope**. The
+plaintext is in-memory only, never returned/stored/logged, and is discarded when `consume` returns.
+
+**Q6 — How will envelope-only DB write be proven?** Run the §8 verification query after ingest: the `connector_app_secrets`
+row exists with envelope columns only (ciphertext, wrapped DEK, nonce, tag, AAD digest, kek id) and **no plaintext
+column**; the atomic `set role connector_runner` + INSERT committed together (§7). Record the **redacted `secret_id`**
+only.
+
+**Q7 — How will logs prove no plaintext leak?** The runner emits only structured **redacted** lines (a `secret_id` or a
+safe static reason — §12.5). Proof: **scan the full task log stream** (stdout/stderr + CloudWatch) for the known secret's
+first bytes / a canary and assert **zero** matches; assert the log contains no `SecretString`/`client_secret` value.
+CloudTrail records the `GetSecretValue` + KMS API calls (audit) and contains **no** plaintext.
+
+**Q8 — How will the SM secret be deleted/disabled after ingest?** Per §12.6, once the §8 query confirms the envelope
+row: **disable first** (`update-secret-version-stage` / restrict / rotate so it is unusable), then **delete**
+(`delete-secret` with a short recovery window, or `--force-delete-without-recovery` once the vault row is confirmed — the
+runbook records which). No active plaintext staging secret may remain.
+
+**Q9 — How will post-cleanup read failure be proven?** A `GetSecretValue` as the task role must now **fail**
+(`ResourceNotFoundException` / `AccessDenied`); capture only the **error class**, never a value. Metadata-only
+`describe-secret` also flips to not-found/deleted.
+
+**Q10 — What evidence will be recorded before the first-real-token staging dry run?** In a **later docs-only PR, only
+after the operator runs it** (never fabricated), the safe/redacted set: (a) pre-run — vendored-core byte-diff clean +
+synthetic dry-run green (§11.2/§10.3), task-role readiness PASS (PR #214, done); (b) run — `composeTaskReadIngest` PASS,
+envelope-only row present (§8, redacted `secret_id`), log-scan for plaintext = **zero hits**; (c) cleanup — secret
+disabled/deleted, post-cleanup `GetSecretValue` failed (error class only). Only then may doc 44 §5 first-real-token
+staging dry-run proceed. **RISK-007 stays OPEN until the full connector path is proven end-to-end.**
