@@ -431,8 +431,9 @@ the operator supplies the real ECS/Fargate task-role ARN via `ID_CADDIE_RUNNER_T
 specific task-role provisioning/name is the §11.3 unresolved infra decision; the ECS/Fargate runtime is PINNED in §12.1).
 Output is redacted (no raw ARN / account / value); fail-closed + opt-in + staging-only; the agent and CI never run the
 live path (CI runs only the guard self-test; static + behavioral tests prove `get-secret-value` is never invoked and no
-ARN is printed). **Task-role readiness is PENDING** (no operator run against a provisioned task role yet). RISK-001/
-RISK-007 remain **OPEN**; Phase C **BLOCKED**.
+ARN is printed). **Task-role IAM readiness: PASS** (operator run 2026-07-01, PR #214 — all 4 simulate proofs; IAM
+simulation only, no `get-secret-value`, no value read, no action performed; docs/47). The **live** task-read (a real ECS
+task issuing `GetSecretValue`) remains PENDING. RISK-001/RISK-007 remain **OPEN**; Phase C **BLOCKED**.
 
 ## 22. PR #213 — persisted task-role provisioning runbook (docs-only) · 2026-07-01
 PR #213 persists the operator runbook to provision the staging ECS/Fargate Slack task-read role into docs/47 (Step 0
@@ -443,5 +444,16 @@ decrypt path (required to complete GetSecretValue); `kms:GenerateDataKey` = the 
 task that immediately calls `ingestClientSecret`), **not** required merely to read from Secrets Manager. KMS is scoped to
 the canonical KEK by **alias** `alias/idcaddie-staging-connector-vault` resolved at runtime — no hardcoded key UUID; no
 `kms:*`, no `Resource "*"`, no `kms:Encrypt`/`kms:ReEncrypt*`. Docs-only: **no IAM resource created, no AWS command run, no
-`get-secret-value`, no ECS run, no production touch, no `VaultProviderTokenSource` enablement.** Task-role readiness stays
-**PENDING**. RISK-001/RISK-007 remain **OPEN**; Phase C **BLOCKED**.
+`get-secret-value`, no ECS run, no production touch, no `VaultProviderTokenSource` enablement.** Task-role **IAM readiness
+later PASSED** (PR #214); the live task-read remains PENDING. RISK-001/RISK-007 remain **OPEN**; Phase C **BLOCKED**.
+
+## 23. PR #214 — task-role IAM readiness evidence recorded (docs-only) · 2026-07-01
+PR #214 records the operator run of `scripts/check-runner-task-read.sh` against the provisioned task role (per the PR #213
+runbook): **PASS on all four `simulate-principal-policy` proofs** — task role ALLOWED `secretsmanager:GetSecretValue` on
+only the pinned staging secret; DENIED on a decoy staging secret; DENIED on a production-NAMED same-account secret; DENIED
+`secretsmanager:PutSecretValue` (no broad `secretsmanager:*`). Caller account matched staging; secret exists (metadata
+only); the KMS alias matched the secret's CMK (`alias/idcaddie-staging-connector-vault`, from the PR #211 metadata
+verification). **IAM simulation only — no `get-secret-value`, no secret value read, no action performed** (docs/47). Safe,
+redacted evidence: no raw ARN, no KMS key id / full KMS ARN, no access key, no secret value. Docs-only. The **live**
+task-read (a real ECS task issuing `GetSecretValue`) remains PENDING. RISK-001/RISK-007 remain **OPEN**; Phase C
+**BLOCKED**.
