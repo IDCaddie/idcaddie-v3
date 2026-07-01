@@ -410,3 +410,17 @@ name under `src/` too, confining task-read to the runner boundary. An operator-r
 The agent and CI never run the live path (CI runs only the guard self-tests; static + behavioral tests prove
 `get-secret-value` is never invoked). **Live task-read result is PENDING** (the secret + task role are not yet
 provisioned). RISK-001/RISK-007 remain **OPEN**; Phase C **BLOCKED**.
+
+## 21. PR #212 — ECS/Fargate task-role provisioning + readiness (IAM simulation only) · 2026-07-01
+PR #212 extends the readiness harness `scripts/check-runner-task-read.sh` to prove the **task role's** least-privilege for
+the future Model B task-read (§12.7/§12.8) — by `simulate-principal-policy` + `describe-secret` ONLY, never
+`get-secret-value`, never reading the value. Four IAM-simulation facts: GetSecretValue **allowed on only** the pinned
+secret; **denied** on a decoy staging secret; **denied** on a production-NAMED same-account secret (name-scoped — real
+cross-account production isolation is the AWS account boundary, not this policy); **denied** a write action (no broad
+`secretsmanager:*`). The principal defaults to the current pinned identity (IAM user `idcaddie-staging-runner`, §12.1);
+the operator supplies the real ECS/Fargate task-role ARN via `ID_CADDIE_RUNNER_TASK_READ_ROLE_ARN` once provisioned (the
+specific task-role provisioning/name is the §11.3 unresolved infra decision; the ECS/Fargate runtime is PINNED in §12.1).
+Output is redacted (no raw ARN / account / value); fail-closed + opt-in + staging-only; the agent and CI never run the
+live path (CI runs only the guard self-test; static + behavioral tests prove `get-secret-value` is never invoked and no
+ARN is printed). **Task-role readiness is PENDING** (no operator run against a provisioned task role yet). RISK-001/
+RISK-007 remain **OPEN**; Phase C **BLOCKED**.
