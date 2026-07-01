@@ -821,6 +821,41 @@ and if the secret is **missing** (NOT-YET-CREATED → provision it first).
 first-real-token staging dry-run (doc 44 §5) · B2c-run runbook (doc 45) · reviewed `connector_runner_login` provisioning ·
 real runner-backed `VaultProviderTokenSource`. **RISK-001/RISK-007 remain OPEN; cutover BLOCKED.**
 
+## PR 22 — ECS/Fargate task-read skeleton (Slack OAuth client secret)
+The **fail-closed runner-side task-read seam** for the future ECS/Fargate Model B task-read (doc 46 §12.5) — a typed
+boundary so the task has a shape to read the secret **reference**, **without** reading or printing the value in any
+CI/agent run. **`GetSecretValue` is confined to the separate runner boundary; the app runtime stays Secrets-Manager-free;
+no value is read/printed/stored; no OAuth; no real ECS task; `VaultProviderTokenSource` stays fail-closed. RISK-007 stays
+OPEN.**
+- **Runner seam (`runner/connector-runner/src/task-secret-read.ts`):** `TaskSecretReader.read(request, consume)` — a
+  typed, **self-contained** (no app-`src/` import), **SDK-free** skeleton. `TaskSecretReadRequest` is a **non-secret
+  reference** (provider/secretRef/secretKind/appEnv); the **result carries NO value** (only `ok`/`reason`/`provider` +
+  the non-secret `secretRef`). **Leak-proof by construction:** the future real reader delivers the plaintext ONLY via the
+  `consume(plaintext)` callback in-scope (→ `ingestClientSecret`, discarded) — never a returned field. `GetSecretValue`
+  appears **only in comments** describing the future path; nothing is imported or invoked. `isTaskSecretReadEnabled` is
+  **always false** (`productionTaskReadReady` hardcoded false); `createDisabledTaskSecretReader().read()` **always
+  returns `{ok:false, reason:"task_read_disabled"}` and NEVER calls `consume`** (never reads).
+- **App runtime stays Secrets-Manager-free:** `scripts/check-app-runtime-imports.sh` now also forbids the
+  `GetSecretValue`/`get-secret-value` API name anywhere under `src/` (in addition to the SM SDK import) — GetSecretValue
+  is the runner's, never the app's.
+- **Operator-run task-read READINESS harness (`scripts/check-runner-task-read.sh`):** verifies **by metadata + IAM
+  simulation only, never by reading** (doc 46 §12.8) that the task role would be **allowed** `secretsmanager:GetSecretValue`
+  on **only** the pinned secret ARN and **denied** on a decoy. Allowed AWS: `sts get-caller-identity`, `secretsmanager
+  describe-secret`, `iam simulate-principal-policy`. **Forbidden: `get-secret-value`** (never invoked). Fail-closed +
+  opt-in + staging-only; missing secret → FAIL (NOT-YET-CREATED). Output is a redacted PASS/FAIL checklist — never the
+  value, raw ARN, or account.
+- **Tests/scans:** runner unit test (disabled always · `consume` never called · no value field · per-reason validation);
+  the runner self-contained-imports check now covers `task-secret-read.ts`; the harness has a static test (allowlist the
+  3 read-only actions, forbid `get-secret-value` invocation + value-read/writes/KMS/deploy) + a behavioral test proving
+  at runtime that `get-secret-value` is never invoked; selftests wired into CI.
+- **Live task-read result: PENDING** (the secret + task role are not yet provisioned — provisioning is PENDING from
+  PR #209). The agent and CI never run the live path.
+
+**What remains after the task-read skeleton:** operator provisions the secret + task role · task-read readiness passes ·
+the real (separate-repo) runner wires the live task-read → `ingestClientSecret` · first-real-token staging dry-run (doc 44
+§5) · B2c-run runbook (doc 45) · reviewed `connector_runner_login` provisioning · real runner-backed
+`VaultProviderTokenSource`. **RISK-001/RISK-007 remain OPEN; cutover BLOCKED.**
+
 ### Remaining PRs after PR 4
 - **PR 5** — UI display of synced Slack data. **PR 6** — manual server-only run trigger. **Later** — scheduler / run
   lifecycle. **Later** — OAuth/vault/runner production credential path (RISK-007). The concrete Supabase store impl for

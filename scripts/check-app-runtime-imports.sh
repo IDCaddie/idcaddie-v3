@@ -32,6 +32,11 @@ scan_dir() {
   _flag "@aws-sdk/client-secretsmanager imported under src/ (Secrets-Manager task-read is the runner's, not the app's)" \
     "$(grep -rInE --include="*.ts" --include="*.tsx" --exclude="*.test.ts" --exclude="*.test.tsx" "['\"]@aws-sdk/client-secretsmanager['\"]" "$src" 2>/dev/null || true)"
 
+  # the app runtime must be Secrets-Manager-READ-free: GetSecretValue (SDK/CLI) is confined to the separate runner
+  # boundary (doc 46 §12.5). Its API name must not appear in app runtime code at all.
+  _flag "Secrets Manager GetSecretValue referenced under src/ (task-read is the runner's — the app must never read secret values)" \
+    "$(grep -rInE --include="*.ts" --include="*.tsx" --exclude="*.test.ts" --exclude="*.test.tsx" "GetSecretValue|getSecretValue|get-secret-value" "$src" 2>/dev/null || true)"
+
   if [ -d "$app" ]; then
     _flag "src/app imports a runner-internal vault module or a KMS client (must stay server-lib / runner-vendored)" \
       "$(grep -rInE --include="*.ts" --include="*.tsx" --exclude="*.test.ts" --exclude="*.test.tsx" "['\"][^'\"]*(runner-db-client|client-secret-ingest-harness|slack-client-secret-store|runner-ingest-entrypoint|@aws-sdk/client-kms)['\"]" "$app" 2>/dev/null || true)"
@@ -78,6 +83,7 @@ selftest() {
   printf 'const r = require("postgres");\n' > "$tmp/src/a.ts"; _case "postgres require" bad
   printf 'import x from "@/lib/pg-utils";\nimport y from "./postgres-helpers";\n' > "$tmp/src/a.ts"; _case "pg-substring paths are NOT flagged" ok
   printf 'import x from "@aws-sdk/client-secretsmanager";\n' > "$tmp/src/b.ts"; _case "secretsmanager import" bad
+  printf 'const r = await client.send(new GetSecretValueCommand({}));\n' > "$tmp/src/b.ts"; _case "GetSecretValue referenced in app src" bad
   printf 'import { RunnerConnection } from "@/lib/server/connector-vault/runner-db-client";\n' > "$tmp/src/app/c.ts"; _case "src/app imports runner internal" bad
   printf 'import x from "@aws-sdk/client-kms";\n' > "$tmp/src/app/d.ts"; _case "src/app imports KMS client" bad
   printf 'import x from "@aws-sdk/client-kms";\n' > "$tmp/src/other.ts"; _case "KMS import outside the adapters" bad
