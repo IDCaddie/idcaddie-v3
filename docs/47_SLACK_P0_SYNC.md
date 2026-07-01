@@ -888,6 +888,79 @@ client-secret. Proof is by **IAM simulation + metadata only — never by reading
 - **Allowed AWS:** `sts get-caller-identity`, `secretsmanager describe-secret`, `iam simulate-principal-policy`.
   **Forbidden: `get-secret-value`** (never invoked). Fail-closed + opt-in + staging-only; missing secret → FAIL.
 
+### Operator runbook — provision the task role (persisted PR #213; IAM-simulation-verified)
+Exact, safe steps. **Never** `aws secretsmanager get-secret-value`, never read/print the secret value, never a secret on
+the command line, no real ECS run, no production touch. RISK-007 stays OPEN. (Values are your own account resources:
+account `833822972703` · region `ca-central-1` · KMS alias `alias/idcaddie-staging-connector-vault`.)
+
+**Step 0 — write two policy files (no secrets in either).** `trust.json` (Fargate task assume-role, scoped to the staging
+account — confused-deputy hardening):
+```json
+{ "Version": "2012-10-17", "Statement": [{ "Effect": "Allow",
+  "Principal": { "Service": "ecs-tasks.amazonaws.com" }, "Action": "sts:AssumeRole",
+  "Condition": { "StringEquals": { "aws:SourceAccount": "833822972703" },
+                 "ArnLike": { "aws:SourceArn": "arn:aws:ecs:ca-central-1:833822972703:*" } } }] }
+```
+`taskread-secret.json` — the **Secrets Manager task-read** grant (this is what `check-runner-task-read.sh` proves): a
+**single action on a single resource**, no `secretsmanager:*`, no `Resource "*"`, no write action, no other/decoy/production
+secret:
+```json
+{ "Version": "2012-10-17", "Statement": [{ "Sid": "ReadOnlyPinnedStagingSlackClientSecret", "Effect": "Allow",
+  "Action": "secretsmanager:GetSecretValue",
+  "Resource": "arn:aws:secretsmanager:ca-central-1:833822972703:secret:/idcaddie/staging/slack/oauth-client-secret-*" }] }
+```
+(The `-*` matches the SM random suffix. **Do not** add an explicit `Deny` on this secret's GetSecretValue — it would make
+the allow-proof read `explicitDeny` instead of `allowed`.)
+
+**Step 1 — create/identify the task role** (CLI under an **admin** profile; no secret on argv):
+`aws iam create-role --role-name idcaddie-staging-slack-taskread --assume-role-policy-document file://trust.json
+--description "Fargate task role: read-only the staging Slack OAuth client secret" --profile <admin> --region ca-central-1`
+— or Console: IAM → Roles → Create role → AWS service → **Elastic Container Service → Elastic Container Service Task** →
+name `idcaddie-staging-slack-taskread`. ARN: `arn:aws:iam::833822972703:role/idcaddie-staging-slack-taskread`.
+
+**Step 2 — attach the Secrets Manager task-read policy:**
+`aws iam put-role-policy --role-name idcaddie-staging-slack-taskread --policy-name taskread-getsecretvalue-pinned
+--policy-document file://taskread-secret.json --profile <admin>`.
+
+**Step 3 — KMS permissions (a SEPARATE inline statement from the Secrets Manager grant; NOT exercised by
+`check-runner-task-read.sh` — review by hand).** Keep the two purposes distinct and grant only what the task's actual work
+needs:
+- **`secretsmanager:GetSecretValue` (Step 2)** is the task-read of **only** the pinned staging SM secret — it is a
+  Secrets Manager permission, not a KMS one.
+- **`kms:Decrypt` — the customer-managed CMK decrypt path.** The pinned SM secret is encrypted with a **customer-managed
+  CMK** (the canonical KEK, alias `alias/idcaddie-staging-connector-vault`; PR #211 confirmed the match). `GetSecretValue`
+  returns plaintext **only** if the caller can `kms:Decrypt` with that CMK, so `kms:Decrypt` scoped to that key is required
+  to complete the task-read. (This same action also unwraps the connector-vault envelope DEK during ingest.)
+- **`kms:GenerateDataKey` — the ingest envelope-write only, NOT for reading Secrets Manager.** `GenerateDataKey` is **not**
+  needed to read from Secrets Manager. Grant it **only if the same one-shot runner task, immediately after the task-read,
+  calls `ingestClientSecret(...)` and must create the encrypted connector-vault envelope row** (wrapping a fresh DEK under
+  the KEK). A task that only reads (no ingest write in the same run) does **not** get `GenerateDataKey`.
+- **Scope + resolve at runtime:** resolve the concrete key ARN from the alias — **never hardcode a key UUID** —
+  `aws kms describe-key --key-id alias/idcaddie-staging-connector-vault --query KeyMetadata.Arn --output text --profile
+  <admin> --region ca-central-1` (read-only; the describe runs under the **admin** profile — the task/runner identity is
+  deliberately not granted `kms:DescribeKey`, doc 42 §91.4). Confirm the secret's CMK matches via `describe-secret
+  --query KmsKeyId`. Then attach a **separate** statement scoped to that key ARN only:
+  `{ "Effect": "Allow", "Action": ["kms:Decrypt"|"kms:Decrypt","kms:GenerateDataKey"], "Resource": "<RESOLVED_KEK_ARN>" }`
+  — read-only task → `["kms:Decrypt"]`; task that also ingests → add `kms:GenerateDataKey`.
+- **Hard limits:** **no** `kms:*`, **no** `Resource "*"`, **no** `kms:Encrypt`, **no** `kms:ReEncrypt*`, **no**
+  `kms:DescribeKey`; never the superseded key (doc 42 §91.2); web/request identity `idcaddie-staging-web` stays
+  `explicitDeny` on `kms:Decrypt` (doc 42 §91.5) — do not grant it here.
+
+**Step 4 — run the verifier** (a **read-only** profile that authenticates into account `833822972703` and is allowed
+`sts:GetCallerIdentity` + `secretsmanager:DescribeSecret` + `iam:SimulatePrincipalPolicy`, and does **not** need
+`GetSecretValue`):
+```
+ID_CADDIE_RUNNER_TASK_READ=1 AWS_PROFILE=<read-only> AWS_REGION=ca-central-1 \
+ID_CADDIE_RUNNER_TASK_READ_EXPECTED_ACCOUNT=833822972703 ID_CADDIE_RUNNER_TASK_READ_ENV=staging \
+RUNNER_TASK_READ_PROJECT_REF=ycdpzduxugdsffjqyoai \
+ID_CADDIE_RUNNER_TASK_READ_ROLE_ARN=arn:aws:iam::833822972703:role/idcaddie-staging-slack-taskread \
+bash scripts/check-runner-task-read.sh
+```
+`RUNNER_TASK_READ_PROJECT_REF=ycdpzduxugdsffjqyoai` is **required** — otherwise the script falls back to the gitignored
+`supabase/.temp/project-ref` (empty on a clean checkout) and the staging guard refuses. **Expect 6 `PASS` rows** (caller
+account · secret exists · ALLOWED on pinned · DENIED on decoy · DENIED on production-named · DENIED write) + "RISK-007
+still OPEN". Any deny returning `allowed` → the policy is too broad; fix and re-run. Then record the safe result below.
+
 ### Task-role readiness evidence · STATUS: PENDING (no operator run against a provisioned task role yet)
 Fill in **only** after the operator provisions the task role and runs the verifier. Redacted — no raw ARN / account / value.
 - ECS/Fargate task role provisioned + `ID_CADDIE_RUNNER_TASK_READ_ROLE_ARN` set to it: ☐ · date: ____
