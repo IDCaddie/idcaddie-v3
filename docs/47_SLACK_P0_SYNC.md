@@ -774,6 +774,53 @@ Recorded from the operator run. Safe, **redacted** — no access key id, no secr
 §5) · B2c-run runbook (doc 45) · reviewed `connector_runner_login` provisioning · real runner-backed
 `VaultProviderTokenSource`. **RISK-001/RISK-007 remain OPEN; cutover BLOCKED.**
 
+## PR 21 — Secrets Manager secret provisioning + metadata verification (Slack OAuth client secret)
+The **next** RISK-007 step: provision the staging Slack **OAuth client secret** reference in Secrets Manager and verify
+it by **metadata only**. The PR #204 preflight recorded this secret as **missing/NOT-YET-CREATED**; this PR adds the safe
+provisioning runbook + a metadata-only verifier. **The secret VALUE is never read, printed, logged, or committed; no
+`get-secret-value`; no OAuth; no real Slack token; no ECS task-read; no KMS decrypt of a real secret; no Postgres; no
+production; no IAM/KMS policy change. RISK-007 stays OPEN.**
+
+### Operator provisioning runbook (§ doc 46 §12.4 — the only human-touch point)
+- **Secret name:** `/idcaddie/staging/slack/oauth-client-secret` (`ca-central-1`, staging account). **Never** a production
+  secret. The value is the Slack **OAuth client secret only** — never an access/refresh token.
+- **Enter the value the SAFE way:** the **AWS Console** secret-value field, **or** an approved no-echo CLI method that
+  reads from **stdin or a secure temp file** — **never** a CLI argv (`--secret-string '<literal>'`), **never** shell
+  history, **never** a screenshot, **never** pasted into chat / docs / PR / GitHub.
+  - Console (recommended): Secrets Manager → Store a new secret → *Other type* → paste the value into the value field.
+  - CLI (only if you must), stdin — the value never appears on the command line or in history:
+    `printf %s "$SLACK_OAUTH_CLIENT_SECRET" | aws secretsmanager create-secret --name /idcaddie/staging/slack/oauth-client-secret --secret-string file:///dev/stdin`
+    (set `SLACK_OAUTH_CLIENT_SECRET` via a no-echo `read -rs`, then `unset` it; do **not** `export` it on the command line.)
+  - CLI (secure temp file), if stdin is impractical: `f=$(mktemp)`; `chmod 600 "$f"`; paste the value into `"$f"` with an
+    editor; `aws secretsmanager create-secret --name … --secret-string "file://$f"`; then **`shred -u "$f"`** (fallback
+    `rm -f "$f"`) and verify it is gone. Never leave the plaintext on disk.
+- **Do NOT read the value back** (`get-secret-value` is forbidden in the setup shell). Record only **metadata**: that the
+  secret exists, the ARN **redacted**, version count, tag keys — never the value.
+
+### Metadata verification (read-only, no value read)
+`scripts/check-runner-secret-metadata.sh` verifies **metadata only** via `aws secretsmanager describe-secret` (which does
+**not** return the value): the secret **exists** with the expected **name**, is in the expected **region + account**, its
+**KMS association** (default vs a supplied expected key), version count, and tag keys. **Allowed AWS:** `sts
+get-caller-identity`, `secretsmanager describe-secret`. **Forbidden:** `secretsmanager get-secret-value` (and all writes /
+KMS crypto / ECS / Postgres). It is fail-closed + opt-in and **prints no secret value, no raw ARN, no KMS id**:
+```
+ID_CADDIE_RUNNER_SECRET_METADATA=1 AWS_PROFILE=<read-only> AWS_REGION=ca-central-1 \
+ID_CADDIE_RUNNER_SECRET_METADATA_EXPECTED_ACCOUNT=<staging account, see doc 42 §91> \
+ID_CADDIE_RUNNER_SECRET_METADATA_ENV=staging bash scripts/check-runner-secret-metadata.sh
+```
+It **refuses** without opt-in / profile / expected-account / env, on wrong region/account, on the production project-ref,
+and if the secret is **missing** (NOT-YET-CREATED → provision it first).
+
+### Provisioning evidence · STATUS: PENDING (no operator provisioning recorded yet)
+- secret `/idcaddie/staging/slack/oauth-client-secret` created in Secrets Manager (Console/stdin, value never on argv): ☐ · date: ____
+- `check-runner-secret-metadata.sh` → **PASS** (exists · name · region/account · KMS association) ☐ · **no value read**
+- no secret value / ARN / KMS id recorded. **RISK-007 remains OPEN** — provisioning + metadata verification is a
+  prerequisite, not closure; Phase C BLOCKED.
+
+**What remains after the secret is provisioned + metadata-verified:** ECS/Fargate task-read (Model B, doc 46 §12.5) ·
+first-real-token staging dry-run (doc 44 §5) · B2c-run runbook (doc 45) · reviewed `connector_runner_login` provisioning ·
+real runner-backed `VaultProviderTokenSource`. **RISK-001/RISK-007 remain OPEN; cutover BLOCKED.**
+
 ### Remaining PRs after PR 4
 - **PR 5** — UI display of synced Slack data. **PR 6** — manual server-only run trigger. **Later** — scheduler / run
   lifecycle. **Later** — OAuth/vault/runner production credential path (RISK-007). The concrete Supabase store impl for
