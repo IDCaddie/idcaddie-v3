@@ -855,14 +855,15 @@ OPEN.**
   the runner self-contained-imports check now covers `task-secret-read.ts`; the harness has a static test (allowlist the
   3 read-only actions, forbid `get-secret-value` invocation + value-read/writes/KMS/deploy) + a behavioral test proving
   at runtime that `get-secret-value` is never invoked; selftests wired into CI.
-- **Live task-read result: PENDING.** The **secret is now provisioned + metadata-verified** (PR #211); the **task role**
-  and the **live task-read** remain PENDING (the task-role IAM simulate check + the real separate-repo runner are not yet
-  done). The agent and CI never run the live path.
+- **Live task-read result: PENDING.** The **secret is provisioned + metadata-verified** (PR #211) and the **task-role IAM
+  readiness passed** (the 4 simulate proofs, PR #214). The **live task-read** (a real ECS task issuing `GetSecretValue`)
+  remains PENDING (the real separate-repo runner is not yet done). The agent and CI never run the live path.
 
-**What remains after the task-read skeleton:** operator provisions the task role · task-read readiness passes ·
-the real (separate-repo) runner wires the live task-read → `ingestClientSecret` · first-real-token staging dry-run (doc 44
-§5) · B2c-run runbook (doc 45) · reviewed `connector_runner_login` provisioning · real runner-backed
-`VaultProviderTokenSource`. **RISK-001/RISK-007 remain OPEN; cutover BLOCKED.**
+**What remains after the task-read skeleton:** ~~operator provisions the task role~~ (done, PR #213 runbook) ·
+~~task-read readiness passes~~ (done, PR #214 — IAM readiness PASS) · the real (separate-repo) runner wires the **live**
+task-read → `ingestClientSecret` · first-real-token staging dry-run (doc 44 §5) · B2c-run runbook (doc 45) · reviewed
+`connector_runner_login` provisioning · real runner-backed `VaultProviderTokenSource`. **RISK-001/RISK-007 remain OPEN;
+cutover BLOCKED.**
 
 ## PR 24 — ECS/Fargate task-role provisioning + readiness (IAM simulation only)
 The operator runbook + extended verifier for the **task role** that will eventually read the pinned staging Slack OAuth
@@ -961,13 +962,20 @@ bash scripts/check-runner-task-read.sh
 account · secret exists · ALLOWED on pinned · DENIED on decoy · DENIED on production-named · DENIED write) + "RISK-007
 still OPEN". Any deny returning `allowed` → the policy is too broad; fix and re-run. Then record the safe result below.
 
-### Task-role readiness evidence · STATUS: PENDING (no operator run against a provisioned task role yet)
-Fill in **only** after the operator provisions the task role and runs the verifier. Redacted — no raw ARN / account / value.
-- ECS/Fargate task role provisioned + `ID_CADDIE_RUNNER_TASK_READ_ROLE_ARN` set to it: ☐ · date: ____
-- simulate: task role **ALLOWED** GetSecretValue on **only** the pinned secret ☐
-- simulate: **DENIED** on a decoy staging secret ☐ · **DENIED** on a production-named secret ☐ · **DENIED** a write action (no broad `secretsmanager:*`) ☐
-- `check-runner-task-read.sh` → **PASS** (all four) ☐ · **no value read; no `get-secret-value`**
-- **RISK-007 remains OPEN** — task-role readiness is a prerequisite, not closure; Phase C BLOCKED.
+### Task-role IAM readiness evidence · RESULT: PASS (2026-07-01, recorded in PR #214)
+Recorded from the operator run of `scripts/check-runner-task-read.sh` against the provisioned task role. Safe, **redacted**
+— no raw ARN, no KMS key id / full KMS ARN, no account beyond the already-documented staging account, no secret value.
+- `check-runner-task-read.sh` → **PASS** (all four proofs) — **IAM simulation only; no `get-secret-value`; no secret value
+  read; no action performed**.
+- caller account matched the expected staging account; secret exists (**metadata-only** `describe-secret`; value never read).
+- KMS alias matched the secret's customer-managed CMK (`alias/idcaddie-staging-connector-vault`) — **PASS** (from the
+  PR #211 metadata verification; recorded here for completeness — not re-derived by this verifier).
+- simulate: task role **ALLOWED** `secretsmanager:GetSecretValue` on **only** the pinned staging secret — **PASS**.
+- simulate: **DENIED** `GetSecretValue` on a decoy staging secret — **PASS**.
+- simulate: **DENIED** `GetSecretValue` on a production-NAMED same-account secret — **PASS** (name-scoped).
+- simulate: **DENIED** `secretsmanager:PutSecretValue` — **PASS** (no broad `secretsmanager:*`; read-only).
+- **RISK-007 remains OPEN** — task-role IAM readiness is a prerequisite, not closure; Phase C BLOCKED. The **live**
+  task-read (a real ECS task issuing `GetSecretValue`) remains **PENDING**.
 
 **What remains after task-role readiness:** the real (separate-repo) runner wires the live task-read → `ingestClientSecret`
 · first-real-token staging dry-run (doc 44 §5) · B2c-run runbook (doc 45) · reviewed `connector_runner_login` provisioning
