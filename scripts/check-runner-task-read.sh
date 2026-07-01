@@ -6,15 +6,19 @@
 # It NEVER calls `get-secret-value`, NEVER reads/prints the secret value, makes NO KMS crypto / ECS / Postgres call, and
 # changes NO state. Output is a redacted PASS/FAIL/INFO checklist. RISK-007 stays OPEN.
 #
-# Allowed AWS (all read-only): sts get-caller-identity, secretsmanager describe-secret, iam simulate-principal-policy.
-# FORBIDDEN: aws secretsmanager get-secret-value (task-read reads a real value — that is the runner's job at run time,
-# never this readiness check, never CI, never the agent).
+# It proves four IAM-simulation facts (doc 46 §12.7/§12.8): the task role is ALLOWED GetSecretValue on ONLY the pinned
+# secret, DENIED on a decoy staging secret, DENIED on a production-named secret (no production access), and DENIED a
+# write action (no broad secretsmanager:*; read-only). Allowed AWS (all read-only): sts get-caller-identity,
+# secretsmanager describe-secret, iam simulate-principal-policy. FORBIDDEN: aws secretsmanager get-secret-value
+# (task-read reads a real value — that is the runner's job at run time, never this readiness check, never CI/agent).
 #
-# Operator run (after the secret + task role exist — provisioning is otherwise PENDING):
+# Operator run (after the secret + task role exist — task-role readiness is otherwise PENDING). The principal defaults to
+# the current pinned identity (IAM user idcaddie-staging-runner); pass ID_CADDIE_RUNNER_TASK_READ_ROLE_ARN with the real
+# ECS/Fargate task-role ARN (user/ or role/) once it is provisioned:
 #   ID_CADDIE_RUNNER_TASK_READ=1 AWS_PROFILE=<read-only> AWS_REGION=ca-central-1 \
 #   ID_CADDIE_RUNNER_TASK_READ_EXPECTED_ACCOUNT=<staging account, see doc 42 §91> \
 #   ID_CADDIE_RUNNER_TASK_READ_ENV=staging \
-#   [ID_CADDIE_RUNNER_TASK_READ_ROLE=idcaddie-staging-runner] \
+#   [ID_CADDIE_RUNNER_TASK_READ_ROLE_ARN=arn:aws:iam::<account>:role/<task-role>] \
 #   bash scripts/check-runner-task-read.sh
 # Self-test (no AWS):  bash scripts/check-runner-task-read.sh selftest
 set -euo pipefail
@@ -49,7 +53,7 @@ check_guards() {
 run_checks() {
   case "$-" in *x*) echo "TASK-READ CHECK REFUSED: disable shell xtrace (set +x)"; return 1;; esac
   local region="$EXPECT_REGION" expect_acct="$ID_CADDIE_RUNNER_TASK_READ_EXPECTED_ACCOUNT" rc=0
-  local role="${ID_CADDIE_RUNNER_TASK_READ_ROLE:-$DEFAULT_TASK_ROLE}"
+  local role="$DEFAULT_TASK_ROLE"  # default principal name; the operator overrides with a full ARN (see below)
   _aws() { aws --profile "$AWS_PROFILE" --region "$region" "$@"; }
   echo "== task-read READINESS (READ-ONLY describe-secret + simulate-principal-policy; NO get-secret-value; value never read) =="
 
@@ -64,22 +68,39 @@ run_checks() {
   fi
   _row PASS "secret exists (metadata only; value NEVER read)"
 
-  # a decoy ARN in the SAME account/region that the task role must NOT be allowed to read
+  # The principal under test. Default is the current pinned staging identity (IAM user idcaddie-staging-runner, doc 42
+  # §91.3 / doc 46 §12.1); the operator OVERRIDES with the real ECS/Fargate task role via ID_CADDIE_RUNNER_TASK_READ_ROLE_ARN
+  # (a full user/ OR role/ ARN) once it is provisioned. The raw ARN is used only in the simulation, never printed.
+  local role_arn="${ID_CADDIE_RUNNER_TASK_READ_ROLE_ARN:-arn:aws:iam::${expect_acct}:user/${role}}"
+  # decoy secrets (simulation-only resource ARNs; no real production/decoy secret is touched or created)
   local decoy_arn="arn:aws:secretsmanager:${region}:${expect_acct}:secret:/idcaddie/staging/slack/decoy-not-authorized"
-  local role_arn="arn:aws:iam::${expect_acct}:user/${role}"
-  _sim() { _aws iam simulate-principal-policy --policy-source-arn "$role_arn" --action-names secretsmanager:GetSecretValue \
-      --resource-arns "$1" --query 'EvaluationResults[0].EvalDecision' --output text 2>/dev/null || true; }
+  local prod_arn="arn:aws:secretsmanager:${region}:${expect_acct}:secret:/idcaddie/production/slack/oauth-client-secret"
+  # _sim <action> <resource-arn> -> the EvalDecision string only. simulate-principal-policy EVALUATES the policy; it does
+  # NOT perform the action (no read, no write, no production touch).
+  _sim() { _aws iam simulate-principal-policy --policy-source-arn "$role_arn" --action-names "$1" \
+      --resource-arns "$2" --query 'EvaluationResults[0].EvalDecision' --output text 2>/dev/null || true; }
+  # a deny proof PASSes ONLY on a recognized denial decision; empty/unknown (e.g. a transient simulate API error) FAILs
+  # (fail-closed — a failed simulation must never read as a denial).
+  _denied() { case "$1" in implicitDeny|explicitDeny) return 0;; *) return 1;; esac; }
+  _row INFO "principal under test: $([ -n "${ID_CADDIE_RUNNER_TASK_READ_ROLE_ARN:-}" ] && echo 'operator-supplied task role ARN' || echo "default pinned identity ($role)")"
 
-  # §12.8: the task role is ALLOWED GetSecretValue on ONLY the pinned ARN...
-  local d_allow; d_allow="$(_sim "$arn")"
+  # (1) §12.7/§12.8: the task role is ALLOWED GetSecretValue on ONLY the pinned ARN...
+  local d_allow; d_allow="$(_sim secretsmanager:GetSecretValue "$arn")"
   [ "$d_allow" = "allowed" ] && _row PASS "task role is ALLOWED secretsmanager:GetSecretValue on the pinned secret" || { _row FAIL "task role GetSecretValue on the pinned secret = ${d_allow:-unknown} (expected allowed)"; rc=1; }
-  # ...and DENIED on any other secret (least-privilege).
-  local d_deny; d_deny="$(_sim "$decoy_arn")"
-  [ "$d_deny" != "allowed" ] && _row PASS "task role is NOT allowed GetSecretValue on a decoy secret ($d_deny)" || { _row FAIL "task role can read a decoy secret — least-privilege violated"; rc=1; }
-  _row INFO "GetSecretValue verified by IAM SIMULATION only — no secret value was read"
+  # (2) ...and DENIED on any other staging secret (least-privilege — not a broad resource grant).
+  local d_deny; d_deny="$(_sim secretsmanager:GetSecretValue "$decoy_arn")"
+  _denied "$d_deny" && _row PASS "task role is DENIED GetSecretValue on a decoy staging secret ($d_deny)" || { _row FAIL "decoy-secret decision = ${d_deny:-unknown} (expected a deny) — least-privilege not verified"; rc=1; }
+  # (3) no production-NAMED secret access (name-scoped; real cross-account production isolation is the AWS account
+  #     boundary, not this policy). Simulation only — no production resource is touched or created.
+  local d_prod; d_prod="$(_sim secretsmanager:GetSecretValue "$prod_arn")"
+  _denied "$d_prod" && _row PASS "task role is DENIED GetSecretValue on a production-NAMED same-account secret ($d_prod; name-scoped, not account isolation)" || { _row FAIL "production-named-secret decision = ${d_prod:-unknown} (expected a deny)"; rc=1; }
+  # (4) no broad secretsmanager:* — a WRITE action on the pinned secret must be denied (read-only least-privilege).
+  local d_write; d_write="$(_sim secretsmanager:PutSecretValue "$arn")"
+  _denied "$d_write" && _row PASS "task role is DENIED a write action (secretsmanager:PutSecretValue) — no broad secretsmanager:* ($d_write)" || { _row FAIL "write-action decision = ${d_write:-unknown} (expected a deny) — broad secretsmanager:* / not read-only"; rc=1; }
+  _row INFO "all four checks are IAM SIMULATION only — no secret value was read, no action was performed"
 
-  if [ "$rc" -eq 0 ]; then echo "== PASS: task-read IAM readiness verified (GetSecretValue allowed on only the pinned secret) — value NEVER read. RISK-007 still OPEN =="
-  else echo "== FAIL: task-read readiness did not match — see rows above =="; fi
+  if [ "$rc" -eq 0 ]; then echo "== PASS: task role IAM readiness verified (GetSecretValue on only the pinned secret; denied on decoy / production-named / write) — value NEVER read. RISK-007 still OPEN =="
+  else echo "== FAIL: task role readiness did not match — see rows above =="; fi
   return $rc
 }
 

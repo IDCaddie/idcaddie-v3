@@ -10,8 +10,8 @@ const code = CODE_LINES.join("\n");
 
 // the ONLY aws actions allowed, all read-only: identity + metadata + IAM simulation. NO get-secret-value.
 const ALLOWED = new Set(["sts get-caller-identity", "secretsmanager describe-secret", "iam simulate-principal-policy"]);
-// captured identifiers (ARN, KMS-less here) must never reach a stdout printer
-const SECRET_VARS = ["arn", "role_arn", "decoy_arn", "live_acct"];
+// captured identifiers (resource / principal ARNs) must never reach a stdout printer
+const SECRET_VARS = ["arn", "role_arn", "decoy_arn", "prod_arn", "live_acct"];
 
 describe("runner task-read readiness — operator-only, metadata+simulate only, fail-closed (static analysis)", () => {
   it("invokes only sts + secretsmanager describe-secret + iam simulate-principal-policy (deny-by-default; NO get-secret-value)", () => {

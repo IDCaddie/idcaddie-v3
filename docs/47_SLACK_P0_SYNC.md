@@ -864,6 +864,42 @@ the real (separate-repo) runner wires the live task-read → `ingestClientSecret
 §5) · B2c-run runbook (doc 45) · reviewed `connector_runner_login` provisioning · real runner-backed
 `VaultProviderTokenSource`. **RISK-001/RISK-007 remain OPEN; cutover BLOCKED.**
 
+## PR 24 — ECS/Fargate task-role provisioning + readiness (IAM simulation only)
+The operator runbook + extended verifier for the **task role** that will eventually read the pinned staging Slack OAuth
+client-secret. Proof is by **IAM simulation + metadata only — never by reading the secret**. **No real ECS task run; no
+`get-secret-value`; no secret value read/printed; no OAuth; no production touch; no IAM/KMS policy change by the verifier;
+`VaultProviderTokenSource` stays fail-closed. RISK-007 stays OPEN.**
+- **Role name / identifier strategy:** the principal under test **defaults** to the current pinned staging identity — IAM
+  **user** `idcaddie-staging-runner` (doc 42 §91.3; doc 46 §12.1 "task IAM role maps to idcaddie-staging-runner"). The
+  **specific ECS/Fargate task-role name is an unresolved infra decision** (§11.3), so the verifier accepts the real
+  task-role ARN via **`ID_CADDIE_RUNNER_TASK_READ_ROLE_ARN`** (a full `user/` or `role/` ARN) once it is provisioned. The
+  verifier prints only "default pinned identity" / "operator-supplied task role ARN" — **never the raw ARN**.
+- **The four proofs (`scripts/check-runner-task-read.sh`, `simulate-principal-policy`, doc 46 §12.7/§12.8):**
+  1. **ALLOWED** `secretsmanager:GetSecretValue` on **only** the pinned secret;
+  2. **DENIED** on a decoy staging secret (not a broad resource grant);
+  3. **DENIED** on a **production-NAMED same-account** secret — **name-scoped** (real cross-account production isolation
+     is the AWS account boundary, not this policy); simulation only, production untouched;
+  4. **DENIED** a write action (`secretsmanager:PutSecretValue`) — **no broad `secretsmanager:*`**, read-only.
+- **Provisioning guidance (operator):** attach a least-privilege policy to the task role — `secretsmanager:GetSecretValue`
+  on **only** `…:secret:/idcaddie/staging/slack/oauth-client-secret-*`; `kms:Decrypt` on the SM secret's key + only
+  `kms:GenerateDataKey`/`kms:Decrypt` on the canonical KEK (by **alias** `alias/idcaddie-staging-connector-vault`); **no**
+  `secretsmanager:*`, **no** production secret, **no** broad KMS (doc 46 §12.7). Then run the verifier and record the
+  four PASSes below.
+- **Allowed AWS:** `sts get-caller-identity`, `secretsmanager describe-secret`, `iam simulate-principal-policy`.
+  **Forbidden: `get-secret-value`** (never invoked). Fail-closed + opt-in + staging-only; missing secret → FAIL.
+
+### Task-role readiness evidence · STATUS: PENDING (no operator run against a provisioned task role yet)
+Fill in **only** after the operator provisions the task role and runs the verifier. Redacted — no raw ARN / account / value.
+- ECS/Fargate task role provisioned + `ID_CADDIE_RUNNER_TASK_READ_ROLE_ARN` set to it: ☐ · date: ____
+- simulate: task role **ALLOWED** GetSecretValue on **only** the pinned secret ☐
+- simulate: **DENIED** on a decoy staging secret ☐ · **DENIED** on a production-named secret ☐ · **DENIED** a write action (no broad `secretsmanager:*`) ☐
+- `check-runner-task-read.sh` → **PASS** (all four) ☐ · **no value read; no `get-secret-value`**
+- **RISK-007 remains OPEN** — task-role readiness is a prerequisite, not closure; Phase C BLOCKED.
+
+**What remains after task-role readiness:** the real (separate-repo) runner wires the live task-read → `ingestClientSecret`
+· first-real-token staging dry-run (doc 44 §5) · B2c-run runbook (doc 45) · reviewed `connector_runner_login` provisioning
+· real runner-backed `VaultProviderTokenSource`. **RISK-001/RISK-007 remain OPEN; cutover BLOCKED.**
+
 ### Remaining PRs after PR 4
 - **PR 5** — UI display of synced Slack data. **PR 6** — manual server-only run trigger. **Later** — scheduler / run
   lifecycle. **Later** — OAuth/vault/runner production credential path (RISK-007). The concrete Supabase store impl for

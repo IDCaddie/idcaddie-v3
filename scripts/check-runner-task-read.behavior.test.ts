@@ -25,21 +25,25 @@ if [ "$1" = secretsmanager ] && [ "$2" = describe-secret ]; then
   exit 0
 fi
 if [ "$1" = iam ] && [ "$2" = simulate-principal-policy ]; then
+  if [ "\${KR_SCENARIO:-}" = simerror ]; then echo ""; exit 0; fi   # a transient simulate API failure → empty decision
+  # dispatch on the resource/action in "$*": production-named / decoy / write (PutSecretValue) / else = GetSecretValue on pinned
   case "$*" in
-    *decoy*) [ "\${KR_SCENARIO:-}" = leaky ] && echo allowed || echo implicitDeny ;;
-    *) [ "\${KR_SCENARIO:-}" = notallowed ] && echo implicitDeny || echo allowed ;;
+    *production*)      [ "\${KR_SCENARIO:-}" = prodleaky ]  && echo allowed || echo implicitDeny ;;
+    *decoy*)           [ "\${KR_SCENARIO:-}" = leaky ]      && echo allowed || echo implicitDeny ;;
+    *PutSecretValue*)  [ "\${KR_SCENARIO:-}" = writeleaky ] && echo allowed || echo implicitDeny ;;
+    *)                 [ "\${KR_SCENARIO:-}" = notallowed ] && echo implicitDeny || echo allowed ;;
   esac
   exit 0
 fi
 echo "unexpected aws call: $*" >&2; exit 42
 `;
 
-function run(scenario: string): { out: string; code: number } {
+function run(scenario: string, extraEnv: Record<string, string> = {}): { out: string; code: number } {
   const env = {
     ...process.env, PATH: `${binDir}:${process.env.PATH}`, KR_SCENARIO: scenario, KR_CALLLOG: callLog,
     ID_CADDIE_RUNNER_TASK_READ: "1", AWS_PROFILE: "p", AWS_REGION: "ca-central-1",
     ID_CADDIE_RUNNER_TASK_READ_EXPECTED_ACCOUNT: "000000000000", ID_CADDIE_RUNNER_TASK_READ_ENV: "staging",
-    RUNNER_TASK_READ_PROJECT_REF: "ycdpzduxugdsffjqyoai",
+    RUNNER_TASK_READ_PROJECT_REF: "ycdpzduxugdsffjqyoai", ...extraEnv,
   };
   try {
     return { out: execFileSync("bash", [SCRIPT], { env, encoding: "utf8", cwd: REPO }), code: 0 };
@@ -58,12 +62,14 @@ describe("check-runner-task-read.sh — behavioral (stubbed aws, metadata+simula
   });
   afterAll(() => fs.rmSync(binDir, { recursive: true, force: true }));
 
-  it("secret exists + task role allowed on pinned / denied on decoy → PASS, get-secret-value NEVER invoked", () => {
+  it("all four checks pass (allow pinned / deny decoy / deny production / deny write) → PASS, get-secret-value NEVER invoked", () => {
     fs.writeFileSync(callLog, "");
     const { out, code } = run("ready");
     expect(code).toBe(0);
     expect(out).toContain("ALLOWED secretsmanager:GetSecretValue on the pinned secret");
-    expect(out).toContain("NOT allowed GetSecretValue on a decoy");
+    expect(out).toContain("DENIED GetSecretValue on a decoy staging secret");
+    expect(out).toContain("DENIED GetSecretValue on a production-NAMED same-account secret");
+    expect(out).toContain("no broad secretsmanager:*");
     expect(out).toContain("value NEVER read");
     const calls = fs.readFileSync(callLog, "utf8");
     expect(calls).toMatch(/iam simulate-principal-policy/);
@@ -82,10 +88,35 @@ describe("check-runner-task-read.sh — behavioral (stubbed aws, metadata+simula
     expect(out).toContain("expected allowed");
   });
 
-  it("task role allowed on a decoy (least-privilege violated) → FAIL", () => {
+  it("task role allowed on a decoy staging secret (least-privilege violated) → FAIL", () => {
     const { out, code } = run("leaky");
     expect(code).toBe(1);
-    expect(out).toContain("least-privilege violated");
+    expect(out).toContain("least-privilege not verified");
+  });
+
+  it("task role allowed on a production-named secret → FAIL", () => {
+    const { out, code } = run("prodleaky");
+    expect(code).toBe(1);
+    expect(out).toContain("production-named-secret decision");
+  });
+
+  it("a deny check with an empty/failed simulate result FAILs (not a false PASS)", () => {
+    const { out, code } = run("simerror"); // stub returns empty for a simulate call
+    expect(code).toBe(1);
+    expect(out).toMatch(/expected a deny|expected allowed/); // fail-closed, not reported as denied
+  });
+
+  it("task role allowed a write action → FAIL (broad secretsmanager:* / not read-only)", () => {
+    const { out, code } = run("writeleaky");
+    expect(code).toBe(1);
+    expect(out).toContain("broad secretsmanager:*");
+  });
+
+  it("operator-supplied task role ARN is used and labelled without printing the raw ARN", () => {
+    const { out, code } = run("ready", { ID_CADDIE_RUNNER_TASK_READ_ROLE_ARN: "arn:aws:iam::000000000000:role/idcaddie-staging-runner-task" });
+    expect(code).toBe(0);
+    expect(out).toContain("operator-supplied task role ARN");
+    expect(out).not.toMatch(/arn:aws:iam/); // the raw role ARN is never printed
   });
 
   it("never prints a raw ARN / account / secret value", () => {
