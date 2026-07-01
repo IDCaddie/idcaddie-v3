@@ -51,6 +51,9 @@ jobs:
       - name: Secrets Manager metadata guards (self-test only — no AWS, no get-secret-value)
         # exercises the fail-closed guard refusals; CI never runs the live describe-secret (no AWS creds, opt-in unset)
         run: bash scripts/check-runner-secret-metadata.sh selftest
+      - name: Task-read readiness guards (self-test only — no AWS, no get-secret-value)
+        # exercises the fail-closed guard refusals; CI never runs the live describe-secret/simulate (no AWS creds, opt-in unset)
+        run: bash scripts/check-runner-task-read.sh selftest
       - name: Docs-drift gate (must not fail open)
         env:
           REQUIRE_BASE: "1"

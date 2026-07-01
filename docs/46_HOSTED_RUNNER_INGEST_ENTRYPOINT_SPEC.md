@@ -385,3 +385,19 @@ allowlisted actions and forbids `get-secret-value`; a vitest behavioral test pro
 never invoked). **Live provisioning result is PENDING** (the operator has not yet created the secret). This is the
 provisioning + metadata-verification prerequisite; the ECS/Fargate **task-read** (§12.5) is a later step. RISK-001/
 RISK-007 remain **OPEN**; Phase C **BLOCKED**.
+
+## 20. PR #210 — ECS/Fargate task-read SKELETON (typed, fail-closed) · 2026-07-01
+PR #210 adds the runner-side **task-read seam** for the future Model B task-read (§12.5): `runner/connector-runner/src/
+task-secret-read.ts` — a typed, self-contained (no app-`src/` import), **AWS-SDK-free** fail-closed skeleton.
+`TaskSecretReader.read(request, consume)` takes a **non-secret reference** request; the result carries **no value**
+(only ok/reason/provider + the non-secret secretRef). **Leak-proof by construction:** the future real reader delivers
+the plaintext ONLY via `consume(plaintext)` in-scope (→ `ingestClientSecret`), never a returned field. `GetSecretValue`
+appears only in COMMENTS; nothing is imported/invoked. `createDisabledTaskSecretReader().read()` ALWAYS returns
+`{ok:false, reason:"task_read_disabled"}` and NEVER calls `consume` (never reads). The app runtime stays
+Secrets-Manager-free — `scripts/check-app-runtime-imports.sh` now forbids the `GetSecretValue`/`get-secret-value` API
+name under `src/` too, confining task-read to the runner boundary. An operator-run readiness harness
+(`scripts/check-runner-task-read.sh`) proves — by `describe-secret` + `simulate-principal-policy` ONLY, never
+`get-secret-value` (§12.8) — that the task role is allowed GetSecretValue on only the pinned ARN and denied elsewhere.
+The agent and CI never run the live path (CI runs only the guard self-tests; static + behavioral tests prove
+`get-secret-value` is never invoked). **Live task-read result is PENDING** (the secret + task role are not yet
+provisioned). RISK-001/RISK-007 remain **OPEN**; Phase C **BLOCKED**.
