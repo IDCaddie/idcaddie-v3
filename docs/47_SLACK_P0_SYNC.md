@@ -811,11 +811,18 @@ ID_CADDIE_RUNNER_SECRET_METADATA_ENV=staging bash scripts/check-runner-secret-me
 It **refuses** without opt-in / profile / expected-account / env, on wrong region/account, on the production project-ref,
 and if the secret is **missing** (NOT-YET-CREATED → provision it first).
 
-### Provisioning evidence · STATUS: PENDING (no operator provisioning recorded yet)
-- secret `/idcaddie/staging/slack/oauth-client-secret` created in Secrets Manager (Console/stdin, value never on argv): ☐ · date: ____
-- `check-runner-secret-metadata.sh` → **PASS** (exists · name · region/account · KMS association) ☐ · **no value read**
-- no secret value / ARN / KMS id recorded. **RISK-007 remains OPEN** — provisioning + metadata verification is a
-  prerequisite, not closure; Phase C BLOCKED.
+### Provisioning evidence · RESULT: secret provisioned + metadata-verified (2026-07-01, recorded in PR #211)
+Recorded from the operator run of `check-runner-secret-metadata.sh`. Safe, **redacted** — no secret value, no KMS key id,
+no full KMS ARN, no access key id (only the already-documented staging account / region / secret name / KMS alias).
+- secret **exists** at `/idcaddie/staging/slack/oauth-client-secret` (created in Secrets Manager; value entered via the
+  safe path, never on argv) — **PASS**.
+- account / region **verified**: `833822972703` / `ca-central-1` — **PASS**.
+- **customer-managed KMS association present** (not the AWS-managed default key) — **PASS**.
+- KMS **alias target matched** `alias/idcaddie-staging-connector-vault` — **PASS** (matched by alias; the resolved key id
+  / ARN is **not** recorded here).
+- **1 version** present; **no tags**.
+- the secret **value was never read**; **no `get-secret-value`** was used (metadata-only `describe-secret`).
+- **RISK-007 remains OPEN** — provisioning + metadata verification is a prerequisite, not closure; Phase C BLOCKED.
 
 **What remains after the secret is provisioned + metadata-verified:** ECS/Fargate task-read (Model B, doc 46 §12.5) ·
 first-real-token staging dry-run (doc 44 §5) · B2c-run runbook (doc 45) · reviewed `connector_runner_login` provisioning ·
@@ -848,10 +855,11 @@ OPEN.**
   the runner self-contained-imports check now covers `task-secret-read.ts`; the harness has a static test (allowlist the
   3 read-only actions, forbid `get-secret-value` invocation + value-read/writes/KMS/deploy) + a behavioral test proving
   at runtime that `get-secret-value` is never invoked; selftests wired into CI.
-- **Live task-read result: PENDING** (the secret + task role are not yet provisioned — provisioning is PENDING from
-  PR #209). The agent and CI never run the live path.
+- **Live task-read result: PENDING.** The **secret is now provisioned + metadata-verified** (PR #211); the **task role**
+  and the **live task-read** remain PENDING (the task-role IAM simulate check + the real separate-repo runner are not yet
+  done). The agent and CI never run the live path.
 
-**What remains after the task-read skeleton:** operator provisions the secret + task role · task-read readiness passes ·
+**What remains after the task-read skeleton:** operator provisions the task role · task-read readiness passes ·
 the real (separate-repo) runner wires the live task-read → `ingestClientSecret` · first-real-token staging dry-run (doc 44
 §5) · B2c-run runbook (doc 45) · reviewed `connector_runner_login` provisioning · real runner-backed
 `VaultProviderTokenSource`. **RISK-001/RISK-007 remain OPEN; cutover BLOCKED.**
