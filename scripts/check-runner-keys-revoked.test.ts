@@ -8,8 +8,9 @@ const SRC = fs.readFileSync(path.resolve(__dirname, "check-runner-keys-revoked.s
 const CODE_LINES = SRC.split("\n").filter((l) => !/^\s*#/.test(l));
 const code = CODE_LINES.join("\n");
 
-// the ONLY aws action allowed: a read-only identity probe (expected to FAIL on a dead key). No mutation, no crypto.
-const ALLOWED = new Set(["sts get-caller-identity"]);
+// the ONLY aws actions allowed, both read-only: a live identity probe (expected to FAIL on a revoked key) and the
+// LOCAL profile-name enumeration (reads ~/.aws only — no network, no secrets). No mutation, no crypto.
+const ALLOWED = new Set(["sts get-caller-identity", "configure list-profiles"]);
 // the captured sts output may contain an ARN on an (unexpected) success — must never reach an output statement
 const SECRET_VARS = ["sts_out"];
 
@@ -42,6 +43,15 @@ describe("runner temp-key revocation — operator-only, read-only, fail-closed (
     const classes = (m![1]).split("|");
     expect(classes.sort()).toEqual(["InvalidClientTokenId", "UnrecognizedClientException"]);
     for (const live of ["AccessDenied", "SignatureDoesNotMatch", "ExpiredToken"]) expect(m![1]).not.toContain(live);
+  });
+
+  it("supports the two valid states — live dead-key probe AND local_profiles_removed (via `aws configure list-profiles`)", () => {
+    expect(code, "must enumerate local profiles read-only").toContain("aws configure list-profiles");
+    expect(code, "STATE 2 marker for the removed-profiles case").toContain("local_profiles_removed");
+    // the local-removed state must NOT claim AWS-side deletion is proven by this run (honest framing)
+    expect(code).toMatch(/local profile REMOVED[^\n]*NOT proven or confirmed by this run/);
+    // still-live guard preserved: a present profile that succeeds sts is FAIL (STILL WORKS), never PASS
+    expect(code).toMatch(/STILL WORKS/);
   });
 
   it("never dumps raw JSON and never prints the captured sts output (ARN/account/key material)", () => {
