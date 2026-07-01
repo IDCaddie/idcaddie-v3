@@ -257,10 +257,19 @@ After a verified envelope-only vault row exists (the §8 query shows the active 
 - **No active plaintext staging secret may remain** once the runbook requires deletion.
 
 ### 12.7 IAM / policy implications (Model B)
-- **Task role:** `secretsmanager:GetSecretValue` on **only** `…:secret:/idcaddie/staging/slack/oauth-client-secret-*`;
-  `kms:Decrypt` on the SM secret's encryption key as required; and **only** `kms:GenerateDataKey` + `kms:Decrypt` on the
-  canonical connector-vault KEK (`a1b7eaa9…`, doc 42 §91). **No** `secretsmanager:*`, **no** broad KMS, **no** production
-  secret, **no** other resource.
+- **Task role — three distinct least-privilege permissions, kept separate (tightened by PR #213):**
+  1. **Secrets Manager task-read** — `secretsmanager:GetSecretValue` on **only**
+     `…:secret:/idcaddie/staging/slack/oauth-client-secret-*`. No `secretsmanager:*`, no write action, no other/decoy/
+     production secret. (This is the dimension `scripts/check-runner-task-read.sh` proves.)
+  2. **`kms:Decrypt` — the customer-managed CMK decrypt path.** The SM secret is CMK-encrypted (the canonical KEK, alias
+     `alias/idcaddie-staging-connector-vault`, PR #211), so `GetSecretValue` returns plaintext only with `kms:Decrypt` on
+     that key; the same action unwraps the envelope DEK during ingest. Scope to the KEK, resolved by alias at runtime —
+     **not** a hardcoded key UUID.
+  3. **`kms:GenerateDataKey` — the ingest envelope-WRITE only, NOT for reading Secrets Manager.** Grant **only** when the
+     same one-shot task, immediately after the task-read, calls `ingestClientSecret(...)` and must create the encrypted
+     vault row. A read-only task does not get it.
+  **No** `kms:*`, **no** `kms:Encrypt` / `kms:ReEncrypt*` / `kms:DescribeKey`, **no** `Resource "*"`, **no** broad KMS,
+  **no** production secret, **no** other resource; never the superseded key (doc 42 §91.2).
 - **Web/request identity** (`idcaddie-staging-web`) stays **denied** `kms:Decrypt` (doc 42 §91) **and** is granted **no**
   read on the SM secret. No app/Vercel/request role can read the secret. No broad human access beyond the operator's
   one-time Console write. **CloudTrail** records the `GetSecretValue` + KMS calls (audit), and contains **no** plaintext.
@@ -424,3 +433,15 @@ Output is redacted (no raw ARN / account / value); fail-closed + opt-in + stagin
 live path (CI runs only the guard self-test; static + behavioral tests prove `get-secret-value` is never invoked and no
 ARN is printed). **Task-role readiness is PENDING** (no operator run against a provisioned task role yet). RISK-001/
 RISK-007 remain **OPEN**; Phase C **BLOCKED**.
+
+## 22. PR #213 — persisted task-role provisioning runbook (docs-only) · 2026-07-01
+PR #213 persists the operator runbook to provision the staging ECS/Fargate Slack task-read role into docs/47 (Step 0
+policy files → Step 1 create role → Step 2 attach the Secrets Manager task-read grant → Step 3 KMS → Step 4 run
+`check-runner-task-read.sh`), and tightens §12.7 so the three permissions are kept **separate and purpose-scoped**:
+`secretsmanager:GetSecretValue` = task-read of only the pinned SM secret; `kms:Decrypt` = the customer-managed CMK
+decrypt path (required to complete GetSecretValue); `kms:GenerateDataKey` = the ingest envelope-WRITE only (a one-shot
+task that immediately calls `ingestClientSecret`), **not** required merely to read from Secrets Manager. KMS is scoped to
+the canonical KEK by **alias** `alias/idcaddie-staging-connector-vault` resolved at runtime — no hardcoded key UUID; no
+`kms:*`, no `Resource "*"`, no `kms:Encrypt`/`kms:ReEncrypt*`. Docs-only: **no IAM resource created, no AWS command run, no
+`get-secret-value`, no ECS run, no production touch, no `VaultProviderTokenSource` enablement.** Task-role readiness stays
+**PENDING**. RISK-001/RISK-007 remain **OPEN**; Phase C **BLOCKED**.
