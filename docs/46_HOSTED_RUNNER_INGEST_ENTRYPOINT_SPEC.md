@@ -282,6 +282,12 @@ Slack client secret loaded, no live KMS run, no AWS keys minted, no OAuth, no B2
 RISK-007 remain OPEN; cutover BLOCKED; connector credentials not production-ready. Phase C remains BLOCKED until the
 ECS/Fargate runtime + the Secrets Manager task-read model are implemented and reviewed.**
 
+> **UPDATE (PR #211, 2026-07-01):** the design-time posture above is superseded on one point — the operator has now
+> **provisioned the staging Secrets Manager secret** `/idcaddie/staging/slack/oauth-client-secret` and it passed
+> **metadata-only** verification (§19 / docs/47). The secret **value** lives only in AWS Secrets Manager (staging),
+> **never** in the repo/docs; it was **never read** (`no get-secret-value`). No live KMS run, no OAuth, no B2c-run, no
+> ECS task-read, production untouched. **RISK-001 / RISK-007 remain OPEN; Phase C BLOCKED.**
+
 ## 13. PR #199 — in-repo TYPED SEAM landed (skeleton only) · 2026-06-28
 PR #199 added **only the typed app↔runner boundary** in the app repo —
 `src/lib/server/connector-vault/runner-ingest-entrypoint.ts`: the `RunnerIngestEntrypoint` contract
@@ -382,9 +388,12 @@ no KMS id). Guards: opt-in + profile + `AWS_REGION=ca-central-1` + 12-digit expe
 `env=staging` + production project-ref hard-abort; missing secret fails closed (NOT-YET-CREATED → provision first). The
 agent and CI never run the live path (CI runs only the guard self-test; a vitest static test bounds it to the two
 allowlisted actions and forbids `get-secret-value`; a vitest behavioral test proves at runtime that `get-secret-value` is
-never invoked). **Live provisioning result is PENDING** (the operator has not yet created the secret). This is the
-provisioning + metadata-verification prerequisite; the ECS/Fargate **task-read** (§12.5) is a later step. RISK-001/
-RISK-007 remain **OPEN**; Phase C **BLOCKED**.
+never invoked). **Live provisioning result: DONE** (PR #211, 2026-07-01) — the operator provisioned the secret and the
+metadata verifier passed (secret exists at the pinned name; account `833822972703` / `ca-central-1`; customer-managed
+KMS association whose alias target matched `alias/idcaddie-staging-connector-vault`; 1 version; no tags; **value never
+read; no `get-secret-value`**; no key id / ARN recorded — docs/47). This is the provisioning + metadata-verification
+prerequisite; the ECS/Fargate **task-read** (§12.5) is a later step (still PENDING). RISK-001/RISK-007 remain **OPEN**;
+Phase C **BLOCKED**.
 
 ## 20. PR #210 — ECS/Fargate task-read SKELETON (typed, fail-closed) · 2026-07-01
 PR #210 adds the runner-side **task-read seam** for the future Model B task-read (§12.5): `runner/connector-runner/src/
