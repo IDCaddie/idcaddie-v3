@@ -27,7 +27,7 @@ import {
   type ConnectorVaultKeyProvider,
   type AppSecretKind,
 } from "./crypto";
-import type { RunnerConnection } from "./runner-db-client";
+import type { RunnerConnection } from "./runner-connection";
 
 // Runtime server-only sentinel — throw if evaluated in a browser.
 if (typeof (globalThis as { window?: unknown }).window !== "undefined") {

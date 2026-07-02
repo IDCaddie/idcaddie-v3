@@ -28,28 +28,18 @@ import {
 } from "./oauth-pending-executor";
 import type { OAuthPendingConsumer } from "./oauth-pending-consume";
 import type { SlackPendingInserter } from "./providers/slack-authorize-pending";
+// The runner-safe connection primitives (RunnerConnection, RunnerDbError) moved to ./runner-connection so the SEPARATE
+// runner can vendor a clean, OAuth-free core (doc 46 §11). Imported for local use + re-exported for existing importers.
+import { RunnerDbError, type RunnerConnection } from "./runner-connection";
 
 // Runtime server-only sentinel — throw if evaluated in a browser.
 if (typeof (globalThis as { window?: unknown }).window !== "undefined") {
   throw new Error("connector-vault/runner-db-client is server-only and must not be imported in client code");
 }
 
-export class RunnerDbError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "RunnerDbError";
-  }
-}
-
-// The low-level injected runner connection — a server-only Postgres session bound to `connector_runner_login`
-// that the FUTURE hosted runner provides. `runSequence` runs the given parameterized statements IN ORDER on
-// ONE connection (so a leading `set role connector_runner` applies to the statements after it). NEVER a
-// service-role / global client; NEVER reachable from request/browser code. Tests inject a mock.
-export interface RunnerConnection {
-  runSequence(
-    statements: ReadonlyArray<{ sql: string; params: readonly unknown[] }>,
-  ): Promise<Array<{ rows: ReadonlyArray<Record<string, unknown>> }>>;
-}
+// Back-compat re-export (the definitions live in ./runner-connection now).
+export { RunnerDbError };
+export type { RunnerConnection };
 
 // The role the runner SET ROLEs into before every operation (NOINHERIT login → no ambient privilege).
 const SET_ROLE_STMT = { sql: "set role connector_runner", params: [] as readonly unknown[] };
