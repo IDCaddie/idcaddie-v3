@@ -981,6 +981,18 @@ Recorded from the operator run of `scripts/check-runner-task-read.sh` against th
 · first-real-token staging dry-run (doc 44 §5) · B2c-run runbook (doc 45) · reviewed `connector_runner_login` provisioning
 · real runner-backed `VaultProviderTokenSource`. **RISK-001/RISK-007 remain OPEN; cutover BLOCKED.**
 
+## PR 28 — separate-runner live task-read: implementation boundary + execution plan (docs-only)
+The consolidated execution runbook for the REAL live task-read → `ingestClientSecret` run (doc 46 §25) — answers the ten
+open questions and fixes the last decisions: **repo** = a separate `idcaddie-connector-runner` (Option A) that **vendors**
+the minimal core at a pinned SHA (§11.2); **command** = a one-shot Fargate task `node dist/ingest-task-read.js --app-env
+staging --version 1 --confirm` (non-secret flags only); **env** = task-role creds + KMS alias + `CONNECTOR_RUNNER_DB_URL`
+(no secret value in env/argv); **GetSecretValue** only in the separate repo's real `TaskSecretReader` (app repo stays
+GetSecretValue-free, scan-enforced); **plaintext** flows via the leak-proof `composeTaskReadIngest` `consume` → ingest;
+**envelope-only** write proven by the §8 query (redacted `secret_id`); **log-leak** proven by a plaintext-scan = zero
+hits; **cleanup** disable→prove-read-fails→delete (§12.6); **evidence** recorded in a later PR only after the operator
+runs it, before the doc 44 §5 first-real-token dry-run. **No code; app runtime GetSecretValue-free; CI no-live-read.
+RISK-001/RISK-007 remain OPEN; Phase C BLOCKED.**
+
 ## PR 27 — live task-read → `ingestClientSecret` plan + typed seam (separate runner)
 The reviewed implementation **plan + a typed fail-closed composition seam** for the separate runner's live task-read
 (doc 46 §24). **No real SDK/pg code is added to this app repo** (§11 — the real runner is a separate deployable); the
