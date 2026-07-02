@@ -12,10 +12,12 @@ authorization source of truth**. We preserve validated workflows and port **no**
 Firebase code.
 
 ## Current status (one line)
-**Phase 2 — auth + read-only tenant/org context on the RLS foundation.** Schema + RLS are
-tested locally and CI-enforced; an auth skeleton (login, server session, protected routes) and
-read-only tenant/org context resolution are built but **not exercised against hosted Supabase**,
-with no tenant switching and **no product UI yet**. Authoritative status: [`docs/00_PRODUCT_STATUS.md`](docs/00_PRODUCT_STATUS.md).
+**Read-only governance foundation + first contract write workflow on the RLS foundation.**
+On the tested, CI-enforced schema + RLS + auth/session foundation, **read-only product surfaces**
+now ship (`/apps` and `/contracts` lists + detail pages), and the **first user-visible write
+workflow** — RLS-gated, audited contract create/edit — exists. **Connector / credential-vault work
+is ongoing**, and **OMC/Flywheel cutover remains blocked** (RISK-001/RISK-007 open, not
+production-ready). Authoritative status: [`docs/00_PRODUCT_STATUS.md`](docs/00_PRODUCT_STATUS.md).
 
 ## Non-negotiables (apply to every change)
 - Do **not** run against hosted Supabase — local-first only.
