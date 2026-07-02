@@ -8,7 +8,7 @@ import {
   type AppSecretEnvelopeStore,
 } from "./slack-client-secret-store";
 import { encryptAppSecret, decryptAppSecret, type ConnectorVaultKeyProvider, type EncryptedConnectorSecret } from "./crypto";
-import type { RunnerConnection } from "./runner-db-client";
+import type { RunnerConnection } from "./runner-connection";
 
 // B2c-secret: the vault-grade APP-SCOPED Slack client-secret store. Synthetic only. A DETECTABLE marked sentinel
 // (NOT a realistic client secret) so the no-leak assertions prove a real secret could not survive into any output.

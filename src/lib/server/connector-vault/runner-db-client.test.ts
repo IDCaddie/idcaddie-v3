@@ -208,7 +208,7 @@ describe("runner-db-client module is server-only + scoped", () => {
     const path = await import("node:path");
     const src = fs.readFileSync(path.resolve(__dirname, "runner-db-client.ts"), "utf8");
     const imports = [...src.matchAll(/from\s+["']([^"']+)["']/g)].map((m) => m[1]).sort();
-    expect(imports).toEqual(["./oauth-pending-consume", "./oauth-pending-executor", "./providers/slack-authorize-pending"].sort());
+    expect(imports).toEqual(["./oauth-pending-consume", "./oauth-pending-executor", "./providers/slack-authorize-pending", "./runner-connection"].sort());
     const code = src.replace(/\/\/[^\n]*/g, "").replace(/\/\*[\s\S]*?\*\//g, "");
     expect(code).not.toMatch(/\bfetch\s*\(/); // no Slack API / no token endpoint
     expect(code).not.toMatch(/createClient\s*\(/); // no global service-role / supabase client
