@@ -4,6 +4,11 @@ import {
   connectorStatusLabel,
   runStatusLabel,
 } from "@/lib/data/connectors";
+import {
+  getLatestSlackSyncRunForCurrentTenant,
+  getSlackAppUserPresenceCountsForCurrentTenant,
+} from "@/lib/data/manual-sync-runs";
+import { slackRunStatusLabel } from "@/lib/data/slack-sync-display";
 
 export const metadata = { title: "Connectors · ID Caddie" };
 
@@ -16,6 +21,9 @@ export const metadata = { title: "Connectors · ID Caddie" };
 // real health are NOT built — shown explicitly below so the gap is visible, not hidden.
 export default async function ConnectorsPage() {
   const result = await listConnectorsForCurrentUser();
+  // Read-only Slack sync status — the latest manual run + active/stale presence counts, RLS-scoped. Safe aggregates only.
+  const syncRun = await getLatestSlackSyncRunForCurrentTenant();
+  const presence = await getSlackAppUserPresenceCountsForCurrentTenant();
 
   return (
     <main className="flex flex-1 flex-col gap-6 p-8">
@@ -95,6 +103,65 @@ export default async function ConnectorsPage() {
           </p>
         </section>
       )}
+
+      <section className="space-y-3 text-sm">
+        <h2 className="font-medium">Slack sync status</h2>
+        <p className="text-xs text-zinc-500">
+          Read-only status of the last Slack sync for your tenant (RLS-scoped). Safe aggregate counts only — no Slack
+          credentials or personal data are shown or stored here. Running a sync is not built here yet.
+        </p>
+
+        {/* latest run */}
+        {!syncRun.ok ? (
+          <p className="text-sm text-red-600">Could not load the last Slack sync right now. Please try again later.</p>
+        ) : syncRun.data === null ? (
+          <div className="rounded border border-zinc-300 p-4 text-sm dark:border-zinc-700">
+            <div className="font-medium">No Slack sync has run yet</div>
+            <p className="mt-1 text-zinc-600 dark:text-zinc-400">
+              Slack sync status and counts will appear here after the first sync run.
+            </p>
+          </div>
+        ) : (
+          <div className="rounded border border-zinc-300 p-4 dark:border-zinc-700">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="rounded-full border border-zinc-300 px-2 py-0.5 text-xs text-zinc-600 dark:border-zinc-700 dark:text-zinc-400">
+                {slackRunStatusLabel(syncRun.data.status)}
+              </span>
+              <span className="text-zinc-500">
+                Started {syncRun.data.startedAt.slice(0, 16).replace("T", " ")}
+                {syncRun.data.finishedAt ? ` · finished ${syncRun.data.finishedAt.slice(0, 16).replace("T", " ")}` : ""}
+              </span>
+              {syncRun.data.errorCode ? (
+                <span className="text-zinc-500">· {syncRun.data.failedStage ?? "error"}: {syncRun.data.errorCode}</span>
+              ) : null}
+            </div>
+            <dl className="mt-3 grid grid-cols-2 gap-x-6 gap-y-1 text-zinc-600 sm:grid-cols-4 dark:text-zinc-400">
+              {[
+                ["App users written", syncRun.data.appUsersWritten],
+                ["People written", syncRun.data.peopleWritten],
+                ["Matches written", syncRun.data.matchesWritten],
+                ["Skipped", syncRun.data.skipped],
+                ["Marked stale", syncRun.data.appUsersMarkedStale],
+              ].map(([label, value]) => (
+                <div key={label as string} className="flex justify-between gap-2 border-b border-zinc-100 py-1 dark:border-zinc-800">
+                  <dt>{label}</dt>
+                  <dd className="font-medium text-zinc-800 dark:text-zinc-200">{value ?? "—"}</dd>
+                </div>
+              ))}
+            </dl>
+          </div>
+        )}
+
+        {/* presence counts */}
+        {presence.ok ? (
+          <p className="text-xs text-zinc-500">
+            Slack app users: <span className="font-medium text-zinc-700 dark:text-zinc-300">{presence.data.active} active</span>
+            {" · "}
+            <span className="font-medium text-zinc-700 dark:text-zinc-300">{presence.data.stale} stale</span>
+            {" "}(stale = not seen in the most recent successful sync; marked, never deleted).
+          </p>
+        ) : null}
+      </section>
 
       <section className="space-y-2 text-sm">
         <h2 className="font-medium">Connector actions</h2>

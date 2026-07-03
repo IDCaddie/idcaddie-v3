@@ -29,3 +29,14 @@ export const SLACK_SYNC_COPY = {
   emptyUsers: "No synced Slack users yet — Slack data will appear here after a sync run.",
   comingNext: "Manual run coming next.",
 } as const;
+
+// Safe, human labels for a manual_sync_runs.status — no false-readiness language. Any unknown value falls back to the
+// raw string (never throws). Pure; no I/O.
+export const SLACK_RUN_STATUS_LABEL: Record<"running" | "succeeded" | "failed", string> = {
+  running: "In progress",
+  succeeded: "Succeeded",
+  failed: "Failed",
+};
+export function slackRunStatusLabel(status: string): string {
+  return (SLACK_RUN_STATUS_LABEL as Record<string, string>)[status] ?? status;
+}

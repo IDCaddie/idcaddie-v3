@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
-import { classifySlackSync, SLACK_SYNC_COPY } from "./slack-sync-display";
+import { classifySlackSync, SLACK_SYNC_COPY, slackRunStatusLabel } from "./slack-sync-display";
 
 describe("classifySlackSync — identifies a connector-synced Slack app from non-secret markers", () => {
   it("is Slack-synced when external_instance_id is present AND vendor is Slack (case/space-insensitive)", () => {
@@ -21,6 +21,15 @@ describe("classifySlackSync — identifies a connector-synced Slack app from non
   it("handles null/undefined input without crashing", () => {
     expect(classifySlackSync(null)).toEqual({ isSlackSynced: false, workspaceId: null });
     expect(classifySlackSync(undefined)).toEqual({ isSlackSynced: false, workspaceId: null });
+  });
+});
+
+describe("slackRunStatusLabel — safe status labels, unknown falls back to the raw value", () => {
+  it("maps the known manual_sync_runs statuses and never throws on an unknown one", () => {
+    expect(slackRunStatusLabel("running")).toBe("In progress");
+    expect(slackRunStatusLabel("succeeded")).toBe("Succeeded");
+    expect(slackRunStatusLabel("failed")).toBe("Failed");
+    expect(slackRunStatusLabel("weird")).toBe("weird"); // fallback, no throw
   });
 });
 
