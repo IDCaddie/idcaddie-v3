@@ -23,7 +23,7 @@ if (typeof (globalThis as { window?: unknown }).window !== "undefined") {
 }
 
 export type StoreWriteTable = "apps" | "app_users" | "people" | "app_user_identity_matches";
-export type StoreWriteOp = "upsert_app" | "upsert_app_user" | "upsert_person" | "upsert_match";
+export type StoreWriteOp = "upsert_app" | "upsert_app_user" | "upsert_person" | "upsert_match" | "mark_stale";
 // SAFE structured failure — ONLY the table, the operation, and the SQLSTATE/PostgREST `code`. The DB error message /
 // details / hint are NEVER captured: a unique/RLS violation message embeds row VALUES (e.g. an email), the code does not.
 export type StoreWriteFailure = { table: StoreWriteTable; op: StoreWriteOp; code: string | null };
@@ -83,6 +83,8 @@ export function createSupabaseSlackResolverStore(supabase: SupabaseClient<Databa
             ...(input.displayName ? { display_name: input.displayName } : {}),
             ...(input.status ? { status: input.status } : {}),
             ...(input.lastActiveAt ? { last_active_at: input.lastActiveAt } : {}),
+            // 0040 presence: seen this run → record it and (re)activate — a returning stale user flips back to active.
+            ...(input.lastSeenAt ? { last_seen_at: input.lastSeenAt, sync_status: "active" } : {}),
             ...(input.rawProvenance ? { raw_payload: input.rawProvenance } : {}), // SANITIZED scalars only (never the raw Slack object)
           },
           { onConflict: "tenant_id,app_id,external_user_id" },
@@ -91,6 +93,26 @@ export function createSupabaseSlackResolverStore(supabase: SupabaseClient<Databa
         .single();
       if (error || !data) throw new StoreWriteError({ table: "app_users", op: "upsert_app_user", code: pgCode(error) });
       return { appUserId: data.id };
+    },
+
+    // 0040 ABSENCE MARKING — UPDATE-only (never a delete): flip THIS tenant+app's currently-'active' rows whose
+    // last_seen_at predates observedAt (or is NULL — rows from before tracking) to 'stale'. Rows seen this run have
+    // last_seen_at == observedAt, so they are excluded naturally; already-stale rows are excluded by the status filter
+    // (idempotent + the count is "newly marked" only). last_seen_at keeps its prior value. RLS (0004 update policy)
+    // enforces the tenant boundary; the caller guards the complete-successful-sync + non-zero-users conditions.
+    async markAbsentAppUsersStale(input) {
+      // Defense-in-depth for the `.or()` filter-string interpolation below: a real ISO instant never contains a
+      // PostgREST filter delimiter, so reject any observedAt that does (the caller always passes toISOString()).
+      if (/[,()]/.test(input.observedAt)) throw new StoreWriteError({ table: "app_users", op: "mark_stale", code: null });
+      const { count, error } = await supabase
+        .from("app_users")
+        .update({ sync_status: "stale" }, { count: "exact" })
+        .eq("tenant_id", input.tenantId)
+        .eq("app_id", input.appId)
+        .eq("sync_status", "active")
+        .or(`last_seen_at.lt.${input.observedAt},last_seen_at.is.null`);
+      if (error) throw new StoreWriteError({ table: "app_users", op: "mark_stale", code: pgCode(error) });
+      return { staleMarked: count ?? 0 };
     },
 
     async upsertPerson(input) {

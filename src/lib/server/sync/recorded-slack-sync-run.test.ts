@@ -25,7 +25,7 @@ function fakeRecorder(startResult: Awaited<ReturnType<ManualSyncRunRecorder["sta
 }
 const deps = (env: Record<string, string | undefined>): RunSlackSyncDeps =>
   ({ env, identity: { tenantId: "tenant-A", connectorId: "slack-dev" } } as unknown as RunSlackSyncDeps);
-const ok: RunSlackSyncSummary = { ok: true, teamPresent: true, usersFetched: 1, factsEmitted: 6, factsRejected: 0, appUsersWritten: 1, peopleWritten: 1, matchesWritten: 1, matchConflicts: 0, skipped: 2 };
+const ok: RunSlackSyncSummary = { ok: true, teamPresent: true, usersFetched: 1, factsEmitted: 6, factsRejected: 0, appUsersWritten: 1, peopleWritten: 1, matchesWritten: 1, matchConflicts: 0, skipped: 2, staleMarked: 0 };
 
 beforeEach(() => { mockRun.mockReset(); mockGuard.mockReset(); });
 

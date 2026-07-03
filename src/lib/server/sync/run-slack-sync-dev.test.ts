@@ -23,15 +23,26 @@ const jsonRes = (obj: unknown, status = 200, headers?: Record<string, string>): 
 });
 function memStore() {
   const apps = new Map<string, string>(), appUsers = new Map<string, string>(), people = new Map<string, string>(), matches = new Map<string, string>();
+  // 0040 presence state per app_user key — a faithful in-memory model of last_seen_at + sync_status.
+  const presence = new Map<string, { lastSeenAt?: string; syncStatus: "active" | "stale" }>();
   let a = 0, u = 0, p = 0;
   const store: SlackResolverStore = {
     async upsertApp(i) { const k = `${i.tenantId}:${i.externalInstanceId}`; if (!apps.has(k)) apps.set(k, `app-${++a}`); return { appId: apps.get(k)! }; },
-    async upsertAppUser(i) { const k = `${i.tenantId}:${i.appId}:${i.externalUserId}`; if (!appUsers.has(k)) appUsers.set(k, `au-${++u}`); return { appUserId: appUsers.get(k)! }; },
+    async upsertAppUser(i) { const k = `${i.tenantId}:${i.appId}:${i.externalUserId}`; if (!appUsers.has(k)) appUsers.set(k, `au-${++u}`); if (i.lastSeenAt) presence.set(k, { lastSeenAt: i.lastSeenAt, syncStatus: "active" }); return { appUserId: appUsers.get(k)! }; },
     async upsertPerson(i) { const k = `${i.tenantId}:${i.primaryEmail.toLowerCase()}`; if (!people.has(k)) people.set(k, `p-${++p}`); return { personId: people.get(k)! }; },
     async getExistingMatchPersonId(i) { return matches.get(`${i.tenantId}:${i.appUserId}`) ?? null; },
     async insertMatch(i) { const k = `${i.tenantId}:${i.appUserId}`; if (matches.has(k)) return { created: false }; matches.set(k, i.personId); return { created: true }; },
+    // faithful UPDATE-only absence marking: active rows of this tenant+app not seen at observedAt -> stale. Never deletes.
+    async markAbsentAppUsersStale(i) {
+      let n = 0;
+      for (const [k, st] of presence) {
+        if (!k.startsWith(`${i.tenantId}:${i.appId}:`)) continue;
+        if (st.syncStatus === "active" && (!st.lastSeenAt || st.lastSeenAt < i.observedAt)) { st.syncStatus = "stale"; n++; }
+      }
+      return { staleMarked: n };
+    },
   };
-  return { store, apps, appUsers, people, matches };
+  return { store, apps, appUsers, people, matches, presence };
 }
 const deps = (over: Partial<RunSlackSyncDeps> = {}): RunSlackSyncDeps => ({
   env: DEV, tokenSource, httpClient: makeFixtureSlackHttpClient().client, store: memStore().store, identity: IDENTITY, observedAt: OBSERVED, ...over,

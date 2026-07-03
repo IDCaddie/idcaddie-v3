@@ -61,6 +61,7 @@ export type RunSlackSyncSummary =
       matchesWritten: number;
       matchConflicts: number;
       skipped: number;
+      staleMarked: number; // 0040 absence marking — app_users flipped active→stale this run (post-success only)
     }
   | {
       ok: false;
@@ -147,5 +148,6 @@ export async function runSlackSyncDev(deps: RunSlackSyncDeps): Promise<RunSlackS
     matchesWritten: resolution.matchesUpserted,
     matchConflicts: resolution.matchConflicts,
     skipped: resolution.skipped,
+    staleMarked: resolution.staleMarked,
   };
 }

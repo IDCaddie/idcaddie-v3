@@ -24,10 +24,22 @@ function memStore() {
   let a = 0, u = 0, p = 0;
   const store: SlackResolverStore = {
     async upsertApp(i) { const k = `${i.tenantId}:${i.externalInstanceId}`; if (!apps.has(k)) apps.set(k, { appId: `app-${++a}`, ...i }); else Object.assign(apps.get(k)!, i); return { appId: apps.get(k)!.appId as string }; },
-    async upsertAppUser(i) { const k = `${i.tenantId}:${i.appId}:${i.externalUserId}`; if (!appUsers.has(k)) appUsers.set(k, { appUserId: `au-${++u}`, ...i }); else Object.assign(appUsers.get(k)!, i); return { appUserId: appUsers.get(k)!.appUserId as string }; },
+    async upsertAppUser(i) { const k = `${i.tenantId}:${i.appId}:${i.externalUserId}`; if (!appUsers.has(k)) appUsers.set(k, { appUserId: `au-${++u}`, ...i }); else Object.assign(appUsers.get(k)!, i); if (i.lastSeenAt) appUsers.get(k)!.syncStatus = "active"; return { appUserId: appUsers.get(k)!.appUserId as string }; },
     async upsertPerson(i) { const k = `${i.tenantId}:${i.primaryEmail.toLowerCase()}`; if (!people.has(k)) people.set(k, { personId: `p-${++p}`, ...i }); else Object.assign(people.get(k)!, i); return { personId: people.get(k)!.personId as string }; },
     async getExistingMatchPersonId(i) { return matches.get(`${i.tenantId}:${i.appUserId}`) ?? null; },
     async insertMatch(i) { const k = `${i.tenantId}:${i.appUserId}`; if (matches.has(k)) return { created: false }; matches.set(k, i.personId); return { created: true }; }, // DO NOTHING — never overwrites
+    // faithful UPDATE-only absence marking over the appUsers records: active rows of this tenant+app whose lastSeenAt
+    // predates observedAt (or is unset) flip to stale. NEVER deletes a row.
+    async markAbsentAppUsersStale(i) {
+      let n = 0;
+      for (const [k, rec] of appUsers) {
+        if (!k.startsWith(`${i.tenantId}:${i.appId}:`)) continue;
+        const seen = rec.lastSeenAt as string | undefined;
+        const status = (rec.syncStatus as string | undefined) ?? "active";
+        if (status === "active" && (!seen || seen < i.observedAt)) { rec.syncStatus = "stale"; n++; }
+      }
+      return { staleMarked: n };
+    },
   };
   return { store, apps, appUsers, people, matches };
 }
@@ -139,5 +151,80 @@ describe("slack-resolver-write — tenant safety + field rules", () => {
     expect(apps.size).toBe(0);
     const onlyBots = await applySlackDiscoveryResolution(store, "tenant-A", factsFor("tenant-A", [user({ isBot: true })]));
     expect(apps.size).toBe(1); expect(onlyBots.appUsersUpserted).toBe(0); // app exists, no bot app_users
+  });
+});
+
+// 0040 ABSENCE / STALE MARKING — non-destructive, post-success-only, tenant+app-scoped.
+describe("applySlackDiscoveryResolution — absence/stale marking (0040)", () => {
+  const T1 = "2026-06-26T00:00:00.000Z", T2 = "2026-06-27T00:00:00.000Z", T3 = "2026-06-28T00:00:00.000Z";
+  const factsAt = (tenant: string, users: unknown[], observedAt: string) =>
+    emitSlackDiscoveryFacts({ workspace: WS(), users: users as Parameters<typeof emitSlackDiscoveryFacts>[0]["users"] }, tenant, { observedAt }).facts;
+  const rec = (appUsers: Map<string, Record<string, unknown>>, ext: string) => [...appUsers.values()].find((r) => r.externalUserId === ext);
+  const u1 = (o = {}) => user({ slackUserId: "U1", email: "u1@x.test", ...o });
+  const u2 = (o = {}) => user({ slackUserId: "U2", email: "u2@x.test", ...o });
+
+  it("present users get last_seen_at + sync_status active; nothing marked stale on the first sync", async () => {
+    const { store, appUsers } = memStore();
+    const s = await applySlackDiscoveryResolution(store, "tenant-A", factsAt("tenant-A", [u1(), u2()], T1));
+    expect(s.staleMarked).toBe(0);
+    expect(rec(appUsers, "U1")).toMatchObject({ lastSeenAt: T1, syncStatus: "active" });
+    expect(rec(appUsers, "U2")).toMatchObject({ lastSeenAt: T1, syncStatus: "active" });
+  });
+
+  it("a SECOND sync missing a prior user marks ONLY that user stale (row kept, last_seen_at preserved)", async () => {
+    const { store, appUsers } = memStore();
+    await applySlackDiscoveryResolution(store, "tenant-A", factsAt("tenant-A", [u1(), u2()], T1));
+    const s2 = await applySlackDiscoveryResolution(store, "tenant-A", factsAt("tenant-A", [u2()], T2)); // U1 absent
+    expect(s2.staleMarked).toBe(1);
+    expect(rec(appUsers, "U1")).toMatchObject({ syncStatus: "stale", lastSeenAt: T1 }); // marked, NOT deleted, last-seen kept
+    expect(rec(appUsers, "U2")).toMatchObject({ syncStatus: "active", lastSeenAt: T2 });
+    expect(appUsers.size).toBe(2); // both rows still present — no hard delete
+  });
+
+  it("re-running the same second sync is idempotent — 0 newly marked", async () => {
+    const { store } = memStore();
+    await applySlackDiscoveryResolution(store, "tenant-A", factsAt("tenant-A", [u1(), u2()], T1));
+    await applySlackDiscoveryResolution(store, "tenant-A", factsAt("tenant-A", [u2()], T2));
+    const again = await applySlackDiscoveryResolution(store, "tenant-A", factsAt("tenant-A", [u2()], T2));
+    expect(again.staleMarked).toBe(0); // U1 already stale; U2 seen
+  });
+
+  it("a returning stale user REACTIVATES (stale is reversible)", async () => {
+    const { store, appUsers } = memStore();
+    await applySlackDiscoveryResolution(store, "tenant-A", factsAt("tenant-A", [u1(), u2()], T1));
+    await applySlackDiscoveryResolution(store, "tenant-A", factsAt("tenant-A", [u2()], T2)); // U1 → stale
+    await applySlackDiscoveryResolution(store, "tenant-A", factsAt("tenant-A", [u1(), u2()], T3)); // U1 returns
+    expect(rec(appUsers, "U1")).toMatchObject({ syncStatus: "active", lastSeenAt: T3 });
+  });
+
+  it("a 0-user (present-count 0) successful sync marks NOTHING stale (guard)", async () => {
+    const { store, appUsers } = memStore();
+    await applySlackDiscoveryResolution(store, "tenant-A", factsAt("tenant-A", [u1()], T1));
+    const empty = await applySlackDiscoveryResolution(store, "tenant-A", factsAt("tenant-A", [], T2)); // workspace only, no users
+    expect(empty.appUsersUpserted).toBe(0);
+    expect(empty.staleMarked).toBe(0); // guard: never mass-mark on a 0-user sync
+    expect(rec(appUsers, "U1")).toMatchObject({ syncStatus: "active" }); // U1 untouched
+  });
+
+  it("a mid-resolve store failure aborts BEFORE marking — nothing is marked stale (failed/partial sync)", async () => {
+    const { store, appUsers } = memStore();
+    await applySlackDiscoveryResolution(store, "tenant-A", factsAt("tenant-A", [u1(), u2()], T1)); // both active
+    // second run: the person upsert throws partway — the resolver rejects before reaching markAbsentAppUsersStale
+    const boom = { ...store, async upsertPerson(): Promise<{ personId: string }> { throw new Error("db down"); } };
+    let threw = false;
+    try { await applySlackDiscoveryResolution(boom, "tenant-A", factsAt("tenant-A", [u2()], T2)); } catch { threw = true; }
+    expect(threw).toBe(true);
+    expect(rec(appUsers, "U1")).toMatchObject({ syncStatus: "active" }); // NOT marked stale — the failed sync marked nothing
+  });
+
+  it("a Slack-DELETED user (still returned) stays ACTIVE with raw_payload.slack_is_deleted=true — distinct from absent", async () => {
+    const { store, appUsers } = memStore();
+    // U1 present-and-deleted-in-Slack; U2 present-normal. Then U2 leaves (absent) while U1 stays deleted-but-present.
+    await applySlackDiscoveryResolution(store, "tenant-A", factsAt("tenant-A", [u1({ isDeleted: true }), u2()], T1));
+    const s2 = await applySlackDiscoveryResolution(store, "tenant-A", factsAt("tenant-A", [u1({ isDeleted: true })], T2)); // U2 absent
+    expect(rec(appUsers, "U1")).toMatchObject({ syncStatus: "active", lastSeenAt: T2 }); // deleted-but-present ⇒ ACTIVE
+    expect((rec(appUsers, "U1")!.rawProvenance as Record<string, unknown>).slack_is_deleted).toBe(true);
+    expect(rec(appUsers, "U2")).toMatchObject({ syncStatus: "stale" }); // ABSENT ⇒ stale (the distinct state)
+    expect(s2.staleMarked).toBe(1);
   });
 });

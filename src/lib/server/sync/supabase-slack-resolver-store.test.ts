@@ -7,15 +7,17 @@ import type { Database } from "@/lib/database.types";
 // (constraints refuse direct duplicates, cross-tenant denial, no-repoint) are proven at the real-RLS SQL layer by
 // org_rls_test.sql Test 58 (the EXACT upserts this store issues). Here we assert: the correct table + tenant-scoped
 // onConflict targets are used, the store throws a SAFE static reason on error, and people is get-or-create.
-type Ctx = { table?: string; op?: string; onConflict?: string; ignoreDuplicates?: boolean; ilike?: string };
-function mkSupabase(resolve: (ctx: Ctx, n: number) => { data: unknown; error: unknown }) {
+type Ctx = { table?: string; op?: string; onConflict?: string; ignoreDuplicates?: boolean; ilike?: string; count?: string; or?: string };
+function mkSupabase(resolve: (ctx: Ctx, n: number) => { data?: unknown; error: unknown; count?: number }) {
   const calls: Ctx[] = [];
   let n = 0;
   const q = (ctx: Ctx): Record<string, unknown> => ({
     upsert: (_p: unknown, o?: { onConflict?: string; ignoreDuplicates?: boolean }) => q({ ...ctx, op: "upsert", onConflict: o?.onConflict, ignoreDuplicates: o?.ignoreDuplicates }),
     insert: () => q({ ...ctx, op: "insert" }),
+    update: (_p: unknown, o?: { count?: string }) => q({ ...ctx, op: "update", count: o?.count }),
     select: () => q(ctx),
     eq: () => q(ctx), ilike: (_c: string, v: string) => q({ ...ctx, ilike: v }), limit: () => q(ctx),
+    or: (v: string) => { calls.push({ ...ctx, or: v }); return Promise.resolve(resolve({ ...ctx, or: v }, n++)); }, // terminal for the mark-stale UPDATE…OR
     single: () => { calls.push(ctx); return Promise.resolve(resolve(ctx, n++)); },
     maybeSingle: () => { calls.push(ctx); return Promise.resolve(resolve(ctx, n++)); },
     then: (res: (v: unknown) => unknown, rej?: (e: unknown) => unknown) => { calls.push(ctx); return Promise.resolve(resolve(ctx, n++)).then(res, rej); },
@@ -63,6 +65,30 @@ describe("createSupabaseSlackResolverStore — tenant-scoped upserts via the use
     const m = mkSupabase((ctx) => (ctx.op === undefined ? { data: { id: "p1" }, error: null } : { data: null, error: null }));
     await createSupabaseSlackResolverStore(m.client).upsertPerson({ tenantId: "t", primaryEmail: "a_b%c@x.test" });
     expect(m.calls[0].ilike).toBe("a\\_b\\%c@x.test"); // literal match, not a pattern
+  });
+
+  it("markAbsentAppUsersStale is an UPDATE (never a delete) to app_users with the not-seen filter + exact count (the tenant+app+active filters run on the real DB via the gated e2e)", async () => {
+    const m = mkSupabase(() => ({ error: null, count: 2 }));
+    const store = createSupabaseSlackResolverStore(m.client);
+    expect(await store.markAbsentAppUsersStale({ tenantId: "t", appId: "a", observedAt: "2026-07-03T00:00:00.000Z" })).toEqual({ staleMarked: 2 });
+    const c = m.calls[0];
+    expect(c.table).toBe("app_users");
+    expect(c.op).toBe("update"); // an UPDATE — NEVER a delete
+    expect(c.count).toBe("exact");
+    expect(c.or).toBe("last_seen_at.lt.2026-07-03T00:00:00.000Z,last_seen_at.is.null"); // not-seen-this-run filter
+  });
+
+  it("markAbsentAppUsersStale rejects an observedAt carrying a PostgREST filter delimiter (defends the .or interpolation)", async () => {
+    const m = mkSupabase(() => ({ error: null, count: 0 }));
+    await expect(createSupabaseSlackResolverStore(m.client).markAbsentAppUsersStale({ tenantId: "t", appId: "a", observedAt: "2026,evil)" }))
+      .rejects.toMatchObject({ failure: { table: "app_users", op: "mark_stale" } });
+    expect(m.calls.length).toBe(0); // never reached the query
+  });
+
+  it("markAbsentAppUsersStale surfaces ONLY the safe code on a DB error (mark_stale op)", async () => {
+    const m = mkSupabase(() => ({ error: { code: "42501", message: "RLS; (primary_email)=(ada@x.test)" } }));
+    await expect(createSupabaseSlackResolverStore(m.client).markAbsentAppUsersStale({ tenantId: "t", appId: "a", observedAt: "2026-07-03T00:00:00.000Z" }))
+      .rejects.toMatchObject({ message: "store_write_failed", failure: { table: "app_users", op: "mark_stale", code: "42501" } });
   });
 
   it("escapeLike escapes backslash, percent, underscore only", () => {

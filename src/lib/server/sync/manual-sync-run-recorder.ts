@@ -79,6 +79,7 @@ export function createSupabaseManualSyncRunRecorder(supabase: SupabaseClient<Dat
             matches_written: summary.matchesWritten,
             match_conflicts: summary.matchConflicts,
             skipped: summary.skipped,
+            app_users_marked_stale: summary.staleMarked, // 0040 — the per-run absence-marking audit count
           }
         : {
             status: "failed" as const,

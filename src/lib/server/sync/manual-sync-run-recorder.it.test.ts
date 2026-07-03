@@ -65,7 +65,7 @@ describe.runIf(RUN)("createSupabaseManualSyncRunRecorder — real DB/RLS", () =>
 
   it("a tenant member opens a 'running' run then closes it 'succeeded' (created_by = the member, RLS-enforced)", async () => {
     const runId = await openA("ok-run");
-    const ok: RunSlackSyncSummary = { ok: true, teamPresent: true, usersFetched: 1, factsEmitted: 6, factsRejected: 0, appUsersWritten: 1, peopleWritten: 1, matchesWritten: 1, matchConflicts: 0, skipped: 2 };
+    const ok: RunSlackSyncSummary = { ok: true, teamPresent: true, usersFetched: 1, factsEmitted: 6, factsRejected: 0, appUsersWritten: 1, peopleWritten: 1, matchesWritten: 1, matchConflicts: 0, skipped: 2, staleMarked: 0 };
     await recA.finish({ runId, summary: ok });
     const { data } = await admin.from("manual_sync_runs").select("status, users_fetched, created_by, tenant_id").eq("id", runId).single();
     expect(data?.status).toBe("succeeded");
@@ -89,7 +89,7 @@ describe.runIf(RUN)("createSupabaseManualSyncRunRecorder — real DB/RLS", () =>
     const { count } = await admin.from("manual_sync_runs").select("*", { count: "exact", head: true }).eq("tenant_id", tenantA).eq("connector_id", "lock-c").eq("status", "running");
     expect(count).toBe(1);
     // after the first finishes, a new run for the same key CAN start (lock released)
-    if (first.ok) await recA.finish({ runId: first.runId, summary: { ok: true, teamPresent: true, usersFetched: 0, factsEmitted: 0, factsRejected: 0, appUsersWritten: 0, peopleWritten: 0, matchesWritten: 0, matchConflicts: 0, skipped: 0 } });
+    if (first.ok) await recA.finish({ runId: first.runId, summary: { ok: true, teamPresent: true, usersFetched: 0, factsEmitted: 0, factsRejected: 0, appUsersWritten: 0, peopleWritten: 0, matchesWritten: 0, matchConflicts: 0, skipped: 0, staleMarked: 0 } });
     expect((await recA.start({ tenantId: tenantA, source: "slack", connectorId: "lock-c" })).ok).toBe(true);
   });
 
@@ -121,7 +121,7 @@ describe.runIf(RUN)("createSupabaseManualSyncRunRecorder — real DB/RLS", () =>
   });
 
   it("finish() on an already-terminal run is a safe no-op (never trips the 0037 completed-run immutability)", async () => {
-    const okSummary: RunSlackSyncSummary = { ok: true, teamPresent: true, usersFetched: 0, factsEmitted: 0, factsRejected: 0, appUsersWritten: 0, peopleWritten: 0, matchesWritten: 0, matchConflicts: 0, skipped: 0 };
+    const okSummary: RunSlackSyncSummary = { ok: true, teamPresent: true, usersFetched: 0, factsEmitted: 0, factsRejected: 0, appUsersWritten: 0, peopleWritten: 0, matchesWritten: 0, matchConflicts: 0, skipped: 0, staleMarked: 0 };
     const runId = await openA("double-finish");
     await recA.finish({ runId, summary: okSummary }); // running -> succeeded
     await expect(recA.finish({ runId, summary: { ok: false, errorCode: "resolve_failed" } })).resolves.toBeUndefined(); // 2nd close: 0 rows (not running) -> no throw, no change
