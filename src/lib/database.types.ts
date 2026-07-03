@@ -291,10 +291,12 @@ export type Database = {
           external_user_id: string | null
           id: string
           last_active_at: string | null
+          last_seen_at: string | null
           license_type: string | null
           raw_payload: Json | null
           source: string | null
           status: string | null
+          sync_status: string
           tenant_id: string
           updated_at: string
         }
@@ -306,10 +308,12 @@ export type Database = {
           external_user_id?: string | null
           id?: string
           last_active_at?: string | null
+          last_seen_at?: string | null
           license_type?: string | null
           raw_payload?: Json | null
           source?: string | null
           status?: string | null
+          sync_status?: string
           tenant_id: string
           updated_at?: string
         }
@@ -321,10 +325,12 @@ export type Database = {
           external_user_id?: string | null
           id?: string
           last_active_at?: string | null
+          last_seen_at?: string | null
           license_type?: string | null
           raw_payload?: Json | null
           source?: string | null
           status?: string | null
+          sync_status?: string
           tenant_id?: string
           updated_at?: string
         }
@@ -1432,6 +1438,7 @@ export type Database = {
       }
       manual_sync_runs: {
         Row: {
+          app_users_marked_stale: number
           app_users_written: number | null
           connector_id: string
           created_at: string
@@ -1453,6 +1460,7 @@ export type Database = {
           users_fetched: number | null
         }
         Insert: {
+          app_users_marked_stale?: number
           app_users_written?: number | null
           connector_id: string
           created_at?: string
@@ -1474,6 +1482,7 @@ export type Database = {
           users_fetched?: number | null
         }
         Update: {
+          app_users_marked_stale?: number
           app_users_written?: number | null
           connector_id?: string
           created_at?: string
