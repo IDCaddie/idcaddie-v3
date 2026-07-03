@@ -3632,6 +3632,84 @@ do $$ declare rid uuid; begin
   assert rid is not null, 'T60c after a run leaves running, a new run for the same key can start (lock released)';
 end $$;
 
+-- ── Test 61: app_user absence/stale fields (migration 0040) — INERT schema shape + posture unchanged. Proves the new
+--    columns' defaults + CHECKs at the real Postgres layer, that the EXISTING 0004 UPDATE policy (not a new one) gates
+--    stale-marking, that NO DELETE appeared, that cross-tenant marking is RLS-impossible, and that `connector_runner`
+--    gained NOTHING on app_users. No runtime code writes these columns yet (the wiring is a later PR). T61-namespaced.
+reset role;
+select set_config('request.jwt.claims','{"sub":"0a000000-0000-0000-0000-000000000001"}',false);
+set role authenticated;
+-- 61a: defaults — a plain insert (no new columns named) gets sync_status='active' and last_seen_at NULL.
+do $$ declare aid uuid; st text; seen timestamptz; begin
+  insert into public.apps (tenant_id, name, external_instance_id)
+    values ('11111111-1111-1111-1111-111111111111','Slack T61','TSLACK61')
+    on conflict (tenant_id, external_instance_id) do update set name = excluded.name;
+  select id into aid from public.apps where tenant_id='11111111-1111-1111-1111-111111111111' and external_instance_id='TSLACK61';
+  insert into public.app_users (tenant_id, app_id, external_user_id, email)
+    values ('11111111-1111-1111-1111-111111111111', aid, 'U61A', 't61a@example.com');
+  select sync_status, last_seen_at into st, seen from public.app_users
+    where tenant_id='11111111-1111-1111-1111-111111111111' and app_id=aid and external_user_id='U61A';
+  assert st = 'active', 'T61a sync_status must DEFAULT to active (existing + new rows start active)';
+  assert seen is null,  'T61a last_seen_at must default NULL (presence unknown until a tracked sync)';
+end $$;
+-- 61b: the CHECK rejects any sync_status outside (active, stale); 'stale' itself is accepted via the EXISTING 0004
+--      UPDATE policy (no new policy was added for this).
+do $$ declare blocked boolean := false; begin
+  begin
+    update public.app_users set sync_status='bogus'
+      where tenant_id='11111111-1111-1111-1111-111111111111' and external_user_id='U61A';
+  exception when check_violation then blocked := true; end;
+  assert blocked, 'T61b sync_status outside (active,stale) must be refused by the CHECK';
+  update public.app_users set sync_status='stale', last_seen_at=now()
+    where tenant_id='11111111-1111-1111-1111-111111111111' and external_user_id='U61A';
+  update public.app_users set sync_status='active'
+    where tenant_id='11111111-1111-1111-1111-111111111111' and external_user_id='U61A'; -- stale is reversible
+end $$;
+-- 61c: NO DELETE appeared — absence marking must never become a delete path (0004 posture preserved).
+do $$ declare n int; begin
+  delete from public.app_users where tenant_id='11111111-1111-1111-1111-111111111111' and external_user_id='U61A';
+  select count(*) into n from public.app_users where tenant_id='11111111-1111-1111-1111-111111111111' and external_user_id='U61A';
+  assert n = 1, 'T61c app_users DELETE must remain policy-less (0 rows deleted) — absence is a MARK, never a delete';
+end $$;
+-- 61d: manual_sync_runs.app_users_marked_stale defaults 0 and rejects negatives.
+do $$ declare blocked boolean := false; v int; begin
+  insert into public.manual_sync_runs (tenant_id, source, connector_id, status)
+    values ('11111111-1111-1111-1111-111111111111','slack','t61','running');
+  select app_users_marked_stale into v from public.manual_sync_runs
+    where tenant_id='11111111-1111-1111-1111-111111111111' and connector_id='t61' and status='running';
+  assert v = 0, 'T61d app_users_marked_stale must default to 0';
+  begin
+    update public.manual_sync_runs set status='failed', finished_at=now(), app_users_marked_stale=-1
+      where tenant_id='11111111-1111-1111-1111-111111111111' and connector_id='t61' and status='running';
+  exception when check_violation then blocked := true; end;
+  assert blocked, 'T61d a negative app_users_marked_stale must be refused by the CHECK';
+  update public.manual_sync_runs set status='failed', finished_at=now(), app_users_marked_stale=2
+    where tenant_id='11111111-1111-1111-1111-111111111111' and connector_id='t61' and status='running';
+end $$;
+-- 61e: cross-tenant stale-marking is RLS-IMPOSSIBLE — a tenant-B member updating tenant-A rows touches 0 rows.
+reset role;
+select set_config('request.jwt.claims','{"sub":"0b000000-0000-0000-0000-000000000001"}',false);
+set role authenticated;
+do $$ declare n int; begin
+  update public.app_users set sync_status='stale'
+    where tenant_id='11111111-1111-1111-1111-111111111111' and external_user_id='U61A';
+  get diagnostics n = row_count;
+  assert n = 0, 'T61e a tenant-B member must update 0 tenant-A app_users rows (RLS)';
+end $$;
+reset role;
+do $$ declare st text; begin
+  select sync_status into st from public.app_users
+    where tenant_id='11111111-1111-1111-1111-111111111111' and external_user_id='U61A';
+  assert st = 'active', 'T61e tenant-A row unchanged by the cross-tenant attempt';
+end $$;
+-- 61f: connector_runner gained NOTHING on app_users (absence marking is a member-JWT concern, never the runner).
+do $$ begin
+  assert not has_table_privilege('connector_runner','public.app_users','SELECT'), 'T61f connector_runner must have NO SELECT on app_users';
+  assert not has_table_privilege('connector_runner','public.app_users','INSERT'), 'T61f connector_runner must have NO INSERT on app_users';
+  assert not has_table_privilege('connector_runner','public.app_users','UPDATE'), 'T61f connector_runner must have NO UPDATE on app_users';
+  assert not has_table_privilege('connector_runner','public.app_users','DELETE'), 'T61f connector_runner must have NO DELETE on app_users';
+end $$;
+
 reset role;
 reset session authorization;
 
