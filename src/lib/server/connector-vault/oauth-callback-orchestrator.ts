@@ -27,6 +27,7 @@ import {
   validateOAuthState,
   type OAuthStateContext,
   type OAuthStateSigner,
+  type OAuthStatePayload,
   type ConsumedNonceStore,
 } from "./oauth-state";
 import {
@@ -58,6 +59,11 @@ export type OrchestratorDeps = {
   signer: OAuthStateSigner;
   now: number;
   consumedNonces?: ConsumedNonceStore;
+  // DURABLE single-use REPLAY gate (real runs): atomically consume the server-side `oauth_pending` row for the
+  // VALIDATED nonce before exchanging. `consumedNonces` above is a same-process guard only; this is the cross-request
+  // durable gate (the DB atomic consume). Omitted by pure/synthetic tests that don't exercise replay; REQUIRED for a
+  // real run (wired by the real-exchange composition). Returns `{ok:false, reason}` on replay/not-found/expired.
+  pendingConsume?: (payload: OAuthStatePayload) => Promise<{ ok: boolean; reason?: string }>;
   // B2b (mocked) — the injected Slack http client + client-secret provider (never env).
   httpClient: SlackHttpClient;
   clientId: string;
@@ -96,6 +102,14 @@ export async function orchestrateSlackOAuthCallback(
   // The synthetic store wiring requires a connector-bound state (a fresh-connect with no connector is out of scope).
   if (typeof v.payload.cid !== "string" || v.payload.cid.length === 0)
     return { ok: false, stage: "validate", reason: "connector_required" };
+
+  // DURABLE REPLAY GATE — if wired (real runs), atomically consume the oauth_pending row for the VALIDATED nonce
+  // BEFORE the exchange. A replayed/reused state finds no consumable row and fails closed HERE, never reaching the
+  // exchange (so a code is never presented twice). Only the validated payload drives the consume (SSOT).
+  if (deps.pendingConsume) {
+    const consumed = await deps.pendingConsume(v.payload);
+    if (!consumed.ok) return { ok: false, stage: "validate", reason: consumed.reason ?? "pending_consume_failed" };
+  }
 
   // STAGE 2+3 — EXCHANGE (mocked) → STORE, threading ONLY the VALIDATED payload (SSOT) + the gated code. B2b does
   // the exchange then the store handoff internally and NEVER returns the token; the store stage is unreachable if the
