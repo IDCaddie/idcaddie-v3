@@ -44,4 +44,4 @@ export SUPABASE_IT_ANON_KEY="${SB_ANON_KEY:?}"
 export SUPABASE_IT_SERVICE_ROLE_KEY="${SB_SERVICE_ROLE_KEY:?}"
 
 echo "==> running store + run-recorder integration tests against ${SUPABASE_IT_URL}"
-npx vitest run src/lib/server/sync/supabase-slack-resolver-store.it.test.ts src/lib/server/sync/manual-sync-run-recorder.it.test.ts
+npx vitest run src/lib/server/sync/supabase-slack-resolver-store.it.test.ts src/lib/server/sync/manual-sync-run-recorder.it.test.ts src/lib/server/sync/slack-synthetic-sync.it.test.ts
