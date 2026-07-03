@@ -19,7 +19,7 @@ function mk(resolve: (ctx: Ctx) => { data: unknown; error: unknown }) {
   });
   return { client: { from: (table: string) => q({ table }) } as unknown as SupabaseClient<Database>, calls };
 }
-const okSummary: RunSlackSyncSummary = { ok: true, teamPresent: true, usersFetched: 2, factsEmitted: 6, factsRejected: 0, appUsersWritten: 2, peopleWritten: 1, matchesWritten: 1, matchConflicts: 0, skipped: 3 };
+const okSummary: RunSlackSyncSummary = { ok: true, teamPresent: true, usersFetched: 2, factsEmitted: 6, factsRejected: 0, appUsersWritten: 2, peopleWritten: 1, matchesWritten: 1, matchConflicts: 0, skipped: 3, staleMarked: 0 };
 
 describe("createSupabaseManualSyncRunRecorder", () => {
   it("start() inserts a 'running' row and returns ok+id (started_at/created_by via DB default)", async () => {
@@ -54,10 +54,10 @@ describe("createSupabaseManualSyncRunRecorder", () => {
     const m = mk(() => ({ data: null, error: null }));
     await createSupabaseManualSyncRunRecorder(m.client).finish({ runId: "run1", summary: okSummary });
     const p = m.calls[0].payload!;
-    expect(p).toMatchObject({ status: "succeeded", users_fetched: 2, facts_emitted: 6, facts_rejected: 0, app_users_written: 2, people_written: 1, matches_written: 1, match_conflicts: 0, skipped: 3 });
+    expect(p).toMatchObject({ status: "succeeded", users_fetched: 2, facts_emitted: 6, facts_rejected: 0, app_users_written: 2, people_written: 1, matches_written: 1, match_conflicts: 0, skipped: 3, app_users_marked_stale: 0 });
     expect(p.finished_at).toBeTypeOf("string");
     // ONLY safe aggregate columns — no token/JWT/email/name/raw/actor-PII key
-    for (const k of Object.keys(p)) expect(["status", "finished_at", "users_fetched", "facts_emitted", "facts_rejected", "app_users_written", "people_written", "matches_written", "match_conflicts", "skipped"]).toContain(k);
+    for (const k of Object.keys(p)) expect(["status", "finished_at", "users_fetched", "facts_emitted", "facts_rejected", "app_users_written", "people_written", "matches_written", "match_conflicts", "skipped", "app_users_marked_stale"]).toContain(k);
     // finish only closes a STILL-running row → never trips the completed-run immutability if it was concurrently reconciled
     expect(m.calls[0].filters).toEqual(expect.arrayContaining(["eq:id=run1", "eq:status=running"]));
   });

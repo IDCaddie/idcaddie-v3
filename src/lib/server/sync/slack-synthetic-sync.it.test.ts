@@ -8,6 +8,7 @@ import { emitSlackDiscoveryFacts } from "../connector-vault/slack-discovery-emit
 import { applySlackDiscoveryResolution } from "../connector-vault/slack-resolver-write";
 import {
   fixtureSlackHttpClient,
+  makeFixtureSlackHttpClient,
   fixtureProviderTokenSource,
   FIXTURE_SLACK_TOKEN,
   FIXTURE_CONNECTOR_ID,
@@ -42,6 +43,7 @@ describe.runIf(RUN)("synthetic Slack sync — end-to-end pipeline over the fixtu
   let storeA: ReturnType<typeof createSupabaseSlackResolverStore>;
   let storeB: ReturnType<typeof createSupabaseSlackResolverStore>;
   let recorderA: ReturnType<typeof createSupabaseManualSyncRunRecorder>;
+  let recorderB: ReturnType<typeof createSupabaseManualSyncRunRecorder>;
   const authUserIds: string[] = [];
 
   async function memberClient(email: string) {
@@ -54,6 +56,14 @@ describe.runIf(RUN)("synthetic Slack sync — end-to-end pipeline over the fixtu
   const runSynthetic = (store: typeof storeA, recorder: typeof recorderA, tenantId: string): Promise<RecordedRunResult> =>
     recordedSlackSyncRun(
       { env: DEV_ENV, tokenSource: fixtureProviderTokenSource, httpClient: fixtureSlackHttpClient, store, identity: { tenantId, connectorId: FIXTURE_CONNECTOR_ID }, observedAt: OBSERVED },
+      recorder,
+    );
+
+  // absence-run variant: a custom observedAt (so a later run can mark earlier-seen users stale) + optional excluded
+  // member ids (simulate users who LEFT the workspace — absent from users.list).
+  const runSyntheticAt = (store: typeof storeA, recorder: typeof recorderA, tenantId: string, observedAt: string, excludeUserIds: readonly string[] = []): Promise<RecordedRunResult> =>
+    recordedSlackSyncRun(
+      { env: DEV_ENV, tokenSource: fixtureProviderTokenSource, httpClient: makeFixtureSlackHttpClient({ excludeUserIds }).client, store, identity: { tenantId, connectorId: FIXTURE_CONNECTOR_ID }, observedAt },
       recorder,
     );
 
@@ -79,6 +89,7 @@ describe.runIf(RUN)("synthetic Slack sync — end-to-end pipeline over the fixtu
     storeA = createSupabaseSlackResolverStore(await memberClient(emailA));
     storeB = createSupabaseSlackResolverStore(await memberClient(emailB));
     recorderA = createSupabaseManualSyncRunRecorder(await memberClient(emailA));
+    recorderB = createSupabaseManualSyncRunRecorder(await memberClient(emailB));
   }, 30_000);
 
   afterAll(async () => {
@@ -170,4 +181,43 @@ describe.runIf(RUN)("synthetic Slack sync — end-to-end pipeline over the fixtu
     const blob = JSON.stringify(r) + "\n" + logs.join("\n");
     for (const needle of [FIXTURE_SLACK_TOKEN, "bob@example.com", "Bob Normal", "carol@example.com", "alice@example.com"]) expect(blob).not.toContain(needle);
   }, 30_000);
+
+  // 0040 absence/stale marking end-to-end (on the clean tenant B — the cross-tenant test wrote nothing there).
+  const OBS_1 = OBSERVED, OBS_2 = "2026-07-03T01:00:00.000Z";
+  const inst = (t: unknown) => new Date(t as string).getTime(); // compare timestamptz by INSTANT (PG normalizes the string)
+  const seenAt = async (ext: string) => (await admin.from("app_users").select("sync_status, last_seen_at, raw_payload").eq("tenant_id", tenantB).eq("external_user_id", ext)).data?.[0];
+
+  it("absence: a first sync leaves everyone active with last_seen_at set (0 stale)", async () => {
+    const r = await runSyntheticAt(storeB, recorderB, tenantB, OBS_1);
+    expect(r.summary.ok && r.summary.staleMarked).toBe(0);
+    const bob = await seenAt("U0000001");
+    expect(bob?.sync_status).toBe("active");
+    expect(inst(bob?.last_seen_at)).toBe(inst(OBS_1));
+    const runs = await admin.from("manual_sync_runs").select("app_users_marked_stale").eq("tenant_id", tenantB);
+    expect(runs.data?.[0]?.app_users_marked_stale).toBe(0);
+  }, 40_000);
+
+  it("absence: a later sync missing a prior user marks ONLY that user stale — row kept, count recorded, others active", async () => {
+    const before = await graphCounts(tenantB);
+    const r = await runSyntheticAt(storeB, recorderB, tenantB, OBS_2, ["U0000001"]); // U0000001 (bob) departs
+    expect(r.summary.ok && r.summary.staleMarked).toBe(1);
+    const bob = await seenAt("U0000001");
+    expect(bob?.sync_status).toBe("stale"); // marked, NOT deleted
+    expect(inst(bob?.last_seen_at)).toBe(inst(OBS_1)); // last-seen PRESERVED at run-1 (not touched by run 2)
+    const u2 = await seenAt("U0000002");
+    expect(u2?.sync_status).toBe("active");
+    expect(inst(u2?.last_seen_at)).toBe(inst(OBS_2)); // still present → refreshed
+    expect(await graphCounts(tenantB)).toEqual(before); // NO hard delete — every row survives
+    const staleRun = await admin.from("manual_sync_runs").select("app_users_marked_stale").eq("tenant_id", tenantB).eq("status", "succeeded").order("started_at", { ascending: false }).limit(1);
+    expect(staleRun.data?.[0]?.app_users_marked_stale).toBe(1); // persisted audit count
+  }, 40_000);
+
+  it("absence: a returning user reactivates; a Slack-deleted-but-present user stays active with slack_is_deleted provenance", async () => {
+    const r = await runSyntheticAt(storeB, recorderB, tenantB, "2026-07-03T02:00:00.000Z"); // full fixture again — bob returns
+    expect(r.summary.ok).toBe(true);
+    expect(await seenAt("U0000001")).toMatchObject({ sync_status: "active" }); // stale → active (reversible)
+    const dana = await seenAt("U0000004"); // Slack `deleted:true`, always RETURNED ⇒ present ⇒ active, distinct from absent
+    expect(dana).toMatchObject({ sync_status: "active" });
+    expect((dana!.raw_payload as Record<string, unknown>).slack_is_deleted).toBe(true);
+  }, 40_000);
 });

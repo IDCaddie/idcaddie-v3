@@ -15,7 +15,7 @@ import type { RunSlackSyncSummary } from "./run-slack-sync-dev";
 const DEV = { NODE_ENV: "development", ID_CADDIE_INTERNAL_SLACK_TRIGGER_ENABLED: "1" } as Record<string, string | undefined>;
 const ctx = (over: Partial<ResolvedTenantContext>): ResolvedTenantContext =>
   ({ activeTenant: { id: "tA", name: "A", slug: "a", role: "owner" }, tenantSwitchingRequired: false, ...over } as ResolvedTenantContext);
-const ok: RunSlackSyncSummary = { ok: true, teamPresent: true, usersFetched: 1, factsEmitted: 6, factsRejected: 0, appUsersWritten: 1, peopleWritten: 1, matchesWritten: 1, matchConflicts: 0, skipped: 2 };
+const ok: RunSlackSyncSummary = { ok: true, teamPresent: true, usersFetched: 1, factsEmitted: 6, factsRejected: 0, appUsersWritten: 1, peopleWritten: 1, matchesWritten: 1, matchConflicts: 0, skipped: 2, staleMarked: 0 };
 
 describe("isInternalSlackTriggerEnabled — allowlist-shaped, fail-closed", () => {
   it("enables ONLY local dev + the distinct trigger opt-in", () => {

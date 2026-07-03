@@ -83,13 +83,20 @@ export const fixtureProviderTokenSource: ProviderTokenSource = {
   },
 };
 
-// A CALL-RECORDING wrapper over `fixtureSlackHttpClient` — same canned responses, plus a `calls` log of each request's
-// url + Authorization header. Lets a unit test assert call ORDER / the Bearer header while reusing the committed fixture
-// data (no ad-hoc response shapes). Still network-free.
-export function makeFixtureSlackHttpClient(): { client: SlackHttpClient; calls: { url: string; auth?: string }[] } {
+// A CALL-RECORDING wrapper over the fixture responses — same canned data, plus a `calls` log of each request's url +
+// Authorization header. Lets a unit test assert call ORDER / the Bearer header while reusing the committed fixture data
+// (no ad-hoc response shapes). Still network-free. `excludeUserIds` simulates a LATER sync where those members are
+// ABSENT from users.list (departed the workspace) — the absence/stale-marking scenario; everything else is unchanged.
+export function makeFixtureSlackHttpClient(opts: { excludeUserIds?: readonly string[] } = {}): { client: SlackHttpClient; calls: { url: string; auth?: string }[] } {
   const calls: { url: string; auth?: string }[] = [];
+  const excluded = new Set(opts.excludeUserIds ?? []);
+  const members = FIXTURE_MEMBERS.filter((m) => !excluded.has(m.id));
   const client: SlackHttpClient = async (url, init) => {
     calls.push({ url, auth: init.headers.Authorization });
+    if (excluded.size > 0 && url.includes("/users.list")) {
+      const body = { ok: true, members, response_metadata: { next_cursor: "" } };
+      return { ok: true, status: 200, headers: { get: () => null }, json: async () => body };
+    }
     return fixtureSlackHttpClient(url, init);
   };
   return { client, calls };

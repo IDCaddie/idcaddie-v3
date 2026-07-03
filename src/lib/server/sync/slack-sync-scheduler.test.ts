@@ -8,7 +8,7 @@ import type { RunSlackSyncSummary } from "./run-slack-sync-dev";
 const DEV = { NODE_ENV: "development", ID_CADDIE_SLACK_SCHEDULER_ENABLED: "1" } as Record<string, string | undefined>;
 const INTERVAL = 30 * 60 * 1000;
 const NOW = Date.parse("2026-06-27T12:00:00Z");
-const ok: RunSlackSyncSummary = { ok: true, teamPresent: true, usersFetched: 1, factsEmitted: 6, factsRejected: 0, appUsersWritten: 1, peopleWritten: 1, matchesWritten: 1, matchConflicts: 0, skipped: 2 };
+const ok: RunSlackSyncSummary = { ok: true, teamPresent: true, usersFetched: 1, factsEmitted: 6, factsRejected: 0, appUsersWritten: 1, peopleWritten: 1, matchesWritten: 1, matchConflicts: 0, skipped: 2, staleMarked: 0 };
 
 describe("isSlackSchedulerEnabled — allowlist-shaped, fail-closed", () => {
   it("enables ONLY local dev + the distinct scheduler opt-in", () => {

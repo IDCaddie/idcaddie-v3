@@ -31,7 +31,14 @@ export interface SlackResolverStore {
   // apps ON CONFLICT (tenant_id, external_instance_id) DO UPDATE (name/vendor/category/instance_url).
   upsertApp(input: { tenantId: string; externalInstanceId: string; name: string; vendorName?: string; category?: string; instanceUrl?: string }): Promise<{ appId: string }>;
   // app_users ON CONFLICT (tenant_id, app_id, external_user_id) DO UPDATE (email/display_name/status/last_active_at/raw_payload).
-  upsertAppUser(input: { tenantId: string; appId: string; externalUserId: string; email?: string; displayName?: string; status?: string; lastActiveAt?: string; rawProvenance?: Record<string, string | number | boolean> }): Promise<{ appUserId: string }>;
+  // `lastSeenAt` (0040 presence): when set, the store ALSO writes last_seen_at + sync_status='active' — a present user
+  // is (re)activated on every sync, including a previously-stale user that reappears.
+  upsertAppUser(input: { tenantId: string; appId: string; externalUserId: string; email?: string; displayName?: string; status?: string; lastActiveAt?: string; lastSeenAt?: string; rawProvenance?: Record<string, string | number | boolean> }): Promise<{ appUserId: string }>;
+  // 0040 ABSENCE MARKING — flip sync_status to 'stale' for THIS tenant+app's currently-'active' rows NOT seen at
+  // observedAt (last_seen_at older than observedAt, or NULL from before tracking). UPDATE only — NEVER a delete;
+  // last_seen_at keeps its prior value (the honest "last time we saw them"). RLS (the existing 0004 update policy)
+  // enforces the tenant. Returns the count marked (0 on an idempotent re-run: absent rows are already 'stale').
+  markAbsentAppUsersStale(input: { tenantId: string; appId: string; observedAt: string }): Promise<{ staleMarked: number }>;
   // people ON CONFLICT (tenant_id, lower(primary_email)) DO UPDATE (full_name).
   upsertPerson(input: { tenantId: string; primaryEmail: string; fullName?: string }): Promise<{ personId: string }>;
   // The EXISTING match person for (tenant_id, app_user_id), or null — used to PROTECT a prior identity decision
@@ -49,6 +56,7 @@ export type SlackResolutionSummary = {
   matchesUpserted: number;
   matchConflicts: number; // existing match points at a DIFFERENT person → left for review, NOT overwritten (0028 invariant)
   skipped: number; // facts ignored (wrong tenant, unsupported type, missing required field)
+  staleMarked: number; // 0040 absence marking — app_users flipped active→stale this run (0 when guarded off / none absent)
   gaps: string[]; // schema-gap notes (e.g. role_admin has no column) — documentation, not an error
 };
 
@@ -61,7 +69,7 @@ export async function applySlackDiscoveryResolution(
   authTenantId: string,
   facts: readonly DiscoveryFact[],
 ): Promise<SlackResolutionSummary> {
-  const summary: SlackResolutionSummary = { appsUpserted: 0, appUsersUpserted: 0, peopleUpserted: 0, matchesUpserted: 0, matchConflicts: 0, skipped: 0, gaps: [] };
+  const summary: SlackResolutionSummary = { appsUpserted: 0, appUsersUpserted: 0, peopleUpserted: 0, matchesUpserted: 0, matchConflicts: 0, skipped: 0, staleMarked: 0, gaps: [] };
   if (!isStr(authTenantId)) return summary; // fail closed — no authenticated tenant, nothing written
   if (!Array.isArray(facts)) return summary;
 
@@ -103,6 +111,9 @@ export async function applySlackDiscoveryResolution(
     const prov = f(acct).provenance && typeof f(acct).provenance === "object" ? (f(acct).provenance as Record<string, string | number | boolean>) : undefined;
     const rawProvenance: Record<string, string | number | boolean> = { provider: "slack" }; // SANITIZED — never the raw Slack object
     if (prov && isStr(prov.slack_role_hint)) rawProvenance.role_hint = prov.slack_role_hint as string;
+    // deleted-vs-absent (0040): a Slack-DELETED user is still RETURNED by users.list → PRESENT (stays sync_status
+    // 'active'); the deletion is recorded as sanitized provenance so it stays distinguishable from an ABSENT ('stale') user.
+    if (prov && prov.slack_is_deleted === true) rawProvenance.slack_is_deleted = true;
     const { appUserId } = await store.upsertAppUser({
       tenantId: authTenantId,
       appId,
@@ -111,6 +122,7 @@ export async function applySlackDiscoveryResolution(
       ...(isStr(f(acct).display_name) ? { displayName: f(acct).display_name as string } : {}),
       ...(isStr(f(acct).status) ? { status: f(acct).status as string } : {}),
       ...(isStr(f(acct).last_activity_at) ? { lastActiveAt: f(acct).last_activity_at as string } : {}), // usage_activity folds here
+      ...(isStr(f(acct).observed_at) ? { lastSeenAt: f(acct).observed_at as string } : {}), // 0040 presence: seen this run → active
       rawProvenance,
     });
     appUserIdByExternal.set(extId, appUserId);
@@ -148,6 +160,22 @@ export async function applySlackDiscoveryResolution(
   summary.skipped += roleAdminN + usageN;
   if (roleAdminN > 0) summary.gaps.push("role_admin: no role column on app_users — role carried as app_users.raw_payload provenance (schema gap; future PR)");
   if (usageN > 0) summary.gaps.push("usage_activity: no usage table — last-active folded into app_users.last_active_at");
+
+  // 4. ABSENCE MARKING (0040) — reached ONLY here, i.e. only after EVERY write above succeeded (any store throw aborts
+  //    the resolution before this line, so a failed/partial sync never marks stale). GUARDS: at least one app_user was
+  //    actually seen this run (a 0-user "successful" sync is suspicious — scope/permission regression — never mass-mark),
+  //    and a well-formed observed_at exists. UPDATE-only (never a delete); tenant+app-scoped; idempotent (re-running the
+  //    same observedAt marks 0 — present rows have last_seen_at == observedAt, absent rows are already 'stale').
+  // ponytail: absence marking trusts that `usersFetched` was a COMPLETE list. slack-client.ts caps users.list at
+  // MAX_PAGES and breaks on a repeating cursor WITHOUT signalling — so a >20k-member workspace (or a cursor loop) could
+  // present a truncated-but-nonzero set and mark the tail stale. Non-destructive + reversible (self-heals on the next
+  // complete sync), so acceptable for the current synthetic/staging scale; the real fix is for listUsers() to signal
+  // completeness / fail closed on truncation before stale-marking large workspaces (follow-up).
+  const observedAt = isStr(f(instance).observed_at) ? (f(instance).observed_at as string) : null;
+  if (summary.appUsersUpserted > 0 && observedAt) {
+    const { staleMarked } = await store.markAbsentAppUsersStale({ tenantId: authTenantId, appId, observedAt });
+    summary.staleMarked = staleMarked;
+  }
 
   return summary;
 }
