@@ -56,7 +56,8 @@ export const FIXTURE_USERS_LIST = { ok: true, members: FIXTURE_MEMBERS, response
 export const SLACK_FIXTURE_EXPECTED = {
   apps: 1,
   appUsers: 6, // U0000001,2,4,5,6,7 (U0000003 bot + USLACKBOT excluded)
-  people: 4, // bob, carol, dana, alice (U5+U6 → one)
+  people: 4, // DISTINCT people rows (bob, carol, dana, alice — U5+U6 dedupe on lower(email)); the DB/store-map count
+  peopleUpserts: 5, // person-UPSERT OPERATIONS (one per email-bearing user U1,U2,U4,U5,U6) — the run-summary `peopleWritten` metric
   matches: 5, // one per email-bearing app_user (U1,U2,U4,U5,U6); U0000007 emailless → none
   excludedBotIds: ["U0000003", "USLACKBOT"] as const,
   deletedAppUserExternalId: "U0000004",
@@ -81,3 +82,15 @@ export const fixtureProviderTokenSource: ProviderTokenSource = {
     return { provider: "slack", token: FIXTURE_SLACK_TOKEN };
   },
 };
+
+// A CALL-RECORDING wrapper over `fixtureSlackHttpClient` — same canned responses, plus a `calls` log of each request's
+// url + Authorization header. Lets a unit test assert call ORDER / the Bearer header while reusing the committed fixture
+// data (no ad-hoc response shapes). Still network-free.
+export function makeFixtureSlackHttpClient(): { client: SlackHttpClient; calls: { url: string; auth?: string }[] } {
+  const calls: { url: string; auth?: string }[] = [];
+  const client: SlackHttpClient = async (url, init) => {
+    calls.push({ url, auth: init.headers.Authorization });
+    return fixtureSlackHttpClient(url, init);
+  };
+  return { client, calls };
+}

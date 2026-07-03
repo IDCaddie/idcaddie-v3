@@ -5,6 +5,7 @@ import { runSlackSyncDev, isDevSlackSyncRunEnabled, type RunSlackSyncDeps } from
 import type { SlackHttpClient, SlackHttpResponse } from "./slack/slack-client";
 import type { SlackResolverStore } from "../connector-vault/slack-resolver-write";
 import { StoreWriteError } from "./supabase-slack-resolver-store";
+import { makeFixtureSlackHttpClient, SLACK_FIXTURE_EXPECTED } from "./slack/slack-sync-fixture";
 
 // Slack P0 PR 6 — manual run orchestrator. Synthetic only: injected token source + http client + in-memory store; NO
 // live Slack/DB. The token is a marked sentinel (the marker is IN the token so the scanner excuses it).
@@ -14,24 +15,12 @@ const DEV = { NODE_ENV: "development", ID_CADDIE_DEV_SLACK_SYNC_ENABLED: "1" } a
 const IDENTITY = { tenantId: "tenant-A", connectorId: "c1" };
 const OBSERVED = "2026-06-27T00:00:00.000Z";
 
+// Happy-path Slack responses come from the committed fixture (makeFixtureSlackHttpClient — 8-member scenario: bot +
+// Slackbot excluded, mixed-case emails dedup, an emailless user). `jsonRes` remains for the ERROR-path tests only, which
+// craft specific Slack failures (invalid_auth / 429 / malformed) the single-scenario fixture does not model.
 const jsonRes = (obj: unknown, status = 200, headers?: Record<string, string>): SlackHttpResponse => ({
   ok: status < 400, status, headers: headers ? { get: (n) => headers[n.toLowerCase()] ?? null } : undefined, json: async () => obj,
 });
-const member = (over: Record<string, unknown> = {}) => ({
-  id: "U1", team_id: "T1", deleted: false, is_bot: false, is_admin: false, is_owner: false, is_primary_owner: false,
-  is_restricted: false, is_ultra_restricted: false, tz: "UTC", updated: 1700000000,
-  profile: { email: "a@x.test", display_name: "Ada", real_name: "Ada L", title: "Eng", status_text: "" }, ...over,
-});
-function httpOk(membersList: unknown[] = [member()]): { client: SlackHttpClient; calls: { url: string; auth?: string }[] } {
-  const calls: { url: string; auth?: string }[] = [];
-  const client: SlackHttpClient = async (url, init) => {
-    calls.push({ url, auth: init.headers.Authorization });
-    if (url.includes("auth.test")) return jsonRes({ ok: true, team_id: "T1", user_id: "U_AUTH", team: "Acme", url: "https://acme.slack.com" });
-    if (url.includes("users.list")) return jsonRes({ ok: true, members: membersList, response_metadata: { next_cursor: "" } });
-    return jsonRes({ ok: false, error: "unknown_method" });
-  };
-  return { client, calls };
-}
 function memStore() {
   const apps = new Map<string, string>(), appUsers = new Map<string, string>(), people = new Map<string, string>(), matches = new Map<string, string>();
   let a = 0, u = 0, p = 0;
@@ -45,7 +34,7 @@ function memStore() {
   return { store, apps, appUsers, people, matches };
 }
 const deps = (over: Partial<RunSlackSyncDeps> = {}): RunSlackSyncDeps => ({
-  env: DEV, tokenSource, httpClient: httpOk().client, store: memStore().store, identity: IDENTITY, observedAt: OBSERVED, ...over,
+  env: DEV, tokenSource, httpClient: makeFixtureSlackHttpClient().client, store: memStore().store, identity: IDENTITY, observedAt: OBSERVED, ...over,
 });
 
 let consoleDump: string[];
@@ -75,24 +64,26 @@ describe("isDevSlackSyncRunEnabled — allowlist-shaped, fail-closed", () => {
 });
 
 describe("runSlackSyncDev — chain wiring + safe summary", () => {
-  it("runs token→client→emitter→resolver and returns a SAFE aggregate summary", async () => {
-    const { client, calls } = httpOk([member({ id: "U1" }), member({ id: "U2", profile: { email: "b@x.test", display_name: "Bo" } })]);
+  it("runs token→client→emitter→resolver and returns a SAFE aggregate summary (fixture scenario)", async () => {
+    const { client, calls } = makeFixtureSlackHttpClient();
     const st = memStore();
     const res = await runSlackSyncDev(deps({ httpClient: client, store: st.store }));
-    expect(res).toMatchObject({ ok: true, teamPresent: true, usersFetched: 2, appUsersWritten: 2, peopleWritten: 2, matchesWritten: 2 });
+    // fixture: 8 members → bot + Slackbot excluded → 6 app_users; 5 person-upserts (peopleWritten is the OPERATION count;
+    // distinct people is 4 after the U5/U6 mixed-case dedupe at the store); 5 matches
+    expect(res).toMatchObject({ ok: true, teamPresent: true, usersFetched: SLACK_FIXTURE_EXPECTED.appUsers, appUsersWritten: SLACK_FIXTURE_EXPECTED.appUsers, peopleWritten: SLACK_FIXTURE_EXPECTED.peopleUpserts, matchesWritten: SLACK_FIXTURE_EXPECTED.matches });
     // chain ORDER: auth.test before users.list; the token rode the Authorization header (not the URL); then writes happened
     expect(calls[0].url).toContain("auth.test");
     expect(calls[1].url).toContain("users.list");
     expect(calls[0].auth).toBe(`Bearer ${SENTINEL}`);
-    expect(st.appUsers.size).toBe(2);
+    expect(st.appUsers.size).toBe(SLACK_FIXTURE_EXPECTED.appUsers);
   });
 
   it("is idempotent — running twice does not duplicate graph rows", async () => {
     const st = memStore();
     await runSlackSyncDev(deps({ store: st.store }));
     const second = await runSlackSyncDev(deps({ store: st.store }));
-    expect(st.appUsers.size).toBe(1); expect(st.people.size).toBe(1); expect(st.matches.size).toBe(1);
-    expect(second.ok && second.matchesWritten).toBe(0); // re-run: match already exists
+    expect(st.appUsers.size).toBe(SLACK_FIXTURE_EXPECTED.appUsers); expect(st.people.size).toBe(SLACK_FIXTURE_EXPECTED.people); expect(st.matches.size).toBe(SLACK_FIXTURE_EXPECTED.matches);
+    expect(second.ok && second.matchesWritten).toBe(0); // re-run: matches already exist
   });
 
   it("the token NEVER appears in the summary, errors, or console", async () => {
@@ -104,7 +95,7 @@ describe("runSlackSyncDev — chain wiring + safe summary", () => {
   it("the summary carries no email/name/raw — only counts/booleans", async () => {
     const res = await runSlackSyncDev(deps());
     const blob = JSON.stringify(res);
-    for (const bad of ["a@x.test", "Ada", "profile", "members", "xoxb"]) expect(blob).not.toContain(bad);
+    for (const bad of ["bob@example.com", "Bob Normal", "carol@example.com", "profile", "members", "xoxb"]) expect(blob).not.toContain(bad);
   });
 });
 
@@ -152,11 +143,11 @@ describe("runSlackSyncDev — fail-closed + safe failures", () => {
     expect(res).toMatchObject({
       ok: false, errorCode: "resolve_failed",
       failedStage: "upsert_app", table: "apps", safeDbCode: "42501", safeReason: "rls_denied",
-      usersFetched: 1, factsEmitted: expect.any(Number), factsRejected: expect.any(Number),
+      usersFetched: SLACK_FIXTURE_EXPECTED.appUsers, factsEmitted: expect.any(Number), factsRejected: expect.any(Number),
     });
     // the diagnostic carries NO token / email / name / raw payload — only safe enums/codes/counts
     const blob = JSON.stringify(res);
-    for (const bad of [SENTINEL, "ada@x.test", "Ada", "profile", "members", "xoxb", "Bearer"]) expect(blob).not.toContain(bad);
+    for (const bad of [SENTINEL, "bob@example.com", "Bob Normal", "profile", "members", "xoxb", "Bearer"]) expect(blob).not.toContain(bad);
   });
 
   it.each([
