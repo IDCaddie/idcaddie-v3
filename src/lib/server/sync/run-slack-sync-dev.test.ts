@@ -97,6 +97,26 @@ describe("runSlackSyncDev — chain wiring + safe summary", () => {
     expect(second.ok && second.matchesWritten).toBe(0); // re-run: matches already exist
   });
 
+  it("an INCOMPLETE users.list (cursor loop) skips stale marking, still writes present users, and logs a SAFE reason", async () => {
+    // a client whose users.list loops the cursor → the Slack client reports complete:false (truncation hardening #234).
+    // Cursor-aware: page 1 carries the user, page 2 (the repeated cursor) is empty → no duplicate, loop detected.
+    const looping: SlackHttpClient = async (url) => {
+      if (url.includes("auth.test")) return { ok: true, status: 200, json: async () => ({ ok: true, team_id: "T1", user_id: "U_AUTH", team: "Acme", url: "https://acme.slack.com" }) };
+      const cursor = new URL(url).searchParams.get("cursor");
+      const members = cursor ? [] : [{ id: "U1", team_id: "T1", profile: { email: "a@x.test", display_name: "Ada" } }];
+      return { ok: true, status: 200, json: async () => ({ ok: true, members, response_metadata: { next_cursor: "loop" } }) };
+    };
+    const st = memStore();
+    const res = await runSlackSyncDev(deps({ httpClient: looping, store: st.store }));
+    expect(res.ok).toBe(true);
+    expect(res.ok && res.staleMarked).toBe(0); // marking SKIPPED on an incomplete fetch
+    expect(res.ok && res.appUsersWritten).toBe(1); // the present user is STILL upserted (non-destructive)
+    const logs = consoleDump.join("\n");
+    expect(logs).toContain("incomplete");
+    expect(logs).toContain("cursor_loop"); // safe reason class only
+    expect(logs).not.toContain(SENTINEL); // never the token
+  });
+
   it("the token NEVER appears in the summary, errors, or console", async () => {
     const res = await runSlackSyncDev(deps());
     expect(JSON.stringify(res)).not.toContain(SENTINEL);

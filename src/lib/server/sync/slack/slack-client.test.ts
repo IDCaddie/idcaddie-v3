@@ -56,7 +56,7 @@ describe("slack-client — auth.test + users.list (mocked)", () => {
 
   it("users.list success normalizes the allowlisted fields", async () => {
     const { client } = mockHttp(() => jsonRes({ ok: true, members: [member()] }));
-    const users = await createSlackClient({ tokenSource, httpClient: client, identity }).listUsers();
+    const { users } = await createSlackClient({ tokenSource, httpClient: client, identity }).listUsers();
     expect(users).toHaveLength(1);
     expect(users[0]).toMatchObject({ slackUserId: "U001", teamId: "T1", email: "a@x.test", displayName: "Ada", title: "Eng", status: "coding", roleHint: "member", timezone: "America/Toronto", isDeleted: false });
     expect(users[0]).not.toHaveProperty("has2fa"); // unavailable in P0 users.list — not a top-level field
@@ -74,7 +74,7 @@ describe("slack-client — auth.test + users.list (mocked)", () => {
       }
       return jsonRes({ ok: false, error: "unknown_method" });
     });
-    const users = await createSlackClient({ tokenSource, httpClient: client, identity }).listUsers();
+    const { users } = await createSlackClient({ tokenSource, httpClient: client, identity }).listUsers();
     expect(users.map((u) => u.slackUserId)).toEqual(["U001", "U002"]);
     expect(page).toBe(2);
   });
@@ -103,7 +103,7 @@ describe("slack-client — auth.test + users.list (mocked)", () => {
 
   it("a REPEATING next_cursor breaks the loop (no duplicate-record loop)", async () => {
     const { client } = mockHttp(() => jsonRes({ ok: true, members: [member({ id: "U001" })], response_metadata: { next_cursor: "SAME" } }));
-    const users = await createSlackClient({ tokenSource, httpClient: client, identity }).listUsers();
+    const { users } = await createSlackClient({ tokenSource, httpClient: client, identity }).listUsers();
     expect(users.map((u) => u.slackUserId)).toEqual(["U001", "U001"]); // page 1 (cursor SAME) + page 2 (cursor SAME → break), not 100×
   });
 
@@ -127,9 +127,9 @@ describe("slack-client — auth.test + users.list (mocked)", () => {
 describe("slack-client — P0 filtering + normalization edges", () => {
   it("filters bots by default (incl. USLACKBOT); includeBots opts back in", async () => {
     const route: Route = () => jsonRes({ ok: true, members: [member({ id: "U001" }), member({ id: "B1", is_bot: true }), member({ id: "USLACKBOT", is_bot: false })] });
-    const filtered = await createSlackClient({ tokenSource, httpClient: mockHttp(route).client, identity }).listUsers();
+    const { users: filtered } = await createSlackClient({ tokenSource, httpClient: mockHttp(route).client, identity }).listUsers();
     expect(filtered.map((u) => u.slackUserId)).toEqual(["U001"]); // both bots removed (USLACKBOT by id)
-    const all = await createSlackClient({ tokenSource, httpClient: mockHttp(route).client, identity }, { includeBots: true }).listUsers();
+    const { users: all } = await createSlackClient({ tokenSource, httpClient: mockHttp(route).client, identity }, { includeBots: true }).listUsers();
     expect(all.map((u) => u.slackUserId).sort()).toEqual(["B1", "U001", "USLACKBOT"]);
   });
 
@@ -137,14 +137,14 @@ describe("slack-client — P0 filtering + normalization edges", () => {
   it("non-bot user WITHOUT profile.email normalizes (email undefined, record still produced)", async () => {
     const noEmail = member({ id: "U_NOEMAIL", profile: { display_name: "NoMail", real_name: "No Mail", title: "Ops", status_text: "" } });
     const { client } = mockHttp(() => jsonRes({ ok: true, members: [noEmail] }));
-    const users = await createSlackClient({ tokenSource, httpClient: client, identity }).listUsers();
+    const { users } = await createSlackClient({ tokenSource, httpClient: client, identity }).listUsers();
     expect(users).toHaveLength(1); // not dropped, not failed
     expect(users[0].email).toBeUndefined();
     expect(users[0].displayName).toBe("NoMail");
   });
   it("non-bot user WITH profile.email normalizes the email", async () => {
     const { client } = mockHttp(() => jsonRes({ ok: true, members: [member({ id: "U_EMAIL", profile: { email: "real@x.test", display_name: "R" } })] }));
-    const users = await createSlackClient({ tokenSource, httpClient: client, identity }).listUsers();
+    const { users } = await createSlackClient({ tokenSource, httpClient: client, identity }).listUsers();
     expect(users[0].email).toBe("real@x.test");
   });
 
@@ -166,7 +166,7 @@ describe("slack-client — P0 filtering + normalization edges", () => {
 
   it("a member with no id is dropped; malformed members are skipped", async () => {
     const { client } = mockHttp(() => jsonRes({ ok: true, members: [{ no_id: true }, null, "str", member({ id: "U9" })] }));
-    const users = await createSlackClient({ tokenSource, httpClient: client, identity }).listUsers();
+    const { users } = await createSlackClient({ tokenSource, httpClient: client, identity }).listUsers();
     expect(users.map((u) => u.slackUserId)).toEqual(["U9"]);
   });
 
@@ -182,10 +182,52 @@ describe("slack-client — P0 filtering + normalization edges", () => {
   });
 });
 
+// #234 truncation hardening — listUsers() must report COMPLETENESS so a partial fetch can't drive stale marking.
+describe("slack-client — users.list completeness signal", () => {
+  const cursorOf = (url: string) => new URL(url).searchParams.get("cursor");
+  const pageRoute = (body: (cursor: string | null) => unknown): Route => (url) =>
+    url.includes("/users.list") ? jsonRes(body(cursorOf(url))) : jsonRes({ ok: true, team_id: "T1", user_id: "U1" });
+  const list = (route: Route) => createSlackClient({ tokenSource, httpClient: mockHttp(route).client, identity }).listUsers();
+
+  it("a single-page list (no next_cursor) is COMPLETE", async () => {
+    const r = await list(pageRoute(() => ({ ok: true, members: [member({ id: "U1" })] })));
+    expect(r).toMatchObject({ complete: true, reason: "complete", usersFetched: 1, pagesFetched: 1 });
+  });
+
+  it("a multi-page list ending on an empty next_cursor is COMPLETE (all pages merged)", async () => {
+    const r = await list(pageRoute((c) => (c === null ? { ok: true, members: [member({ id: "U1" })], response_metadata: { next_cursor: "c1" } } : { ok: true, members: [member({ id: "U2" })] })));
+    expect(r).toMatchObject({ complete: true, reason: "complete", usersFetched: 2, pagesFetched: 2 });
+    expect(r.users.map((u) => u.slackUserId)).toEqual(["U1", "U2"]);
+  });
+
+  it("a zero-user response (auth ok, empty members, no cursor) is COMPLETE with 0 users", async () => {
+    const r = await list(pageRoute(() => ({ ok: true, members: [] })));
+    expect(r).toMatchObject({ complete: true, reason: "complete", usersFetched: 0, pagesFetched: 1 });
+  });
+
+  it("a REPEATED next_cursor (loop) is INCOMPLETE with reason cursor_loop", async () => {
+    const r = await list(pageRoute(() => ({ ok: true, members: [member({ id: "U1" })], response_metadata: { next_cursor: "loop" } })));
+    expect(r).toMatchObject({ complete: false, reason: "cursor_loop", pagesFetched: 2 }); // page 2 sees the repeated cursor → stop
+  });
+
+  it("a never-ending unique cursor hits the page cap → INCOMPLETE with reason page_limit_reached", async () => {
+    let n = 0;
+    const r = await list(pageRoute(() => ({ ok: true, members: [member({ id: `U${++n}` })], response_metadata: { next_cursor: `c${n}` } })));
+    expect(r).toMatchObject({ complete: false, reason: "page_limit_reached" });
+    expect(r.pagesFetched).toBe(100); // MAX_PAGES
+  });
+
+  it("a mid-stream Slack error (page 2 ok:false) THROWS (fails the whole fetch — never returns a partial-as-complete)", async () => {
+    const route = pageRoute((c) => (c === null ? { ok: true, members: [member({ id: "U1" })], response_metadata: { next_cursor: "c1" } } : { ok: false, error: "internal_error" }));
+    await expect(createSlackClient({ tokenSource, httpClient: mockHttp(route).client, identity }).listUsers())
+      .rejects.toMatchObject({ name: "SlackApiError", code: "internal_error" });
+  });
+});
+
 describe("slack-client — token secrecy + no real network", () => {
   it("the token never appears in normalized records, errors, or console", async () => {
     const { client } = mockHttp(() => jsonRes({ ok: true, members: [member()] }));
-    const users = await createSlackClient({ tokenSource, httpClient: client, identity }).listUsers();
+    const { users } = await createSlackClient({ tokenSource, httpClient: client, identity }).listUsers();
     expect(JSON.stringify(users)).not.toContain(SENTINEL_TOKEN);
     // every error path: code only, never the token
     for (const res of [jsonRes({ ok: false, error: "invalid_auth" }), jsonRes("x"), jsonRes({ ok: false }, 429, { "retry-after": "1" })]) {

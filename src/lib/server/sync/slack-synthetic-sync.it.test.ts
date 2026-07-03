@@ -140,7 +140,7 @@ describe.runIf(RUN)("synthetic Slack sync — end-to-end pipeline over the fixtu
   it("mismatched-tenant facts are SKIPPED and tenant B's graph stays empty", async () => {
     // Emit facts for tenant A, then resolve them through tenant B's store with authTenantId = tenant B → spoof guard skips all.
     const client = createSlackClient({ tokenSource: fixtureProviderTokenSource, httpClient: fixtureSlackHttpClient, identity: { tenantId: tenantA, connectorId: FIXTURE_CONNECTOR_ID } });
-    const { facts } = emitSlackDiscoveryFacts({ workspace: await client.authTest(), users: await client.listUsers() }, tenantA, { observedAt: OBSERVED });
+    const { facts } = emitSlackDiscoveryFacts({ workspace: await client.authTest(), users: (await client.listUsers()).users }, tenantA, { observedAt: OBSERVED });
     const res = await applySlackDiscoveryResolution(storeB, tenantB, facts);
     expect(res.skipped).toBe(facts.length); // every tenant-A fact skipped by tenant B
     expect(res.appsUpserted + res.appUsersUpserted + res.peopleUpserted + res.matchesUpserted).toBe(0);

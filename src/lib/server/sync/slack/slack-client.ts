@@ -126,9 +126,23 @@ export function normalizeSlackUser(member: unknown): SlackUserRecord | null {
   };
 }
 
+// users.list COMPLETENESS signal (#234 truncation hardening). `complete` is true ONLY when pagination reached the natural
+// last page (no next_cursor) without hitting the page cap or a cursor loop — so a downstream consumer can refuse to mark
+// absent users stale on a possibly-truncated fetch. A hard error mid-stream (http/ratelimit/malformed/Slack error) still
+// THROWS SlackApiError (fails the whole sync); this result covers only the SILENT truncation cases. `reason` is a SAFE
+// class only — never a token, response body, or cursor value.
+export type ListUsersIncompleteReason = "page_limit_reached" | "cursor_loop";
+export type ListUsersResult = {
+  users: SlackUserRecord[];
+  complete: boolean;
+  reason: "complete" | ListUsersIncompleteReason;
+  usersFetched: number;
+  pagesFetched: number;
+};
+
 export type SlackClient = {
   authTest(): Promise<SlackAuthTestResult>;
-  listUsers(): Promise<SlackUserRecord[]>;
+  listUsers(): Promise<ListUsersResult>;
 };
 
 export function createSlackClient(deps: SlackClientDeps, options: SlackClientOptions = {}): SlackClient {
@@ -173,14 +187,19 @@ export function createSlackClient(deps: SlackClientDeps, options: SlackClientOpt
       return { ok: true, teamId, userId, teamName: str(obj.team), url: str(obj.url) };
     },
 
-    async listUsers(): Promise<SlackUserRecord[]> {
+    async listUsers(): Promise<ListUsersResult> {
       const out: SlackUserRecord[] = [];
       let cursor = "";
       const seenCursors = new Set<string>(); // break on a repeating cursor → no duplicate-record loop on a misbehaving page
+      // Default = INCOMPLETE: if the loop exhausts MAX_PAGES while a cursor is still pending, we truncated → fail closed.
+      let complete = false;
+      let reason: ListUsersResult["reason"] = "page_limit_reached";
+      let pagesFetched = 0;
       for (let page = 0; page < MAX_PAGES; page++) {
         const query: Record<string, string> = { limit: String(USERS_PAGE_LIMIT) };
         if (cursor) query.cursor = cursor;
         const obj = await callSlack("users.list", query, "users_list");
+        pagesFetched++;
         const members = Array.isArray(obj.members) ? obj.members : [];
         for (const m of members) {
           const rec = normalizeSlackUser(m);
@@ -190,11 +209,11 @@ export function createSlackClient(deps: SlackClientDeps, options: SlackClientOpt
         }
         const meta = obj.response_metadata && typeof obj.response_metadata === "object" ? (obj.response_metadata as Record<string, unknown>) : {};
         cursor = str(meta.next_cursor) ?? "";
-        if (!cursor) break; // last page
-        if (seenCursors.has(cursor)) break; // misbehaving/looping cursor — stop rather than refetch the same page
+        if (!cursor) { complete = true; reason = "complete"; break; } // reached the natural last page → COMPLETE
+        if (seenCursors.has(cursor)) { complete = false; reason = "cursor_loop"; break; } // looping cursor → INCOMPLETE
         seenCursors.add(cursor);
       }
-      return out;
+      return { users: out, complete, reason, usersFetched: out.length, pagesFetched };
     },
   };
 }

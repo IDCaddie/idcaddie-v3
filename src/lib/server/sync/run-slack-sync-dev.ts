@@ -105,10 +105,15 @@ export async function runSlackSyncDev(deps: RunSlackSyncDeps): Promise<RunSlackS
   if (!deps.observedAt) return { ok: false, errorCode: "missing_observed_at" };
 
   const client = createSlackClient({ tokenSource: deps.tokenSource, httpClient: deps.httpClient, identity: deps.identity });
-  let workspace, users;
+  let workspace, users, syncComplete: boolean;
   try {
     workspace = await client.authTest(); // token rides the Authorization header inside the client; never surfaced here
-    users = await client.listUsers();
+    const list = await client.listUsers();
+    users = list.users;
+    syncComplete = list.complete;
+    // #234 hardening: on a SILENTLY truncated fetch (page cap / cursor loop) log a SAFE reason class (never a token/body)
+    // — present users are still written, but absence/stale marking is skipped below so an unfetched user is not marked stale.
+    if (!syncComplete) console.warn(`[sync/slack] users.list incomplete — stale marking skipped: ${list.reason}`);
   } catch (e) {
     // ONLY the safe Slack error code escapes — never the caught error body / token / raw response.
     return { ok: false, errorCode: e instanceof SlackApiError ? e.code : "slack_error" };
@@ -117,7 +122,7 @@ export async function runSlackSyncDev(deps: RunSlackSyncDeps): Promise<RunSlackS
   let emit, resolution;
   try {
     emit = emitSlackDiscoveryFacts({ workspace, users }, deps.identity.tenantId, { observedAt: deps.observedAt, ...(deps.sourceRunId ? { sourceRunId: deps.sourceRunId } : {}) });
-    resolution = await applySlackDiscoveryResolution(deps.store, deps.identity.tenantId, emit.facts);
+    resolution = await applySlackDiscoveryResolution(deps.store, deps.identity.tenantId, emit.facts, { syncComplete });
   } catch (e) {
     // a resolver/store failure → SAFE structured diagnostics: stage/table/code/reason ONLY. The concrete store attaches a
     // value-free `.failure` (table+op+SQLSTATE code, never a message that could embed an email); we never read a raw

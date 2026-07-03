@@ -206,6 +206,20 @@ describe("applySlackDiscoveryResolution — absence/stale marking (0040)", () =>
     expect(rec(appUsers, "U1")).toMatchObject({ syncStatus: "active" }); // U1 untouched
   });
 
+  it("an INCOMPLETE fetch (syncComplete=false) skips stale marking — present users are still upserted (non-destructive)", async () => {
+    const { store, appUsers } = memStore();
+    await applySlackDiscoveryResolution(store, "tenant-A", factsAt("tenant-A", [u1(), u2()], T1)); // both active
+    // second sync: U1 absent, but the provider fetch was truncated → syncComplete=false → do NOT mark U1 stale
+    const s2 = await applySlackDiscoveryResolution(store, "tenant-A", factsAt("tenant-A", [u2()], T2), { syncComplete: false });
+    expect(s2.staleMarked).toBe(0);
+    expect(rec(appUsers, "U1")).toMatchObject({ syncStatus: "active" }); // absent-but-untruncated-unknown → left active
+    expect(rec(appUsers, "U2")).toMatchObject({ syncStatus: "active", lastSeenAt: T2 }); // present user still written
+    // a COMPLETE re-run of the same absence THEN marks it (proves the gate, not a permanent skip)
+    const s3 = await applySlackDiscoveryResolution(store, "tenant-A", factsAt("tenant-A", [u2()], T2), { syncComplete: true });
+    expect(s3.staleMarked).toBe(1);
+    expect(rec(appUsers, "U1")).toMatchObject({ syncStatus: "stale" });
+  });
+
   it("a mid-resolve store failure aborts BEFORE marking — nothing is marked stale (failed/partial sync)", async () => {
     const { store, appUsers } = memStore();
     await applySlackDiscoveryResolution(store, "tenant-A", factsAt("tenant-A", [u1(), u2()], T1)); // both active
