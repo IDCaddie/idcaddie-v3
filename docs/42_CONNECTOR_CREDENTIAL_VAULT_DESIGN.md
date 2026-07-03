@@ -1,12 +1,17 @@
 # 42 · Connector Credential Vault — Security Design
 
-**Status: DRAFT — design only. Connector credential vault design is drafted but not implemented.**
-**Connector implementation remains blocked until the vault design is reviewed and accepted.**
+**Status: ACCEPTED — substantially IMPLEMENTED.** This security design has since been built in v3: migrations
+`0017`-`0038`; ~79 files in `src/lib/server/connector-vault/`; §8-style connector RLS/grant tests `T38`-`T58` green
+in the CI RLS suite; `0029` runner-secret grants hosted-verified staging + production.
+**RISK-007 remains OPEN, and connector / real-customer-credential use + Phase C + cutover remain BLOCKED** pending
+broader closure (hosted KMS/IAM separation for customer secrets, rotation/revocation, the full connector path, and
+production) — see [04 §RISK-007](./04_RISK_REGISTER.md). Only ONE staging app-level Slack client secret has been
+ingested envelope-only so far (connector-runner PR #16).
 
 This is a **docs-only security design**. **No connector credentials are stored by this PR. No connector sync is
 implemented by this PR. No production data was touched. No hosted commands were run. No migrations were added. No
-RLS policies were changed. No service-role access was added.** Schema and RLS below are **conceptual only** — no
-migration, table, policy, or encryption code ships here. It is the Option-A "connector vault security design PR"
+RLS policies were changed. No service-role access was added.** Schema and RLS below were **conceptual at the time of this design PR**; they have **since been implemented**
+(migrations `0017`-`0038`, `src/lib/server/connector-vault/`) — see the Status note above and [04 §RISK-007](./04_RISK_REGISTER.md); **RISK-007 remains OPEN.** It is the Option-A "connector vault security design PR"
 the read-only-parity checkpoint ([41 §32.3](./41_FULL_PARITY_IMPLEMENTATION_ROADMAP.md)) requires before any
 connector work, and the prerequisite for **RISK-007** (connector secrets).
 

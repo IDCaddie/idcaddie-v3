@@ -2,12 +2,16 @@
 
 **Canonical source for: the SAFE future path for collecting, storing, using, rotating, and deleting
 connector credentials (Okta / Google / Microsoft Entra / Slack / SCIM / SaaS scrapers / inbound API
-tokens) in ID Caddie v3.** This is **design only** — nothing here is built. Its purpose is to make
+tokens) in ID Caddie v3.** This began as **design only**; the vault has **since been substantially built** in v3 (following the later security design [42](./42_CONNECTOR_CREDENTIAL_VAULT_DESIGN.md), chosen over this doc's specific six-table schema) — **RISK-007 remains OPEN** pending broader closure (see [04 §RISK-007](./04_RISK_REGISTER.md)). Its purpose is to make
 **RISK-007** (no credential vault) addressable by a future, tested, reviewed implementation, and to ensure
 **no real secret is ever collected or stored until that vault exists.**
 
-> **Status (do not overclaim):** **DESIGNED, NOT BUILT.** There is no vault, no connector table, no
-> encryption code, no OAuth flow, no sync worker, no connector UI, and no migration in the repo. This doc
+> **Status (do not overclaim):** **PARTIALLY IMPLEMENTED.** This doc records the ORIGINAL design; the vault is
+> now substantially built (following the later design [42](./42_CONNECTOR_CREDENTIAL_VAULT_DESIGN.md)): migrations
+> `0017`-`0038`, ~79 files in `src/lib/server/connector-vault/`, and §8-style connector RLS/grant tests `T38`-`T58`
+> green in the CI RLS suite. Only ONE staging app-level Slack client secret has been ingested envelope-only so far
+> (connector-runner PR #16); per-tenant customer credentials, other providers, rotation/revocation, hosted KMS/IAM
+> separation broadly, the full connector path, and production remain. This doc
 > **does not close RISK-007** and **does not make v3 connector-ready or cutover-ready.** Legacy stored 50+
 > connector secrets in **plaintext** ([current-security-risk-map.md](./current-security-risk-map.md)); v3
 > will **not** port that. Implementation is gated on this design being reviewed + the §8 tests being green.
