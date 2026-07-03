@@ -3332,25 +3332,23 @@ begin
 end $$;
 reset role;
 
--- ── Test 57: connector_runner_login MINIMAL-PRIVILEGE prerequisite (docs/45 §4 documented DDL — manual staging-only,
---    NOT a committed migration: the LOGIN credential is environment-specific + must never be committed). The hosted
+-- ── Test 57: connector_runner_login MINIMAL-PRIVILEGE login chain — PROVISIONED BY MIGRATION 0039 (role SHAPE only;
+--    the PASSWORD stays environment-specific, operator-set out-of-band, never committed — docs/45 §4). The hosted
 --    runner connects as `connector_runner_login` (LOGIN, NOINHERIT) and SET ROLEs into `connector_runner`. This test
---    creates the role per the documented DDL and proves it can do NOTHING beyond assuming the runner role: NOINHERIT,
---    no superuser/createrole/createdb/bypassrls, ZERO direct table grants, member of EXACTLY connector_runner.
+--    asserts 0039 created the role (NO fixture fallback — a missing role fails loudly) and proves it can do NOTHING
+--    beyond assuming the runner role: NOINHERIT, no superuser/createrole/createdb/replication/bypassrls, ZERO direct
+--    table grants, member of EXACTLY connector_runner with SET capability but NO inherited (USAGE) privilege.
 reset role;
-do $$ begin
-  if not exists (select 1 from pg_roles where rolname = 'connector_runner_login') then
-    create role connector_runner_login login noinherit;   -- NOINHERIT → no ambient privilege from member roles
-    grant connector_runner to connector_runner_login;     -- may SET ROLE connector_runner, and nothing more
-  end if;
-end $$;
 do $$ declare r pg_roles%rowtype; n int;
 begin
+  assert exists (select 1 from pg_roles where rolname = 'connector_runner_login'),
+    'T57 connector_runner_login must be PROVISIONED BY MIGRATION 0039 (no out-of-band fixture)';
   select * into r from pg_roles where rolname = 'connector_runner_login';
   assert r.rolsuper = false,      'T57 connector_runner_login must NOT be superuser';
   assert r.rolinherit = false,    'T57 connector_runner_login must be NOINHERIT';
   assert r.rolcreaterole = false, 'T57 connector_runner_login must NOT have CREATEROLE';
   assert r.rolcreatedb = false,   'T57 connector_runner_login must NOT have CREATEDB';
+  assert r.rolreplication = false,'T57 connector_runner_login must NOT have REPLICATION';
   assert r.rolbypassrls = false,  'T57 connector_runner_login must NOT BYPASSRLS (only connector_runner does, via SET ROLE)';
   assert r.rolcanlogin = true,    'T57 connector_runner_login must be a LOGIN role';
   select count(*) into n from information_schema.role_table_grants where grantee = 'connector_runner_login';
@@ -3360,6 +3358,13 @@ begin
   assert exists (select 1 from pg_auth_members m join pg_roles g on g.oid=m.roleid
      where m.member=(select oid from pg_roles where rolname='connector_runner_login') and g.rolname='connector_runner'),
      'T57 connector_runner_login must be a member of connector_runner (so it can SET ROLE connector_runner)';
+  -- PG16+ membership semantics: SET capability true (can assume the runner role), USAGE/inheritance false (NOINHERIT
+  -- + `with set true, inherit false` — no ambient privilege). This is the exact pair the connector-runner repo's
+  -- pre-run DB gate checks (idcaddie-connector-runner docs/FIRST_LIVE_RUN_CHECKLIST.md §1b).
+  assert pg_has_role('connector_runner_login','connector_runner','SET') = true,
+    'T57 connector_runner_login must be able to SET ROLE connector_runner (membership set option)';
+  assert pg_has_role('connector_runner_login','connector_runner','USAGE') = false,
+    'T57 connector_runner_login must NOT inherit connector_runner privileges (USAGE false — NOINHERIT membership)';
 end $$;
 -- behavioral: as connector_runner_login (NOINHERIT) there is NO ambient access; only AFTER `set role connector_runner`.
 set session authorization connector_runner_login;
