@@ -68,7 +68,13 @@ export async function applySlackDiscoveryResolution(
   store: SlackResolverStore,
   authTenantId: string,
   facts: readonly DiscoveryFact[],
+  // `syncComplete` (#234 truncation hardening): absence/stale marking runs ONLY when the provider returned a COMPLETE
+  // user list (no truncation/cursor loop). A partial fetch would make absent-looking users falsely stale, so it is
+  // skipped (present users are still upserted — non-destructive). Defaults to `true` (a caller that fully controls the
+  // fact set, e.g. a direct unit test); the real orchestrator threads the client's completeness signal.
+  opts?: { syncComplete?: boolean },
 ): Promise<SlackResolutionSummary> {
+  const syncComplete = opts?.syncComplete ?? true;
   const summary: SlackResolutionSummary = { appsUpserted: 0, appUsersUpserted: 0, peopleUpserted: 0, matchesUpserted: 0, matchConflicts: 0, skipped: 0, staleMarked: 0, gaps: [] };
   if (!isStr(authTenantId)) return summary; // fail closed — no authenticated tenant, nothing written
   if (!Array.isArray(facts)) return summary;
@@ -166,13 +172,15 @@ export async function applySlackDiscoveryResolution(
   //    actually seen this run (a 0-user "successful" sync is suspicious — scope/permission regression — never mass-mark),
   //    and a well-formed observed_at exists. UPDATE-only (never a delete); tenant+app-scoped; idempotent (re-running the
   //    same observedAt marks 0 — present rows have last_seen_at == observedAt, absent rows are already 'stale').
-  // ponytail: absence marking trusts that `usersFetched` was a COMPLETE list. slack-client.ts caps users.list at
-  // MAX_PAGES and breaks on a repeating cursor WITHOUT signalling — so a >20k-member workspace (or a cursor loop) could
-  // present a truncated-but-nonzero set and mark the tail stale. Non-destructive + reversible (self-heals on the next
-  // complete sync), so acceptable for the current synthetic/staging scale; the real fix is for listUsers() to signal
-  // completeness / fail closed on truncation before stale-marking large workspaces (follow-up).
+  // TRUNCATION GUARD (#234, now enforced by `syncComplete`): absence marking must only run on a COMPLETE user list.
+  // slack-client.ts caps users.list at MAX_PAGES and stops on a repeating cursor — but it now REPORTS that via
+  // `ListUsersResult.complete`, and the orchestrator threads it here as `syncComplete`. A truncated/looping fetch
+  // (complete:false) skips marking below, so a >20k-member workspace or a cursor loop can no longer mark the unfetched
+  // tail stale. (A hard mid-stream error already throws and fails the whole sync before this point.)
   const observedAt = isStr(f(instance).observed_at) ? (f(instance).observed_at as string) : null;
-  if (summary.appUsersUpserted > 0 && observedAt) {
+  // GATE: mark stale ONLY on a COMPLETE fetch (syncComplete) with ≥1 user seen and a valid observed_at. An incomplete
+  // fetch (truncation/cursor loop) skips marking entirely — present users are already upserted (non-destructive).
+  if (syncComplete && summary.appUsersUpserted > 0 && observedAt) {
     const { staleMarked } = await store.markAbsentAppUsersStale({ tenantId: authTenantId, appId, observedAt });
     summary.staleMarked = staleMarked;
   }
