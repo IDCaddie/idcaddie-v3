@@ -364,15 +364,15 @@ harness and the launcher both refuse if it is.
   (or set `CONNECTOR_OAUTH_REDIRECT_URI` on staging to the exact URL).
 
 ### 11.3 connector_runner_login readiness check
-`connector_runner_login` is a **manual, staging-only** prerequisite (NOT a committed migration — the LOGIN credential is
-environment-specific and must never be committed). Documented DDL (run by a DB admin on staging; the password is set
-out-of-band, never committed):
+The `connector_runner_login` **role SHAPE is now provisioned by migration `0039_connector_runner_login_provision.sql`**
+(LOGIN + NOINHERIT, member of `connector_runner` with `set true, inherit false`, zero direct grants, no dangerous
+attributes) — applying it to hosted staging/production remains a **separate, explicitly-approved** operator step. The
+**PASSWORD stays environment-specific and is NEVER committed** — the operator sets it out-of-band after the shape exists:
 ```sql
-create role connector_runner_login login noinherit;   -- NOINHERIT: no ambient privilege
-grant connector_runner to connector_runner_login;      -- may SET ROLE connector_runner, and nothing more
 alter role connector_runner_login password '<supplied-out-of-band, never committed>';
 ```
-Verify minimal privilege (matches RLS T57):
+Verify minimal privilege (a core-shape subset of RLS T57, which additionally asserts NOREPLICATION and the
+`pg_has_role(…,'SET')=true` / `pg_has_role(…,'USAGE')=false` membership semantics):
 ```sql
 select rolname, rolsuper, rolinherit, rolcreaterole, rolcreatedb, rolbypassrls, rolcanlogin
   from pg_roles where rolname = 'connector_runner_login';
