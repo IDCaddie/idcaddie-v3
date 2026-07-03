@@ -71,7 +71,8 @@ describe("sync-status DAL + connectors page never reference a secret/PII column"
     const dal = strip(fs.readFileSync(path.resolve(__dirname, "manual-sync-runs.ts"), "utf8"));
     const page = strip(fs.readFileSync(path.resolve(__dirname, "..", "..", "app", "(authenticated)", "connectors", "page.tsx"), "utf8"));
     // surgical identifiers (real secret/PII columns + token shapes), NOT English words that appear in reassurance copy.
-    for (const forbidden of ["connector_secret", "raw_payload", "rawPayload", "access_token", "ciphertext", "dek_wrapped", "aead_", "primary_email", "display_name", "service_role", "xoxb", "Bearer "]) {
+    // (the service-role literal is intentionally omitted — scripts/check-auth-safety.sh already forbids it repo-wide.)
+    for (const forbidden of ["connector_secret", "raw_payload", "rawPayload", "access_token", "ciphertext", "dek_wrapped", "aead_", "primary_email", "display_name", "xoxb", "Bearer "]) {
       expect(dal).not.toContain(forbidden);
       expect(page).not.toContain(forbidden);
     }
