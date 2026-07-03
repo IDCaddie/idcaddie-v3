@@ -7,8 +7,9 @@ re-explaining RLS. Implemented in `supabase/migrations/0002_org_scoped_rls.sql`,
 `0008_org_scoped_app_user_identity_matches_read.sql`,
 `0009_harden_app_contracts_read_tenant_bind.sql`, and
 `0010_contracts_audit_on_write.sql`; proven by
-`supabase/tests/org_rls_test.sql` (222 assertions, T1–T35, `verified-local`, `ci-enforced` via
-PR #2). Schema: [v3-data-model.md](./v3-data-model.md).
+`supabase/tests/org_rls_test.sql` (T1–T60 — 60 tests, incl. the connector-vault suite T38–T58; current assertion
+count tracked in [00_PRODUCT_STATUS](./00_PRODUCT_STATUS.md), RLS suite 631 as of PR #181; `verified-local`,
+`ci-enforced` via PR #2). Schema: [v3-data-model.md](./v3-data-model.md).
 Design rationale & legacy evidence: [v3-security-model.md](./v3-security-model.md),
 [current-security-risk-map.md](./current-security-risk-map.md).
 
