@@ -22,8 +22,9 @@
 -- APPLYING TO HOSTED (staging re-assert or production provisioning) REMAINS A SEPARATE, EXPLICITLY-APPROVED OPERATOR
 -- STEP — nothing applies automatically. RISK-007 remains OPEN; Phase C remains BLOCKED.
 --
--- Migration-safety: CREATE ROLE (if missing) + attribute hardening + one membership grant + a defensive revoke —
--- no table changes, no row changes, no RLS/policy changes, no browser-role (anon/authenticated) change.
+-- Migration-safety: CREATE ROLE (if missing; secure PG defaults) + a LOGIN/NOINHERIT normalize + one membership grant +
+-- a defensive revoke — no table changes, no row changes, no RLS/policy changes, no browser-role change. Applies cleanly
+-- under a NON-superuser migration role (Supabase / `supabase start`): it sets NO privileged role attribute.
 --
 -- REQUIRES PostgreSQL 16+ (the `grant … with set true, inherit false` membership options). The local CI suite runs
 -- postgres:16 and hosted STAGING is verified PG 17.x; CONFIRM the production Postgres major is 16+ before the
@@ -40,9 +41,13 @@ do $$ begin
   end if;
 end $$;
 
--- Harden/normalize the attributes even when the role pre-exists (idempotent; does NOT touch the password):
--- exactly LOGIN + NOINHERIT, and none of the dangerous attributes.
-alter role connector_runner_login login noinherit nosuperuser nocreatedb nocreaterole noreplication nobypassrls;
+-- Normalize the connection attributes (idempotent; does NOT touch the password): LOGIN + NOINHERIT ONLY. These are the
+-- only role attributes a non-superuser migration role (Supabase applies migrations as `supabase_admin` — CREATEROLE, NOT
+-- a true SUPERUSER) is permitted to set. The dangerous attributes are deliberately NOT set here: a freshly `create role`d
+-- role already has NONE of superuser/createdb/createrole/replication/bypassrls (secure PG defaults), and issuing e.g.
+-- `nosuperuser` would require SUPERUSER the migration role lacks and fail 42501 on hosted Supabase (and under
+-- `supabase start`). T57 verifies the full secure shape (all those attributes false) on the fresh role.
+alter role connector_runner_login login noinherit;
 
 -- Membership: may SET ROLE connector_runner — and NOTHING else. Explicit PG16+ options: SET TRUE (can assume the
 -- runner role) + INHERIT FALSE (belt-and-braces with NOINHERIT: never ambient). Re-granting is idempotent (updates
