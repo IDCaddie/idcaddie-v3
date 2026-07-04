@@ -40,8 +40,13 @@ before any exchange. **This launcher is the pre-flight only — RUN GATE A remai
    The ingest/prod guards + `isRealExchangeEnabled` all hard-block production.
 4. **The KMS/IAM separation is verified green** (docs/49) and the `connector_runner_login` chain is provisioned
    (migration 0039) before any decrypt/store.
-5. **`oauth_pending` provisioning** — the real replay gate needs the runner-backed `oauth_pending` consumer wired; confirm
-   `payload.corr` equals the persisted `oauth_pending.state_jti` (the one `ponytail:` seam noted in the wiring) first.
+5. **Authorize front-half + `oauth_pending` provisioning** — run the authorize preparer `prepareRunGateAAuthorize`
+   (`src/lib/server/connector-vault/run-gate-a-authorize.ts`, staging-only, injected signer + runner-backed inserter, no
+   Slack call) to persist the single-use `oauth_pending` row and emit the aligned triple: the **authorize URL** (open it on
+   the DEV workspace), the signed **`state`** (→ `CONNECTOR_OAUTH_CALLBACK_STATE`), and the **expectedContext env** (tenant/
+   connector/subject/**correlation**). The persisted `oauth_pending.state_jti = corr`, which is the exact key the runner
+   consume (`makeReplayConsume`) matches on — pinned by the `run-gate-a-authorize` integration test (authorize→consume:
+   found, then replay/mismatch fail closed). Do not hand-assemble the state/row/env; the preparer emits them aligned.
 
 ## Expected evidence (record in a docs-only PR — never a secret)
 - The redacted store ref (`secretId`) + the envelope columns being ciphertext (no plaintext).

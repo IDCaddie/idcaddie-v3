@@ -50,7 +50,7 @@ describe("buildSlackAuthorizeUrl — authorize URL builder", () => {
     expect(state).toBe(expected.state);
     // alignment hashes are one-way (never the raw nonce/state)
     expect(res.nonceHash).toBe(sha256("nonce-A"));
-    expect(res.stateJti).toBe(sha256(state));
+    expect(res.stateJti).toBe("corr-slack-test"); // state_jti = corr (the runner consume key), NOT sha256(state)
     expect(res.nonceHash).not.toContain("nonce-A");
     expect(res.expiresAt).toBe(NOW + 600_000);
   });
@@ -92,7 +92,7 @@ describe("classifySlackCallback — callback validation/classification (NO token
     if (out.status === "received") {
       // returns only safe one-way hashes (the future oauth_pending consume keys) — never the raw code/state
       expect(out.nonceHash).toBe(sha256("nonce-cb"));
-      expect(out.stateJti).toBe(sha256(sp.get("state")!));
+      expect(out.stateJti).toBe("corr-slack-test"); // consume key = validated payload.corr
       const flat = JSON.stringify(out);
       expect(flat).not.toContain("slack-auth-code-VALUE-ignored"); // the code value is never returned
       expect(flat).not.toContain("nonce-cb");

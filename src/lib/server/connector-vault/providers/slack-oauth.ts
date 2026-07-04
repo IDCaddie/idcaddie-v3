@@ -7,7 +7,7 @@
 //
 // WHAT IT DOES: (a) `buildSlackAuthorizeUrl` returns the `https://slack.com/oauth/v2/authorize?...` redirect
 // URL with a SIGNED `state` (via `createOAuthState`) + the alignment values a future PR persists to
-// `oauth_pending` (`stateJti = sha256(state)`, `nonceHash = sha256(nonce)` — one-way hashes, never the raw
+// `oauth_pending` (`stateJti = corr` — the correlation id, the callback consume key; `nonceHash = sha256(nonce)` — the raw
 // nonce/state); (b) `classifySlackCallback` validates the signed state (via `validateOAuthState`) and
 // classifies the callback into a SAFE outcome. The Slack token endpoint (`oauth.v2.access`) is NEVER built
 // or called — only the authorize redirect target is. No `fetch` anywhere.
@@ -141,7 +141,9 @@ export function buildSlackAuthorizeUrl(input: SlackAuthorizeInput): SlackAuthori
   return {
     ok: true,
     url: `${SLACK_AUTHORIZE_URL}?${params.toString()}`,
-    stateJti: sha256Hex(state),
+    // state_jti is the oauth_pending consume key = corr (the correlation id bound into the signed state). The callback
+    // consume matches oauth_pending.state_jti against the VALIDATED payload.corr (never a re-hash of the raw state).
+    stateJti: input.correlationId,
     nonceHash: sha256Hex(nonce),
     expiresAt: input.now + (input.ttlSeconds ?? DEFAULT_TTL_SECONDS) * 1000,
   };
@@ -177,7 +179,7 @@ export function classifySlackCallback(
   // safe future-consume keys (one-way hashes). No token exchange, no Slack call, no connector_secrets write.
   return {
     status: "received",
-    stateJti: state ? sha256Hex(state) : "",
+    stateJti: result.payload.corr, // the oauth_pending consume key = validated payload.corr (matches the authorize persist)
     nonceHash: sha256Hex(result.payload.nonce),
   };
 }

@@ -12,7 +12,7 @@
 // later gated PR; tests inject a mock, so there is NO live DB write and NO credentials in tests.
 //
 // REDACTION: the raw nonce is NEVER materialized here (the builder returns only one-way hashes), so it can
-// never be stored, returned, or logged. The persisted row carries `state_jti = sha256(state)` +
+// never be stored, returned, or logged. The persisted row carries `state_jti = corr` (correlation id) +
 // `nonce_hash = sha256(nonce)` only (RAW state and RAW nonce are never stored). The result returns the Slack
 // authorize URL (the signed `state` is the intended redirect carrier, not a secret) + safe metadata only.
 //

@@ -155,7 +155,7 @@ describe("full wiring — Slack authorize persist -> callback consume through th
     expect(conn.rows.size).toBe(1);
     if (!persist.ok) return;
 
-    // derive the consume keys the persisted row carries (stateJti = sha256(state), nonceHash = sha256(nonce))
+    // the consume keys the persisted row carries (stateJti = corr — the consume key; nonceHash = sha256(nonce))
     const { createHash } = await import("node:crypto");
     const persistedJti = persist.stateJti;
     const nonceHash = createHash("sha256").update("nonce-A", "utf8").digest("hex");
