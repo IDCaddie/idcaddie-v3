@@ -11,6 +11,8 @@ import {
   formatMatrix,
   runSelftest,
   REQUIRED_ENV,
+  buildSimulateArgs,
+  scopeKeyPolicyToResource,
 } from "./verify-connector-vault-kms-iam-separation.mjs";
 
 const SCRIPT = fileURLToPath(new URL("./verify-connector-vault-kms-iam-separation.mjs", import.meta.url));
@@ -39,8 +41,8 @@ function run(extraEnv: Record<string, string> = {}, args: string[] = [], ref: st
 }
 
 describe("connector-vault KMS/IAM separation verifier — matrix logic (mocks only) + fail-closed guards", () => {
-  it("the built-in selftest passes (8 matrix-logic checks, no AWS)", () => {
-    expect(runSelftest()).toEqual({ ok: true, checks: 8 });
+  it("the built-in selftest passes (10 matrix-logic checks, no AWS)", () => {
+    expect(runSelftest()).toEqual({ ok: true, checks: 10 });
   });
 
   it("a correct hosted policy PASSES the full allowed/denied matrix + alias-scope", () => {
@@ -144,6 +146,47 @@ describe("connector-vault KMS/IAM separation verifier — matrix logic (mocks on
     expect(webUnset.code).toBe(1);
     expect(webUnset.out).toMatch(/missing required env/);
     expect(webUnset.out).toContain("CONNECTOR_VAULT_WEB_ROLE_ARN"); // still required when not exactly NONE
+  });
+
+  // ── live command builder — never send "*" as a --resource-arns ARN (hosted InvalidInput fix) ────────────────
+  const R = "ca-central-1";
+  const hasResourceArns = (a: string[]) => a.includes("--resource-arns");
+  const resourceArnStar = (a: string[]) => { const i = a.indexOf("--resource-arns"); return i !== -1 && a[i + 1] === "*"; };
+
+  it("buildSimulateArgs NEVER emits `--resource-arns \"*\"` — a wildcard/absent resource OMITS the flag", () => {
+    for (const res of ["*", "", undefined as unknown as string, null as unknown as string]) {
+      const a = buildSimulateArgs(A.task, "kms:Decrypt", res, R);
+      expect(resourceArnStar(a)).toBe(false);
+      expect(hasResourceArns(a)).toBe(false); // omitted → the API defaults ResourceArns to "*" (valid)
+      expect(a.join(" ")).not.toContain("--resource-arns *");
+    }
+  });
+
+  it("buildSimulateArgs passes a REAL ARN via --resource-arns (KMS row includes the scoped resource policy)", () => {
+    const kmsPolicy = scopeKeyPolicyToResource('{"Statement":[{"Effect":"Allow","Action":"kms:*","Resource":"*"}]}', A.cmk);
+    const a = buildSimulateArgs(A.task, "kms:Decrypt", A.cmk, R, kmsPolicy);
+    expect(a[a.indexOf("--resource-arns") + 1]).toBe(A.cmk);
+    expect(resourceArnStar(a)).toBe(false);
+    expect(a).toContain("--resource-policy");
+    expect(a[a.indexOf("--resource-policy") + 1]).not.toContain('"Resource":"*"'); // no bare "*" reaches the simulator
+  });
+
+  it("buildSimulateArgs for a secret ARN includes --resource-arns and NO resource policy", () => {
+    const a = buildSimulateArgs(A.exec, "secretsmanager:GetSecretValue", A.connectorSecret, R);
+    expect(a[a.indexOf("--resource-arns") + 1]).toBe(A.connectorSecret);
+    expect(a).not.toContain("--resource-policy");
+  });
+
+  it("scopeKeyPolicyToResource rewrites Resource `*` → the CMK ARN; keeps specific ARNs; fail-safe on non-JSON", () => {
+    const scoped = scopeKeyPolicyToResource('{"Statement":[{"Effect":"Allow","Action":"kms:Decrypt","Resource":"*"},{"Effect":"Allow","Action":"kms:*","Resource":["*","arn:aws:kms:x:y:key/keep"]}]}', A.cmk);
+    const p = JSON.parse(scoped);
+    expect(p.Statement[0].Resource).toBe(A.cmk);
+    expect(p.Statement[1].Resource).toEqual([A.cmk, "arn:aws:kms:x:y:key/keep"]);
+    expect(scoped).not.toContain('"Resource":"*"');
+    // already-specific Resource untouched; unparseable / empty inputs returned as-is (no throw)
+    expect(scopeKeyPolicyToResource('{"Statement":[{"Resource":"arn:aws:kms:x:y:key/z"}]}', A.cmk)).toContain("arn:aws:kms:x:y:key/z");
+    expect(scopeKeyPolicyToResource("not-json", A.cmk)).toBe("not-json");
+    expect(scopeKeyPolicyToResource("", A.cmk)).toBe("");
   });
 
   it("is INERT by default: `selftest` needs no AWS/env and exits 0; bare run refuses (exit 1)", () => {
