@@ -20,6 +20,18 @@ gate — it performs **no** real OAuth call, KMS decrypt, DB read, or secret rea
 `isRealExchangeEnabled(env)` returns true **only** when `CONNECTOR_OAUTH_REAL_EXCHANGE_ENABLED=1` **and** the environment
 is non-production. `makeRealOrchestratorDeps` **throws** unless the gate is on. The agent and CI never set the flag.
 
+## Operator pre-flight launcher (INERT — built, not the run)
+`scripts/run-gate-a-b2c-real-exchange-launcher.mjs` (npm: `run-gate-a:preflight:selftest`) is the guarded operator
+pre-flight for RUN GATE A. It **assembles nothing and runs no exchange** — its sole import is `node:fs`, it never calls
+Slack, never builds an authorize URL, never reads a secret/code/token/DB URL, and never imports the real-exchange wiring.
+It **refuses** unless: the linked Supabase ref is exactly `ycdpzduxugdsffjqyoai` (prod `dzbfxulvxchdemcettrx` hard-blocked),
+`CONNECTOR_OAUTH_REAL_EXCHANGE_ENABLED=1` in a non-production env, `--confirm="RUN B2C FIRST REAL TOKEN STAGING"`,
+`--app-env=staging`, `--redirect-uri` equal to the exact staging callback URI, and **no** client secret / bot token /
+OAuth code / DB URL / password in argv or env (refused and never echoed); then it emits the procedure. §5's correlation
+seam is now **enforced explicitly**: `makeReplayConsume` guards a non-empty `payload.corr` and uses it as the
+`oauth_pending.state_jti` single-use key, so an empty/mismatched correlation fails closed (`correlation_missing`/`not_found`)
+before any exchange. **This launcher is the pre-flight only — RUN GATE A remains PENDING and has not been run.**
+
 ## Prerequisites for a real run (ALL required, in order)
 1. **Explicit Sam GO** — a real run is not implied by any prior approval. It is its own decision.
 2. **Disposable Slack DEV workspace ONLY** — never a customer/production Slack workspace. The connector app is a throwaway

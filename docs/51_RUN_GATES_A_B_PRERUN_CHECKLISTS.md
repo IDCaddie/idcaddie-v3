@@ -64,13 +64,18 @@ Steps 1–2 are prerequisites for A; A is a prerequisite for B. Do them in order
       CI or any shared/production environment; it must be non-production (the gate hard-blocks prod).
 
 ### A5 · Run steps (dry-run / preflight first; exact values redacted)
-- [ ] **Preflight only:** confirm the gate evaluates ON in the staging env and OFF by default elsewhere; confirm the
-      `oauth_pending` replay consumer is wired and `payload.corr == oauth_pending.state_jti` holds (the docs/50 §5 seam).
+- [ ] **Preflight (INERT launcher — built):** run the operator pre-flight, which assembles nothing and runs no exchange:
+      `CONNECTOR_OAUTH_REAL_EXCHANGE_ENABLED=1 node scripts/run-gate-a-b2c-real-exchange-launcher.mjs --confirm="RUN B2C FIRST REAL TOKEN STAGING" --app-env=staging --redirect-uri=https://idcaddie-v3.vercel.app/connectors/oauth/callback`
+      — it REFUSES unless: staging ref (`ycdpzduxugdsffjqyoai`, prod hard-blocked), gate ON + non-prod, exact confirm phrase,
+      `--app-env=staging`, exact staging redirect URI, and no secret/code/token/DB-URL in argv or env; then it emits the
+      procedure. It VERIFIES the gate is OFF by default / ON only non-prod, the `oauth_pending` replay consumer is wired,
+      the `payload.corr == oauth_pending.state_jti` correlation holds (key identity + the atomic multi-field WHERE, now
+      guarded fail-closed on an empty corr), and that a real exchange cannot run without the durable pending row.
 - [ ] **Approval phrase (exact):** `RUN B2C FIRST REAL TOKEN STAGING` — recorded with the "Sam GO".
-- [ ] **Command placeholders** (fill in the ephemeral shell; never commit values):
-      `CONNECTOR_OAUTH_REAL_EXCHANGE_ENABLED=1  <staging real-exchange launcher>  --app-env staging --confirm "RUN B2C FIRST REAL TOKEN STAGING"`
-      with the Slack DEV app `client_id`, the server-trusted `expectedContext` (from the `oauth_pending` lookup), and the
-      config redirect URI — **no client secret / token / DB URL on the command line**.
+- [ ] **The launcher is pre-flight ONLY.** The actual exchange is a SEPARATE, explicitly-Sam-approved step that assembles
+      the real deps via `makeRealOrchestratorDeps` (gated) with the Slack DEV app `client_id`, the server-trusted
+      `expectedContext` (from the `oauth_pending` lookup), and the config redirect URI — **no client secret / token / DB
+      URL on the command line**; the browser callback route stays synthetic and is NOT wired to the real path.
 - [ ] Complete ONE authorize → callback with the DEV workspace; do not retry a consumed state.
 
 ### A6 · Evidence to collect (PASS/FAIL + safe metadata only)

@@ -46,13 +46,19 @@ export function makeReplayConsume(
   now: () => number = () => Date.now(),
 ): (payload: OAuthStatePayload) => Promise<{ ok: boolean; reason?: string }> {
   return async (payload) => {
+    // CORRELATION ENFORCEMENT (docs/50 §5): `payload.corr` — authenticated by the state HMAC in validateOAuthState —
+    // IS the `oauth_pending.state_jti` single-use key. The atomic consume matches ONLY a row whose `state_jti = corr`
+    // AND tenant/provider/connector/nonce_hash all match; a callback whose corr does not correspond to a persisted
+    // pending row → 0 rows → `not_found` (fail closed). This is a load-bearing equality, so guard corr is a non-empty
+    // string first — an empty/absent key must NEVER be sent to the consume WHERE (fail closed, never widen the match).
+    if (typeof payload.corr !== "string" || payload.corr.length === 0) return { ok: false, reason: "correlation_missing" };
     const r = await consumeOAuthPending(
       {
         tenantId: payload.tid,
         provider: payload.prov,
         connectorId: payload.cid,
         subject: payload.sub,
-        stateJti: payload.corr, // ponytail: corr IS the operation/correlation id bound at authorize-time; confirm it equals the persisted oauth_pending.state_jti before the real B2c run.
+        stateJti: payload.corr, // corr === oauth_pending.state_jti — correlation enforced by key identity + the atomic multi-field WHERE
         nonceHash: hashOAuthValue(payload.nonce),
         now: now(),
       },
