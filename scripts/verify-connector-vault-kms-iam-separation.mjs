@@ -5,12 +5,16 @@
 // (RISK-007 closure prerequisite, docs/49). Unlike verify-staging-kms-iam-separation-dry-run.mjs (which PRINTS a
 // human runbook), this EVALUATES the boundary and returns a PASS/FAIL matrix — driven in `selftest` by MOCKED
 // IAM/KMS clients (proving the matrix LOGIC, with no AWS), and in the operator-only `live` mode by real access
-// EVALUATION (`iam:SimulatePrincipalPolicy` + `kms:ListAliases`), which decide access WITHOUT executing anything.
+// EVALUATION, which decides access WITHOUT executing anything.
 //
-// SAFETY MODEL — by construction this never decrypts and never reads a secret value:
-//   * It uses ONLY iam:SimulatePrincipalPolicy (evaluates whether a principal WOULD be allowed an action on a
-//     resource — it does NOT perform the action) and kms:ListAliases (alias metadata). It calls NO kms:Decrypt,
-//     NO kms:GenerateDataKey, NO secretsmanager:GetSecretValue, NO ECS, and touches NO DB.
+// SAFETY MODEL — by construction this never decrypts and never reads a secret value. It uses ONLY these read-only calls:
+//   * KMS rows → `kms:GetKeyPolicy` (key-policy METADATA) + STRUCTURAL analysis: does the CMK key policy grant THIS
+//     principal THIS action? IAM's simulator cannot faithfully evaluate a ROLE against a KMS key policy via
+//     --resource-policy (it needs a concrete caller a role ARN can't imply — "Invalid caller …"), so KMS separation is
+//     read from the key policy itself. NO simulate call, NO kms:Decrypt, NO kms:GenerateDataKey for KMS rows.
+//   * Secrets-Manager rows → `iam:SimulatePrincipalPolicy` (identity-policy EVALUATION; no --resource-policy → no caller
+//     needed). Evaluates whether the principal WOULD be allowed — it does NOT read a secret value.
+//   * Alias → `kms:ListAliases` (metadata). It calls NO secretsmanager:GetSecretValue, NO ECS, and touches NO DB.
 //   * The agent + CI run ONLY `selftest` (mocked functions, zero AWS). `live` is OPERATOR-RUN ONLY and is
 //     fail-closed: it refuses unless every guard/env is set, rejects the production ref, requires the staging ref
 //     and an explicit confirmation phrase.
@@ -96,7 +100,9 @@ export function evaluateSeparation({ arns, expectedAlias, simulate, resolveAlias
     let actual;
     try {
       actual = simulate(arns[r.identity], r.action, arns[r.resource]);
-      if (actual !== "allowed" && actual !== "denied") actual = "error";
+      // `overbroad` (a KMS grant via "*"/root) is preserved as a distinct verdict — it is NOT "allowed", so it fails an
+      // expected-allowed row, and it never equals "denied" either. Anything else unexpected collapses to "error".
+      if (actual !== "allowed" && actual !== "denied" && actual !== "overbroad") actual = "error";
     } catch {
       actual = "error";
     }
@@ -125,38 +131,91 @@ export function formatMatrix(result) {
   return result.rows.map(line).join("\n") + `\n  => ${result.allPass ? "ALL SEPARATION CHECKS PASS" : "SEPARATION CHECK FAILED"}`;
 }
 
-// ── pure command builders (no AWS; unit-tested) ──────────────────────────────────────────────────────────────
-// Build the `aws iam simulate-principal-policy` argv. `iam:SimulatePrincipalPolicy` REJECTS the literal `*` in
-// `--resource-arns` ("ResourceNames are not in a valid ARN format: *"); the API instead defaults ResourceArns to `*`
-// (all resources) when the flag is OMITTED. So a wildcard/absent resource omits `--resource-arns` entirely; a real ARN
-// is passed. An optional (already resource-scoped) resource policy is appended for KMS rows.
-export function buildSimulateArgs(principalArn, action, resourceArn, region, resourcePolicy) {
+// ── Secrets-Manager simulate argv (no AWS; unit-tested) ──────────────────────────────────────────────────────
+// Build the `aws iam simulate-principal-policy` argv for a NON-KMS (Secrets Manager) row. No `--resource-policy` (that
+// caused the role+resource-policy caller error for KMS), so identity-policy evaluation needs no caller. `--resource-arns`
+// never receives the literal `*` (the API rejects it); a wildcard/absent resource omits the flag (defaults to `*`).
+export function buildSimulateArgs(principalArn, action, resourceArn, region) {
   const isWildcard = !resourceArn || resourceArn === "*";
   const args = ["iam", "simulate-principal-policy", "--policy-source-arn", principalArn, "--action-names", action];
   if (!isWildcard) args.push("--resource-arns", resourceArn); // NEVER push "*" — omitting defaults ResourceArns to "*"
   args.push("--region", region, "--query", "EvaluationResults[0].EvalDecision", "--output", "text");
-  if (resourcePolicy) args.push("--resource-policy", resourcePolicy);
   return args;
 }
 
-// A KMS key policy's statements use `"Resource": "*"` (meaning "this CMK"). When that raw policy is handed to
-// SimulatePrincipalPolicy via `--resource-policy`, the API validates its Resource elements as ARNs and rejects the bare
-// `*` — the SAME "not a valid ARN format: *" error. Rewrite each `Resource: "*"` to the CMK's own ARN (semantically
-// identical for the key it is attached to), so the resource policy carries a valid ARN while the identity∪key-policy
-// evaluation is preserved. Metadata-only (no secret material); fail-safe — an unparseable policy is returned unchanged.
-export function scopeKeyPolicyToResource(policyJson, cmkArn) {
-  if (!policyJson || !cmkArn) return policyJson;
-  try {
-    const p = JSON.parse(policyJson);
-    const stmts = Array.isArray(p.Statement) ? p.Statement : p.Statement ? [p.Statement] : [];
-    for (const s of stmts) {
-      if (s && s.Resource === "*") s.Resource = cmkArn;
-      else if (s && Array.isArray(s.Resource)) s.Resource = s.Resource.map((r) => (r === "*" ? cmkArn : r));
-    }
-    return JSON.stringify(p);
-  } catch {
-    return policyJson;
+// ── KMS key-policy structural analysis (no AWS; unit-tested) ─────────────────────────────────────────────────
+// WHY not simulate: `iam:SimulatePrincipalPolicy` cannot faithfully evaluate a ROLE principal against a KMS key policy
+// supplied via `--resource-policy` — resource-policy evaluation needs a concrete caller ("Invalid caller — Caller is not
+// present and cannot be implied from policySourceArn"), which a role ARN cannot imply, and KMS authorization (key policy
+// + grants + IAM) is not modeled by the IAM simulator. So KMS separation is evidenced STRUCTURALLY from the CMK key
+// policy (`kms:GetKeyPolicy` — metadata, no key material, no decrypt), asserting which principals get which KMS actions.
+
+// Boundary: this reads ONLY the CMK key policy — it does NOT enumerate KMS grants (kms:ListGrants). A grant-only decrypt
+// path (not named in the key policy, no root delegation) would read "denied"; the vault CMK does not use grants for the
+// runner, and a grant-based path is a separate check. (docs/49.)
+
+// The string ARNs inside a policy Principal element ({AWS: "arn"|["arn",…]} or "*").
+function principalArns(principal) {
+  const out = [];
+  const walk = (v) => { if (typeof v === "string") out.push(v); else if (Array.isArray(v)) v.forEach(walk); else if (v && typeof v === "object") Object.values(v).forEach(walk); };
+  walk(principal);
+  return out;
+}
+// Is a principal value account-root delegation (grants to EVERY IAM principal in the account)? AWS treats the account-root
+// ARN `arn:aws:iam::<acct>:root` AND the bare 12-digit account id `<acct>` identically — both must be flagged overbroad.
+const isAccountRoot = (a) => typeof a === "string" && (/:root$/.test(a) || /^\d{12}$/.test(a));
+// Does a Principal element include `principalArn`? `overbroad` = it grants via `*` (any principal) or account-root (ARN or
+// bare account id) — never the tight, explicit role grant the vault CMK requires. An overbroad principal is treated as
+// matching every principal (so it also breaks the DENIED rows).
+export function principalMatch(principal, principalArn) {
+  const arns = principalArns(principal);
+  const overbroad = arns.some((a) => a === "*" || isAccountRoot(a));
+  return { matches: overbroad || arns.includes(principalArn), overbroad };
+}
+// Does an Action element cover `wanted`? AWS action matching is CASE-INSENSITIVE and treats `*` (any run) and `?` (one
+// char) as wildcards ANYWHERE — so `kms:*`, `kms:Decrypt*`, `kms:*Decrypt`, and `*` all match `kms:Decrypt`. Under-matching
+// an action is the dangerous (fail-open) direction, so this is a full glob, not just the trailing-`:*` case.
+export function actionMatch(action, wanted) {
+  const acts = Array.isArray(action) ? action : [action];
+  const w = String(wanted).toLowerCase();
+  return acts.some((a) => {
+    if (typeof a !== "string") return false;
+    const rx = new RegExp("^" + a.toLowerCase().replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*").replace(/\?/g, ".") + "$");
+    return rx.test(w);
+  });
+}
+// Structural key-policy decision for (principalArn, action): explicit Deny > explicit Allow > implicit deny. Returns
+// { decision: "allow"|"deny"|"error", overbroad }. `error` = policy unparseable/empty OR carries a construct this simple
+// structural model cannot safely evaluate (`NotPrincipal`/`NotAction` invert matching; `Condition` can gate an Allow/Deny)
+// — treated as NON-ANALYZABLE → fail-closed (never a silent skip that could hide a broad grant on a DENIED row).
+export function evaluateKeyPolicyAccess(policyJson, principalArn, action) {
+  let p;
+  try { p = JSON.parse(policyJson); } catch { return { decision: "error", overbroad: false }; }
+  if (!p || typeof p !== "object") return { decision: "error", overbroad: false };
+  const stmts = Array.isArray(p.Statement) ? p.Statement : p.Statement ? [p.Statement] : [];
+  let allow = false, deny = false, overbroad = false;
+  for (const s of stmts) {
+    if (!s || typeof s !== "object") continue;
+    if (s.NotPrincipal !== undefined || s.NotAction !== undefined || s.Condition !== undefined)
+      return { decision: "error", overbroad: false }; // non-analyzable → human review, not a structural pass
+    if (!actionMatch(s.Action, action)) continue;
+    const pm = principalMatch(s.Principal, principalArn);
+    if (!pm.matches) continue;
+    if (s.Effect === "Deny") deny = true;
+    else if (s.Effect === "Allow") { allow = true; overbroad = overbroad || pm.overbroad; }
   }
+  return { decision: deny ? "deny" : allow ? "allow" : "deny", overbroad };
+}
+// Map the structural decision to a matrix verdict: "allowed" | "denied" | "overbroad" | "error". `overbroad` (allowed
+// ONLY via a `*`/root principal) is deliberately NOT "allowed" — it fails an expected-allowed row, and because such a
+// grant matches every principal it also flips the expected-denied rows to "overbroad" → a broadly-granting key policy
+// fails separation either way. A missing/unparseable policy is "error" (fail-closed) — never a silent pass.
+export function kmsAccessFromKeyPolicy(policyJson, principalArn, action) {
+  if (!policyJson) return "error";
+  const { decision, overbroad } = evaluateKeyPolicyAccess(policyJson, principalArn, action);
+  if (decision === "error") return "error";
+  if (decision === "allow") return overbroad ? "overbroad" : "allowed";
+  return "denied";
 }
 
 // ── selftest: prove the matrix LOGIC with MOCK functions only (zero AWS) ─────────────────────────────────────
@@ -229,32 +288,44 @@ export function runSelftest() {
   noWebExecLeak.rows.find((r) => r.id === "exec/kms:Decrypt/cmk").pass === false || fail("NO_WEB mode must NOT skip the exec decrypt check — exec leak must still FAIL");
   noWebExecLeak.allPass === false || fail("NO_WEB mode must still fail overall when a non-web row leaks");
 
-  // 9) command builder NEVER emits `--resource-arns "*"`: a wildcard/absent resource OMITS the flag; a real ARN includes it.
+  // 9) Secrets-Manager simulate builder NEVER emits `--resource-arns "*"` and NEVER a `--resource-policy` (the caller error).
   const noStar = (args) => { const i = args.indexOf("--resource-arns"); return i === -1 || args[i + 1] !== "*"; };
-  const wild = buildSimulateArgs(A.task, "kms:Decrypt", "*", "ca-central-1");
+  const wild = buildSimulateArgs(A.task, "secretsmanager:GetSecretValue", "*", "ca-central-1");
   (noStar(wild) && !wild.includes("--resource-arns")) || fail("a wildcard resource must OMIT --resource-arns (never send the literal '*')");
-  const absent = buildSimulateArgs(A.task, "kms:Decrypt", undefined, "ca-central-1");
-  (noStar(absent) && !absent.includes("--resource-arns")) || fail("an absent resource must OMIT --resource-arns");
-  const real = buildSimulateArgs(A.task, "kms:Decrypt", A.cmk, "ca-central-1");
-  (real.includes("--resource-arns") && real[real.indexOf("--resource-arns") + 1] === A.cmk && noStar(real)) || fail("a real ARN must be passed via --resource-arns");
-  buildSimulateArgs(A.exec, "secretsmanager:GetSecretValue", A.connectorSecret, "ca-central-1").includes("--resource-policy") && fail("no --resource-policy for a non-KMS action");
+  (noStar(buildSimulateArgs(A.task, "secretsmanager:GetSecretValue", undefined, "ca-central-1")) && !buildSimulateArgs(A.task, "s", undefined, "r").includes("--resource-arns")) || fail("an absent resource must OMIT --resource-arns");
+  const real = buildSimulateArgs(A.exec, "secretsmanager:GetSecretValue", A.connectorSecret, "ca-central-1");
+  (real[real.indexOf("--resource-arns") + 1] === A.connectorSecret && noStar(real) && !real.includes("--resource-policy")) || fail("a real ARN must be passed via --resource-arns; no --resource-policy");
 
-  // 10) scopeKeyPolicyToResource rewrites a key policy's Resource `*` → the CMK ARN (so no bare `*` reaches the simulator);
-  // an already-specific Resource is untouched; an unparseable policy is returned unchanged (fail-safe).
-  const scoped = scopeKeyPolicyToResource('{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":"kms:*","Resource":"*"}]}', A.cmk);
-  (JSON.parse(scoped).Statement[0].Resource === A.cmk) || fail("key-policy Resource '*' must be scoped to the CMK ARN");
-  /"Resource":"\*"/.test(scoped) && fail("no bare Resource '*' may remain in the scoped key policy");
-  scopeKeyPolicyToResource("not json", A.cmk) === "not json" || fail("an unparseable key policy must be returned unchanged (fail-safe)");
+  // 10) KMS separation is decided STRUCTURALLY from the key policy — the load-bearing checks:
+  const vault = JSON.stringify({ Statement: [{ Effect: "Allow", Principal: { AWS: A.task }, Action: ["kms:Decrypt", "kms:GenerateDataKey"], Resource: "*" }] });
+  kmsAccessFromKeyPolicy(vault, A.task, "kms:Decrypt") === "allowed" || fail("task must be ALLOWED vault decrypt by the key policy");
+  kmsAccessFromKeyPolicy(vault, A.task, "kms:GenerateDataKey") === "allowed" || fail("task must be ALLOWED vault generateDataKey");
+  kmsAccessFromKeyPolicy(vault, A.exec, "kms:Decrypt") === "denied" || fail("exec must be DENIED vault decrypt (not in the key policy)");
+  kmsAccessFromKeyPolicy(JSON.stringify({ Statement: [{ Effect: "Allow", Principal: { AWS: A.exec }, Action: "kms:*", Resource: "*" }] }), A.task, "kms:Decrypt") === "denied" || fail("decoy that grants only exec must DENY task");
+  // overbroad (star/root) grant is NOT a clean allow, and it also flips a denied principal → both fail separation:
+  const broad = JSON.stringify({ Statement: [{ Effect: "Allow", Principal: { AWS: "*" }, Action: "kms:Decrypt", Resource: "*" }] });
+  kmsAccessFromKeyPolicy(broad, A.task, "kms:Decrypt") === "overbroad" || fail("a `*`-principal grant must read `overbroad`, not `allowed`");
+  kmsAccessFromKeyPolicy(broad, A.exec, "kms:Decrypt") === "overbroad" || fail("a `*`-principal grant must also flag the exec principal");
+  // explicit Deny wins; a missing/unparseable policy is fail-closed `error` (NEVER a silent pass):
+  kmsAccessFromKeyPolicy(JSON.stringify({ Statement: [{ Effect: "Allow", Principal: { AWS: A.task }, Action: "kms:*", Resource: "*" }, { Effect: "Deny", Principal: { AWS: A.task }, Action: "kms:Decrypt", Resource: "*" }] }), A.task, "kms:Decrypt") === "denied" || fail("explicit Deny must win over Allow");
+  (kmsAccessFromKeyPolicy("", A.task, "kms:Decrypt") === "error" && kmsAccessFromKeyPolicy("not json", A.task, "kms:Decrypt") === "error") || fail("a missing/unparseable key policy must be `error` (fail-closed)");
 
-  return { ok: true, checks: 10 };
+  // 11) fail-OPEN guards: bare-account-id root == overbroad; partial action wildcard matches; NotPrincipal/NotAction/Condition → error.
+  kmsAccessFromKeyPolicy(JSON.stringify({ Statement: [{ Effect: "Allow", Principal: { AWS: "123456789012" }, Action: "kms:Decrypt", Resource: "*" }] }), A.exec, "kms:Decrypt") === "overbroad" || fail("a bare account-id principal must be overbroad (root-equivalent)");
+  kmsAccessFromKeyPolicy(JSON.stringify({ Statement: [{ Effect: "Allow", Principal: { AWS: A.exec }, Action: "kms:Decrypt*", Resource: "*" }] }), A.exec, "kms:Decrypt") === "allowed" || fail("a partial action wildcard (kms:Decrypt*) must match kms:Decrypt");
+  kmsAccessFromKeyPolicy(JSON.stringify({ Statement: [{ Effect: "Allow", NotPrincipal: { AWS: A.exec }, Action: "kms:Decrypt", Resource: "*" }] }), A.exec, "kms:Decrypt") === "error" || fail("NotPrincipal must be non-analyzable → error (fail-closed)");
+  kmsAccessFromKeyPolicy(JSON.stringify({ Statement: [{ Effect: "Deny", Principal: { AWS: A.task }, Action: "kms:Decrypt", Resource: "*", Condition: { Bool: {} } }] }), A.task, "kms:Decrypt") === "error" || fail("a Condition must be non-analyzable → error (fail-closed)");
+
+  return { ok: true, checks: 11 };
 }
 
-// ── live simulate/alias via the AWS CLI (OPERATOR-ONLY; never called by selftest/CI) ─────────────────────────
-function liveSimulate(region) {
-  // Cache the CMK key policy (a RESOURCE-based policy — metadata, NOT a secret). For KMS actions the effective
-  // authorization is identity-policy ∪ key-policy, so we pass the key policy via --resource-policy; otherwise a
-  // decrypt granted DIRECTLY in the key policy (not IAM) would be invisible and a load-bearing DENIED row could
-  // wrongly PASS. kms:GetKeyPolicy reads no key material and decrypts nothing.
+// ── live decide/alias via the AWS CLI (OPERATOR-ONLY; never called by selftest/CI) ────────────────────────────
+// KMS rows → STRUCTURAL key-policy analysis (kms:GetKeyPolicy metadata → evaluateKeyPolicyAccess): no simulate, no
+// --resource-policy, no caller — sidesteps the role+resource-policy caller error and models KMS access from the policy.
+// Secrets-Manager rows → iam:SimulatePrincipalPolicy identity evaluation (no --resource-policy → no caller needed).
+// NONE of these perform an action: no kms:Decrypt, no kms:GenerateDataKey, no secretsmanager:GetSecretValue, no ECS.
+function liveDecide(region) {
+  // Cache the CMK key policy (a RESOURCE-based policy — metadata, NOT key material). kms:GetKeyPolicy decrypts nothing.
   const keyPolicyCache = {};
   const keyPolicy = (cmkArn) => {
     if (!(cmkArn in keyPolicyCache)) {
@@ -266,12 +337,12 @@ function liveSimulate(region) {
     return keyPolicyCache[cmkArn];
   };
   return (principalArn, action, resourceArn) => {
-    // iam:SimulatePrincipalPolicy EVALUATES access; it performs NO action, reads NO secret, decrypts NOTHING.
-    // For KMS actions include the CMK key policy (scoped to the CMK ARN so no bare `*` reaches the simulator).
-    let resourcePolicy;
-    if (action.startsWith("kms:")) { const kp = keyPolicy(resourceArn); if (kp) resourcePolicy = scopeKeyPolicyToResource(kp, resourceArn); }
-    const args = buildSimulateArgs(principalArn, action, resourceArn, region, resourcePolicy);
-    const out = execFileSync("aws", args, { encoding: "utf8" }).trim();
+    if (action.startsWith("kms:")) {
+      // Structural: does the CMK key policy grant THIS principal THIS action? → allowed | denied | overbroad | error.
+      return kmsAccessFromKeyPolicy(keyPolicy(resourceArn), principalArn, action);
+    }
+    // Secrets Manager: iam:SimulatePrincipalPolicy EVALUATES access — performs NO action, reads NO secret value.
+    const out = execFileSync("aws", buildSimulateArgs(principalArn, action, resourceArn, region), { encoding: "utf8" }).trim();
     return out === "allowed" ? "allowed" : "denied"; // explicitDeny/implicitDeny → denied
   };
 }
@@ -318,8 +389,9 @@ function main(argv) {
     decoyCmk: process.env.CONNECTOR_VAULT_DECOY_CMK_ARN, dbUrlSecret: process.env.CONNECTOR_VAULT_DB_URL_SECRET_ARN,
     connectorSecret: process.env.CONNECTOR_VAULT_CONNECTOR_SECRET_ARN,
   };
-  console.log("  [LIVE] connector-vault KMS/IAM separation verify (iam:SimulatePrincipalPolicy + kms:ListAliases —");
-  console.log("  NO decrypt, NO get-secret-value, NO ECS, NO DB). Verdicts + metadata only; no secret values.");
+  console.log("  [LIVE] connector-vault KMS/IAM separation verify — KMS rows via kms:GetKeyPolicy structural analysis,");
+  console.log("  Secrets-Manager rows via iam:SimulatePrincipalPolicy, alias via kms:ListAliases. NO decrypt, NO");
+  console.log("  generateDataKey, NO get-secret-value, NO ECS, NO DB. Verdicts + metadata only; no secret values.");
   if (noWebPrincipal) {
     console.log("  [web] NO_WEB_AWS_PRINCIPAL mode: the web/request runtime has NO AWS identity (Vercel + Supabase RLS).");
     console.log("        web rows are recorded by ABSENCE (not simulated). Evidence anchors: (1) IAM role list shows no");
@@ -327,7 +399,7 @@ function main(argv) {
     console.log("        GetSecretValue on the request path in CI; (3) the request-path token source hard-throws. docs/49.");
   }
   console.log("");
-  const result = evaluateSeparation({ arns, expectedAlias: process.env.CONNECTOR_VAULT_EXPECTED_ALIAS, simulate: liveSimulate(region), resolveAliases: liveResolveAliases(region), noWebPrincipal });
+  const result = evaluateSeparation({ arns, expectedAlias: process.env.CONNECTOR_VAULT_EXPECTED_ALIAS, simulate: liveDecide(region), resolveAliases: liveResolveAliases(region), noWebPrincipal });
   console.log(formatMatrix(result));
   console.log("\n  KMS/IAM separation is hosted evidence only — it stores no secret and does NOT close RISK-007");
   console.log("  (audited access/use + rotation/revocation + lifecycle remain). RISK-007 OPEN; Phase C BLOCKED.");
