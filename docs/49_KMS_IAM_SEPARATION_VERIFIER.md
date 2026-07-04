@@ -6,7 +6,8 @@
 `scripts/verify-connector-vault-kms-iam-separation.mjs` **evaluates** the hosted KMS/IAM separation boundary that
 RISK-007 closure depends on, and returns a PASS/FAIL **allowed/denied matrix**. It complements — does not replace —
 `verify-staging-kms-iam-separation-dry-run.mjs` (which prints a synthetic decrypt/deny *runbook* for a human). This one
-decides access by **evaluation** (`iam:SimulatePrincipalPolicy` + `kms:ListAliases`), which never performs the action.
+decides access by **evaluation** — KMS rows by **structural key-policy analysis** (`kms:GetKeyPolicy` metadata),
+Secrets-Manager rows by `iam:SimulatePrincipalPolicy`, alias by `kms:ListAliases` — which never performs the action.
 
 ## What it never does
 No `kms:Decrypt`, no `kms:GenerateDataKey`, no `secretsmanager:GetSecretValue`, no ECS, no DB. It reads **no secret
@@ -29,19 +30,34 @@ PASS/FAIL) — never a secret, DB URL, key material, account id, or full ARN. Th
 
 A single failing row fails the run. Rows 3/3b/4/5/7 are the security-critical **denials**; row A catches a wrong CMK.
 
-**How live access is evaluated.** For KMS rows the verifier fetches the CMK **key policy** (`kms:GetKeyPolicy` —
-metadata, no key material) and passes it to `iam:SimulatePrincipalPolicy` via `--resource-policy`, so authorization is
-evaluated as *identity policy ∪ key policy*. Without this, a `kms:Decrypt` granted **directly in the key policy** (not via
-IAM) would be invisible and a load-bearing DENIED row could wrongly pass. `iam:SimulatePrincipalPolicy` still only
-*evaluates* — it performs no action, reads no secret, decrypts nothing.
+**How live access is evaluated — KMS rows use structural key-policy analysis, not simulation.** `iam:SimulatePrincipalPolicy`
+**cannot** faithfully evaluate a **role** principal against a KMS key policy supplied via `--resource-policy`: resource-policy
+evaluation needs a concrete caller, which a role ARN cannot imply (*"Invalid caller — Caller is not present and cannot be
+implied from policySourceArn"*), and KMS authorization (key policy + grants + IAM) is not modeled by the IAM simulator.
+So for KMS rows the verifier fetches the CMK **key policy** (`kms:GetKeyPolicy` — metadata, no key material, no decrypt)
+and evaluates it **structurally** (`evaluateKeyPolicyAccess` / `kmsAccessFromKeyPolicy`): *explicit Deny > explicit Allow >
+implicit deny*, matching Principal (exact role ARN) and Action (`kms:Decrypt` / `kms:GenerateDataKey`, incl. `kms:*`).
+Verdicts: **allowed** (the task role is explicitly granted), **denied** (no statement grants the principal), **overbroad**
+(allowed only via a `*`/account-root principal — deliberately *not* "allowed", so it fails an expected-allowed row and, since
+it matches every principal, the expected-denied rows too), and **error** (fail-closed, never a silent pass). Account-root is
+recognized in **both** forms AWS treats identically — `arn:aws:iam::<acct>:root` and the bare `<acct>` id — and action
+matching is a **case-insensitive glob** (`kms:*`, `kms:Decrypt*`, `kms:*Decrypt`, `*`), since under-matching a grant is the
+fail-open direction. A statement carrying `NotPrincipal`, `NotAction`, or `Condition` (which this structural model cannot
+safely evaluate) makes the policy **non-analyzable → `error`** (human review), rather than being skipped — a skip could hide
+a broad `Allow` on a DENIED row. So a legitimately conditional vault key policy surfaces as `error` (investigate), never a
+false pass. This asserts the vault CMK's **key-policy** separation: the runner task role is granted; the execution role
+and the decoy CMK are not; no wildcard/root grant of the KMS actions.
 
-**Wildcard-`*` handling (why the argv is built carefully).** `SimulatePrincipalPolicy` rejects the literal `*` as an ARN
-("ResourceNames are not in a valid ARN format: *") in **two** places: (1) `--resource-arns` — so a wildcard/absent
-resource **omits** the flag (the API then defaults `ResourceArns` to `*`, which is valid); the verifier never sends `*`
-there. (2) the key policy's own `"Resource": "*"` statements — so before passing the policy via `--resource-policy` the
-verifier rewrites each `Resource: "*"` to the **CMK's own ARN** (`scopeKeyPolicyToResource` — semantically identical for
-the key it is attached to). Both are pure, unit-tested builders (`buildSimulateArgs` / `scopeKeyPolicyToResource`); no
-AWS behavior, allowed/denied semantics, or the key-policy union is changed.
+*Limitation (documented boundary):* the structural check reads **only the CMK key policy**; it does not enumerate **KMS
+grants** (`kms:ListGrants`). A principal granted a KMS action solely via a grant (not named in the key policy, no root
+delegation) would read `denied` — a policy-only analysis cannot see runtime grants (the prior simulate approach modeled
+them no better). The vault CMK does not rely on grants for the runner; a grant-based path would be a separate check.
+
+**Secrets-Manager rows** are still evaluated with `iam:SimulatePrincipalPolicy` (identity-policy EvalDecision) — **without**
+`--resource-policy`, so no caller is needed and the flag that caused the KMS error is never sent. `buildSimulateArgs` also
+never passes the literal `*` to `--resource-arns` (`SimulatePrincipalPolicy` rejects it — a wildcard/absent resource omits
+the flag, which defaults `ResourceArns` to `*`). All of `buildSimulateArgs` / `principalMatch` / `actionMatch` /
+`evaluateKeyPolicyAccess` / `kmsAccessFromKeyPolicy` are pure, unit-tested, and make no AWS call.
 
 ## Selftest (CI, no AWS)
 ```

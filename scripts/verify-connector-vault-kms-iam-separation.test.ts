@@ -12,7 +12,10 @@ import {
   runSelftest,
   REQUIRED_ENV,
   buildSimulateArgs,
-  scopeKeyPolicyToResource,
+  evaluateKeyPolicyAccess,
+  kmsAccessFromKeyPolicy,
+  principalMatch,
+  actionMatch,
 } from "./verify-connector-vault-kms-iam-separation.mjs";
 
 const SCRIPT = fileURLToPath(new URL("./verify-connector-vault-kms-iam-separation.mjs", import.meta.url));
@@ -41,8 +44,8 @@ function run(extraEnv: Record<string, string> = {}, args: string[] = [], ref: st
 }
 
 describe("connector-vault KMS/IAM separation verifier — matrix logic (mocks only) + fail-closed guards", () => {
-  it("the built-in selftest passes (10 matrix-logic checks, no AWS)", () => {
-    expect(runSelftest()).toEqual({ ok: true, checks: 10 });
+  it("the built-in selftest passes (11 matrix-logic checks, no AWS)", () => {
+    expect(runSelftest()).toEqual({ ok: true, checks: 11 });
   });
 
   it("a correct hosted policy PASSES the full allowed/denied matrix + alias-scope", () => {
@@ -148,45 +151,90 @@ describe("connector-vault KMS/IAM separation verifier — matrix logic (mocks on
     expect(webUnset.out).toContain("CONNECTOR_VAULT_WEB_ROLE_ARN"); // still required when not exactly NONE
   });
 
-  // ── live command builder — never send "*" as a --resource-arns ARN (hosted InvalidInput fix) ────────────────
+  // ── Secrets-Manager simulate builder — never send "*"; never a --resource-policy (the role+key-policy caller bug) ──
   const R = "ca-central-1";
   const hasResourceArns = (a: string[]) => a.includes("--resource-arns");
   const resourceArnStar = (a: string[]) => { const i = a.indexOf("--resource-arns"); return i !== -1 && a[i + 1] === "*"; };
 
   it("buildSimulateArgs NEVER emits `--resource-arns \"*\"` — a wildcard/absent resource OMITS the flag", () => {
     for (const res of ["*", "", undefined as unknown as string, null as unknown as string]) {
-      const a = buildSimulateArgs(A.task, "kms:Decrypt", res, R);
+      const a = buildSimulateArgs(A.exec, "secretsmanager:GetSecretValue", res, R);
       expect(resourceArnStar(a)).toBe(false);
       expect(hasResourceArns(a)).toBe(false); // omitted → the API defaults ResourceArns to "*" (valid)
       expect(a.join(" ")).not.toContain("--resource-arns *");
     }
   });
 
-  it("buildSimulateArgs passes a REAL ARN via --resource-arns (KMS row includes the scoped resource policy)", () => {
-    const kmsPolicy = scopeKeyPolicyToResource('{"Statement":[{"Effect":"Allow","Action":"kms:*","Resource":"*"}]}', A.cmk);
-    const a = buildSimulateArgs(A.task, "kms:Decrypt", A.cmk, R, kmsPolicy);
-    expect(a[a.indexOf("--resource-arns") + 1]).toBe(A.cmk);
-    expect(resourceArnStar(a)).toBe(false);
-    expect(a).toContain("--resource-policy");
-    expect(a[a.indexOf("--resource-policy") + 1]).not.toContain('"Resource":"*"'); // no bare "*" reaches the simulator
-  });
-
-  it("buildSimulateArgs for a secret ARN includes --resource-arns and NO resource policy", () => {
+  it("buildSimulateArgs passes a REAL ARN via --resource-arns and NEVER a --resource-policy", () => {
     const a = buildSimulateArgs(A.exec, "secretsmanager:GetSecretValue", A.connectorSecret, R);
     expect(a[a.indexOf("--resource-arns") + 1]).toBe(A.connectorSecret);
-    expect(a).not.toContain("--resource-policy");
+    expect(resourceArnStar(a)).toBe(false);
+    expect(a).not.toContain("--resource-policy"); // resource-policy caused the role caller error → never sent
   });
 
-  it("scopeKeyPolicyToResource rewrites Resource `*` → the CMK ARN; keeps specific ARNs; fail-safe on non-JSON", () => {
-    const scoped = scopeKeyPolicyToResource('{"Statement":[{"Effect":"Allow","Action":"kms:Decrypt","Resource":"*"},{"Effect":"Allow","Action":"kms:*","Resource":["*","arn:aws:kms:x:y:key/keep"]}]}', A.cmk);
-    const p = JSON.parse(scoped);
-    expect(p.Statement[0].Resource).toBe(A.cmk);
-    expect(p.Statement[1].Resource).toEqual([A.cmk, "arn:aws:kms:x:y:key/keep"]);
-    expect(scoped).not.toContain('"Resource":"*"');
-    // already-specific Resource untouched; unparseable / empty inputs returned as-is (no throw)
-    expect(scopeKeyPolicyToResource('{"Statement":[{"Resource":"arn:aws:kms:x:y:key/z"}]}', A.cmk)).toContain("arn:aws:kms:x:y:key/z");
-    expect(scopeKeyPolicyToResource("not-json", A.cmk)).toBe("not-json");
-    expect(scopeKeyPolicyToResource("", A.cmk)).toBe("");
+  // ── KMS separation via STRUCTURAL key-policy analysis (replaces simulate+--resource-policy) — task-5 coverage ──
+  const grant = (principal: string, action: string | string[]) => JSON.stringify({ Version: "2012-10-17", Statement: [{ Effect: "Allow", Principal: { AWS: principal }, Action: action, Resource: "*" }] });
+
+  it("kmsAccessFromKeyPolicy: PASSES only when the task role principal + required KMS actions are present for the vault CMK", () => {
+    const vault = grant(A.task, ["kms:Decrypt", "kms:GenerateDataKey"]);
+    expect(kmsAccessFromKeyPolicy(vault, A.task, "kms:Decrypt")).toBe("allowed");
+    expect(kmsAccessFromKeyPolicy(vault, A.task, "kms:GenerateDataKey")).toBe("allowed");
+    // kms:* wildcard action also covers the required actions
+    expect(kmsAccessFromKeyPolicy(grant(A.task, "kms:*"), A.task, "kms:Decrypt")).toBe("allowed");
+  });
+
+  it("kmsAccessFromKeyPolicy: FAILS-closed when the task principal is missing, or only a different action is granted", () => {
+    expect(kmsAccessFromKeyPolicy(grant(A.exec, "kms:*"), A.task, "kms:Decrypt")).toBe("denied"); // task not present
+    expect(kmsAccessFromKeyPolicy(grant(A.task, "kms:Encrypt"), A.task, "kms:Decrypt")).toBe("denied"); // wrong action
+    expect(kmsAccessFromKeyPolicy("", A.task, "kms:Decrypt")).toBe("error"); // no policy fetched
+    expect(kmsAccessFromKeyPolicy("not-json", A.task, "kms:Decrypt")).toBe("error"); // unparseable → NOT a pass
+  });
+
+  it("kmsAccessFromKeyPolicy: exec allowed / decoy-allows-task / explicit Deny are all detected", () => {
+    expect(kmsAccessFromKeyPolicy(grant(A.exec, "kms:Decrypt"), A.exec, "kms:Decrypt")).toBe("allowed"); // exec leak → row (expect denied) FAILs
+    expect(kmsAccessFromKeyPolicy(grant(A.task, "kms:Decrypt"), A.task, "kms:Decrypt")).toBe("allowed"); // decoy granting task → task/decoy row FAILs
+    const denyWins = JSON.stringify({ Statement: [{ Effect: "Allow", Principal: { AWS: A.task }, Action: "kms:*", Resource: "*" }, { Effect: "Deny", Principal: { AWS: A.task }, Action: "kms:Decrypt", Resource: "*" }] });
+    expect(kmsAccessFromKeyPolicy(denyWins, A.task, "kms:Decrypt")).toBe("denied"); // explicit Deny > Allow
+  });
+
+  it("kmsAccessFromKeyPolicy: a wildcard/overbroad principal (`*` or account root) reads `overbroad`, never `allowed`", () => {
+    for (const p of ["*", "arn:aws:iam::123456789012:root"]) {
+      expect(kmsAccessFromKeyPolicy(grant(p, "kms:Decrypt"), A.task, "kms:Decrypt")).toBe("overbroad"); // not a clean allow
+      expect(kmsAccessFromKeyPolicy(grant(p, "kms:Decrypt"), A.exec, "kms:Decrypt")).toBe("overbroad"); // also flags the denied principal
+    }
+  });
+
+  it("FAIL-OPEN regressions closed: bare account-id root, partial action wildcard, NotPrincipal/NotAction/Condition", () => {
+    // (1) bare 12-digit account id == account-root delegation → overbroad (same as arn:…:root); must NOT read a clean allow
+    for (const root of ["123456789012", "arn:aws:iam::123456789012:root"]) {
+      expect(kmsAccessFromKeyPolicy(grant(root, "kms:Decrypt"), A.task, "kms:Decrypt")).toBe("overbroad");
+      expect(kmsAccessFromKeyPolicy(grant(root, "kms:Decrypt"), A.exec, "kms:Decrypt")).toBe("overbroad"); // flips the denied principal too
+    }
+    // (2) partial action wildcards that AWS honors must match (a missed grant on a DENIED principal would fail open)
+    for (const act of ["kms:Decrypt*", "kms:De*", "kms:*Decrypt", "kms:decrypt", "*"])
+      expect(kmsAccessFromKeyPolicy(grant(A.exec, act), A.exec, "kms:Decrypt")).toBe("allowed"); // exec granted → its denied row would FAIL
+    expect(kmsAccessFromKeyPolicy(grant(A.exec, "kms:Encrypt*"), A.exec, "kms:Decrypt")).toBe("denied"); // genuinely unrelated
+    // (3) NotPrincipal / NotAction / Condition → non-analyzable → "error" (fail-closed), never a silent skip that passes a denied row
+    const notPrincipal = JSON.stringify({ Statement: [{ Effect: "Allow", NotPrincipal: { AWS: "arn:aws:iam::1:role/other" }, Action: "kms:Decrypt", Resource: "*" }] });
+    const notAction = JSON.stringify({ Statement: [{ Effect: "Allow", Principal: { AWS: A.exec }, NotAction: "kms:Encrypt", Resource: "*" }] });
+    const conditional = JSON.stringify({ Statement: [{ Effect: "Allow", Principal: { AWS: A.task }, Action: "kms:*", Resource: "*" }, { Effect: "Deny", Principal: { AWS: A.task }, Action: "kms:Decrypt", Resource: "*", Condition: { Bool: { "aws:MultiFactorAuthPresent": "false" } } }] });
+    for (const pol of [notPrincipal, notAction, conditional])
+      for (const who of [A.task, A.exec]) expect(kmsAccessFromKeyPolicy(pol, who, "kms:Decrypt")).toBe("error");
+  });
+
+  it("principalMatch / actionMatch building blocks are correct (exact, wildcard, root)", () => {
+    expect(principalMatch({ AWS: [A.task, A.exec] }, A.task)).toEqual({ matches: true, overbroad: false });
+    expect(principalMatch({ AWS: A.exec }, A.task)).toEqual({ matches: false, overbroad: false });
+    expect(principalMatch({ AWS: "*" }, A.task).overbroad).toBe(true);
+    expect(principalMatch({ AWS: "arn:aws:iam::1:root" }, A.task).overbroad).toBe(true);
+    expect(actionMatch("kms:*", "kms:Decrypt")).toBe(true);
+    expect(actionMatch(["kms:Encrypt", "kms:Decrypt"], "kms:Decrypt")).toBe(true);
+    expect(actionMatch("kms:Encrypt", "kms:Decrypt")).toBe(false);
+    expect(actionMatch("*", "kms:Decrypt")).toBe(true);
+    // evaluateKeyPolicyAccess exposes the raw decision + overbroad flag
+    expect(evaluateKeyPolicyAccess(grant(A.task, "kms:Decrypt"), A.task, "kms:Decrypt")).toEqual({ decision: "allow", overbroad: false });
+    expect(evaluateKeyPolicyAccess(grant("*", "kms:Decrypt"), A.task, "kms:Decrypt")).toEqual({ decision: "allow", overbroad: true });
+    expect(evaluateKeyPolicyAccess("nope", A.task, "kms:Decrypt")).toEqual({ decision: "error", overbroad: false });
   });
 
   it("is INERT by default: `selftest` needs no AWS/env and exits 0; bare run refuses (exit 1)", () => {
