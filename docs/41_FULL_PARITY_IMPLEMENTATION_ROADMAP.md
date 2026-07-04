@@ -2057,7 +2057,7 @@ no connector marked connected.
   `https://slack.com/oauth/v2/authorize?client_id&scope&redirect_uri&state` with a SIGNED state
   (`createOAuthState`). client_id INJECTED (never hardcoded / env-read here); redirect_uri validated
   (HTTPS-only); scopes default to the registry's display scopes. Returns oauth_pending alignment hashes
-  `stateJti=sha256(state)`, `nonceHash=sha256(nonce)` (one-way; raw nonce/state never persisted). The Slack
+  `stateJti=corr [was sha256(state); corrected #243]`, `nonceHash=sha256(nonce)` (one-way; raw nonce/state never persisted). The Slack
   token endpoint is never built/called. Fail-closed reasons on bad config.
 - **`classifySlackCallback`** → safe outcome (`provider_error`/`not_configured`/`invalid[reason]`/`received`).
   Validates the signed state via `validateOAuthState`; checks `code` PRESENCE only (value never read); **NO
@@ -2099,7 +2099,7 @@ no connector marked connected, no sync run. Library-only (no route / server acti
   reason }`: validates inserter present / provider supported / tenant context (tenant required; org/subject
   optional, nullable per `0020`); builds the authorize URL (validating clientId/redirectUri[https]/signer/
   scopes); inserts ONE row `{ tenant_id, organization_id?, provider:'slack', connector_id?, subject?,
-  state_jti=sha256(state), nonce_hash=sha256(nonce), intent:'connect', expires_at }`. **Raw nonce is not
+  state_jti=corr [was sha256(state); corrected #243], nonce_hash=sha256(nonce), intent:'connect', expires_at }`. **Raw nonce is not
   stored. Raw state is not stored** (the raw nonce is never materialized — the builder returns only hashes).
 - **Fail closed:** missing inserter / unsupported provider / missing tenant(org/subject) / bad config / unsafe
   redirect / duplicate(state_jti|nonce_hash) → duplicate_pending / DB error → persist_failed; no partial row.

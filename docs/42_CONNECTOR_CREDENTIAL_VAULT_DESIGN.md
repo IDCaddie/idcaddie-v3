@@ -695,8 +695,8 @@ material is inserted, updated, or deleted.** No migration is added (the `oauth_p
 
 ### 32.3 `oauth_pending` single-use replay store — design only (no migration in this PR)
 Conceptual Tier-2 schema (illustrative columns; the migration is a later gated PR):
-- `oauth_pending` — `id, tenant_id, organization_id?, provider, connector_id?, subject?, state_jti (a random
-  unique id embedded in the signed state), nonce_hash (sha256 of the nonce — the RAW nonce is never stored),
+- `oauth_pending` — `id, tenant_id, organization_id?, provider, connector_id?, subject?, state_jti (= corr, the
+  correlation id embedded in the signed state — the callback consume key, since #243), nonce_hash (sha256 of the nonce — the RAW nonce is never stored),
   expires_at, consumed_at?, created_at, attempt_count? (safe counter), last_rejected_code? (a safe reason code,
   never a secret)`.
 - **Single-use enforcement.** `UNIQUE (state_jti)` and `UNIQUE (nonce_hash)`. **Consume is one atomic UPDATE**:
@@ -1735,7 +1735,7 @@ is a SIGNED state from `createOAuthState` (the §31 signer boundary). `client_id
 config / explicit input — never hardcoded, never read from env here). `redirect_uri` is validated (absolute
 HTTPS only — `javascript:`/`http:`/`data:`/relative rejected). Scopes default to the registry's Slack DISPLAY
 scopes (metadata only). It returns the **oauth_pending alignment values** a FUTURE PR persists at
-authorize-time: `stateJti = sha256(state)`, `nonceHash = sha256(nonce)` — one-way hashes; the raw nonce/state
+authorize-time: `stateJti = corr` (the correlation id — the callback consume key, since #243), `nonceHash = sha256(nonce)` — the raw nonce/state
 are NEVER persisted. Fail-closed reasons: `wrong_provider`/`missing_client_id`/`missing_redirect_uri`/
 `invalid_redirect_uri`/`missing_signer`/`missing_scopes`/`invalid_context`. **The Slack token endpoint
 (`oauth.v2.access`) is never built or called.**
@@ -1794,7 +1794,7 @@ Slack provider is supported (registry), and the tenant context (tenant required;
 optional + validated if present — matching the nullable `0020` columns); builds the authorize URL via
 `buildSlackAuthorizeUrl` (which validates clientId/redirectUri[https-only]/signer/scopes and returns the
 one-way hashes); then inserts ONE row `{ tenant_id, organization_id?, provider:'slack', connector_id?,
-subject?, state_jti = sha256(state), nonce_hash = sha256(nonce), intent:'connect', expires_at }`.
+subject?, state_jti = corr (the correlation id; the runner consume key, since #243), nonce_hash = sha256(nonce), intent:'connect', expires_at }`.
 **Raw nonce is not stored. Raw state is not stored** — the raw nonce is NEVER materialized here (the builder
 returns only hashes), so it can never be stored, returned, or logged; the result returns the authorize URL
 (the signed `state` is the intended redirect carrier) + safe metadata only.
@@ -4113,7 +4113,7 @@ stored). Design of the binding:
 | **connector binding** | `payload.cid` must equal the completing context's connector — **UNCONDITIONAL, null-normalized** (`connector_mismatch`): a fresh-connect (`cid=null` both) matches, but a re-auth state (`cid=A`) can never complete a fresh-connect context, nor connector A complete connector B. (Not gated on `!= null`, so the compare can't be skipped.) |
 | **exact redirect URI binding** | the `redirect_uri` sent to Slack at authorize is bound and must match the callback **EXACTLY** — full-string equality, **NOT** prefix/substring/origin-only/loose. Designed as: bind the exact `redirect_uri` to the state (extend the payload or pin it per-app) and reject any mismatch (`redirect_uri_mismatch`). `buildSlackAuthorizeUrl` already requires an absolute-HTTPS redirect (no `http:`/`javascript:`/relative). |
 | **actor / session binding (✅ DONE in B2a, #174)** | **B2a implemented this:** `validateOAuthState` now compares `payload.sub` against the completing session (`subject_mismatch`; `session_required` if no completing actor), binds the EXACT redirect URI (`redir` → `redirect_uri_mismatch`) + correlation id (`corr` → `correlation_mismatch`), and `generateBoundOAuthState` adds generation-time actor authorization. *(Original gap:)* the previous `validateOAuthState` bound `tid`/`prov`/`cid` but **did NOT compare `payload.sub` or `intent` to the completing session.** B2a MUST add **actor/session binding**: the completing session's authenticated subject must equal `payload.sub` **and** `oauth_pending.subject` (a new `subject_mismatch`/`session_mismatch` reason code), and `intent` must match. **How the callback obtains the subject (B2a must name it, not assume a layout):** an App Router **route handler does NOT run the `(authenticated)/layout.tsx` auth gate**, so the callback handler MUST itself resolve the authenticated user (e.g. `getSessionUser()` / `supabase.auth.getUser()` **inside** the handler) and compare to `payload.sub`/`oauth_pending.subject`. **Routing caveat:** the callback path is not in `proxy.ts` `PUBLIC_PREFIXES`, so an **unauthenticated** browser returning from Slack is 302'd to `/login` and the in-flight `code`/`state` are dropped — B2a must define how the session is guaranteed present at callback (e.g. require an active session + re-entry after login, or a controlled allowlist with auth enforced inside the handler), never weakening the subject check. Without all this, an attacker-initiated authorize could be completed by a victim session even though tenant/provider match. |
-| **correlation_id binding** | a **prefixed grammar-safe** `correlation_id` (the #166 `SAFE_CORRELATION_RE`, e.g. `corr-…`/`run-…`) is generated at authorize **for the audit rows**, kept **separate** from `state_jti` (which is the random `oauth_pending` lookup key, sha256-hex shaped — NOT the correlation_id), and threaded into every audit row (§90.7) so authorize→callback→exchange→store correlate. |
+| **correlation_id binding** | a **prefixed grammar-safe** `correlation_id` (the #166 `SAFE_CORRELATION_RE`, e.g. `corr-…`/`run-…`) is generated at authorize and, **since #243, IS the `oauth_pending.state_jti`** single-use lookup key (`state_jti = corr` — the callback consume matches the HMAC-authenticated `payload.corr`); it is also threaded into every audit row (§90.7) so authorize→callback→exchange→store correlate. |
 | **failure behavior** | every check is fail-closed: any mismatch/expired/replayed/bad-signature ⇒ reject with a safe reason CODE (§90.7), **no** exchange, **no** state burned on a rejected state, **no** raw `code`/nonce surfaced. |
 
 **OAuth state MUST bind — and the callback MUST compare against the completing request/session — ALL EIGHT of:**
