@@ -93,7 +93,7 @@ const SLACK: ConnectorProviderDefinition = {
   status: "skeleton",
   reviewGate: "provider-specific-reviewed-pr", // real token storage stays gated behind this
   riskLevel: "low",
-  requiredScopes: ["users:read", "usergroups:read", "auditlogs:read"], // display-only metadata
+  requiredScopes: ["users:read", "usergroups:read"], // display-only metadata
   helpCopy:
     "Coming soon — not connected. Slack is a skeleton provider entry only: no credentials are stored and " +
     "connecting/sync are not built. A later reviewed PR adds the real OAuth + token storage behind the vault.",
