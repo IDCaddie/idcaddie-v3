@@ -49,7 +49,7 @@ describe("persistSlackAuthorizePending — authorize-time oauth_pending persist"
     // returned URL is Slack-specific + carries the signed state; safe metadata only
     expect(new URL(res.url).origin).toBe("https://slack.com");
     expect(new URL(res.url).pathname).toBe("/oauth/v2/authorize");
-    expect(res.stateJti).toBe(sha256(new URL(res.url).searchParams.get("state")!));
+    expect(res.stateJti).toBe("corr-auth-test"); // state_jti = corr (the runner consume key), NOT sha256(state)
     expect(res.expiresAt).toBe(NOW + 600_000);
     // exactly one row persisted, provider slack, hashes not raw values
     expect(ins.rows).toHaveLength(1);
@@ -73,9 +73,9 @@ describe("persistSlackAuthorizePending — authorize-time oauth_pending persist"
     const flat = JSON.stringify(row);
     expect(flat).not.toContain("super-secret-nonce-RAW"); // raw nonce never stored
     const state = res.ok ? new URL(res.url).searchParams.get("state")! : "";
-    expect(flat).not.toContain(state); // raw signed state string is never a stored column (only its sha256)
+    expect(flat).not.toContain(state); // raw signed state string is never a stored column
     expect(row.nonceHash).toBe(sha256("super-secret-nonce-RAW"));
-    expect(row.stateJti).toBe(sha256(state));
+    expect(row.stateJti).toBe("corr-auth-test"); // state_jti = corr (the consume key), never the raw/hashed state
     // the result object likewise carries no raw nonce
     expect(JSON.stringify(res)).not.toContain("super-secret-nonce-RAW");
   });
