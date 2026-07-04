@@ -32,6 +32,12 @@
 //   CONNECTOR_VAULT_DB_URL_SECRET_ARN=… CONNECTOR_VAULT_CONNECTOR_SECRET_ARN=… \
 //   node scripts/verify-connector-vault-kms-iam-separation.mjs
 //
+// Web evidence has TWO modes (docs/49):
+//   A. web ROLE mode — CONNECTOR_VAULT_WEB_ROLE_ARN=arn:… → the web role is SIMULATED and must be DENIED kms:Decrypt.
+//   B. NO_WEB_AWS_PRINCIPAL mode — CONNECTOR_VAULT_WEB_ROLE_ARN=NONE (exact) → the web/request runtime has no AWS
+//      identity (Vercel + Supabase RLS); web rows are recorded `no_web_aws_principal` (not simulated). STRONGER evidence:
+//      no principal ⇒ cannot authenticate to AWS at all. All other rows are unchanged. Only EXACTLY `NONE` triggers it.
+//
 // Self-test (no AWS, mocks only, CI): node scripts/verify-connector-vault-kms-iam-separation.mjs selftest
 
 import { execFileSync } from "node:child_process";
@@ -75,8 +81,18 @@ export const SEPARATION_MATRIX = [
 // iam:SimulatePrincipalPolicy's EvalDecision (allowed vs explicit/implicit deny). `resolveAliases(cmkArn) ->
 // string[]` abstracts kms:ListAliases. No AWS here — the caller injects real or mock functions. Returns the
 // verdict rows + an alias-scope verdict + allPass. Fail-closed: an evaluator throw is caught → that row FAILs.
-export function evaluateSeparation({ arns, expectedAlias, simulate, resolveAliases }) {
+//
+// `noWebPrincipal` (docs/49 mode B): the v3 web/request runtime is Vercel + Supabase-RLS and has NO AWS identity by
+// design — no credential, no role, no `@aws-sdk` on the request path. That is STRONGER than "a web role that is denied":
+// with no principal it cannot authenticate to AWS at all, so it cannot perform ANY action. In this mode the web rows are
+// NOT simulated (there is no principal to simulate); each is recorded as `no_web_aws_principal` and passes ONLY when the
+// row expects "denied" (a hypothetical "allowed" web row would FAIL — absence can never satisfy an allow). This affects
+// ONLY `identity === "web"` rows; task/exec/decoy/secret/alias rows are evaluated exactly as before.
+export function evaluateSeparation({ arns, expectedAlias, simulate, resolveAliases, noWebPrincipal = false }) {
   const rows = SEPARATION_MATRIX.map((r) => {
+    if (noWebPrincipal && r.identity === "web") {
+      return { id: r.id, identity: r.identity, action: r.action, resource: r.resource, expect: r.expect, actual: "no_web_aws_principal", pass: r.expect === "denied", note: r.note };
+    }
     let actual;
     try {
       actual = simulate(arns[r.identity], r.action, arns[r.resource]);
@@ -163,7 +179,23 @@ export function runSelftest() {
   // 6) output redaction: no ARN account/path, no secret shapes.
   const out = formatMatrix(good) + tail("arn:aws:kms:ca-central-1:123456789012:key/abc");
   /123456789012/.test(out) && fail("output must not contain an account id");
-  return { ok: true, checks: 6 };
+
+  // 7) NO_WEB_AWS_PRINCIPAL mode: web rows are recorded as `no_web_aws_principal` and PASS by absence, WITHOUT calling
+  // simulate for them. Simulate throws if ever asked about the web principal — proving web rows never reach it.
+  const noWebSim = (p, act, res) => { if (p === A.web) fail("web principal must NOT be simulated in NO_WEB mode"); return correctMockSimulate(A)(p, act, res); };
+  const noWeb = evaluateSeparation({ arns: A, expectedAlias: alias, simulate: noWebSim, resolveAliases: okAliases, noWebPrincipal: true });
+  noWeb.allPass || fail("NO_WEB mode with an otherwise-correct policy must pass the full matrix");
+  const webRow = noWeb.rows.find((r) => r.id === "web/kms:Decrypt/cmk");
+  (webRow.actual === "no_web_aws_principal" && webRow.pass === true) || fail("web row must read no_web_aws_principal and PASS in NO_WEB mode");
+
+  // 8) NO_WEB mode must NOT skip or weaken NON-web rows. With exec able to decrypt the CMK, the exec row must STILL FAIL
+  // (the sentinel affects web rows only) — this is the load-bearing guard against the sentinel masking a real leak.
+  const noWebExecLeak = evaluateSeparation({ arns: A, expectedAlias: alias, resolveAliases: okAliases, noWebPrincipal: true,
+    simulate: (p, act, res) => (p === A.exec && act === "kms:Decrypt" && res === A.cmk) ? "allowed" : correctMockSimulate(A)(p, act, res) });
+  noWebExecLeak.rows.find((r) => r.id === "exec/kms:Decrypt/cmk").pass === false || fail("NO_WEB mode must NOT skip the exec decrypt check — exec leak must still FAIL");
+  noWebExecLeak.allPass === false || fail("NO_WEB mode must still fail overall when a non-web row leaks");
+
+  return { ok: true, checks: 8 };
 }
 
 // ── live simulate/alias via the AWS CLI (OPERATOR-ONLY; never called by selftest/CI) ─────────────────────────
@@ -219,7 +251,12 @@ function main(argv) {
   if (ref === PRODUCTION_REF) return refuse(`production ref (${PRODUCTION_REF}) must NOT be touched.`);
   if (ref !== STAGING_REF) return refuse(`wrong/unknown project ref (expected staging ${STAGING_REF}).`);
   if (process.env.AWS_REGION && process.env.AWS_REGION !== EXPECT_REGION) return refuse(`wrong region (expected ${EXPECT_REGION}).`);
-  const missing = REQUIRED_ENV.filter((k) => !process.env[k]);
+  // Mode B (docs/49): the EXACT sentinel `NONE` asserts there is no web/request AWS principal → the web ARN is not
+  // required (there is none to supply). Anything else — unset, empty, a typo like "none"/"None ", or a real ARN — is NOT
+  // the sentinel, so the web ARN stays required (unset/empty → refuse) or is simulated live (a bogus value → error → FAIL).
+  const noWebPrincipal = process.env.CONNECTOR_VAULT_WEB_ROLE_ARN === "NONE";
+  const required = noWebPrincipal ? REQUIRED_ENV.filter((k) => k !== "CONNECTOR_VAULT_WEB_ROLE_ARN") : REQUIRED_ENV;
+  const missing = required.filter((k) => !process.env[k]);
   if (missing.length) return refuse(`missing required env (values never printed): ${missing.join(", ")}.`);
 
   const region = process.env.AWS_REGION;
@@ -230,8 +267,15 @@ function main(argv) {
     connectorSecret: process.env.CONNECTOR_VAULT_CONNECTOR_SECRET_ARN,
   };
   console.log("  [LIVE] connector-vault KMS/IAM separation verify (iam:SimulatePrincipalPolicy + kms:ListAliases —");
-  console.log("  NO decrypt, NO get-secret-value, NO ECS, NO DB). Verdicts + metadata only; no secret values.\n");
-  const result = evaluateSeparation({ arns, expectedAlias: process.env.CONNECTOR_VAULT_EXPECTED_ALIAS, simulate: liveSimulate(region), resolveAliases: liveResolveAliases(region) });
+  console.log("  NO decrypt, NO get-secret-value, NO ECS, NO DB). Verdicts + metadata only; no secret values.");
+  if (noWebPrincipal) {
+    console.log("  [web] NO_WEB_AWS_PRINCIPAL mode: the web/request runtime has NO AWS identity (Vercel + Supabase RLS).");
+    console.log("        web rows are recorded by ABSENCE (not simulated). Evidence anchors: (1) IAM role list shows no");
+    console.log("        web/request role; (2) check-app-runtime-imports.sh bars @aws-sdk/client-kms & Secrets-Manager");
+    console.log("        GetSecretValue on the request path in CI; (3) the request-path token source hard-throws. docs/49.");
+  }
+  console.log("");
+  const result = evaluateSeparation({ arns, expectedAlias: process.env.CONNECTOR_VAULT_EXPECTED_ALIAS, simulate: liveSimulate(region), resolveAliases: liveResolveAliases(region), noWebPrincipal });
   console.log(formatMatrix(result));
   console.log("\n  KMS/IAM separation is hosted evidence only — it stores no secret and does NOT close RISK-007");
   console.log("  (audited access/use + rotation/revocation + lifecycle remain). RISK-007 OPEN; Phase C BLOCKED.");
