@@ -1,7 +1,8 @@
 # 49 · Connector-vault KMS/IAM separation verifier
 
-**Status:** verifier `implemented` + `selftest ci-enforced`; **live run = operator-only, not yet run**. RISK-007 remains
-**OPEN**; Phase C remains **BLOCKED**.
+**Status:** verifier `implemented` + `selftest ci-enforced`; **live run = operator-run — hosted STAGING PASS (2026-07-04)**
+after least-privilege key-policy tightening (see *Evidence* below). **Staging only — no production run.** RISK-007 remains
+**OPEN**; Phase C remains **BLOCKED** (this proves the KMS/IAM separation boundary; it does not close RISK-007).
 
 `scripts/verify-connector-vault-kms-iam-separation.mjs` **evaluates** the hosted KMS/IAM separation boundary that
 RISK-007 closure depends on, and returns a PASS/FAIL **allowed/denied matrix**. It complements — does not replace —
@@ -120,6 +121,23 @@ material) can be evidenced two ways. Pick by whether a web/request AWS principal
 ## Evidence to record (a docs-only verification PR)
 Record PASS/FAIL **per row** + the run date/account/region — never a secret, ARN, or key material. A green run is
 hosted evidence for the **KMS/IAM separation only**.
+
+### Evidence — hosted STAGING run, 2026-07-04 (`ALL SEPARATION CHECKS PASS`)
+Account `833822972703` / `ca-central-1`, caller `sam-cli`, **mode B** (`CONNECTOR_VAULT_WEB_ROLE_ARN=NONE`). The default
+account-root "Enable IAM" delegation on both CMKs read **`overbroad`** (correct — root delegation is not key-policy
+separation), so both key policies were **tightened to least-privilege** before the green run:
+- **Vault CMK** (`alias/idcaddie-staging-connector-vault`): admin/manage = `sam-cli` + a new durable `idcaddie-staging-kms-admin`
+  role; runtime-use = `idcaddie-staging-slack-taskread` for `kms:Decrypt` + `kms:GenerateDataKey` **only**.
+- **Decoy CMK** (`alias/idcaddie-staging-kek`): admin/manage **only** — no runtime-use.
+- Both: **no** account-root, **no** wildcard/bare-account principal, **no** exec-role KMS, **no** KMS grants (none pre-existed;
+  IAM Access Analyzer returned no findings).
+
+Matrix (all PASS): task→vault `Decrypt`/`GenerateDataKey` **allowed**; task→decoy `Decrypt`/`GenerateDataKey` **denied**;
+exec→vault `Decrypt` **denied**; web `Decrypt` = **`no_web_aws_principal`** (IAM role list holds only the runner-exec,
+slack-taskread, kms-admin roles — no web/request role); Secrets-Manager DB-URL secret allowed(exec) / connector secret
+denied(exec) / connector secret allowed(task); alias = **match**. No `kms:Decrypt`/`GenerateDataKey` executed, no
+`GetSecretValue` value read, no ECS, no DB, no production; no secret/DB-URL/token/ARN printed. **Staging only — not a
+production claim; does not close RISK-007.** Recorded in [docs/52](./52_RISK_007_CLOSURE_EVIDENCE_TRACKER.md) criteria 5 & 11.
 
 ## What it does / does not close
 Proves: the two runtime identities (web, exec) cannot decrypt vault material, the runner can, the KMS grant is
