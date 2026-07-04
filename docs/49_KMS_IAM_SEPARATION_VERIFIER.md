@@ -35,6 +35,14 @@ evaluated as *identity policy ∪ key policy*. Without this, a `kms:Decrypt` gra
 IAM) would be invisible and a load-bearing DENIED row could wrongly pass. `iam:SimulatePrincipalPolicy` still only
 *evaluates* — it performs no action, reads no secret, decrypts nothing.
 
+**Wildcard-`*` handling (why the argv is built carefully).** `SimulatePrincipalPolicy` rejects the literal `*` as an ARN
+("ResourceNames are not in a valid ARN format: *") in **two** places: (1) `--resource-arns` — so a wildcard/absent
+resource **omits** the flag (the API then defaults `ResourceArns` to `*`, which is valid); the verifier never sends `*`
+there. (2) the key policy's own `"Resource": "*"` statements — so before passing the policy via `--resource-policy` the
+verifier rewrites each `Resource: "*"` to the **CMK's own ARN** (`scopeKeyPolicyToResource` — semantically identical for
+the key it is attached to). Both are pure, unit-tested builders (`buildSimulateArgs` / `scopeKeyPolicyToResource`); no
+AWS behavior, allowed/denied semantics, or the key-policy union is changed.
+
 ## Selftest (CI, no AWS)
 ```
 npm run verify:kms-iam:selftest

@@ -125,6 +125,40 @@ export function formatMatrix(result) {
   return result.rows.map(line).join("\n") + `\n  => ${result.allPass ? "ALL SEPARATION CHECKS PASS" : "SEPARATION CHECK FAILED"}`;
 }
 
+// ── pure command builders (no AWS; unit-tested) ──────────────────────────────────────────────────────────────
+// Build the `aws iam simulate-principal-policy` argv. `iam:SimulatePrincipalPolicy` REJECTS the literal `*` in
+// `--resource-arns` ("ResourceNames are not in a valid ARN format: *"); the API instead defaults ResourceArns to `*`
+// (all resources) when the flag is OMITTED. So a wildcard/absent resource omits `--resource-arns` entirely; a real ARN
+// is passed. An optional (already resource-scoped) resource policy is appended for KMS rows.
+export function buildSimulateArgs(principalArn, action, resourceArn, region, resourcePolicy) {
+  const isWildcard = !resourceArn || resourceArn === "*";
+  const args = ["iam", "simulate-principal-policy", "--policy-source-arn", principalArn, "--action-names", action];
+  if (!isWildcard) args.push("--resource-arns", resourceArn); // NEVER push "*" — omitting defaults ResourceArns to "*"
+  args.push("--region", region, "--query", "EvaluationResults[0].EvalDecision", "--output", "text");
+  if (resourcePolicy) args.push("--resource-policy", resourcePolicy);
+  return args;
+}
+
+// A KMS key policy's statements use `"Resource": "*"` (meaning "this CMK"). When that raw policy is handed to
+// SimulatePrincipalPolicy via `--resource-policy`, the API validates its Resource elements as ARNs and rejects the bare
+// `*` — the SAME "not a valid ARN format: *" error. Rewrite each `Resource: "*"` to the CMK's own ARN (semantically
+// identical for the key it is attached to), so the resource policy carries a valid ARN while the identity∪key-policy
+// evaluation is preserved. Metadata-only (no secret material); fail-safe — an unparseable policy is returned unchanged.
+export function scopeKeyPolicyToResource(policyJson, cmkArn) {
+  if (!policyJson || !cmkArn) return policyJson;
+  try {
+    const p = JSON.parse(policyJson);
+    const stmts = Array.isArray(p.Statement) ? p.Statement : p.Statement ? [p.Statement] : [];
+    for (const s of stmts) {
+      if (s && s.Resource === "*") s.Resource = cmkArn;
+      else if (s && Array.isArray(s.Resource)) s.Resource = s.Resource.map((r) => (r === "*" ? cmkArn : r));
+    }
+    return JSON.stringify(p);
+  } catch {
+    return policyJson;
+  }
+}
+
 // ── selftest: prove the matrix LOGIC with MOCK functions only (zero AWS) ─────────────────────────────────────
 // A mock "correct" hosted policy: task may decrypt/genkey the CMK + read the connector secret; nobody else can
 // decrypt; exec reads only the DB-URL secret; the CMK is scoped (decoy denied); alias matches.
@@ -195,7 +229,24 @@ export function runSelftest() {
   noWebExecLeak.rows.find((r) => r.id === "exec/kms:Decrypt/cmk").pass === false || fail("NO_WEB mode must NOT skip the exec decrypt check — exec leak must still FAIL");
   noWebExecLeak.allPass === false || fail("NO_WEB mode must still fail overall when a non-web row leaks");
 
-  return { ok: true, checks: 8 };
+  // 9) command builder NEVER emits `--resource-arns "*"`: a wildcard/absent resource OMITS the flag; a real ARN includes it.
+  const noStar = (args) => { const i = args.indexOf("--resource-arns"); return i === -1 || args[i + 1] !== "*"; };
+  const wild = buildSimulateArgs(A.task, "kms:Decrypt", "*", "ca-central-1");
+  (noStar(wild) && !wild.includes("--resource-arns")) || fail("a wildcard resource must OMIT --resource-arns (never send the literal '*')");
+  const absent = buildSimulateArgs(A.task, "kms:Decrypt", undefined, "ca-central-1");
+  (noStar(absent) && !absent.includes("--resource-arns")) || fail("an absent resource must OMIT --resource-arns");
+  const real = buildSimulateArgs(A.task, "kms:Decrypt", A.cmk, "ca-central-1");
+  (real.includes("--resource-arns") && real[real.indexOf("--resource-arns") + 1] === A.cmk && noStar(real)) || fail("a real ARN must be passed via --resource-arns");
+  buildSimulateArgs(A.exec, "secretsmanager:GetSecretValue", A.connectorSecret, "ca-central-1").includes("--resource-policy") && fail("no --resource-policy for a non-KMS action");
+
+  // 10) scopeKeyPolicyToResource rewrites a key policy's Resource `*` → the CMK ARN (so no bare `*` reaches the simulator);
+  // an already-specific Resource is untouched; an unparseable policy is returned unchanged (fail-safe).
+  const scoped = scopeKeyPolicyToResource('{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":"kms:*","Resource":"*"}]}', A.cmk);
+  (JSON.parse(scoped).Statement[0].Resource === A.cmk) || fail("key-policy Resource '*' must be scoped to the CMK ARN");
+  /"Resource":"\*"/.test(scoped) && fail("no bare Resource '*' may remain in the scoped key policy");
+  scopeKeyPolicyToResource("not json", A.cmk) === "not json" || fail("an unparseable key policy must be returned unchanged (fail-safe)");
+
+  return { ok: true, checks: 10 };
 }
 
 // ── live simulate/alias via the AWS CLI (OPERATOR-ONLY; never called by selftest/CI) ─────────────────────────
@@ -216,9 +267,10 @@ function liveSimulate(region) {
   };
   return (principalArn, action, resourceArn) => {
     // iam:SimulatePrincipalPolicy EVALUATES access; it performs NO action, reads NO secret, decrypts NOTHING.
-    const args = ["iam", "simulate-principal-policy", "--policy-source-arn", principalArn, "--action-names", action,
-      "--resource-arns", resourceArn, "--region", region, "--query", "EvaluationResults[0].EvalDecision", "--output", "text"];
-    if (action.startsWith("kms:")) { const kp = keyPolicy(resourceArn); if (kp) args.push("--resource-policy", kp); }
+    // For KMS actions include the CMK key policy (scoped to the CMK ARN so no bare `*` reaches the simulator).
+    let resourcePolicy;
+    if (action.startsWith("kms:")) { const kp = keyPolicy(resourceArn); if (kp) resourcePolicy = scopeKeyPolicyToResource(kp, resourceArn); }
+    const args = buildSimulateArgs(principalArn, action, resourceArn, region, resourcePolicy);
     const out = execFileSync("aws", args, { encoding: "utf8" }).trim();
     return out === "allowed" ? "allowed" : "denied"; // explicitDeny/implicitDeny → denied
   };
