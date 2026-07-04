@@ -7,6 +7,13 @@ from PRs verified via `git log` / `gh pr list`.
 
 ---
 
+### docs(risk-007) — Step 1 hosted staging apply/verify evidence recorded · 2026-07-04
+- **Docs-only.** Records the hosted **staging** Step 1 result (completed 2026-07-03, before Step 2): migrations `0036`–`0040` applied via `supabase db push --linked` to staging ref `ycdpzduxugdsffjqyoai`; production ref `dzbfxulvxchdemcettrx` **not** linked/touched; post-apply migration list = `0001–0040 Local = Remote`.
+- **Role shape (`0039`, per T57):** `connector_runner_login` — `rolcanlogin=true`, `rolinherit=false`, `rolsuper`/`rolcreatedb`/`rolcreaterole`/`rolreplication`/`rolbypassrls` all `false`; `pg_has_role(→ connector_runner, 'SET')=true`, `'USAGE')=false`; **direct table grants = 0**.
+- **Schema (`0040`):** `app_users.last_seen_at` present; `app_users.sync_status` present, default `active`, NOT NULL; `manual_sync_runs.app_users_marked_stale` present, default `0`, NOT NULL. Existing envelope row intact (1 app-level staging Slack `oauth_client_secret`; no secret value read).
+- `docs/52` criteria **3** (hosted migrations/grants) & **4** (`connector_runner_login` versioned + hosted-verified) → **DONE (hosted staging)**; pending-gates list item 1 marked done; **RUN GATE A** flagged as the next open gate.
+- **Negatives:** no AWS call, no ECS, no `GetSecretValue`, no KMS decrypt/`GenerateDataKey`, no OAuth/token, no production; no secret value / DB URL / password / token printed. **Staging only — not a production claim. RISK-007 remains OPEN; Phase C remains BLOCKED; this does not close RISK-007.**
+
 ### docs(risk-007) — Step 2 KMS/IAM separation: hosted staging PASS evidence recorded · 2026-07-04
 - **Docs-only.** Records the hosted **staging** KMS/IAM separation result: the Step 2 verifier ran green (`ALL SEPARATION CHECKS PASS`) on account `833822972703`/ca-central-1 (caller `sam-cli`, mode B `CONNECTOR_VAULT_WEB_ROLE_ARN=NONE`) after least-privilege key-policy tightening.
 - **Key-policy tightening:** the default account-root "Enable IAM" delegation on both CMKs read `overbroad`; both were tightened — vault `alias/idcaddie-staging-connector-vault` (admin = `sam-cli` + new `idcaddie-staging-kms-admin` role; runtime-use = `idcaddie-staging-slack-taskread` for `kms:Decrypt`+`kms:GenerateDataKey` only), decoy `alias/idcaddie-staging-kek` (admin-only). No root/wildcard/bare-account principal, no exec-role KMS, no KMS grants (Access Analyzer clean).
