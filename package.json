@@ -11,6 +11,7 @@
     "slack:sync:dev": "vitest run src/lib/server/sync/run-slack-sync-dev.liverun.test.ts",
     "test:store-it": "bash scripts/test-store-it.sh",
     "verify:kms-iam:selftest": "node scripts/verify-connector-vault-kms-iam-separation.mjs selftest",
+    "run-gate-a:preflight:selftest": "node scripts/run-gate-a-b2c-real-exchange-launcher.mjs selftest",
     "runner:typecheck": "tsc -p runner/connector-runner/tsconfig.json",
     "runner:test": "vitest run runner/connector-runner"
   },
