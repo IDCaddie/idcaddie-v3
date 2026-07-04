@@ -39,8 +39,8 @@ function run(extraEnv: Record<string, string> = {}, args: string[] = [], ref: st
 }
 
 describe("connector-vault KMS/IAM separation verifier — matrix logic (mocks only) + fail-closed guards", () => {
-  it("the built-in selftest passes (6 matrix-logic checks, no AWS)", () => {
-    expect(runSelftest()).toEqual({ ok: true, checks: 6 });
+  it("the built-in selftest passes (8 matrix-logic checks, no AWS)", () => {
+    expect(runSelftest()).toEqual({ ok: true, checks: 8 });
   });
 
   it("a correct hosted policy PASSES the full allowed/denied matrix + alias-scope", () => {
@@ -84,6 +84,66 @@ describe("connector-vault KMS/IAM separation verifier — matrix logic (mocks on
     expect(out).not.toMatch(/arn:aws:/);              // no full ARN
     expect(out).not.toMatch(/xox[bp]-|postgres:\/\//);// no token / DB URL shape
     expect(out).toContain("ALL SEPARATION CHECKS PASS");
+  });
+
+  // ── NO_WEB_AWS_PRINCIPAL mode (docs/49 mode B) — the web runtime has no AWS identity ────────────────────────
+  it("NO_WEB mode: web rows are recorded `no_web_aws_principal` and PASS by absence (never simulated)", () => {
+    const simSpy = (p: string, act: string, res: string) => {
+      if (p === A.web) throw new Error("web principal must NOT be simulated in NO_WEB mode");
+      return correctMockSimulate(A)(p, act, res);
+    };
+    const r = evaluateSeparation({ arns: A, expectedAlias: ALIAS, simulate: simSpy, resolveAliases: okAliases, noWebPrincipal: true });
+    const webRow = r.rows.find((x: { id: string }) => x.id === "web/kms:Decrypt/cmk");
+    expect(webRow?.actual).toBe("no_web_aws_principal");
+    expect(webRow?.pass).toBe(true);
+    expect(r.allPass).toBe(true);
+    expect(formatMatrix(r)).toContain("no_web_aws_principal"); // the reason is visible in the redacted output
+  });
+
+  it("NO_WEB mode does NOT weaken non-web rows: exec-decrypt / decoy / connector-secret leaks STILL fail", () => {
+    // the sentinel affects `identity==='web'` rows only — every non-web load-bearing negative must still be simulated.
+    const leaky = (p: string, act: string, res: string) => {
+      if (p === A.exec && act === "kms:Decrypt" && res === A.cmk) return "allowed"; // exec can decrypt the CMK
+      if (p === A.task && act === "kms:Decrypt" && res === A.decoyCmk) return "allowed"; // KMS grant wildcarded to the decoy
+      if (p === A.exec && act === "secretsmanager:GetSecretValue" && res === A.connectorSecret) return "allowed"; // secret role-sep broken
+      return correctMockSimulate(A)(p, act, res);
+    };
+    const r = evaluateSeparation({ arns: A, expectedAlias: ALIAS, resolveAliases: okAliases, noWebPrincipal: true, simulate: leaky });
+    for (const id of ["exec/kms:Decrypt/cmk", "task/kms:Decrypt/decoyCMK", "exec/GetSecretValue/connectorSecret"])
+      expect(r.rows.find((x: { id: string }) => x.id === id)?.pass).toBe(false);
+    expect(r.allPass).toBe(false);
+  });
+
+  it("gate: EXACTLY `NONE` drops the web ARN from required; other env stays required (refuses BEFORE any AWS call)", () => {
+    // NONE + every other var EXCEPT the connector secret → refuses on the connector secret, NOT on the web ARN.
+    const none = run({
+      CONNECTOR_VAULT_KMS_IAM_VERIFY: "1", CONNECTOR_VAULT_KMS_IAM_VERIFY_CONFIRM: "RUN KMS IAM SEPARATION VERIFY",
+      AWS_REGION: "ca-central-1", CONNECTOR_VAULT_WEB_ROLE_ARN: "NONE",
+      CONNECTOR_VAULT_TASK_ROLE_ARN: A.task, CONNECTOR_VAULT_EXEC_ROLE_ARN: A.exec,
+      CONNECTOR_VAULT_CMK_ARN: A.cmk, CONNECTOR_VAULT_DECOY_CMK_ARN: A.decoyCmk,
+      CONNECTOR_VAULT_EXPECTED_ALIAS: ALIAS, CONNECTOR_VAULT_DB_URL_SECRET_ARN: A.dbUrlSecret,
+      // CONNECTOR_VAULT_CONNECTOR_SECRET_ARN intentionally omitted
+    });
+    expect(none.code).toBe(1);
+    expect(none.out).toMatch(/missing required env/);
+    expect(none.out).toContain("CONNECTOR_VAULT_CONNECTOR_SECRET_ARN");
+    expect(none.out).not.toContain("CONNECTOR_VAULT_WEB_ROLE_ARN"); // dropped from required in NONE mode
+  });
+
+  it("gate: a MISSING/typo web ARN (not exactly `NONE`) stays REQUIRED → refuses, never silently passes", () => {
+    // every other var present, web ARN UNSET (not "NONE") → the web ARN is the only thing missing → refuse listing it.
+    const webUnset = run({
+      CONNECTOR_VAULT_KMS_IAM_VERIFY: "1", CONNECTOR_VAULT_KMS_IAM_VERIFY_CONFIRM: "RUN KMS IAM SEPARATION VERIFY",
+      AWS_REGION: "ca-central-1",
+      CONNECTOR_VAULT_TASK_ROLE_ARN: A.task, CONNECTOR_VAULT_EXEC_ROLE_ARN: A.exec,
+      CONNECTOR_VAULT_CMK_ARN: A.cmk, CONNECTOR_VAULT_DECOY_CMK_ARN: A.decoyCmk,
+      CONNECTOR_VAULT_EXPECTED_ALIAS: ALIAS, CONNECTOR_VAULT_DB_URL_SECRET_ARN: A.dbUrlSecret,
+      CONNECTOR_VAULT_CONNECTOR_SECRET_ARN: A.connectorSecret,
+      // CONNECTOR_VAULT_WEB_ROLE_ARN intentionally unset — NOT the sentinel
+    });
+    expect(webUnset.code).toBe(1);
+    expect(webUnset.out).toMatch(/missing required env/);
+    expect(webUnset.out).toContain("CONNECTOR_VAULT_WEB_ROLE_ARN"); // still required when not exactly NONE
   });
 
   it("is INERT by default: `selftest` needs no AWS/env and exits 0; bare run refuses (exit 1)", () => {

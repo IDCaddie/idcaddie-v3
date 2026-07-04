@@ -62,6 +62,37 @@ wildcarded — the run only *evaluates* access to it, never uses it).
 
 **Expected output:** the matrix with every row `PASS` and `=> ALL SEPARATION CHECKS PASS`.
 
+### Web/request evidence — two modes
+The `web/kms:Decrypt/cmk` row (LOAD-BEARING negative: the web/request runtime must not be able to decrypt vault
+material) can be evidenced two ways. Pick by whether a web/request AWS principal exists:
+
+- **Mode A — web ROLE mode** (`CONNECTOR_VAULT_WEB_ROLE_ARN=arn:aws:iam::…:role/<web-role>`): the web role is
+  **simulated** and must resolve to **denied**. Use this only if the web/request runtime actually runs under an AWS role.
+
+- **Mode B — `NO_WEB_AWS_PRINCIPAL`** (`CONNECTOR_VAULT_WEB_ROLE_ARN=NONE`, exact string): the web/request runtime has
+  **no AWS identity by design** (v3 web = Vercel + Supabase RLS). The web row is recorded `no_web_aws_principal` and
+  passes **by absence** — it is *not* simulated (there is no principal to simulate). This is **stronger** than a denied
+  role: with no principal the web path cannot authenticate to AWS at all, so it cannot perform *any* KMS/Secrets-Manager
+  action. Only the exact string `NONE` triggers it; unset/empty/a typo (`none`, `None `) keeps the web ARN **required**
+  (unset → refuse) or simulates it as a real ARN (bogus → `error` → FAIL). Only the web rows are affected — task/exec/
+  decoy/secret/alias rows are evaluated identically.
+
+  **Three evidence anchors** back Mode B (record them alongside the matrix):
+  1. **IAM role list** — `aws iam list-roles` shows **no** web/request role for the environment (only the runner
+     `…-connector-runner-exec` and `…-slack-taskread` roles exist).
+  2. **CI import boundary** — `scripts/check-app-runtime-imports.sh` fails CI on any `@aws-sdk/client-kms` in `src/app`
+     or any `@aws-sdk/client-secretsmanager` / `GetSecretValue` under `src/`, so the request path has no code route to
+     KMS or Secrets Manager.
+  3. **Request-path token source** — `src/lib/server/sync/vault-provider-token-source.ts` is a hard-throwing,
+     fail-closed placeholder (no reader; `isVaultProviderTokenSourceEnabled` is hardcoded `false`).
+
+  Mode B operator command (same as above, but the web line becomes):
+  ```
+  CONNECTOR_VAULT_WEB_ROLE_ARN=NONE \
+  ```
+  and no web role ARN is supplied. Expected: the `web` row prints `actual=no_web_aws_principal`, and with the other
+  rows green, `=> ALL SEPARATION CHECKS PASS`.
+
 ## Evidence to record (a docs-only verification PR)
 Record PASS/FAIL **per row** + the run date/account/region — never a secret, ARN, or key material. A green run is
 hosted evidence for the **KMS/IAM separation only**.
