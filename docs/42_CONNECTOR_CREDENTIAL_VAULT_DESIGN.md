@@ -1735,7 +1735,7 @@ is a SIGNED state from `createOAuthState` (the §31 signer boundary). `client_id
 config / explicit input — never hardcoded, never read from env here). `redirect_uri` is validated (absolute
 HTTPS only — `javascript:`/`http:`/`data:`/relative rejected). Scopes default to the registry's Slack DISPLAY
 scopes (metadata only). It returns the **oauth_pending alignment values** a FUTURE PR persists at
-authorize-time: `stateJti = sha256(state)`, `nonceHash = sha256(nonce)` — one-way hashes; the raw nonce/state
+authorize-time: `stateJti = corr` (the correlation id — the callback consume key, since #243), `nonceHash = sha256(nonce)` — the raw nonce/state
 are NEVER persisted. Fail-closed reasons: `wrong_provider`/`missing_client_id`/`missing_redirect_uri`/
 `invalid_redirect_uri`/`missing_signer`/`missing_scopes`/`invalid_context`. **The Slack token endpoint
 (`oauth.v2.access`) is never built or called.**
@@ -1794,7 +1794,7 @@ Slack provider is supported (registry), and the tenant context (tenant required;
 optional + validated if present — matching the nullable `0020` columns); builds the authorize URL via
 `buildSlackAuthorizeUrl` (which validates clientId/redirectUri[https-only]/signer/scopes and returns the
 one-way hashes); then inserts ONE row `{ tenant_id, organization_id?, provider:'slack', connector_id?,
-subject?, state_jti = sha256(state), nonce_hash = sha256(nonce), intent:'connect', expires_at }`.
+subject?, state_jti = corr (the correlation id; the runner consume key, since #243), nonce_hash = sha256(nonce), intent:'connect', expires_at }`.
 **Raw nonce is not stored. Raw state is not stored** — the raw nonce is NEVER materialized here (the builder
 returns only hashes), so it can never be stored, returned, or logged; the result returns the authorize URL
 (the signed `state` is the intended redirect carrier) + safe metadata only.
