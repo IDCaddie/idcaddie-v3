@@ -30,6 +30,7 @@ const FIXTURES: Record<DiscoveryFactType, Record<string, unknown>> = {
   license: { ...base, fact_type: "license", license_name: "Jira Standard", license_sku: "JIRA-STD", cost_hint: 7.75, currency: "USD" },
   usage_activity: { ...base, fact_type: "usage_activity", last_activity_at: "2026-06-20T00:00:00Z", activity_count: 42, usage_confidence: 0.7 },
   role_admin: { ...base, fact_type: "role_admin", role_name: "site-admin", is_admin: true },
+  group: { ...base, fact_type: "group", group_external_id: "S07UG1", group_name: "Engineering", group_handle: "eng", member_count: 5, is_active: true },
   group_membership: { ...base, fact_type: "group_membership", group_name: "Engineering", member_email: "jane@acme.com" },
   contract: { ...base, fact_type: "contract", source_type: "contract_intelligence", source_provider: "contract-ai", counterparty_vendor: "Atlassian", contract_value: 50000, currency: "USD" },
   invoice_spend: { ...base, fact_type: "invoice_spend", source_type: "invoice_spend_import", source_provider: "stripe", vendor_name: "Atlassian", amount: 1234.5, currency: "USD", app_candidate_name: "Jira" },
@@ -40,8 +41,8 @@ const FIXTURES: Record<DiscoveryFactType, Record<string, unknown>> = {
 const ALL_TYPES = Object.keys(FIXTURES) as DiscoveryFactType[];
 
 describe("discovery fact schema — versioned contract, valid fixture per category", () => {
-  it("defines exactly the 13 required fact categories", () => {
-    expect(ALL_TYPES).toHaveLength(13);
+  it("defines exactly the 14 required fact categories", () => {
+    expect(ALL_TYPES).toHaveLength(14);
   });
 
   it.each(ALL_TYPES)("a valid %s fact parses", (factType) => {
@@ -156,5 +157,39 @@ describe("discovery-facts module is server-safe (only zod; no db/fetch/secrets/s
     for (const tok of ["token_endpoint", "grant_type", "https://", "createServiceClient"]) {
       expect(code).not.toContain(tok);
     }
+  });
+});
+
+describe("standalone group fact (PR A — additive within schema v1, no migration)", () => {
+  it("'group' is included in the discriminated union", () => {
+    expect(ALL_TYPES).toContain("group");
+    expect(parseDiscoveryFact(FIXTURES.group).success).toBe(true);
+  });
+
+  it("a valid group fact parses (required + optional fields)", () => {
+    const r = parseDiscoveryFact(FIXTURES.group);
+    expect(r.success).toBe(true);
+  });
+
+  it("a group fact WITHOUT group_external_id fails closed", () => {
+    const f = { ...FIXTURES.group };
+    delete f.group_external_id;
+    expect(parseDiscoveryFact(f).success).toBe(false);
+  });
+
+  it("a group fact WITHOUT group_name fails closed", () => {
+    const f = { ...FIXTURES.group };
+    delete f.group_name;
+    expect(parseDiscoveryFact(f).success).toBe(false);
+  });
+
+  it("an unknown / extra key on a group fact is rejected (strict)", () => {
+    expect(parseDiscoveryFact({ ...FIXTURES.group, surprise_field: 1 }).success).toBe(false);
+  });
+
+  it("member_count must be a nonnegative integer", () => {
+    expect(parseDiscoveryFact({ ...FIXTURES.group, member_count: -1 }).success).toBe(false);
+    expect(parseDiscoveryFact({ ...FIXTURES.group, member_count: 1.5 }).success).toBe(false);
+    expect(parseDiscoveryFact({ ...FIXTURES.group, member_count: 0 }).success).toBe(true);
   });
 });

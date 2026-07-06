@@ -151,20 +151,30 @@ Okta group) — see the Open Decision (§7).
 - No expression language / transforms in `field_map` beyond dot-paths + the one `!` — the moment configs can *compute*, they are code.
 - Do not couple to RISK-007 closure (§8). No production.
 
-## 7. Open decision — standalone `group` fact type / discovery-fact schema v2
-`FactTypeSchema` today: `app_discovery, app_instance_identity, vendor_product, app_user_account,
-person_identity_candidate, license, usage_activity, role_admin, group_membership, contract, invoice_spend,
-risk_completeness, recommendation_evidence`. There is a **`group_membership`** edge but **no standalone `group`** entity.
-Slack `usergroups.list` (and Okta groups) need a group node.
+## 7. DECIDED (2026-07-06) — add a standalone `group` fact NOW (additive, NO migration, NO version bump)
+`FactTypeSchema` had a **`group_membership`** edge but **no standalone `group`** entity, so Slack `usergroups.list` (and Okta
+groups) had no group node. **Decision (Sam):** add a standalone **`group`** fact type now, as a small **additive** change to
+`discovery-facts.ts` (a new discriminated-union member): required `group_external_id` + `group_name`; optional
+`group_handle`, `description`, `app_id_hint`, `app_instance_key`, `group_type`, `member_count` (nonneg int), `is_active`.
 
-- **Option A — add a `group` fact type -> bump `DISCOVERY_FACT_SCHEMA_VERSION` to 2** (reviewed, versioned schema change).
-  Cleanest; unblocks `usergroups.list` in the Slack manifest. Cost: a schema migration + version bump + read-path handling.
-- **Option B — model groups only as `group_membership` edges** (no group node). No schema change; but group name/handle/metadata
-  have nowhere to live, and empty groups are invisible.
-- **Recommendation:** **Option A** as a small reviewed schema-v2 PR *before* the Slack manifest includes `usergroups.list`; ship
-  Phase 1 with `users.list -> app_user_account` (needs no schema change) so the executor lands independently of this decision.
+**Correction to the earlier "schema v2 may be needed" language:** it is **NOT** needed.
+- **NO DB migration.** `discovery_facts.fact_type` is free `text` (no CHECK constraint) and the fact is stored in
+  `fact_json jsonb`; RLS is tenant-role-based, and indexes are generic (`(tenant_id, fact_type)`). Adding a fact type is a
+  pure zod change.
+- **NO `DISCOVERY_FACT_SCHEMA_VERSION` bump.** Adding a fact type is backward-compatible, and `schema_version` is a single
+  `z.literal(1)` — bumping it would *break* every existing fact. It stays **1**.
+- **Runner write policy/grants are a LATER (Phase 2) concern, not group-specific.** Live sync writes facts as `SET ROLE
+  connector_runner`, but `discovery_facts`'s INSERT policy today is `has_tenant_role(owner/admin/editor)`. Enabling runner
+  writes needs a `connector_runner` grant/policy on `discovery_facts` — a Phase 2 migration that applies to **all** fact
+  writes, proposed separately, not part of this fact-type addition.
+- **Option B (edges only) rejected:** group name/handle/metadata and empty groups have nowhere to live.
 
-**Decision owner: Sam.** Until decided, the Slack manifest ships `auth.test` + `users.list` only.
+`group_membership` links to a `group` by `(tenant, source_provider, app_instance_key, group_external_id)` at read time — a
+soft natural-key link, **no FK**.
+
+**Still deferred** until the manifest emits `group` (add `"group"` to `EMIT_FACT_TYPES`) and the executor is ready:
+`usergroups.list` in the Slack manifest, its `slack_usergroup` item schema, and the membership fan-out
+(`usergroups.users.list` -> `group_membership`). The Slack manifest still ships `auth.test` + `users.list` only for now.
 
 ## 8. RISK-007 is a SEPARATE track (unchanged by this doc)
 This framework is net-new product work and does **not** advance or alter RISK-007 closure. **RISK-007 remains OPEN; Phase C
