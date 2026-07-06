@@ -1,0 +1,42 @@
+{
+  "manifest_version": 1,
+  "provider_id": "slack",
+  "auth": { "kind": "oauth2", "token_kind": "oauth_access", "header": "bearer" },
+  "base_url": "https://slack.com/api",
+  "rate_limit": { "rps": 18, "burst": 5 },
+  "budget": { "max_requests": 500, "max_items": 100000, "max_wallclock_s": 600 },
+  "endpoints": [
+    {
+      "id": "auth.test",
+      "method": "GET",
+      "path": "/auth.test",
+      "emits": "none",
+      "response": { "ok_path": "ok" },
+      "required_scopes": []
+    },
+    {
+      "id": "users.list",
+      "method": "GET",
+      "path": "/users.list",
+      "query": { "limit": 200 },
+      "pagination": {
+        "style": "cursor",
+        "cursor_param": "cursor",
+        "next_path": "response_metadata.next_cursor",
+        "items_path": "members",
+        "max_pages": 200
+      },
+      "emits": "app_user_account",
+      "item_schema_ref": "slack_user",
+      "field_map": {
+        "app_user_external_id": "id",
+        "display_name": "profile.real_name",
+        "email": "profile.email",
+        "is_active": "!deleted",
+        "usage_source_ts": "updated"
+      },
+      "response": { "ok_path": "ok" },
+      "required_scopes": ["users:read", "users:read.email"]
+    }
+  ]
+}
