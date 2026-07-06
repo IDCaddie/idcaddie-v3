@@ -31,9 +31,7 @@
       "field_map": {
         "app_user_external_id": "id",
         "display_name": "profile.real_name",
-        "email": "profile.email",
-        "is_active": "!deleted",
-        "usage_source_ts": "updated"
+        "email": "profile.email"
       },
       "response": { "ok_path": "ok" },
       "required_scopes": ["users:read", "users:read.email"]

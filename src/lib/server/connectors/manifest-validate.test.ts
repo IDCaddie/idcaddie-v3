@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import * as validateModule from "./manifest-validate";
 import { validateManifestObject, validateManifestsDir, MANIFESTS_DIR } from "./manifest-validate";
+import { parseDiscoveryFact } from "../connector-vault/discovery-facts";
 
 // Phase 1a — pure contract/config validation. INERT: no fetch, no DB, no token, no sync.
 type Obj = Record<string, unknown>;
@@ -122,5 +123,40 @@ describe("connector manifest contract (Phase 1a — INERT)", () => {
     const exported = Object.keys(validateModule).sort();
     expect(exported.some((k) => /env|tenant|\bdb\b|remote|fetch|runtime|fromstring|fromurl/i.test(k))).toBe(false);
     expect(exported).toEqual(["MANIFESTS_DIR", "validateManifestObject", "validateManifestsDir"]);
+  });
+});
+
+// Catch the class of bug where a manifest's field_map maps to a fact field that does NOT exist on the emitted fact type
+// (the executor would fail closed at runtime; this catches it at manifest-review time). A key is "recognized" iff adding it
+// to a minimal fact of that type does NOT produce a zod `unrecognized_keys` issue naming it.
+describe("field_map keys must be valid fields of the emitted fact type (cross-check vs discovery-facts)", () => {
+  const baseFact = {
+    schema_version: 1, signal_id: "s", tenant_id: "t", source_type: "identity_provider_discovery",
+    source_provider: "slack", observed_at: "2026-01-01T00:00:00Z", confidence: 0.9,
+  };
+  const keyRecognized = (factType: string, key: string): boolean => {
+    const r = parseDiscoveryFact({ ...baseFact, fact_type: factType, [key]: "x" });
+    if (r.success) return true;
+    return !r.error.issues.some((i) => i.code === "unrecognized_keys" && (i.keys ?? []).includes(key));
+  };
+
+  it("self-check: a bogus field is NOT recognized; a real field IS", () => {
+    expect(keyRecognized("app_user_account", "not_a_real_field")).toBe(false);
+    expect(keyRecognized("app_user_account", "email")).toBe(true);
+    expect(keyRecognized("group", "group_name")).toBe(true);
+    // regression guard for the exact bug fixed here:
+    expect(keyRecognized("app_user_account", "is_active")).toBe(false);
+    expect(keyRecognized("app_user_account", "usage_source_ts")).toBe(false);
+  });
+
+  it("every field_map key in every shipped manifest is a valid field of its emitted fact type", () => {
+    const bad: string[] = [];
+    for (const ep of (slack.endpoints as Obj[])) {
+      const emits = ep.emits as string;
+      const fm = ep.field_map as Record<string, string> | undefined;
+      if (emits === "none" || !fm) continue;
+      for (const key of Object.keys(fm)) if (!keyRecognized(emits, key)) bad.push(`${ep.id}: '${key}' is not a field of '${emits}'`);
+    }
+    expect(bad).toEqual([]);
   });
 });
