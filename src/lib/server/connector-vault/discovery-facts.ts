@@ -49,7 +49,7 @@ export type DiscoveryFactSourceType = z.infer<typeof SourceTypeSchema>;
 export const ReviewStatusSchema = z.enum(["pending", "confirmed", "rejected", "auto", "needs_review"]);
 export type DiscoveryReviewStatus = z.infer<typeof ReviewStatusSchema>;
 
-// The 13 standardized fact categories (the `fact_type` discriminator).
+// The 14 standardized fact categories (the `fact_type` discriminator).
 export const FactTypeSchema = z.enum([
   "app_discovery",
   "app_instance_identity",
@@ -59,6 +59,7 @@ export const FactTypeSchema = z.enum([
   "license",
   "usage_activity",
   "role_admin",
+  "group",
   "group_membership",
   "contract",
   "invoice_spend",
@@ -217,6 +218,24 @@ const GroupMembershipFact = z.object({
   membership_status: z.string().optional(),
 }).strict();
 
+// 9b. Group — a standalone group ENTITY (e.g. a Slack usergroup, an Okta group), independent of any membership edge.
+// A `group_membership` links to a `group` by (tenant, source_provider, app_instance_key, group_external_id) at read time
+// (a soft natural-key link, no FK). Additive within schema v1 — no version bump, no DB migration (fact_type is free text,
+// the fact lives in discovery_facts.fact_json jsonb).
+const GroupFact = z.object({
+  ...baseShape,
+  fact_type: z.literal("group"),
+  group_external_id: z.string().min(1),   // provider group id (Slack usergroup id / Okta group id)
+  group_name: z.string().min(1),
+  group_handle: z.string().optional(),     // Slack @handle; usually absent for Okta
+  description: z.string().optional(),
+  app_id_hint: z.string().optional(),      // which app the group belongs to
+  app_instance_key: z.string().optional(), // instance: Slack team_id / Okta org
+  group_type: z.string().optional(),       // provider label (e.g. Okta OKTA_GROUP/APP_GROUP/BUILT_IN)
+  member_count: z.number().int().nonnegative().optional(),
+  is_active: z.boolean().optional(),
+}).strict();
+
 // 10. Contract — a contract signal (e.g. from contract intelligence). source_clause_text is provenance only.
 const ContractFact = z.object({
   ...baseShape,
@@ -284,6 +303,7 @@ export const DiscoveryFactSchema = z.discriminatedUnion("fact_type", [
   LicenseFact,
   UsageActivityFact,
   RoleAdminFact,
+  GroupFact,
   GroupMembershipFact,
   ContractFact,
   InvoiceSpendFact,
