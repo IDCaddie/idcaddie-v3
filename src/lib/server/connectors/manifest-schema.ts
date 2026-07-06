@@ -18,9 +18,10 @@ export const HTTP_METHODS = ["GET"] as const; // GET only for Phase 1a. POST / m
 export const PAGINATION_STYLES = ["cursor", "page", "offset", "link", "none"] as const;
 
 // The fact types an endpoint may emit — a curated SUBSET of discovery-facts `FactTypeSchema`, plus "none".
-// NOTE: a standalone "group" fact type is DELIBERATELY EXCLUDED — it does not exist in discovery-facts today and is an
-// OPEN DECISION (discovery-fact schema v2, docs/54 §7). Until Sam decides, no manifest may emit "group".
-export const EMIT_FACT_TYPES = ["none", "app_user_account", "app_discovery", "app_instance_identity", "group_membership"] as const;
+// "group" is INCLUDED: the standalone `group` fact exists as of PR #252 (docs/54 §7 — additive, no schema-version bump).
+// NOTE: this only allowlists the emit *type*. The per-item schema (e.g. `slack_usergroup`) is validated by the executor's
+// item-schema registry (Phase 1b) — not yet built; the manifest layer treats `item_schema_ref` as an opaque string.
+export const EMIT_FACT_TYPES = ["none", "app_user_account", "app_discovery", "app_instance_identity", "group", "group_membership"] as const;
 
 // Per-provider host allowlist. base_url's host must be listed here. Extended one reviewed provider at a time.
 export const PROVIDER_HOST_ALLOWLIST: Readonly<Record<string, readonly string[]>> = {
