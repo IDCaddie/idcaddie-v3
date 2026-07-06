@@ -172,9 +172,10 @@ groups) had no group node. **Decision (Sam):** add a standalone **`group`** fact
 `group_membership` links to a `group` by `(tenant, source_provider, app_instance_key, group_external_id)` at read time — a
 soft natural-key link, **no FK**.
 
-**Still deferred** until the manifest emits `group` (add `"group"` to `EMIT_FACT_TYPES`) and the executor is ready:
-`usergroups.list` in the Slack manifest, its `slack_usergroup` item schema, and the membership fan-out
-(`usergroups.users.list` -> `group_membership`). The Slack manifest still ships `auth.test` + `users.list` only for now.
+**Landed (PR B):** the `group` fact exists (PR #252), `"group"` is in `EMIT_FACT_TYPES` (manifests may emit `group`), and
+`usergroups.list` is declared in the Slack manifest (`emits: group`, `pagination: none`, `item_schema_ref: slack_usergroup`).
+**Still deferred:** the `slack_usergroup` per-item schema validation (needs the executor's item-schema registry), the
+membership fan-out (`usergroups.users.list` -> `group_membership`), the generic **executor**, and **live sync** — all Phase 1b+.
 
 ## 8. RISK-007 is a SEPARATE track (unchanged by this doc)
 This framework is net-new product work and does **not** advance or alter RISK-007 closure. **RISK-007 remains OPEN; Phase C

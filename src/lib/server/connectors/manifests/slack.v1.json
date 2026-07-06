@@ -37,6 +37,26 @@
       },
       "response": { "ok_path": "ok" },
       "required_scopes": ["users:read", "users:read.email"]
+    },
+    {
+      "id": "usergroups.list",
+      "method": "GET",
+      "path": "/usergroups.list",
+      "query": { "include_disabled": 0, "include_count": true },
+      "pagination": { "style": "none", "items_path": "usergroups" },
+      "emits": "group",
+      "item_schema_ref": "slack_usergroup",
+      "field_map": {
+        "group_external_id": "id",
+        "group_name": "name",
+        "group_handle": "handle",
+        "description": "description",
+        "member_count": "user_count",
+        "app_instance_key": "team_id",
+        "is_active": "!date_delete"
+      },
+      "response": { "ok_path": "ok" },
+      "required_scopes": ["usergroups:read"]
     }
   ]
 }

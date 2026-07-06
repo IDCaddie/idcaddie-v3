@@ -93,9 +93,29 @@ describe("connector manifest contract (Phase 1a — INERT)", () => {
     expect(validateManifestObject(m, "x").ok).toBe(false);
   });
 
-  it("emitting a standalone 'group' fact is NOT supported yet (discovery-fact schema v2 — open decision, docs/54 §7)", () => {
-    const m = base(); users(m).emits = "group";
-    expect(validateManifestObject(m, "x").ok).toBe(false);
+  it("emitting a standalone 'group' fact is now ACCEPTED (PR #252 added the group fact; docs/54 §7)", () => {
+    const m = base(); users(m).emits = "group"; // users.list already has item_schema_ref + field_map + pagination
+    expect(validateManifestObject(m, "x").ok).toBe(true);
+  });
+
+  it("the shipped Slack manifest now includes usergroups.list emitting a group (valid)", () => {
+    const r = validateManifestObject(slack, "slack.v1.json");
+    expect(r.ok).toBe(true);
+    const ug = eps(slack).find((e) => e.id === "usergroups.list");
+    expect(ug).toBeDefined();
+    expect(ug!.emits).toBe("group");
+    expect(ug!.method).toBe("GET");
+    expect((ug!.pagination as Obj).style).toBe("none");
+    expect((ug!.field_map as Obj).is_active).toBe("!date_delete"); // the allowlisted ! negation
+  });
+
+  it("a group-emitting endpoint still fails without item_schema_ref / field_map / pagination", () => {
+    const m1 = base(); const ep1 = eps(m1).find((e) => e.id === "usergroups.list") as Obj; ep1.emits = "group"; delete ep1.item_schema_ref;
+    expect(validateManifestObject(m1, "x").ok).toBe(false);
+    const m2 = base(); const ep2 = eps(m2).find((e) => e.id === "usergroups.list") as Obj; delete ep2.field_map;
+    expect(validateManifestObject(m2, "x").ok).toBe(false);
+    const m3 = base(); const ep3 = eps(m3).find((e) => e.id === "usergroups.list") as Obj; delete ep3.pagination;
+    expect(validateManifestObject(m3, "x").ok).toBe(false);
   });
 
   it("NO runtime/tenant/env/remote manifest loader is exported — manifests are image-baked, reviewed-only", () => {
