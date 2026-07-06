@@ -47,7 +47,7 @@ describe("connector manifest contract (Phase 1a — INERT)", () => {
   });
 
   it("secret-shaped strings anywhere are rejected (a manifest must carry no credential)", () => {
-    const m = base(); eps(m)[0].query = { token: "xoxb-123456789012-abcdefABCDEF" };
+    const m = base(); eps(m)[0].query = { token: "xoxb-not-a-real-token-EXAMPLE" };
     const r = validateManifestObject(m, "x");
     expect(r.ok).toBe(false);
     expect(errs(r).join(" ")).toMatch(/secret-shaped/);
