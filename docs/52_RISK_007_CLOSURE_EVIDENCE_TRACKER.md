@@ -93,6 +93,27 @@ Then: finish evidence (criterion 17) → draft the RISK-007 closure register PR 
 + the items above resolved; criteria 9/12/13/14-events are now DONE-staging) → Phase C unblock as a separate decision
 (criterion 19).
 
+## Remaining closure sequencing (2026-07-06 — planning only; does NOT close RISK-007)
+Criteria 3–14 are DONE-staging. What remains, in the safe order (do NOT jump ahead of a gate):
+1. **Criterion 15 — date-gated (`>= 2026-07-10`).** After the 7-day recovery window (scheduled `delete-secret`, 2026-07-03),
+   confirm `/idcaddie/staging/slack/oauth-client-secret` is **permanently deleted** (Secrets Manager **metadata only** —
+   e.g. `describe-secret` → `ResourceNotFound`; **never** `get-secret-value`). **Not actionable before 2026-07-10.**
+2. **Criterion 12 — operator judgment.** Decide whether closure requires a **provider-side** token rotation (a genuinely new
+   bot token) or the **vault-version** rotation/supersede/revoke lifecycle already proven at RUN GATE B suffices.
+   Recommendation: the **vault-version rotation may suffice for staging closure** (revoke works, old version unusable, new
+   version usable); a **provider-side token rotation is future hardening unless Sam decides it is required**. Record the decision.
+3. **Provider-side Slack `auth.revoke` — DEFERRED; do NOT run now.** v1 and v2 **share the same provider token** (Slack
+   re-issued it), so revoking now **would likely kill the active v2**. Only actionable once a genuinely new token exists
+   (a real provider-side rotation) or on connector decommission.
+4. **Criterion 18 — closure register (docs), only after 15 + 12 are resolved.** Draft the RISK-007 closure register; flipping
+   RISK-007 to closed is a **deliberate, separate step** — not done here.
+5. **Criterion 19 — Phase C unblock, only after 18.** A separate explicit Sam decision; never bundled with a run.
+6. **`connectors.status` / `granted_scopes_safe` follow-up — decoupled.** A product decision on activation ownership; it
+   **does NOT gate RISK-007 closure** and is tracked separately.
+
+**RISK-007 remains OPEN; Phase C remains BLOCKED.** Staging only (`ycdpzduxugdsffjqyoai`); production (`dzbfxulvxchdemcettrx`)
+untouched.
+
 **Staging-run follow-ups (do NOT reopen RISK-007; do NOT gate closure on their own):**
 - **Connector activation:** `connectors.status` is still `pending` and `granted_scopes_safe` is `NULL` after RUN GATE A —
   decide whether the OAuth exchange or the first sync owns connector activation.
