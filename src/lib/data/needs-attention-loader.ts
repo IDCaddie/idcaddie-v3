@@ -6,12 +6,13 @@ import { listAppsWithCountsForCurrentUser, listAppOwnershipForCurrentUser } from
 import { listContractsForCurrentUser } from "./contracts";
 import { listConnectorsForCurrentUser } from "./connectors";
 import { getReportsSummaryForCurrentUser } from "./reports";
+import { listCatalogForCurrentUser } from "./catalog";
 import { buildNeedsAttention, type NeedsAttention, type NeedsAttentionInputs } from "./needs-attention";
 
 export type { AttentionSection, AttentionItem, NeedsAttention } from "./needs-attention";
 
 export async function getNeedsAttentionForCurrentUser(): Promise<NeedsAttention> {
-  const [appsCounts, appsOwnership, contracts, connectors, reports] = await Promise.all([
+  const [appsCounts, appsOwnership, contracts, connectors, reports, catalogAliases] = await Promise.all([
     listAppsWithCountsForCurrentUser(),
     listAppOwnershipForCurrentUser(),
     listContractsForCurrentUser(),
@@ -19,6 +20,7 @@ export async function getNeedsAttentionForCurrentUser(): Promise<NeedsAttention>
     getReportsSummaryForCurrentUser()
       .then((data): NeedsAttentionInputs["reports"] => ({ ok: true, data }))
       .catch((): NeedsAttentionInputs["reports"] => ({ ok: false })),
+    listCatalogForCurrentUser(),
   ]);
-  return buildNeedsAttention({ appsCounts, appsOwnership, contracts, connectors, reports });
+  return buildNeedsAttention({ appsCounts, appsOwnership, contracts, connectors, reports, catalogAliases });
 }
