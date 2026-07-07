@@ -10,6 +10,7 @@ import {
 import { classifySlackSync, SLACK_SYNC_COPY } from "@/lib/data/slack-sync-display";
 import { getLatestSlackSyncRunForCurrentTenant } from "@/lib/data/manual-sync-runs";
 import { appAttentionFlags } from "@/lib/data/apps-inventory";
+import { getCatalogMappingForApp } from "@/lib/data/catalog";
 
 export const metadata = { title: "App · ID Caddie" };
 
@@ -39,6 +40,7 @@ export default async function AppDetailPage({
   const result = await getAppDetailForCurrentUser(id);
   const linkedContracts = result.ok ? await listContractsLinkedToApp(id) : null;
   const appUsers = result.ok ? await listAppUsersForApp(id) : null;
+  const catalogMapping = result.ok ? await getCatalogMappingForApp(id) : null;
   // Minimal matched/unmatched status, derived server-side from RLS-scoped match rows for THIS roster's
   // app_users. Empty/failed map ⇒ status shown as "—" (unknown), never a misleading "unmatched".
   const matches =
@@ -197,6 +199,34 @@ export default async function AppDetailPage({
               <Field label="Paying org" value={result.data.payingOrgId ? "Assigned" : "—"} />
               <Field label="Procurement org" value={result.data.procurementOrgId ? "Assigned" : "—"} />
             </div>
+          </section>
+
+          <section className="space-y-2 text-sm">
+            <h2 className="font-medium">Catalog mapping</h2>
+            {!catalogMapping || !catalogMapping.ok ? (
+              <p className="text-zinc-600 dark:text-zinc-400">Could not load catalog mapping.</p>
+            ) : !catalogMapping.data.mapped ? (
+              <p className="text-zinc-600 dark:text-zinc-400">
+                This app is not mapped to the canonical catalog yet.{" "}
+                <Link href="/catalog" className="underline">
+                  View catalog
+                </Link>
+              </p>
+            ) : (
+              <>
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <Field label="Canonical product" value={catalogMapping.data.productName} />
+                  <Field label="Vendor" value={catalogMapping.data.vendorName ?? "—"} />
+                  <Field label="Category" value={catalogMapping.data.category ?? "—"} />
+                  <Field label="Aliases" value={String(catalogMapping.data.aliasCount)} />
+                </div>
+                <p className="text-xs text-zinc-500">
+                  <Link href="/catalog" className="underline">
+                    Open the App Catalog
+                  </Link>
+                </p>
+              </>
+            )}
           </section>
 
           <section className="space-y-2 text-sm">

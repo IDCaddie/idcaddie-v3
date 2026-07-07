@@ -67,3 +67,66 @@ export async function listCatalogForCurrentUser(): Promise<DataResult<CatalogVie
     },
   };
 }
+
+// Whether one app is mapped to a canonical product, with SAFE display fields only (never a raw id). `appId`
+// is a lookup key; apps.canonical_app_id / app_products / vendors / app_aliases are all RLS-scoped. Any read
+// error fails closed; a hidden/missing canonical product (RLS or deleted) is treated as unmapped (fail safe,
+// no id leak). This is self-contained here so the apps DAL / AppDetail DTO carry no catalog id.
+export type CatalogMapping =
+  | { mapped: false }
+  | { mapped: true; productName: string; vendorName: string | null; category: string | null; aliasCount: number };
+
+export async function getCatalogMappingForApp(appId: string): Promise<DataResult<CatalogMapping>> {
+  const supabase = await createClient();
+
+  const { data: app, error: appErr } = await supabase
+    .from("apps")
+    .select("canonical_app_id")
+    .eq("id", appId)
+    .maybeSingle();
+  if (appErr) {
+    console.error("[data/catalog] mapping app read failed");
+    return { ok: false, error: "query_failed" };
+  }
+  const canonicalId: string | null = app?.canonical_app_id ?? null;
+  if (!canonicalId) return { ok: true, data: { mapped: false } };
+
+  const { data: product, error: pErr } = await supabase
+    .from("app_products")
+    .select("name, category, vendor_id")
+    .eq("id", canonicalId)
+    .maybeSingle();
+  if (pErr) {
+    console.error("[data/catalog] mapping product read failed");
+    return { ok: false, error: "query_failed" };
+  }
+  if (!product) return { ok: true, data: { mapped: false } };
+
+  let vendorName: string | null = null;
+  if (product.vendor_id) {
+    const { data: vendor, error: vErr } = await supabase
+      .from("vendors")
+      .select("name")
+      .eq("id", product.vendor_id)
+      .maybeSingle();
+    if (vErr) {
+      console.error("[data/catalog] mapping vendor read failed");
+      return { ok: false, error: "query_failed" };
+    }
+    vendorName = vendor?.name ?? null;
+  }
+
+  const { data: aliasRows, error: aErr } = await supabase
+    .from("app_aliases")
+    .select("id")
+    .eq("app_product_id", canonicalId);
+  if (aErr) {
+    console.error("[data/catalog] mapping alias count failed");
+    return { ok: false, error: "query_failed" };
+  }
+
+  return {
+    ok: true,
+    data: { mapped: true, productName: product.name, vendorName, category: product.category, aliasCount: (aliasRows ?? []).length },
+  };
+}
