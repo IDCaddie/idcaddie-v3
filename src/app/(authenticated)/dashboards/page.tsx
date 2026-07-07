@@ -1,12 +1,18 @@
 import Link from "next/link";
 import { getDashboardSummaryForCurrentUser } from "@/lib/data/dashboard";
+import {
+  getDashboardOverviewForCurrentUser,
+  formatMoney,
+  type DashboardOverview,
+} from "@/lib/data/dashboard-overview-loader";
 
 export const metadata = { title: "Dashboards · ID Caddie" };
 
-// Read-only Dashboards view. It renders only what the server DAL returns (which composes the existing
-// RLS-scoped reports + audit-count helpers); RLS is the authorization boundary. Every number is a
-// "visible to you" count, not an absolute total. It links ONLY to implemented read-only pages. No
-// report builder, no charts, no connector/spend/license analytics, no AI insights, no exports.
+// Read-only Dashboards view. It renders only what the server DALs return (RLS-scoped reports + audit
+// counts, plus a contract spend/renewal overview from existing `contracts` fields); RLS is the
+// authorization boundary. Every number is "visible to you", not an absolute total. Spend/renewals use
+// ONLY contract data (total_cost / currency / renewal_date / end_date / notice_deadline) — NO
+// invoices/license tables (default-deny), no connectors, no charts, no AI, no exports.
 function StatCard({
   label,
   value,
@@ -31,6 +37,91 @@ function StatCard({
   );
 }
 
+function SpendCard({ overview }: { overview: DashboardOverview }) {
+  const spend = overview.spend;
+  return (
+    <section className="space-y-2 rounded border border-zinc-200 p-4 dark:border-zinc-800">
+      <h2 className="font-medium">Tracked contract spend</h2>
+      {spend == null ? (
+        <p className="text-sm text-zinc-500">Temporarily unavailable — try again later.</p>
+      ) : spend.byCurrency.length === 0 ? (
+        <p className="text-sm text-zinc-500">No tracked contract spend yet.</p>
+      ) : (
+        <>
+          <ul className="space-y-1 text-sm">
+            {spend.byCurrency.map((c) => (
+              <li key={c.currency} className="tabular-nums">
+                <span className="font-semibold">{formatMoney(c.total, c.currency)}</span>{" "}
+                <span className="text-zinc-500">
+                  · {c.contractCount} contract{c.contractCount === 1 ? "" : "s"}
+                </span>
+              </li>
+            ))}
+          </ul>
+          <p className="text-xs text-zinc-500">
+            Total contract value visible to you, grouped by currency ({spend.contractsWithCost} contract
+            {spend.contractsWithCost === 1 ? "" : "s"} with a recorded cost). Contract totals only — no
+            invoice/actual-spend data.
+          </p>
+        </>
+      )}
+    </section>
+  );
+}
+
+function RenewalsCard({ overview }: { overview: DashboardOverview }) {
+  const r = overview.renewals;
+  return (
+    <section className="space-y-2 rounded border border-zinc-200 p-4 dark:border-zinc-800">
+      <h2 className="font-medium">Upcoming renewals</h2>
+      {r == null ? (
+        <p className="text-sm text-zinc-500">Temporarily unavailable — try again later.</p>
+      ) : (
+        <>
+          <div className="flex flex-wrap gap-2 text-xs">
+            <span className="rounded-full border border-amber-500 px-2 py-0.5 text-amber-700 dark:text-amber-400">
+              {r.due30.length} due in 30 days
+            </span>
+            <span className="rounded-full border border-zinc-400 px-2 py-0.5 text-zinc-500">
+              {r.due90.length} in 90 days
+            </span>
+            {r.missing > 0 ? (
+              <Link
+                href="/needs-attention"
+                className="rounded-full border border-zinc-400 px-2 py-0.5 text-zinc-500 hover:border-zinc-600"
+              >
+                {r.missing} missing a renewal date →
+              </Link>
+            ) : null}
+          </div>
+          {r.topUpcoming.length === 0 ? (
+            <p className="text-sm text-zinc-500">No upcoming renewals.</p>
+          ) : (
+            <ul className="space-y-1 text-sm">
+              {r.topUpcoming.map((it) => (
+                <li key={it.id}>
+                  <Link href={`/contracts/${it.id}`} className="underline">
+                    {it.contractName}
+                  </Link>{" "}
+                  <span className="text-zinc-500">
+                    — {it.date} ({it.daysUntil === 0 ? "today" : `in ${it.daysUntil}d`}
+                    {it.basis === "end" ? ", end date" : ""}
+                    {it.noticeDeadline ? `, notice by ${it.noticeDeadline}` : ""})
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+          <p className="text-xs text-zinc-500">
+            Soonest renewals visible to you, by renewal date (or end date). The full missing-renewal list is on
+            Needs Attention.
+          </p>
+        </>
+      )}
+    </section>
+  );
+}
+
 const NOT_BUILT = [
   "Custom dashboard builder",
   "Charts / visualizations",
@@ -41,7 +132,10 @@ const NOT_BUILT = [
 ];
 
 export default async function DashboardsPage() {
-  const s = await getDashboardSummaryForCurrentUser();
+  const [s, overview] = await Promise.all([
+    getDashboardSummaryForCurrentUser(),
+    getDashboardOverviewForCurrentUser(),
+  ]);
 
   const matchSub =
     s.accountsMatched != null && s.accountsUnmatched != null
@@ -93,6 +187,11 @@ export default async function DashboardsPage() {
         identity-account match status only (no person/IdP detail). “Recent audit entries” is a capped,
         RLS-scoped count — no audit detail, actor, or IP is shown here.
       </p>
+
+      <section className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <SpendCard overview={overview} />
+        <RenewalsCard overview={overview} />
+      </section>
 
       <section className="space-y-2 text-sm">
         <h2 className="font-medium">Dashboard capabilities</h2>
