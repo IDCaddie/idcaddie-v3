@@ -79,6 +79,14 @@ export default async function DashboardsPage() {
           <div className="text-sm font-medium">Visible-to-you summary counts</div>
           <div className="mt-2 text-xs text-zinc-500 underline">Open →</div>
         </Link>
+        <Link
+          href="/needs-attention"
+          className="flex flex-col justify-center rounded border border-zinc-200 p-4 transition hover:border-zinc-400 dark:border-zinc-800 dark:hover:border-zinc-600"
+        >
+          <div className="text-xs text-zinc-500">Needs Attention</div>
+          <div className="text-sm font-medium">Cleanup queue (RLS-scoped)</div>
+          <div className="mt-2 text-xs text-zinc-500 underline">Open →</div>
+        </Link>
       </section>
       <p className="text-xs text-zinc-500">
         Counts reflect only rows your tenant/org access allows (RLS-scoped). Matched/unmatched is the

@@ -9,7 +9,7 @@ export type NavSection = { title: string; items: NavItem[] };
 
 // The real, implemented authenticated routes that may be linked. Keep in sync with the route tree;
 // the test asserts every linked NavItem.href is one of these (so an unbuilt area can never be linked).
-export const IMPLEMENTED_ROUTES = ["/", "/apps", "/contracts", "/people", "/reports", "/audit", "/admin", "/files", "/dashboards", "/connectors"] as const;
+export const IMPLEMENTED_ROUTES = ["/", "/apps", "/contracts", "/people", "/reports", "/audit", "/admin", "/files", "/dashboards", "/connectors", "/needs-attention"] as const;
 
 export const NAV_SECTIONS: NavSection[] = [
   {
@@ -19,6 +19,8 @@ export const NAV_SECTIONS: NavSection[] = [
       // Read-only summary of RLS-scoped "visible to you" counts linking to implemented pages. No builder
       // / charts / connector-spend / AI / export — see the page's "Not built yet" copy.
       { label: "Dashboards", href: "/dashboards", note: "read-only summary" },
+      // Read-only cleanup queue composed from existing RLS-scoped DALs (apps/contracts/connectors). No sync.
+      { label: "Needs Attention", href: "/needs-attention", note: "cleanup queue" },
     ],
   },
   {
