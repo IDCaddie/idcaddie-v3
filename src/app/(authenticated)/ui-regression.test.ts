@@ -16,6 +16,7 @@ const PAGES = [
   "contracts/page.tsx",
   "contracts/[id]/page.tsx",
   "catalog/page.tsx",
+  "audit/page.tsx",
 ];
 
 describe("UI regression — PR #1–#5 pages stay read-only + leak-free", () => {
