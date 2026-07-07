@@ -35,9 +35,10 @@ full canonical plan), and `docs/60_DO_NOT_COPY_FROM_OLD_APP.md` (unsafe patterns
 ## 1. The plan in one line
 
 **FACT + INFERENCE:** For **2026-07-07 → 2026-07-09**, keep building **safe, read-only
-product surfaces** on the proven pattern. **P-008 has now merged (#266)**, so the next items are
-**P-009**, then **P-010 only if there is time (scope-confirm first)** — because those are the
-highest-value things we are actually *allowed* to do right now with zero governance risk.
+product surfaces** on the proven pattern. **P-008 (#266) and P-009 (#268) have now merged**, so the
+next remaining read-only item is **P-010 (safe CSV export) — only if there is time, and scope-confirm
+first** — because that is the highest-value thing we are actually *allowed* to do right now with zero
+governance risk.
 **On/after 2026-07-10**, the RISK-007 closure track becomes actionable and takes priority:
 **R-015 → R-018 → R-019**, and only after those, the first sanctioned connector sync **C-2c**
 (gated). Nothing on the connector/live-sync track can legitimately start before 2026-07-10.
@@ -69,9 +70,9 @@ slower. Section 7 lists the specific things that fall on the wrong side of this 
 
 ## 3. What is already done (recap)
 
-**FACT — the nine merged product/quality PRs on the safe pattern above (#257–#264 and #266;
-#265 was the rebuild docs pack, docs 55–61).** Full detail and the old-app parity mapping are
-in `docs/55_REBUILD_STATUS.md` §4.1 and `docs/56_OLD_APP_PARITY_REGISTER.md`.
+**FACT — the ten merged product/quality PRs on the safe pattern above (#257–#264, #266, #268;
+#265 and #267 were docs PRs — the rebuild pack docs 55–61 and its refresh).** Full detail and the
+old-app parity mapping are in `docs/55_REBUILD_STATUS.md` §4.1 and `docs/56_OLD_APP_PARITY_REGISTER.md`.
 
 | Workstream | Delivered | GitHub PR |
 |---|---|---|
@@ -84,6 +85,7 @@ in `docs/55_REBUILD_STATUS.md` §4.1 and `docs/56_OLD_APP_PARITY_REGISTER.md`.
 | **P-006** | Canonical app catalog (`/catalog`) | **#263** |
 | **P-007** | App-detail ↔ catalog mapping | **#264** |
 | **P-008** | "Needs Attention" catalog-alias backlog | **#266** |
+| **P-009** | Audit-log search / filter | **#268** |
 
 The **catalog trio is now complete**: **P-006** (a canonical catalog of apps, #263), **P-007**
 (mapping each app's detail page to that catalog, #264), and **P-008** (surfacing the unreviewed
@@ -94,7 +96,7 @@ now has a clean canonical-app notion, per-app mapping, and a review backlog — 
 
 ## 4. What to build next, in order (the 2026-07-07 → 2026-07-09 window)
 
-**Update (2026-07-07): P-008 has merged (#266)** — recorded below as done. The remaining items
+**Update (2026-07-07): P-008 (#266) and P-009 (#268) have merged** — recorded below as done. The remaining items
 follow the Section 2 pattern: read-only, RLS-scoped DAL, pure helper, tests, **no migration, no
 service role**. The unmerged ones carry **GitHub PR: TBD**. Ordering rationale and dependencies
 also appear in `docs/59_WORKSTREAM_ROADMAP.md`.
@@ -108,18 +110,15 @@ also appear in `docs/59_WORKSTREAM_ROADMAP.md`.
   alias confirm/reject/resolver write (deferred; shown as "Not built yet" on `/catalog`).
 - **Detail + risk notes:** `docs/59_WORKSTREAM_ROADMAP.md` (P-008). **Next up: P-009 (below).**
 
-### P-009 — Audit log search / filter (GitHub PR: TBD)
-- **What:** Add search and filter controls to the existing read-only **audit-log viewer**
-  (the `/audit` surface). Let a reviewer narrow the log by actor, action type, and date
-  range instead of scrolling the whole list.
-- **Why now (INFERENCE):** The audit viewer already ships and is already RLS-scoped, so this
-  is pure presentation logic over rows the caller is *already* entitled to see. It materially
-  improves the security-reviewer and admin experience with no new exposure.
-- **Shape (FACT-of-pattern):** filter/search is a **pure helper** over the DAL's
-  already-RLS-scoped result set (the database still decides which rows exist; the filter only
-  narrows what is already permitted). Render/unit tests. **Zero migration, no service role.**
-- **Guardrail:** the filter must never widen scope — it can only *narrow* the RLS-permitted
-  set. Fail-closed on any unrecognised filter input.
+### P-009 — Audit log search / filter — **DONE (#268)**
+- **Delivered:** search + **action / entity / window (7/30/90-day)** filters on the `/audit` surface,
+  via a new **pure** filter helper (`audit-filter.ts`) + render/unit tests. **Zero migration.**
+- **Result:** `/audit` now has safe search + filters. The **audit DAL projection is UNCHANGED** —
+  filtering is a pure helper over the DAL's already-RLS-scoped rows (it can only *narrow*; the database
+  still decides which rows exist). Search is over the safe displayed fields (action + entity) only — **no**
+  raw-JSON / before-after / actor / IP / user-agent search. An invalid `days` value **fails safe** to
+  all-time (never falsely narrows).
+- **Detail:** `docs/59_WORKSTREAM_ROADMAP.md` (P-009). **Next remaining read-only item: P-010 (below).**
 
 ### P-010 — Safe CSV export (GitHub PR: TBD) — **only if scope is tight and time remains**
 - **What:** Let a user export data they can *already see* (e.g. the app inventory or the
@@ -139,26 +138,25 @@ also appear in `docs/59_WORKSTREAM_ROADMAP.md`.
 
 ## 5. The exact next recommended item — and why
 
-**RECOMMENDATION (INFERENCE, from the facts below): with the catalog trio (P-006/P-007/P-008)
-now merged, the single next thing to pick up is `P-009` (audit-log search / filter).**
+**RECOMMENDATION (INFERENCE, from the facts below): with P-006/P-007/P-008 and P-009 now merged,
+the only remaining pre-2026-07-10 read-only item is `P-010` (safe CSV export) — and it should be
+picked up ONLY if the window has room, and its scope confirmed first.**
 
-Why P-009 and not anything on the connector/RISK-007 track:
+Why P-010 (scope-confirmed) and not anything on the connector/RISK-007 track:
 
-- **It is actionable *today* (FACT).** It fits the Section 2 safe pattern end-to-end (pure
-  search/filter over the already-RLS-scoped `/audit` result set) and needs no migration, no
-  security review, and no human governance decision.
+- **P-010 is the last read-only item, and it is optional (FACT + INFERENCE).** CSV export touches
+  file-generation + column-scoping details that can eat a day; it must export **only** the safe DTO
+  columns already rendered on-screen (no raw ids/tenant/secret), server-side from the same RLS-scoped
+  DAL. Confirm the exact lists + columns before starting; if the window is tight, defer it.
 - **The RISK-007 / connector items literally cannot start yet (FACT).** The next technical
   item on that track, **R-015** (RISK-007 **criterion 15**, permanent deletion of the staging
   source Slack client secret), is **date-gated and only actionable *after* 2026-07-10** — it
   sits behind a recovery window (see `docs/52_RISK_007_CLOSURE_EVIDENCE_TRACKER.md` and
   `docs/04_RISK_REGISTER.md`). Trying to "get ahead" on it before the window is not possible
   and must not be forced.
-- **It improves an existing surface with no new exposure (FACT).** `/audit` already ships
-  read-only + RLS-scoped; P-009 only narrows what is already permitted.
 
-**INFERENCE:** After P-009, take **P-010 only if the window still has room (scope-confirm
-first).** When 2026-07-10 arrives, the connector/RISK-007 track (Section 6) becomes the priority
-and should preempt further `P-` work.
+**INFERENCE:** When 2026-07-10 arrives, the connector/RISK-007 track (Section 6) becomes the priority
+(**R-015 → R-018 → R-019**, then the gated **C-2c**) and should preempt further `P-` work.
 
 ---
 

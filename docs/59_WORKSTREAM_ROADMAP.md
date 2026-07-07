@@ -22,7 +22,7 @@ per-PR log → [05_ENGINEERING_CHANGELOG.md](./05_ENGINEERING_CHANGELOG.md); con
 > change to either document's content.
 
 Today = **2026-07-07**. Repo HEADs at time of writing (FACT, from the canonical brief): `idcaddie-v3` main @ `768f91a`
-(PRs through #266 merged); `idcaddie-connector-runner` main @ `84ecf6d`.
+(PRs through #268 merged); `idcaddie-connector-runner` main @ `84ecf6d`.
 
 ---
 
@@ -54,7 +54,7 @@ is guarded by SECURITY DEFINER functions rather than an RLS policy.
 > epics, doc 27's Tracks A–P, doc 33's T1–T9; the row-level crosswalk lives in
 > [56_OLD_APP_PARITY_REGISTER.md](./56_OLD_APP_PARITY_REGISTER.md) and [57_CONNECTOR_PARITY_REGISTER.md](./57_CONNECTOR_PARITY_REGISTER.md).)
 
-**The safe-rebuild pattern (proven by #257–#266).** Every completed **P**/**Q** item below followed the same shape: a **NEW
+**The safe-rebuild pattern (proven by #257–#268).** Every completed **P**/**Q** item below followed the same shape: a **NEW
 read-only page/section** + a **user-scoped RLS DAL** + a **pure helper** + **render/unit tests** — with **zero migration, no
 service-role, no client-side tenant filter, ids-as-keys/booleans, fail-closed**. This is the pattern to keep copying. (FACT:
 this pattern is what these PRs did; INFERENCE: that it stays the right default for the next **P** items.)
@@ -85,6 +85,7 @@ Summary first, full detail cards below.
 | P-006 | Canonical app catalog (`/catalog`) | DONE | #263 | idcaddie-v3 | Yes (done) |
 | P-007 | App-detail catalog mapping | DONE | #264 | idcaddie-v3 | Yes (done) |
 | P-008 | Needs Attention alias backlog | DONE | #266 | idcaddie-v3 | Yes (done) |
+| P-009 | Audit search / filter | DONE | #268 | idcaddie-v3 | Yes (done) |
 
 > **Provenance caveat (INFERENCE-check).** These PR numbers are **FACT per the canonical PR map** in the project brief and
 > mirror [05_ENGINEERING_CHANGELOG.md](./05_ENGINEERING_CHANGELOG.md). This doc was written **read-only** — no `git`/`gh` was
@@ -342,7 +343,6 @@ the immediate ordering lives in [61_NEXT_3_DAYS_PLAN.md](./61_NEXT_3_DAYS_PLAN.m
 
 | ID | Title | Workstream | Pattern | Safe before 2026-07-10? | Notes |
 |---|---|---|---|---|---|
-| P-009 | Audit search / filter | Product | Safe-rebuild (zero migration) | **Yes** | Server-side search/filter over the existing `/audit` read surface |
 | P-010 | Safe CSV export | Product | Safe-rebuild (zero migration) | **Yes** | Export **within RLS scope** of already-visible read views (no new data) |
 | C-2c | Hosted staging live sync | Connectors | **Gated** | **GATED** | See §2 — needs decisions #3/#4; RISK-007 OPEN |
 | R-015 | RISK-007 criterion 15 | Risk | Human op | **No** (after 2026-07-10) | See §2 |
@@ -369,15 +369,20 @@ the immediate ordering lives in [61_NEXT_3_DAYS_PLAN.md](./61_NEXT_3_DAYS_PLAN.m
 - **Next step:** A future *write* workflow to resolve an alias (confirm/reject) — deferred; needs its own RLS-gated design.
 
 ### P-009 — Audit search / filter
-- **Workstream:** Product · **Scope:** Server-side search + filter over the existing `/audit` read surface; user-scoped DAL +
-  pure filter helper + tests. **Zero migration.**
+- **Status:** DONE (merged). · **GitHub PR:** #268 · **Repo:** idcaddie-v3
+- **Workstream:** Product · **Scope:** Added search + action/entity/window filters to the existing `/audit` read surface via a
+  new **pure** filter helper (`audit-filter.ts`) + render/unit tests. **Zero migration.**
 - **Why:** The `/audit` viewer already ships (read-only); a growing audit log is only useful if it's searchable. `audit_logs`
   is append-only.
+- **Result:** `/audit` now has safe **search + action/entity/window filters**. The **audit DAL projection is UNCHANGED** —
+  filtering runs server-side over the already-fetched, RLS-scoped rows and can only NARROW (no new query, no widening). Search
+  is over the safe displayed fields (action + entity) only — no raw-JSON / before-after / actor / IP / user-agent search.
+- **Risk reduced:** Makes the audit surface usable for reviewers without exposing any new field; an invalid `days` value fails
+  safe to all-time (never falsely narrows). **RISK-007 stays OPEN; Phase C stays BLOCKED; no live sync.**
 - **Dependencies:** Existing `/audit` surface + DAL. · **Blocked-by:** None.
-- **Safe before 2026-07-10:** **Yes** — read-only, no migration, server-side within RLS scope.
-- **Next step:** Confirm the searchable columns against [02_SECURITY_AND_RLS.md](./02_SECURITY_AND_RLS.md) read-scope map.
+- **Next step:** Deep/historical/paginated audit search + export are separate future items (see P-010 for export).
 
-### P-010 — Safe CSV export
+### P-010 — Safe CSV export — **scope-confirm first** (next candidate after P-009)
 - **Workstream:** Product · **Scope:** CSV export of **already-visible** read views (dashboards, apps, contracts), generated
   **server-side within the caller's RLS scope** — exports nothing the user can't already see. Pure serializer + tests. **Zero
   migration.**
