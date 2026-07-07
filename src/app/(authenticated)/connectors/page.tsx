@@ -29,7 +29,7 @@ export default async function ConnectorsPage() {
     <main className="flex flex-1 flex-col gap-6 p-8">
       <header className="space-y-1">
         <div className="text-sm">
-          <Link href="/" className="text-zinc-500 hover:underline">
+          <Link href="/dashboards" className="text-zinc-500 hover:underline">
             ← Back
           </Link>
         </div>

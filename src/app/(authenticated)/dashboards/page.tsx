@@ -51,11 +51,6 @@ export default async function DashboardsPage() {
   return (
     <main className="flex flex-1 flex-col gap-6 p-8">
       <header className="space-y-1">
-        <div className="text-sm">
-          <Link href="/" className="text-zinc-500 hover:underline">
-            ← Back
-          </Link>
-        </div>
         <h1 className="text-xl font-semibold">Dashboards</h1>
         <p className="text-sm text-zinc-600 dark:text-zinc-400">
           Read-only summary of what is <strong>visible to you</strong> (RLS-scoped) — not absolute
