@@ -42,6 +42,9 @@ export type AppDetail = {
   responsibleOrgId: string | null;
   payingOrgId: string | null;
   procurementOrgId: string | null;
+  // Ownership as booleans ONLY — the raw owner FKs (business/technical_owner_user_id → profiles) never leave the DAL.
+  hasBusinessOwner: boolean;
+  hasTechnicalOwner: boolean;
   createdAt: string;
   updatedAt: string;
 };
@@ -61,7 +64,8 @@ export async function getAppDetailForCurrentUser(appId: string): Promise<AppDeta
   const { data, error } = await supabase
     .from("apps")
     .select(
-      "id, name, vendor_name, category, status, external_instance_id, instance_url, responsible_org_id, paying_org_id, procurement_owner_org_id, created_at, updated_at",
+      // business_owner_user_id / technical_owner_user_id are read ONLY to compute booleans; never returned.
+      "id, name, vendor_name, category, status, external_instance_id, instance_url, responsible_org_id, paying_org_id, procurement_owner_org_id, business_owner_user_id, technical_owner_user_id, created_at, updated_at",
     )
     .eq("id", appId)
     .maybeSingle();
@@ -87,6 +91,8 @@ export async function getAppDetailForCurrentUser(appId: string): Promise<AppDeta
       responsibleOrgId: data.responsible_org_id,
       payingOrgId: data.paying_org_id,
       procurementOrgId: data.procurement_owner_org_id,
+      hasBusinessOwner: data.business_owner_user_id != null,
+      hasTechnicalOwner: data.technical_owner_user_id != null,
       createdAt: data.created_at,
       updatedAt: data.updated_at,
     },
@@ -100,6 +106,8 @@ export async function getAppDetailForCurrentUser(appId: string): Promise<AppDeta
 export type AppInventoryRow = AppSummary & {
   linkedContractCount: number;
   appUserCount: number;
+  // Ownership as a boolean ONLY — the raw owner FKs (business/technical_owner_user_id) never leave the DAL.
+  hasOwner: boolean;
 };
 
 // Tally a flat list of app ids into per-app counts.
@@ -120,7 +128,8 @@ export async function listAppsWithCountsForCurrentUser(): Promise<DataResult<App
 
   const { data: apps, error: appsErr } = await supabase
     .from("apps")
-    .select("id, name, vendor_name, category, status")
+    // owner FKs read ONLY to compute hasOwner; never returned.
+    .select("id, name, vendor_name, category, status, business_owner_user_id, technical_owner_user_id")
     .order("name", { ascending: true });
   if (appsErr) {
     console.error("[data/apps] listAppsWithCountsForCurrentUser apps query failed");
@@ -152,6 +161,7 @@ export async function listAppsWithCountsForCurrentUser(): Promise<DataResult<App
       status: a.status,
       linkedContractCount: contractCounts.get(a.id) ?? 0,
       appUserCount: userCounts.get(a.id) ?? 0,
+      hasOwner: a.business_owner_user_id != null || a.technical_owner_user_id != null,
     })),
   };
 }

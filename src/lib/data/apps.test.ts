@@ -34,8 +34,8 @@ describe("listAppsWithCountsForCurrentUser", () => {
       makeSupabase({
         apps: {
           data: [
-            { id: "app1", name: "Asana", vendor_name: "Asana", category: "PM", status: "active" },
-            { id: "app2", name: "Zoom", vendor_name: null, category: null, status: "inactive" },
+            { id: "app1", name: "Asana", vendor_name: "Asana", category: "PM", status: "active", business_owner_user_id: "prof-1", technical_owner_user_id: null },
+            { id: "app2", name: "Zoom", vendor_name: null, category: null, status: "inactive", business_owner_user_id: null, technical_owner_user_id: null },
           ],
           error: null,
         },
@@ -58,6 +58,7 @@ describe("listAppsWithCountsForCurrentUser", () => {
         status: "active",
         linkedContractCount: 2,
         appUserCount: 3,
+        hasOwner: true,
       },
       {
         id: "app2",
@@ -67,11 +68,12 @@ describe("listAppsWithCountsForCurrentUser", () => {
         status: "inactive",
         linkedContractCount: 1,
         appUserCount: 0,
+        hasOwner: false,
       },
     ]);
-    // DTO carries ONLY the safe inventory columns — no tenant_id, no raw row, no sensitive internals.
+    // DTO carries ONLY the safe inventory columns + a hasOwner boolean — no tenant_id, no raw owner id, no raw row.
     expect(Object.keys(res.data[0]).sort()).toEqual(
-      ["appUserCount", "category", "id", "linkedContractCount", "name", "status", "vendorName"].sort(),
+      ["appUserCount", "category", "hasOwner", "id", "linkedContractCount", "name", "status", "vendorName"].sort(),
     );
   });
 
