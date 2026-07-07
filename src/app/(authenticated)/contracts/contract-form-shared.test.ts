@@ -23,6 +23,7 @@ const detail = (over: Partial<ContractDetail> = {}): ContractDetail => ({
   currency: null,
   billingFrequency: null,
   renewalResponsibility: null,
+  hasOwner: false,
   procurementOrgId: null,
   payingOrgId: null,
   category: null,

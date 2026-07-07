@@ -31,6 +31,11 @@ export type ContractSummary = {
   category: string | null;
   renewalDate: string | null;
   endDate: string | null;
+  totalCost: number | null;
+  currency: string | null;
+  // Ownership as a boolean ONLY — the raw owner_user_id (a profiles FK) never leaves the DAL.
+  hasOwner: boolean;
+  renewalResponsibility: string | null; // a free-text "who renews this" label (never a user id)
 };
 
 // Structured result: callers get typed data or a safe error label, never a raw Supabase error.
@@ -56,6 +61,8 @@ export type ContractDetail = {
   currency: string | null;
   billingFrequency: string | null;
   renewalResponsibility: string | null;
+  // Ownership as a boolean ONLY — the raw owner_user_id (a profiles FK) never leaves the DAL.
+  hasOwner: boolean;
   procurementOrgId: string | null;
   payingOrgId: string | null;
   category: string | null;
@@ -85,7 +92,7 @@ export async function getContractDetailForCurrentUser(
   const { data, error } = await supabase
     .from("contracts")
     .select(
-      "id, contract_name, vendor_name, status, start_date, end_date, renewal_date, notice_deadline, total_cost, currency, billing_frequency, renewal_responsibility, procurement_org_id, paying_org_id, category, procurement_date, notes, po_number, auto_renew, month_to_month, created_at, updated_at",
+      "id, contract_name, vendor_name, status, start_date, end_date, renewal_date, notice_deadline, total_cost, currency, billing_frequency, renewal_responsibility, owner_user_id, procurement_org_id, paying_org_id, category, procurement_date, notes, po_number, auto_renew, month_to_month, created_at, updated_at",
     )
     .eq("id", contractId)
     .maybeSingle();
@@ -113,6 +120,7 @@ export async function getContractDetailForCurrentUser(
       currency: data.currency,
       billingFrequency: data.billing_frequency,
       renewalResponsibility: data.renewal_responsibility,
+      hasOwner: data.owner_user_id != null,
       procurementOrgId: data.procurement_org_id,
       payingOrgId: data.paying_org_id,
       category: data.category,
@@ -135,7 +143,8 @@ export async function listContractsForCurrentUser(): Promise<DataResult<Contract
 
   const { data, error } = await supabase
     .from("contracts")
-    .select("id, contract_name, vendor_name, status, category, renewal_date, end_date")
+    // owner_user_id is read ONLY to compute a hasOwner boolean; it is never returned (no raw profile id).
+    .select("id, contract_name, vendor_name, status, category, renewal_date, end_date, total_cost, currency, owner_user_id, renewal_responsibility")
     .order("contract_name", { ascending: true });
 
   if (error) {
@@ -153,6 +162,10 @@ export async function listContractsForCurrentUser(): Promise<DataResult<Contract
       category: c.category,
       renewalDate: c.renewal_date,
       endDate: c.end_date,
+      totalCost: c.total_cost,
+      currency: c.currency,
+      hasOwner: c.owner_user_id != null,
+      renewalResponsibility: c.renewal_responsibility,
     })),
   };
 }

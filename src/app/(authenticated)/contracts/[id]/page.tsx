@@ -2,6 +2,8 @@ import Link from "next/link";
 import { getContractDetailForCurrentUser } from "@/lib/data/contracts";
 import { listContractFilesForCurrentUser } from "@/lib/data/contract-files";
 import { listAppsLinkedToContract } from "@/lib/data/links";
+import { formatMoney } from "@/lib/data/dashboard-overview";
+import { contractAttentionFlags } from "@/lib/data/contract-attention";
 import { ContractFiles } from "./contract-files";
 
 export const metadata = { title: "Contract · ID Caddie" };
@@ -30,6 +32,20 @@ export default async function ContractDetailPage({
   const result = await getContractDetailForCurrentUser(id);
   const linkedApps = result.ok ? await listAppsLinkedToContract(id) : null;
   const files = result.ok ? await listContractFilesForCurrentUser(id) : null;
+
+  // hasLinkedApp: true = ≥1 linked app, false = known-none, null = unknown (read failed) → not flagged.
+  const hasLinkedApp = linkedApps && linkedApps.ok ? linkedApps.data.length > 0 : null;
+  const flags = result.ok
+    ? contractAttentionFlags(
+        {
+          renewalDate: result.data.renewalDate,
+          endDate: result.data.endDate,
+          hasOwner: result.data.hasOwner,
+          hasLinkedApp,
+        },
+        new Date(),
+      )
+    : [];
 
   return (
     <main className="flex flex-1 flex-col gap-6 p-8">
@@ -81,7 +97,7 @@ export default async function ContractDetailPage({
               value={
                 result.data.totalCost === null
                   ? "—"
-                  : `${result.data.totalCost} ${result.data.currency ?? ""}`.trim()
+                  : formatMoney(result.data.totalCost, result.data.currency ?? "unspecified")
               }
             />
             <Field label="Billing frequency" value={result.data.billingFrequency ?? "—"} />
@@ -89,12 +105,28 @@ export default async function ContractDetailPage({
               label="Renewal responsibility"
               value={result.data.renewalResponsibility ?? "—"}
             />
+            <Field label="Owner assigned" value={result.data.hasOwner ? "Yes" : "No"} />
             <Field label="Category" value={result.data.category ?? "—"} />
             <Field label="Procurement date" value={result.data.procurementDate ?? "—"} />
             <Field label="PO number" value={result.data.poNumber ?? "—"} />
             <Field label="Auto renew" value={result.data.autoRenew ? "Yes" : "No"} />
             <Field label="Month-to-month" value={result.data.monthToMonth ? "Yes" : "No"} />
           </section>
+
+          {flags.length > 0 ? (
+            <section className="space-y-2 text-sm">
+              <h2 className="font-medium">Needs attention</h2>
+              <ul className="flex flex-wrap gap-2">
+                {flags.map((f) => (
+                  <li key={f.key}>
+                    <span className="rounded-full border border-amber-500 px-2 py-0.5 text-xs text-amber-700 dark:text-amber-400">
+                      {f.label}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ) : null}
 
           {result.data.notes ? (
             <section className="space-y-1 text-sm">
