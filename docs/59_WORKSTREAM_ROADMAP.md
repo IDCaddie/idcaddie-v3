@@ -22,7 +22,7 @@ per-PR log → [05_ENGINEERING_CHANGELOG.md](./05_ENGINEERING_CHANGELOG.md); con
 > change to either document's content.
 
 Today = **2026-07-07**. Repo HEADs at time of writing (FACT, from the canonical brief): `idcaddie-v3` main @ `768f91a`
-(PRs through #264 merged); `idcaddie-connector-runner` main @ `84ecf6d`.
+(PRs through #266 merged); `idcaddie-connector-runner` main @ `84ecf6d`.
 
 ---
 
@@ -54,7 +54,7 @@ is guarded by SECURITY DEFINER functions rather than an RLS policy.
 > epics, doc 27's Tracks A–P, doc 33's T1–T9; the row-level crosswalk lives in
 > [56_OLD_APP_PARITY_REGISTER.md](./56_OLD_APP_PARITY_REGISTER.md) and [57_CONNECTOR_PARITY_REGISTER.md](./57_CONNECTOR_PARITY_REGISTER.md).)
 
-**The safe-rebuild pattern (proven by #257–#264).** Every completed **P**/**Q** item below followed the same shape: a **NEW
+**The safe-rebuild pattern (proven by #257–#266).** Every completed **P**/**Q** item below followed the same shape: a **NEW
 read-only page/section** + a **user-scoped RLS DAL** + a **pure helper** + **render/unit tests** — with **zero migration, no
 service-role, no client-side tenant filter, ids-as-keys/booleans, fail-closed**. This is the pattern to keep copying. (FACT:
 this pattern is what these PRs did; INFERENCE: that it stays the right default for the next **P** items.)
@@ -84,6 +84,7 @@ Summary first, full detail cards below.
 | Q-001 | UI render harness + route boundaries | DONE | #262 | idcaddie-v3 | Yes (done) |
 | P-006 | Canonical app catalog (`/catalog`) | DONE | #263 | idcaddie-v3 | Yes (done) |
 | P-007 | App-detail catalog mapping | DONE | #264 | idcaddie-v3 | Yes (done) |
+| P-008 | Needs Attention alias backlog | DONE | #266 | idcaddie-v3 | Yes (done) |
 
 > **Provenance caveat (INFERENCE-check).** These PR numbers are **FACT per the canonical PR map** in the project brief and
 > mirror [05_ENGINEERING_CHANGELOG.md](./05_ENGINEERING_CHANGELOG.md). This doc was written **read-only** — no `git`/`gh` was
@@ -116,7 +117,7 @@ Summary first, full detail cards below.
 - **Dependencies:** Existing contract/app DALs.
 - **Blocked-by:** None.
 - **Safe before 2026-07-10:** Yes (done).
-- **Next step:** **P-008** — extend with alias-derived backlog rows (below).
+- **Next step:** **P-008** landed (#266) — added the catalog-alias backlog section. Further sections track new signals (e.g. P-009+).
 
 ### P-003 — Dashboard spend + renewals
 - **Status:** DONE (merged). · **GitHub PR:** #259 · **Repo:** idcaddie-v3
@@ -341,7 +342,6 @@ the immediate ordering lives in [61_NEXT_3_DAYS_PLAN.md](./61_NEXT_3_DAYS_PLAN.m
 
 | ID | Title | Workstream | Pattern | Safe before 2026-07-10? | Notes |
 |---|---|---|---|---|---|
-| P-008 | Needs Attention alias backlog | Product | Safe-rebuild (zero migration) | **Yes** | Adds alias-derived rows to `/needs-attention` (P-002) |
 | P-009 | Audit search / filter | Product | Safe-rebuild (zero migration) | **Yes** | Server-side search/filter over the existing `/audit` read surface |
 | P-010 | Safe CSV export | Product | Safe-rebuild (zero migration) | **Yes** | Export **within RLS scope** of already-visible read views (no new data) |
 | C-2c | Hosted staging live sync | Connectors | **Gated** | **GATED** | See §2 — needs decisions #3/#4; RISK-007 OPEN |
@@ -354,12 +354,19 @@ the immediate ordering lives in [61_NEXT_3_DAYS_PLAN.md](./61_NEXT_3_DAYS_PLAN.m
 | A-002 | AI invoice extraction **plan** | AI | Design doc only | **Yes** | **No v3 design doc exists yet** (gap) |
 
 ### P-008 — Needs Attention alias backlog
-- **Workstream:** Product · **Scope:** Extend `/needs-attention` (P-002) with alias-derived backlog rows (e.g. unresolved app
-  aliases surfaced as attention items), via a user-scoped DAL + pure helper + render/unit tests. **Zero migration.**
+- **Status:** DONE (merged). · **GitHub PR:** #266 · **Repo:** idcaddie-v3
+- **Workstream:** Product · **Scope:** Extended `/needs-attention` (P-002) with a "Catalog aliases pending review" section —
+  reuses the P-006 catalog DAL, filters aliases to `review_status = pending` (a bounded `0024` CHECK enum, so no guessing),
+  and shows the alias value + product/vendor **names** linking to `/catalog`, via the pure builder + render/unit tests.
+  **Zero migration.**
 - **Why:** Aliases that don't resolve to a canonical app are exactly the kind of "needs a human" item the old app surfaced.
+- **Result:** `/needs-attention` now includes **catalog aliases pending review**. Read-only — no alias confirm/reject/resolver
+  write; those stay deferred (surfaced as "Not built yet" on `/catalog`).
 - **Dependencies:** P-002, P-004 (flag helper), P-007 (catalog mapping). · **Blocked-by:** None.
-- **Safe before 2026-07-10:** **Yes** — pure safe-rebuild; no gated surface.
-- **Next step:** Define alias-backlog rows against [56_OLD_APP_PARITY_REGISTER.md](./56_OLD_APP_PARITY_REGISTER.md).
+- **Risk reduced:** Surfaces the catalog-graph review backlog in the cleanup queue without exposing any secret/PII/raw id
+  (`reviewed_by`/`reviewed_at`/`provenance`/`source`/`normalized_name` never returned or rendered). **RISK-007 stays OPEN;
+  Phase C stays BLOCKED; no live sync.**
+- **Next step:** A future *write* workflow to resolve an alias (confirm/reject) — deferred; needs its own RLS-gated design.
 
 ### P-009 — Audit search / filter
 - **Workstream:** Product · **Scope:** Server-side search + filter over the existing `/audit` read surface; user-scoped DAL +

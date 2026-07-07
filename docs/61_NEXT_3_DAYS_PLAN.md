@@ -35,12 +35,12 @@ full canonical plan), and `docs/60_DO_NOT_COPY_FROM_OLD_APP.md` (unsafe patterns
 ## 1. The plan in one line
 
 **FACT + INFERENCE:** For **2026-07-07 → 2026-07-09**, keep building **safe, read-only
-product surfaces** on the proven pattern — **P-008**, then **P-009**, and **P-010 only if
-there is time** — because those are the highest-value things we are actually *allowed* to
-do right now with zero governance risk. **On/after 2026-07-10**, the RISK-007 closure track
-becomes actionable and takes priority: **R-015 → R-018 → R-019**, and only after those,
-the first sanctioned connector sync **C-2c**. Nothing on the connector/live-sync track can
-legitimately start before 2026-07-10.
+product surfaces** on the proven pattern. **P-008 has now merged (#266)**, so the next items are
+**P-009**, then **P-010 only if there is time (scope-confirm first)** — because those are the
+highest-value things we are actually *allowed* to do right now with zero governance risk.
+**On/after 2026-07-10**, the RISK-007 closure track becomes actionable and takes priority:
+**R-015 → R-018 → R-019**, and only after those, the first sanctioned connector sync **C-2c**
+(gated). Nothing on the connector/live-sync track can legitimately start before 2026-07-10.
 
 ---
 
@@ -69,9 +69,9 @@ slower. Section 7 lists the specific things that fall on the wrong side of this 
 
 ## 3. What is already done (recap)
 
-**FACT — the eight most recent merged PRs (#257–#264), all on the safe pattern above.**
-Full detail and the old-app parity mapping are in `docs/55_REBUILD_STATUS.md` §4.1 and
-`docs/56_OLD_APP_PARITY_REGISTER.md`.
+**FACT — the nine merged product/quality PRs on the safe pattern above (#257–#264 and #266;
+#265 was the rebuild docs pack, docs 55–61).** Full detail and the old-app parity mapping are
+in `docs/55_REBUILD_STATUS.md` §4.1 and `docs/56_OLD_APP_PARITY_REGISTER.md`.
 
 | Workstream | Delivered | GitHub PR |
 |---|---|---|
@@ -83,33 +83,30 @@ Full detail and the old-app parity mapping are in `docs/55_REBUILD_STATUS.md` §
 | **Q-001** | UI render-test harness + route error boundaries | **#262** |
 | **P-006** | Canonical app catalog (`/catalog`) | **#263** |
 | **P-007** | App-detail ↔ catalog mapping | **#264** |
+| **P-008** | "Needs Attention" catalog-alias backlog | **#266** |
 
-Because **P-006** (a canonical catalog of apps) and **P-007** (mapping each app's detail
-page to that catalog) just landed, the app now has a clean notion of a "canonical app" and
-the **aliases** that resolve to it. That is exactly what makes **P-008 (below)** a small,
-natural next step rather than new infrastructure.
+The **catalog trio is now complete**: **P-006** (a canonical catalog of apps, #263), **P-007**
+(mapping each app's detail page to that catalog, #264), and **P-008** (surfacing the unreviewed
+**aliases** as a "Catalog aliases pending review" section on `/needs-attention`, #266). The app
+now has a clean canonical-app notion, per-app mapping, and a review backlog — all **read-only**.
 
 ---
 
 ## 4. What to build next, in order (the 2026-07-07 → 2026-07-09 window)
 
-All three items below follow the Section 2 pattern: read-only, RLS-scoped DAL, pure helper,
-tests, **no migration, no service role**. Each is written as a workstream ID with **GitHub
-PR: TBD** because none has merged yet. Ordering rationale and dependencies also appear in
-`docs/59_WORKSTREAM_ROADMAP.md`.
+**Update (2026-07-07): P-008 has merged (#266)** — recorded below as done. The remaining items
+follow the Section 2 pattern: read-only, RLS-scoped DAL, pure helper, tests, **no migration, no
+service role**. The unmerged ones carry **GitHub PR: TBD**. Ordering rationale and dependencies
+also appear in `docs/59_WORKSTREAM_ROADMAP.md`.
 
-### P-008 — "Needs Attention" alias backlog (GitHub PR: TBD)
-- **What:** Add a read-only section to the existing "Needs Attention" surface (shipped as
-  P-002/#258) that lists **app aliases that have not yet been resolved to a canonical app** —
-  the housekeeping backlog created now that the canonical catalog (P-006) and alias mapping
-  (P-007) exist. It answers "which incoming app names still need a human to map them?"
-- **Why now (INFERENCE):** It reuses the catalog/alias data that #263/#264 just made
-  available, closes an obvious loop for the OMC-style workflow, and needs **no new data** —
-  only a read + a pure "is this alias unmapped?" helper.
-- **Shape (FACT-of-pattern):** new read-only section + RLS-scoped DAL reading the existing
-  alias/catalog tables + pure helper + render/unit tests. **Zero migration.**
-- **Explicitly not in P-008:** any *write* to resolve an alias. Resolving is a future write
-  workflow (see `docs/59_WORKSTREAM_ROADMAP.md`); P-008 only *surfaces the backlog*.
+### P-008 — "Needs Attention" alias backlog — **DONE (#266)**
+- **Delivered:** a read-only **"Catalog aliases pending review"** section on `/needs-attention`
+  (P-002) — counts aliases with `review_status = pending` (a bounded `0024` CHECK enum) and shows
+  the alias value + product/vendor **names** linking to `/catalog`, reusing the P-006 catalog DAL.
+  **Zero migration.**
+- **Result:** `/needs-attention` now includes catalog aliases pending review. **Read-only** — no
+  alias confirm/reject/resolver write (deferred; shown as "Not built yet" on `/catalog`).
+- **Detail + risk notes:** `docs/59_WORKSTREAM_ROADMAP.md` (P-008). **Next up: P-009 (below).**
 
 ### P-009 — Audit log search / filter (GitHub PR: TBD)
 - **What:** Add search and filter controls to the existing read-only **audit-log viewer**
@@ -142,25 +139,26 @@ PR: TBD** because none has merged yet. Ordering rationale and dependencies also 
 
 ## 5. The exact next recommended item — and why
 
-**RECOMMENDATION (INFERENCE, from the facts below): the single next thing to pick up is
-`P-008` (the "Needs Attention" alias backlog).**
+**RECOMMENDATION (INFERENCE, from the facts below): with the catalog trio (P-006/P-007/P-008)
+now merged, the single next thing to pick up is `P-009` (audit-log search / filter).**
 
-Why P-008 and not anything on the connector/RISK-007 track:
+Why P-009 and not anything on the connector/RISK-007 track:
 
-- **It is actionable *today* (FACT).** It fits the Section 2 safe pattern end-to-end and needs
-  no migration, no security review, and no human governance decision.
+- **It is actionable *today* (FACT).** It fits the Section 2 safe pattern end-to-end (pure
+  search/filter over the already-RLS-scoped `/audit` result set) and needs no migration, no
+  security review, and no human governance decision.
 - **The RISK-007 / connector items literally cannot start yet (FACT).** The next technical
   item on that track, **R-015** (RISK-007 **criterion 15**, permanent deletion of the staging
   source Slack client secret), is **date-gated and only actionable *after* 2026-07-10** — it
   sits behind a recovery window (see `docs/52_RISK_007_CLOSURE_EVIDENCE_TRACKER.md` and
   `docs/04_RISK_REGISTER.md`). Trying to "get ahead" on it before the window is not possible
   and must not be forced.
-- **It builds directly on what just merged (FACT).** P-006/P-007 created the canonical-app +
-  alias structure; P-008 is the smallest useful surface that uses it.
+- **It improves an existing surface with no new exposure (FACT).** `/audit` already ships
+  read-only + RLS-scoped; P-009 only narrows what is already permitted.
 
-**INFERENCE:** After P-008, take **P-009**; take **P-010 only if the window still has room.**
-When 2026-07-10 arrives, the connector/RISK-007 track (Section 6) becomes the priority and
-should preempt further `P-` work.
+**INFERENCE:** After P-009, take **P-010 only if the window still has room (scope-confirm
+first).** When 2026-07-10 arrives, the connector/RISK-007 track (Section 6) becomes the priority
+and should preempt further `P-` work.
 
 ---
 
