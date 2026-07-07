@@ -136,13 +136,13 @@ export default async function ContractDetailPage({
           ) : null}
 
           <section className="space-y-2 text-sm">
-            <h2 className="font-medium">Ownership (organization IDs)</h2>
+            <h2 className="font-medium">Ownership</h2>
             <p className="text-xs text-zinc-500">
-              Organization names are not enriched yet (deferred); IDs shown for now.
+              Presence only — organization ids are not shown (name enrichment is deferred).
             </p>
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <Field label="Procurement org" value={result.data.procurementOrgId ?? "—"} />
-              <Field label="Paying org" value={result.data.payingOrgId ?? "—"} />
+              <Field label="Procurement org" value={result.data.procurementOrgId ? "Assigned" : "—"} />
+              <Field label="Paying org" value={result.data.payingOrgId ? "Assigned" : "—"} />
             </div>
           </section>
 

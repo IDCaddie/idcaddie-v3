@@ -1,0 +1,55 @@
+// @vitest-environment jsdom
+import { describe, it, expect, vi, afterEach } from "vitest";
+import { render, screen, cleanup } from "@testing-library/react";
+
+vi.mock("next/link", () => ({
+  default: ({ href, children }: { href: unknown; children: React.ReactNode }) => (
+    <a href={typeof href === "string" ? href : "#"}>{children}</a>
+  ),
+}));
+vi.mock("@/lib/data/apps", () => ({ getAppDetailForCurrentUser: vi.fn() }));
+vi.mock("@/lib/data/links", () => ({ listContractsLinkedToApp: vi.fn() }));
+vi.mock("@/lib/data/app-users", () => ({ listAppUsersForApp: vi.fn() }));
+vi.mock("@/lib/data/app-user-matches", () => ({ listMatchesForAppUsers: vi.fn() }));
+vi.mock("@/lib/data/manual-sync-runs", () => ({ getLatestSlackSyncRunForCurrentTenant: vi.fn() }));
+
+import AppDetailPage from "./page";
+import { getAppDetailForCurrentUser } from "@/lib/data/apps";
+import { listContractsLinkedToApp } from "@/lib/data/links";
+import { listAppUsersForApp } from "@/lib/data/app-users";
+import { listMatchesForAppUsers } from "@/lib/data/app-user-matches";
+
+const asMock = <T,>(fn: T) => fn as unknown as { mockResolvedValue: (v: unknown) => void };
+const OWNER_UUID = "11111111-2222-3333-4444-555555555555";
+afterEach(cleanup);
+
+// An app with no owners, no linked contracts, no discovered accounts → all three attention flags fire.
+const detail = {
+  ok: true,
+  data: {
+    id: "app-uuid-abc", name: "Figma", vendorName: "Figma Inc", category: "Design", status: "active",
+    externalInstanceId: null, instanceUrl: null,
+    responsibleOrgId: null, payingOrgId: null, procurementOrgId: null,
+    hasBusinessOwner: false, hasTechnicalOwner: false,
+    createdAt: "2026-06-01T00:00:00Z", updatedAt: "2026-06-02T00:00:00Z",
+  },
+};
+
+describe("/apps/[id] render", () => {
+  it("shows Needs Attention flags + ownership presence as Yes/No, with no raw ids", async () => {
+    asMock(getAppDetailForCurrentUser).mockResolvedValue(detail);
+    asMock(listContractsLinkedToApp).mockResolvedValue({ ok: true, data: [] });
+    asMock(listAppUsersForApp).mockResolvedValue({ ok: true, data: [] });
+    asMock(listMatchesForAppUsers).mockResolvedValue({ ok: true, data: [] });
+
+    const { container } = render(await AppDetailPage({ params: Promise.resolve({ id: "app-uuid-abc" }) }));
+    expect(screen.getByText("Needs attention")).toBeTruthy();
+    expect(screen.getByText("No owner assigned")).toBeTruthy();
+    expect(screen.getByText("No linked contract")).toBeTruthy();
+    expect(screen.getByText("No discovered accounts")).toBeTruthy();
+    expect(screen.getByText("Business owner assigned")).toBeTruthy();
+    // regression: no raw owner/app UUID leaks into the rendered UI
+    expect(container.textContent).not.toContain(OWNER_UUID);
+    expect(container.textContent).not.toContain("app-uuid-abc");
+  });
+});
