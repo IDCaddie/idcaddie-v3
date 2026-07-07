@@ -158,6 +158,32 @@ export async function listAppsWithCountsForCurrentUser(): Promise<DataResult<App
 
 // List the apps the current user may read. RLS (keyed on the user's tenant/org memberships)
 // decides visibility — we pass no tenant filter; the database is the authorization boundary.
+// Read-only ownership signal for the "Needs Attention" cleanup queue. Selects the two owner FKs
+// (business/technical) but exposes ONLY a computed `hasOwner` boolean — the raw profile ids are NEVER
+// returned to any caller/UI (keeps the DTO within the ids-only-when-needed discipline). RLS-scoped; no
+// tenant_id from the caller.
+export type AppOwnershipRow = { id: string; name: string; status: string; hasOwner: boolean };
+export async function listAppOwnershipForCurrentUser(): Promise<DataResult<AppOwnershipRow[]>> {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("apps")
+    .select("id, name, status, business_owner_user_id, technical_owner_user_id")
+    .order("name", { ascending: true });
+  if (error) {
+    console.error("[data/apps] listAppOwnershipForCurrentUser query failed");
+    return { ok: false, error: "query_failed" };
+  }
+  return {
+    ok: true,
+    data: (data ?? []).map((a) => ({
+      id: a.id,
+      name: a.name,
+      status: a.status,
+      hasOwner: a.business_owner_user_id != null || a.technical_owner_user_id != null,
+    })),
+  };
+}
+
 export async function listAppsForCurrentUser(): Promise<DataResult<AppSummary[]>> {
   const supabase = await createClient();
 
