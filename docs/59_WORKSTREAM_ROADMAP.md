@@ -22,7 +22,7 @@ per-PR log → [05_ENGINEERING_CHANGELOG.md](./05_ENGINEERING_CHANGELOG.md); con
 > change to either document's content.
 
 Today = **2026-07-07**. Repo HEADs at time of writing (FACT, from the canonical brief): `idcaddie-v3` main @ `768f91a`
-(PRs through #268 merged); `idcaddie-connector-runner` main @ `84ecf6d`.
+(PRs through #270 merged); `idcaddie-connector-runner` main @ `84ecf6d`.
 
 ---
 
@@ -54,7 +54,7 @@ is guarded by SECURITY DEFINER functions rather than an RLS policy.
 > epics, doc 27's Tracks A–P, doc 33's T1–T9; the row-level crosswalk lives in
 > [56_OLD_APP_PARITY_REGISTER.md](./56_OLD_APP_PARITY_REGISTER.md) and [57_CONNECTOR_PARITY_REGISTER.md](./57_CONNECTOR_PARITY_REGISTER.md).)
 
-**The safe-rebuild pattern (proven by #257–#268).** Every completed **P**/**Q** item below followed the same shape: a **NEW
+**The safe-rebuild pattern (proven by #257–#270).** Every completed **P**/**Q** item below followed the same shape: a **NEW
 read-only page/section** + a **user-scoped RLS DAL** + a **pure helper** + **render/unit tests** — with **zero migration, no
 service-role, no client-side tenant filter, ids-as-keys/booleans, fail-closed**. This is the pattern to keep copying. (FACT:
 this pattern is what these PRs did; INFERENCE: that it stays the right default for the next **P** items.)
@@ -86,6 +86,7 @@ Summary first, full detail cards below.
 | P-007 | App-detail catalog mapping | DONE | #264 | idcaddie-v3 | Yes (done) |
 | P-008 | Needs Attention alias backlog | DONE | #266 | idcaddie-v3 | Yes (done) |
 | P-009 | Audit search / filter | DONE | #268 | idcaddie-v3 | Yes (done) |
+| P-010 | Safe CSV export (apps + contracts) | DONE | #270 | idcaddie-v3 | Yes (done) |
 
 > **Provenance caveat (INFERENCE-check).** These PR numbers are **FACT per the canonical PR map** in the project brief and
 > mirror [05_ENGINEERING_CHANGELOG.md](./05_ENGINEERING_CHANGELOG.md). This doc was written **read-only** — no `git`/`gh` was
@@ -343,7 +344,6 @@ the immediate ordering lives in [61_NEXT_3_DAYS_PLAN.md](./61_NEXT_3_DAYS_PLAN.m
 
 | ID | Title | Workstream | Pattern | Safe before 2026-07-10? | Notes |
 |---|---|---|---|---|---|
-| P-010 | Safe CSV export | Product | Safe-rebuild (zero migration) | **Yes** | Export **within RLS scope** of already-visible read views (no new data) |
 | C-2c | Hosted staging live sync | Connectors | **Gated** | **GATED** | See §2 — needs decisions #3/#4; RISK-007 OPEN |
 | R-015 | RISK-007 criterion 15 | Risk | Human op | **No** (after 2026-07-10) | See §2 |
 | R-018 | RISK-007 closure register | Risk | Governance PR | **No** | See §2 — gated on 3–15 green |
@@ -382,17 +382,22 @@ the immediate ordering lives in [61_NEXT_3_DAYS_PLAN.md](./61_NEXT_3_DAYS_PLAN.m
 - **Dependencies:** Existing `/audit` surface + DAL. · **Blocked-by:** None.
 - **Next step:** Deep/historical/paginated audit search + export are separate future items (see P-010 for export).
 
-### P-010 — Safe CSV export — **scope-confirm first** (next candidate after P-009)
-- **Workstream:** Product · **Scope:** CSV export of **already-visible** read views (dashboards, apps, contracts), generated
-  **server-side within the caller's RLS scope** — exports nothing the user can't already see. Pure serializer + tests. **Zero
-  migration.**
-- **Why:** Export is a recurring old-app expectation and a common reviewer/OMC ask.
-- **Tradeoff / guardrail:** Must reuse the **same RLS DAL** as the on-screen view (no widened query, no service role, no
-  client-side tenant filter); export = serialize what RLS already returned. (INFERENCE: this is the safe shape; it must be
-  designed, not assumed.)
-- **Dependencies:** P-003/P-005 views. · **Blocked-by:** None.
-- **Safe before 2026-07-10:** **Yes** — provided it strictly serializes RLS-scoped reads.
-- **Next step:** Scope the first export view; add a render/serializer test asserting no out-of-scope rows.
+### P-010 — Safe CSV export (apps + contracts)
+- **Status:** DONE (merged). · **GitHub PR:** #270 · **Repo:** idcaddie-v3
+- **Workstream:** Product · **Scope (as shipped):** Client-side "Export CSV" on `/apps` and `/contracts` — a pure `to-csv.ts`
+  serializer (RFC-4180 quoting, CRLF) + a small `"use client"` button per surface. **Zero migration.**
+- **Result:** `/apps` and `/contracts` now have **safe client-side CSV export**.
+- **Constraints (FACT):** **apps + contracts only** (dashboards/catalog/audit/needs-attention/reports/invoice/license export
+  are NOT built); exports **only the already-rendered safe display columns** (`hasOwner`→Yes/No; nulls→""); **no server
+  export route/handler**; **no re-query**; **no widened DAL projection** (`apps.ts`/`contracts.ts` untouched); the client
+  button receives only pre-projected `{headers, rows, filename}`; **no raw ids/UUIDs or secrets** exported (asserted by
+  tests). Apps exports the current filtered/sorted view; contracts the visible list.
+- **Risk reduced:** A recurring old-app/reviewer ask, delivered with zero new data exposure and no new server surface.
+  **RISK-007 stays OPEN; Phase C stays BLOCKED; no live sync.**
+- **Dependencies:** P-005 (apps list) / P-004 (contracts list). · **Blocked-by:** None.
+- **Next step:** The **pre-2026-07-10 read-only product queue (P-001–P-010, Q-001) is COMPLETE.** Deeper exports
+  (dashboards/audit/paginated) are separate future items; the priority now shifts to the gated R-/C- track (below) on/after
+  2026-07-10, plus an optional docs refresh of [00_PRODUCT_STATUS](./00_PRODUCT_STATUS.md) / [05_ENGINEERING_CHANGELOG](./05_ENGINEERING_CHANGELOG.md).
 
 ### M-001 — Invoices RLS + read-only surface *(migration-gated)*
 - **Workstream:** Migration-gated data surfaces · **Scope:** A **new reviewed migration** adding the invoices table/columns

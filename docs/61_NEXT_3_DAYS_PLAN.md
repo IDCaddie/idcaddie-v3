@@ -35,10 +35,10 @@ full canonical plan), and `docs/60_DO_NOT_COPY_FROM_OLD_APP.md` (unsafe patterns
 ## 1. The plan in one line
 
 **FACT + INFERENCE:** For **2026-07-07 → 2026-07-09**, keep building **safe, read-only
-product surfaces** on the proven pattern. **P-008 (#266) and P-009 (#268) have now merged**, so the
-next remaining read-only item is **P-010 (safe CSV export) — only if there is time, and scope-confirm
-first** — because that is the highest-value thing we are actually *allowed* to do right now with zero
-governance risk.
+product surfaces** on the proven pattern. **P-008 (#266), P-009 (#268), and P-010 (#270) have now merged
+— the pre-2026-07-10 read-only product queue (P-001–P-010, Q-001) is COMPLETE.** What remains is docs
+housekeeping (optional `00`/`05` refresh) and the **gated** connector/RISK-007 track, which cannot
+legitimately start before 2026-07-10.
 **On/after 2026-07-10**, the RISK-007 closure track becomes actionable and takes priority:
 **R-015 → R-018 → R-019**, and only after those, the first sanctioned connector sync **C-2c**
 (gated). Nothing on the connector/live-sync track can legitimately start before 2026-07-10.
@@ -70,8 +70,8 @@ slower. Section 7 lists the specific things that fall on the wrong side of this 
 
 ## 3. What is already done (recap)
 
-**FACT — the ten merged product/quality PRs on the safe pattern above (#257–#264, #266, #268;
-#265 and #267 were docs PRs — the rebuild pack docs 55–61 and its refresh).** Full detail and the
+**FACT — the eleven merged product/quality PRs on the safe pattern above (#257–#264, #266, #268, #270;
+#265/#267/#269 were docs PRs — the rebuild pack docs 55–61 and its refreshes).** Full detail and the
 old-app parity mapping are in `docs/55_REBUILD_STATUS.md` §4.1 and `docs/56_OLD_APP_PARITY_REGISTER.md`.
 
 | Workstream | Delivered | GitHub PR |
@@ -86,6 +86,7 @@ old-app parity mapping are in `docs/55_REBUILD_STATUS.md` §4.1 and `docs/56_OLD
 | **P-007** | App-detail ↔ catalog mapping | **#264** |
 | **P-008** | "Needs Attention" catalog-alias backlog | **#266** |
 | **P-009** | Audit-log search / filter | **#268** |
+| **P-010** | Safe CSV export (apps + contracts) | **#270** |
 
 The **catalog trio is now complete**: **P-006** (a canonical catalog of apps, #263), **P-007**
 (mapping each app's detail page to that catalog, #264), and **P-008** (surfacing the unreviewed
@@ -96,7 +97,7 @@ now has a clean canonical-app notion, per-app mapping, and a review backlog — 
 
 ## 4. What to build next, in order (the 2026-07-07 → 2026-07-09 window)
 
-**Update (2026-07-07): P-008 (#266) and P-009 (#268) have merged** — recorded below as done. The remaining items
+**Update (2026-07-07): P-008 (#266), P-009 (#268), and P-010 (#270) have merged — the read-only product queue is COMPLETE.** Recorded below as done. The remaining items
 follow the Section 2 pattern: read-only, RLS-scoped DAL, pure helper, tests, **no migration, no
 service role**. The unmerged ones carry **GitHub PR: TBD**. Ordering rationale and dependencies
 also appear in `docs/59_WORKSTREAM_ROADMAP.md`.
@@ -120,34 +121,33 @@ also appear in `docs/59_WORKSTREAM_ROADMAP.md`.
   all-time (never falsely narrows).
 - **Detail:** `docs/59_WORKSTREAM_ROADMAP.md` (P-009). **Next remaining read-only item: P-010 (below).**
 
-### P-010 — Safe CSV export (GitHub PR: TBD) — **only if scope is tight and time remains**
-- **What:** Let a user export data they can *already see* (e.g. the app inventory or the
-  contract/renewal view) as a CSV (comma-separated values) file.
-- **Why it is optional (INFERENCE):** It adds real user value but touches file-generation and
-  formatting details that can eat a day. If P-008 and P-009 take the window, **drop P-010** to
-  next window rather than rush it.
-- **Why it is still "safe":** the export is generated **server-side from the same RLS-scoped
-  DAL** that already backs the on-screen view — it exposes **nothing** the user cannot already
-  read on the page. No new data path, no new table, no service role.
-- **Guardrails (FACT-of-pattern):** export exactly the columns already shown; generate on the
-  server from the RLS-scoped read (never a broad/service-role read); fail-closed (an empty or
-  denied read produces an empty file, never someone else's rows); render/unit tests on the pure
-  CSV-serialisation helper. **Zero migration.**
+### P-010 — Safe CSV export (apps + contracts) — **DONE (#270)**
+- **Delivered:** a client-side "Export CSV" on `/apps` and `/contracts` — a pure `to-csv.ts` serializer
+  (RFC-4180 quoting, CRLF) + a small `"use client"` button per surface. **Zero migration.**
+- **Result:** both lists now export the **already-rendered safe display columns** as CSV.
+- **Constraints (FACT):** **apps + contracts only**; already-rendered safe display columns only
+  (`hasOwner`→Yes/No; nulls→""); **no server export route**, **no re-query**, **no widened DAL projection**
+  (`apps.ts`/`contracts.ts` untouched); the client button receives only pre-projected `{headers, rows,
+  filename}`; **no raw ids/UUIDs or secrets** exported (asserted by tests). Fail-safe: no button when the read
+  failed. Apps exports the current filtered/sorted view; contracts the visible list.
+- **Detail:** `docs/59_WORKSTREAM_ROADMAP.md` (P-010). **This was the last read-only product item.**
 
 ---
 
 ## 5. The exact next recommended item — and why
 
-**RECOMMENDATION (INFERENCE, from the facts below): with P-006/P-007/P-008 and P-009 now merged,
-the only remaining pre-2026-07-10 read-only item is `P-010` (safe CSV export) — and it should be
-picked up ONLY if the window has room, and its scope confirmed first.**
+**RECOMMENDATION (INFERENCE, from the facts below): the pre-2026-07-10 read-only product queue
+(P-001–P-010, Q-001) is COMPLETE — there is no remaining safe-to-build-now product item. The next
+actions are (a) an OPTIONAL docs refresh of `00_PRODUCT_STATUS` / `05_ENGINEERING_CHANGELOG` to cover
+#257–#270, and then (b) the GATED connector/RISK-007 track, which cannot legitimately start before
+2026-07-10.**
 
-Why P-010 (scope-confirmed) and not anything on the connector/RISK-007 track:
+Why nothing else on the product track, and why the connector/RISK-007 track waits:
 
-- **P-010 is the last read-only item, and it is optional (FACT + INFERENCE).** CSV export touches
-  file-generation + column-scoping details that can eat a day; it must export **only** the safe DTO
-  columns already rendered on-screen (no raw ids/tenant/secret), server-side from the same RLS-scoped
-  DAL. Confirm the exact lists + columns before starting; if the window is tight, defer it.
+- **The read-only queue is done (FACT).** P-001–P-010 + Q-001 have merged (#257–#264, #266, #268, #270).
+  Deeper exports (dashboards/audit/paginated), invoices, license/ELU, and the people directory all need
+  either a migration (default-deny tables), a privacy review, or the connector track — none are
+  "zero-migration read-only now".
 - **The RISK-007 / connector items literally cannot start yet (FACT).** The next technical
   item on that track, **R-015** (RISK-007 **criterion 15**, permanent deletion of the staging
   source Slack client secret), is **date-gated and only actionable *after* 2026-07-10** — it
@@ -156,7 +156,8 @@ Why P-010 (scope-confirmed) and not anything on the connector/RISK-007 track:
   and must not be forced.
 
 **INFERENCE:** When 2026-07-10 arrives, the connector/RISK-007 track (Section 6) becomes the priority
-(**R-015 → R-018 → R-019**, then the gated **C-2c**) and should preempt further `P-` work.
+(**R-015 → R-018 → R-019**, then the gated **C-2c**) and should preempt further `P-` work. Each is a
+separate, explicit human decision — none is unblocked by this plan.
 
 ---
 
@@ -280,15 +281,15 @@ start it in this window, for a specific, honest reason. Deferring is a decision,
 
 ## 8. Day-by-day sketch (INFERENCE — a suggestion, not a contract)
 
-- **2026-07-07 (Mon-equivalent):** Start and land **P-008** (alias backlog). Begin **P-009**
-  (audit search/filter).
-- **2026-07-08:** Finish **P-009**. If scope is tight, stop here and carry P-010 forward.
-- **2026-07-09:** **P-010** (safe CSV export) *only if* P-008 + P-009 are done and tested;
-  otherwise polish/tests and pre-stage the RISK-007 track paperwork (read-only prep for R-018,
-  no early action on R-015).
+- **2026-07-07 (actual):** **P-008 (#266), P-009 (#268), and P-010 (#270) all landed** — the whole
+  read-only product queue (P-001–P-010, Q-001) is complete ahead of schedule.
+- **2026-07-08 / 07-09:** No remaining safe-to-build-now product item. Optional: the docs refresh of
+  `00_PRODUCT_STATUS` / `05_ENGINEERING_CHANGELOG` to cover #257–#270. **No early action on the RISK-007
+  track** (R-015 is date-gated); read-only prep for R-018 paperwork is the most that may happen.
 - **2026-07-10:** The recovery window clears. **R-015** becomes actionable — a human operator
   confirms permanent deletion of the staging source secret (metadata only). Then the track
-  continues **R-018 → R-019 → C-2c** per Section 6, on the sanctioned order.
+  continues **R-018 → R-019 → C-2c** per Section 6, on the sanctioned order — each a separate explicit
+  decision (nothing here unblocks them).
 
 **INFERENCE:** If any `P-` item slips, prefer shipping fewer items cleanly over rushing three.
 The window's value is *safe* progress, not item count.
