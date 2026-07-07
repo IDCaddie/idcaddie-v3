@@ -69,7 +69,8 @@ export async function listContractsLinkedToApp(
 
   const { data, error } = await supabase
     .from("contracts")
-    .select("id, contract_name, vendor_name, status, category, renewal_date, end_date")
+    // owner_user_id is read ONLY to compute hasOwner; it is never returned (no raw profile id).
+    .select("id, contract_name, vendor_name, status, category, renewal_date, end_date, total_cost, currency, owner_user_id, renewal_responsibility")
     .in("id", contractIds)
     .order("contract_name", { ascending: true });
   if (error) {
@@ -86,6 +87,10 @@ export async function listContractsLinkedToApp(
       category: c.category,
       renewalDate: c.renewal_date,
       endDate: c.end_date,
+      totalCost: c.total_cost,
+      currency: c.currency,
+      hasOwner: c.owner_user_id != null,
+      renewalResponsibility: c.renewal_responsibility,
     })),
   };
 }

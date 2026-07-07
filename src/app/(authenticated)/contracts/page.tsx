@@ -1,7 +1,19 @@
 import Link from "next/link";
 import { listContractsForCurrentUser } from "@/lib/data/contracts";
+import { formatMoney } from "@/lib/data/dashboard-overview";
+import { renewalFlag, type RenewalFlag } from "@/lib/data/contract-attention";
 
 export const metadata = { title: "Contracts · ID Caddie" };
+
+function RenewalBadge({ flag }: { flag: RenewalFlag }) {
+  if (flag === "due30")
+    return <span className="ml-2 rounded-full border border-amber-500 px-1.5 py-0.5 text-[10px] text-amber-700 dark:text-amber-400">≤30d</span>;
+  if (flag === "due90")
+    return <span className="ml-2 rounded-full border border-zinc-400 px-1.5 py-0.5 text-[10px] text-zinc-500">≤90d</span>;
+  if (flag === "missing")
+    return <span className="ml-2 rounded-full border border-zinc-400 px-1.5 py-0.5 text-[10px] text-zinc-500">no date</span>;
+  return null;
+}
 
 // Read-only contracts list (build-sequence Stage 5 — read-only slice). Renders only what the
 // user-scoped server DAL returns; RLS is the authorization boundary (tenant members + related
@@ -11,6 +23,7 @@ export const metadata = { title: "Contracts · ID Caddie" };
 // cookies() in the server client (like /apps).
 export default async function ContractsPage() {
   const result = await listContractsForCurrentUser();
+  const now = new Date();
 
   return (
     <main className="flex flex-1 flex-col gap-6 p-8">
@@ -67,6 +80,7 @@ export default async function ContractsPage() {
                   <th className="py-2 pr-4 font-medium">Category</th>
                   <th className="py-2 pr-4 font-medium">Renewal</th>
                   <th className="py-2 pr-4 font-medium">End</th>
+                  <th className="py-2 pr-4 text-right font-medium">Value</th>
                 </tr>
               </thead>
               <tbody>
@@ -79,6 +93,11 @@ export default async function ContractsPage() {
                       <Link href={`/contracts/${contract.id}`} className="underline">
                         {contract.contractName}
                       </Link>
+                      {!contract.hasOwner ? (
+                        <span className="ml-2 rounded-full border border-zinc-400 px-1.5 py-0.5 text-[10px] text-zinc-500">
+                          no owner
+                        </span>
+                      ) : null}
                     </td>
                     <td className="py-2 pr-4 text-zinc-600 dark:text-zinc-400">
                       {contract.vendorName ?? "—"}
@@ -93,9 +112,15 @@ export default async function ContractsPage() {
                     </td>
                     <td className="py-2 pr-4 text-zinc-600 dark:text-zinc-400">
                       {contract.renewalDate ?? "—"}
+                      <RenewalBadge flag={renewalFlag(contract.renewalDate, contract.endDate, now)} />
                     </td>
                     <td className="py-2 pr-4 text-zinc-600 dark:text-zinc-400">
                       {contract.endDate ?? "—"}
+                    </td>
+                    <td className="py-2 pr-4 text-right tabular-nums text-zinc-600 dark:text-zinc-400">
+                      {contract.totalCost == null
+                        ? "—"
+                        : formatMoney(contract.totalCost, contract.currency ?? "unspecified")}
                     </td>
                   </tr>
                 ))}

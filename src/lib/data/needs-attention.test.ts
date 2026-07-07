@@ -11,7 +11,7 @@ const appsCounts = (rows: Array<{ id: string; name: string; vendorName?: string 
 const appsOwnership = (rows: Array<{ id: string; name: string; hasOwner: boolean }>): NeedsAttentionInputs["appsOwnership"] =>
   ({ ok: true, data: rows.map((r) => ({ id: r.id, name: r.name, status: "active", hasOwner: r.hasOwner })) });
 const contracts = (rows: Array<{ id: string; contractName: string; renewalDate: string | null; endDate: string | null }>): NeedsAttentionInputs["contracts"] =>
-  ({ ok: true, data: rows.map((r) => ({ id: r.id, contractName: r.contractName, vendorName: null, status: "active", category: null, renewalDate: r.renewalDate, endDate: r.endDate })) });
+  ({ ok: true, data: rows.map((r) => ({ id: r.id, contractName: r.contractName, vendorName: null, status: "active", category: null, renewalDate: r.renewalDate, endDate: r.endDate, totalCost: null, currency: null, hasOwner: false, renewalResponsibility: null })) });
 const connectors = (rows: Array<{ id: string; provider: string; status: string; runStatus?: string }>): NeedsAttentionInputs["connectors"] =>
   ({ ok: true, data: rows.map((r) => ({ id: r.id, provider: r.provider, displayName: null, status: r.status, safeScopes: [], createdAt: "t", updatedAt: "t", lastRun: r.runStatus ? { status: r.runStatus, startedAt: null, completedAt: null, failureCode: null, failureLabel: null, recordsSeen: null, recordsImported: null, recordsFailed: null } : null })) });
 const reports = (unmatched: number | null): NeedsAttentionInputs["reports"] =>
