@@ -7,7 +7,7 @@ import { NAV_SECTIONS, IMPLEMENTED_ROUTES } from "../../app/(authenticated)/nav-
 
 // Fixture builders for the exact DAL result shapes.
 const appsCounts = (rows: Array<{ id: string; name: string; vendorName?: string | null; linkedContractCount: number }>): NeedsAttentionInputs["appsCounts"] =>
-  ({ ok: true, data: rows.map((r) => ({ id: r.id, name: r.name, vendorName: r.vendorName ?? null, category: null, status: "active", linkedContractCount: r.linkedContractCount, appUserCount: 0 })) });
+  ({ ok: true, data: rows.map((r) => ({ id: r.id, name: r.name, vendorName: r.vendorName ?? null, category: null, status: "active", linkedContractCount: r.linkedContractCount, appUserCount: 0, hasOwner: false })) });
 const appsOwnership = (rows: Array<{ id: string; name: string; hasOwner: boolean }>): NeedsAttentionInputs["appsOwnership"] =>
   ({ ok: true, data: rows.map((r) => ({ id: r.id, name: r.name, status: "active", hasOwner: r.hasOwner })) });
 const contracts = (rows: Array<{ id: string; contractName: string; renewalDate: string | null; endDate: string | null }>): NeedsAttentionInputs["contracts"] =>

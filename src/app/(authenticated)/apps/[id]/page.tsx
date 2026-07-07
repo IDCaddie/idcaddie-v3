@@ -9,6 +9,7 @@ import {
 } from "@/lib/data/app-account-intelligence";
 import { classifySlackSync, SLACK_SYNC_COPY } from "@/lib/data/slack-sync-display";
 import { getLatestSlackSyncRunForCurrentTenant } from "@/lib/data/manual-sync-runs";
+import { appAttentionFlags } from "@/lib/data/apps-inventory";
 
 export const metadata = { title: "App · ID Caddie" };
 
@@ -59,6 +60,14 @@ export default async function AppDetailPage({
   // Latest manual-sync run status (RLS-scoped, safe aggregates) — only for a Slack-synced app.
   const slackRun = slackSync.isSlackSynced ? await getLatestSlackSyncRunForCurrentTenant() : null;
 
+  // Read-only attention flags from already-fetched, RLS-scoped data (booleans only — never raw ids/PII).
+  const hasOwner = result.ok ? result.data.hasBusinessOwner || result.data.hasTechnicalOwner : false;
+  const hasLinkedContract = linkedContracts && linkedContracts.ok ? linkedContracts.data.length > 0 : null;
+  const hasDiscoveredAccounts = appUsers && appUsers.ok ? appUsers.data.length > 0 : null;
+  const attentionFlags = result.ok
+    ? appAttentionFlags({ hasOwner, hasLinkedContract, hasDiscoveredAccounts })
+    : [];
+
   return (
     <main className="flex flex-1 flex-col gap-6 p-8">
       <div className="text-sm">
@@ -97,6 +106,21 @@ export default async function AppDetailPage({
               </div>
             ) : null}
           </header>
+
+          {attentionFlags.length > 0 ? (
+            <section className="space-y-2 text-sm">
+              <h2 className="font-medium">Needs attention</h2>
+              <ul className="flex flex-wrap gap-2">
+                {attentionFlags.map((f) => (
+                  <li key={f.key}>
+                    <span className="rounded-full border border-amber-500 px-2 py-0.5 text-xs text-amber-700 dark:text-amber-400">
+                      {f.label}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ) : null}
 
           {slackSync.isSlackSynced ? (
             <section className="space-y-2 text-sm">
@@ -161,14 +185,17 @@ export default async function AppDetailPage({
           </section>
 
           <section className="space-y-2 text-sm">
-            <h2 className="font-medium">Ownership (organization IDs)</h2>
+            <h2 className="font-medium">Ownership</h2>
             <p className="text-xs text-zinc-500">
-              Organization names are not enriched yet (deferred); IDs shown for now.
+              Presence only — owner user ids and organization ids are not shown (name enrichment is deferred).
             </p>
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-              <Field label="Responsible org" value={result.data.responsibleOrgId ?? "—"} />
-              <Field label="Paying org" value={result.data.payingOrgId ?? "—"} />
-              <Field label="Procurement org" value={result.data.procurementOrgId ?? "—"} />
+              <Field label="Business owner assigned" value={result.data.hasBusinessOwner ? "Yes" : "No"} />
+              <Field label="Technical owner assigned" value={result.data.hasTechnicalOwner ? "Yes" : "No"} />
+              <Field label="Owner assigned (any)" value={hasOwner ? "Yes" : "No"} />
+              <Field label="Responsible org" value={result.data.responsibleOrgId ? "Assigned" : "—"} />
+              <Field label="Paying org" value={result.data.payingOrgId ? "Assigned" : "—"} />
+              <Field label="Procurement org" value={result.data.procurementOrgId ? "Assigned" : "—"} />
             </div>
           </section>
 
