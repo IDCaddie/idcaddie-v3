@@ -2,6 +2,7 @@ import Link from "next/link";
 import { listContractsForCurrentUser } from "@/lib/data/contracts";
 import { formatMoney } from "@/lib/data/dashboard-overview";
 import { renewalFlag, type RenewalFlag } from "@/lib/data/contract-attention";
+import { ExportCsvButton } from "./export-csv-button";
 
 export const metadata = { title: "Contracts · ID Caddie" };
 
@@ -24,6 +25,21 @@ function RenewalBadge({ flag }: { flag: RenewalFlag }) {
 export default async function ContractsPage() {
   const result = await listContractsForCurrentUser();
   const now = new Date();
+
+  // CSV export = the SAME visible rows, projected to safe display columns ONLY (no id/raw fields).
+  const exportHeaders = ["Name", "Vendor", "Status", "Category", "Renewal date", "End date", "Value", "Owner assigned"];
+  const exportRows = result.ok
+    ? result.data.map((c) => [
+        c.contractName,
+        c.vendorName ?? "",
+        c.status,
+        c.category ?? "",
+        c.renewalDate ?? "",
+        c.endDate ?? "",
+        c.totalCost == null ? "" : formatMoney(c.totalCost, c.currency ?? "unspecified"),
+        c.hasOwner ? "Yes" : "No",
+      ])
+    : [];
 
   return (
     <main className="flex flex-1 flex-col gap-6 p-8">
@@ -67,8 +83,16 @@ export default async function ContractsPage() {
         </div>
       ) : (
         <section className="space-y-2 text-sm">
-          <div className="text-zinc-500">
-            {result.data.length} contract{result.data.length === 1 ? "" : "s"}
+          <div className="flex items-center gap-3">
+            <div className="text-zinc-500">
+              {result.data.length} contract{result.data.length === 1 ? "" : "s"}
+            </div>
+            <span className="ml-auto flex items-center gap-2">
+              <ExportCsvButton headers={exportHeaders} rows={exportRows} filename="contracts-export.csv" />
+              <span className="text-xs text-zinc-400">
+                Exports the rows currently shown with safe display columns only.
+              </span>
+            </span>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full border-collapse text-left">

@@ -8,6 +8,7 @@ import {
   type AppFilter,
   type AppSort,
 } from "@/lib/data/apps-inventory";
+import { ExportCsvButton } from "./export-csv-button";
 
 export const metadata = { title: "Apps · ID Caddie" };
 
@@ -33,6 +34,18 @@ export default async function AppsPage({
 
   const result = await listAppsWithCountsForCurrentUser();
   const rows = result.ok ? filterSortApps(result.data, { q, filters, sort }) : [];
+
+  // CSV export = the SAME filtered/sorted rows, projected to safe display columns ONLY (no id/raw fields).
+  const exportHeaders = ["Name", "Vendor", "Category", "Status", "Linked contracts", "App users", "Owner assigned"];
+  const exportRows = rows.map((a) => [
+    a.name,
+    a.vendorName ?? "",
+    a.category ?? "",
+    a.status,
+    String(a.linkedContractCount),
+    String(a.appUserCount),
+    a.hasOwner ? "Yes" : "No",
+  ]);
 
   // Build a URL that toggles a filter or sets a sort, preserving the current search text + other state.
   const hrefWith = (over: { filter?: AppFilter; sort?: AppSort }) => {
@@ -100,6 +113,14 @@ export default async function AppsPage({
             <Link href="/apps" className="text-xs text-zinc-500 underline">
               clear
             </Link>
+          ) : null}
+          {rows.length > 0 ? (
+            <span className="ml-auto flex items-center gap-2">
+              <ExportCsvButton headers={exportHeaders} rows={exportRows} filename="apps-export.csv" />
+              <span className="text-xs text-zinc-400">
+                Exports the rows currently shown with safe display columns only.
+              </span>
+            </span>
           ) : null}
         </div>
       ) : null}
