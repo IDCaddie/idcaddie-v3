@@ -9,6 +9,7 @@ import type { listAppsWithCountsForCurrentUser, listAppOwnershipForCurrentUser }
 import type { listContractsForCurrentUser } from "./contracts";
 import type { listConnectorsForCurrentUser } from "./connectors";
 import type { getReportsSummaryForCurrentUser } from "./reports";
+import type { listCatalogForCurrentUser } from "./catalog";
 
 export type AttentionItem = { label: string; sublabel?: string; href: string };
 export type AttentionState = "ok" | "empty" | "error" | "deferred";
@@ -31,6 +32,7 @@ type AppsOwnershipResult = Awaited<ReturnType<typeof listAppOwnershipForCurrentU
 type ContractsResult = Awaited<ReturnType<typeof listContractsForCurrentUser>>;
 type ConnectorsResult = Awaited<ReturnType<typeof listConnectorsForCurrentUser>>;
 type ReportsResult = { ok: true; data: Awaited<ReturnType<typeof getReportsSummaryForCurrentUser>> } | { ok: false };
+type CatalogResult = Awaited<ReturnType<typeof listCatalogForCurrentUser>>;
 
 export type NeedsAttentionInputs = {
   appsCounts: AppsCountsResult;
@@ -38,6 +40,7 @@ export type NeedsAttentionInputs = {
   contracts: ContractsResult;
   connectors: ConnectorsResult;
   reports: ReportsResult;
+  catalogAliases: CatalogResult;
 };
 
 const BAD_CONNECTOR_STATUS = new Set(["error", "revoked", "disabled"]);
@@ -166,6 +169,35 @@ export function buildNeedsAttention(input: NeedsAttentionInputs): NeedsAttention
     items: reportsOk && unmatched != null && unmatched > 0 ? [{ label: `${unmatched} unmatched accounts`, href: "/people" }] : [],
     href: "/people",
   });
+
+  // 7. Catalog aliases pending review — review_status is a bounded enum (0024 CHECK: pending/confirmed/
+  //    rejected/auto), so "pending" is reliable (no deferred guess needed). Safe display only: the alias
+  //    VALUE + its product/vendor NAMES (joined from the same RLS-scoped catalog view) — never reviewed_by/
+  //    reviewed_at/provenance/source/normalized_name/raw ids. No per-alias page, so items link to /catalog.
+  let catalogPendingItems: AttentionItem[] = [];
+  if (input.catalogAliases.ok) {
+    const view = input.catalogAliases.data;
+    const productById = new Map(view.products.map((p) => [p.id, p]));
+    const vendorById = new Map(view.vendors.map((v) => [v.id, v]));
+    catalogPendingItems = view.aliases
+      .filter((a) => a.reviewStatus === "pending")
+      .map((a) => {
+        const prod = productById.get(a.productId);
+        const vend = prod?.vendorId ? vendorById.get(prod.vendorId) : undefined;
+        const sublabel = prod ? (vend ? `${prod.name} · ${vend.name}` : prod.name) : undefined;
+        return { label: a.aliasValue, sublabel, href: "/catalog" };
+      });
+  }
+  sections.push(
+    section(
+      "catalog-aliases-pending",
+      "Catalog aliases pending review",
+      "Canonical-catalog aliases still awaiting review — confirm or reject them on the App Catalog so the app graph stays clean.",
+      input.catalogAliases.ok,
+      catalogPendingItems,
+      "/catalog",
+    ),
+  );
 
   return { sections };
 }

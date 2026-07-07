@@ -16,6 +16,14 @@ const connectors = (rows: Array<{ id: string; provider: string; status: string; 
   ({ ok: true, data: rows.map((r) => ({ id: r.id, provider: r.provider, displayName: null, status: r.status, safeScopes: [], createdAt: "t", updatedAt: "t", lastRun: r.runStatus ? { status: r.runStatus, startedAt: null, completedAt: null, failureCode: null, failureLabel: null, recordsSeen: null, recordsImported: null, recordsFailed: null } : null })) });
 const reports = (unmatched: number | null): NeedsAttentionInputs["reports"] =>
   ({ ok: true, data: { appsVisible: 0, contractsVisible: 0, accountsVisible: 0, accountsMatched: null, accountsUnmatched: unmatched, filesVisible: 0 } });
+const catalogAliases = (rows: Array<{ id: string; aliasValue: string; reviewStatus: string; productName?: string }>): NeedsAttentionInputs["catalogAliases"] => ({
+  ok: true,
+  data: {
+    vendors: [{ id: "v1", name: "Atlassian", websiteDomain: null }],
+    products: rows.map((r) => ({ id: `p-${r.id}`, vendorId: "v1", name: r.productName ?? "Jira", category: null })),
+    aliases: rows.map((r) => ({ id: r.id, productId: `p-${r.id}`, aliasType: "domain", aliasValue: r.aliasValue, reviewStatus: r.reviewStatus, confidence: null })),
+  },
+});
 
 const base = (): NeedsAttentionInputs => ({
   appsCounts: appsCounts([]),
@@ -23,6 +31,7 @@ const base = (): NeedsAttentionInputs => ({
   contracts: contracts([]),
   connectors: connectors([]),
   reports: reports(0),
+  catalogAliases: catalogAliases([]),
 });
 const sec = (r: ReturnType<typeof buildNeedsAttention>, key: string) => r.sections.find((s) => s.key === key)!;
 
@@ -72,9 +81,24 @@ describe("buildNeedsAttention — categorization", () => {
     expect(s.items).toEqual([{ label: "4 unmatched accounts", href: "/people" }]);
   });
 
+  it("catalog aliases pending: only review_status='pending', joined product/vendor names, links to /catalog", () => {
+    const r = buildNeedsAttention({ ...base(), catalogAliases: catalogAliases([
+      { id: "x1", aliasValue: "jira.acme.com", reviewStatus: "pending", productName: "Jira" },
+      { id: "x2", aliasValue: "conf.acme.com", reviewStatus: "confirmed", productName: "Confluence" },
+    ]) });
+    const s = sec(r, "catalog-aliases-pending");
+    expect(s.state).toBe("ok");
+    expect(s.count).toBe(1);
+    expect(s.items).toEqual([{ label: "jira.acme.com", sublabel: "Jira · Atlassian", href: "/catalog" }]);
+  });
+
+  it("catalog aliases: a failed catalog read fails closed to 'error'", () => {
+    expect(sec(buildNeedsAttention({ ...base(), catalogAliases: { ok: false, error: "query_failed" } }), "catalog-aliases-pending").state).toBe("error");
+  });
+
   it("empty inputs → every actionable section is 'empty' (all clear); unmanaged is 'deferred'", () => {
     const r = buildNeedsAttention(base());
-    for (const key of ["apps-missing-owner", "apps-missing-contract", "contracts-missing-renewal", "connector-issues", "unmatched-accounts"]) {
+    for (const key of ["apps-missing-owner", "apps-missing-contract", "contracts-missing-renewal", "connector-issues", "unmatched-accounts", "catalog-aliases-pending"]) {
       expect(sec(r, key).state).toBe("empty");
     }
     expect(sec(r, "unmanaged-apps").state).toBe("deferred");
@@ -97,9 +121,9 @@ describe("buildNeedsAttention — categorization", () => {
 describe("needs-attention — safety", () => {
   it("output never contains a raw owner id, fact_json, connector_secrets, or token", () => {
     // even if owner ids somehow reached the builder, they aren't in AppOwnershipRow — assert the serialized output is clean
-    const r = buildNeedsAttention({ ...base(), appsOwnership: appsOwnership([{ id: "a1", name: "Figma", hasOwner: false }]), reports: reports(3) });
+    const r = buildNeedsAttention({ ...base(), appsOwnership: appsOwnership([{ id: "a1", name: "Figma", hasOwner: false }]), reports: reports(3), catalogAliases: catalogAliases([{ id: "x1", aliasValue: "jira.acme.com", reviewStatus: "pending", productName: "Jira" }]) });
     const json = JSON.stringify(r);
-    for (const forbidden of ["fact_json", "connector_secrets", "discovery_facts", "business_owner_user_id", "technical_owner_user_id", "token", "ciphertext"]) {
+    for (const forbidden of ["fact_json", "connector_secrets", "discovery_facts", "business_owner_user_id", "technical_owner_user_id", "token", "ciphertext", "reviewed_by", "reviewed_at", "provenance", "normalized_name"]) {
       expect(json).not.toContain(forbidden);
     }
   });

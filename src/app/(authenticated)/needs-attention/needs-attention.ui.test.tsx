@@ -21,6 +21,7 @@ describe("/needs-attention render", () => {
       sections: [
         { key: "apps-missing-owner", title: "Apps missing an owner", explanation: "x", state: "ok", count: 1, items: [{ label: "Figma", sublabel: "active", href: "/apps/a1" }] },
         { key: "contracts-missing-renewal", title: "Contracts missing a renewal date", explanation: "x", state: "empty", count: 0, items: [] },
+        { key: "catalog-aliases-pending", title: "Catalog aliases pending review", explanation: "x", state: "ok", count: 1, items: [{ label: "jira.acme.com", sublabel: "Jira · Atlassian", href: "/catalog" }] },
       ],
     });
     render(await NeedsAttentionPage());
@@ -28,5 +29,8 @@ describe("/needs-attention render", () => {
     expect(screen.getByText("Figma")).toBeTruthy();
     expect(screen.getByText("Contracts missing a renewal date")).toBeTruthy();
     expect(screen.getByText("All clear")).toBeTruthy();
+    // the new catalog-aliases section renders with its item linking to /catalog
+    expect(screen.getByText("Catalog aliases pending review")).toBeTruthy();
+    expect(screen.getByText("jira.acme.com")).toBeTruthy();
   });
 });
