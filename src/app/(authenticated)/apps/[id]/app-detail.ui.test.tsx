@@ -12,12 +12,14 @@ vi.mock("@/lib/data/links", () => ({ listContractsLinkedToApp: vi.fn() }));
 vi.mock("@/lib/data/app-users", () => ({ listAppUsersForApp: vi.fn() }));
 vi.mock("@/lib/data/app-user-matches", () => ({ listMatchesForAppUsers: vi.fn() }));
 vi.mock("@/lib/data/manual-sync-runs", () => ({ getLatestSlackSyncRunForCurrentTenant: vi.fn() }));
+vi.mock("@/lib/data/catalog", () => ({ getCatalogMappingForApp: vi.fn() }));
 
 import AppDetailPage from "./page";
 import { getAppDetailForCurrentUser } from "@/lib/data/apps";
 import { listContractsLinkedToApp } from "@/lib/data/links";
 import { listAppUsersForApp } from "@/lib/data/app-users";
 import { listMatchesForAppUsers } from "@/lib/data/app-user-matches";
+import { getCatalogMappingForApp } from "@/lib/data/catalog";
 
 const asMock = <T,>(fn: T) => fn as unknown as { mockResolvedValue: (v: unknown) => void };
 const OWNER_UUID = "11111111-2222-3333-4444-555555555555";
@@ -41,6 +43,7 @@ describe("/apps/[id] render", () => {
     asMock(listContractsLinkedToApp).mockResolvedValue({ ok: true, data: [] });
     asMock(listAppUsersForApp).mockResolvedValue({ ok: true, data: [] });
     asMock(listMatchesForAppUsers).mockResolvedValue({ ok: true, data: [] });
+    asMock(getCatalogMappingForApp).mockResolvedValue({ ok: true, data: { mapped: false } });
 
     const { container } = render(await AppDetailPage({ params: Promise.resolve({ id: "app-uuid-abc" }) }));
     expect(screen.getByText("Needs attention")).toBeTruthy();
@@ -48,8 +51,33 @@ describe("/apps/[id] render", () => {
     expect(screen.getByText("No linked contract")).toBeTruthy();
     expect(screen.getByText("No discovered accounts")).toBeTruthy();
     expect(screen.getByText("Business owner assigned")).toBeTruthy();
+    // unmapped catalog state
+    expect(screen.getByText("Catalog mapping")).toBeTruthy();
+    expect(screen.getByText(/not mapped to the canonical catalog yet/)).toBeTruthy();
     // regression: no raw owner/app UUID leaks into the rendered UI
     expect(container.textContent).not.toContain(OWNER_UUID);
+    expect(container.textContent).not.toContain("app-uuid-abc");
+  });
+
+  it("renders a mapped catalog product (name/vendor/category/alias count) with no raw ids", async () => {
+    const PRODUCT_UUID = "99999999-8888-7777-6666-555555555555";
+    asMock(getAppDetailForCurrentUser).mockResolvedValue(detail);
+    asMock(listContractsLinkedToApp).mockResolvedValue({ ok: true, data: [] });
+    asMock(listAppUsersForApp).mockResolvedValue({ ok: true, data: [] });
+    asMock(listMatchesForAppUsers).mockResolvedValue({ ok: true, data: [] });
+    asMock(getCatalogMappingForApp).mockResolvedValue({
+      ok: true,
+      data: { mapped: true, productName: "Confluence", vendorName: "Atlassian", category: "Docs", aliasCount: 3 },
+    });
+
+    const { container } = render(await AppDetailPage({ params: Promise.resolve({ id: "app-uuid-abc" }) }));
+    expect(screen.getByText("Catalog mapping")).toBeTruthy();
+    expect(screen.getByText("Canonical product")).toBeTruthy();
+    expect(screen.getByText("Confluence")).toBeTruthy();
+    expect(screen.getByText("Atlassian")).toBeTruthy();
+    expect(screen.getByText("Docs")).toBeTruthy();
+    // no raw canonical/product UUID leaks
+    expect(container.textContent).not.toContain(PRODUCT_UUID);
     expect(container.textContent).not.toContain("app-uuid-abc");
   });
 });

@@ -7,7 +7,7 @@ import { join } from "node:path";
 const createClient = vi.fn();
 vi.mock("@/lib/supabase/server", () => ({ createClient: () => createClient() }));
 
-import { listCatalogForCurrentUser } from "./catalog";
+import { listCatalogForCurrentUser, getCatalogMappingForApp } from "./catalog";
 
 type TableData = { data: unknown[] | null; error: unknown };
 function makeSupabase(byTable: Record<string, TableData>) {
@@ -57,5 +57,65 @@ describe("listCatalogForCurrentUser", () => {
     for (const f of ["normalized_name", "provenance", "reviewed_by", "reviewed_at", "fact_json", "connector_secrets", "discovery_facts", "SERVICE_ROLE"]) {
       expect(code, `catalog.ts must not reference ${f}`).not.toContain(f);
     }
+  });
+});
+
+// `.select().eq().maybeSingle()` (apps/products/vendors single reads) AND `.select().eq()` (awaitable alias
+// list) resolve to the configured per-table result.
+function mappingSupabase(byTable: Record<string, { data: unknown; error: unknown }>) {
+  const from = (table: string) => {
+    const r = byTable[table] ?? { data: null, error: null };
+    const p = Promise.resolve(r);
+    const eqResult = { maybeSingle: () => p, then: (...a: Parameters<Promise<typeof r>["then"]>) => p.then(...a) };
+    return { select: () => ({ eq: () => eqResult }) };
+  };
+  return { from };
+}
+
+describe("getCatalogMappingForApp", () => {
+  it("returns a mapped product with safe display fields only (no raw ids)", async () => {
+    createClient.mockResolvedValue(
+      mappingSupabase({
+        apps: { data: { canonical_app_id: "prod-uuid" }, error: null },
+        app_products: { data: { name: "Confluence", category: "Docs", vendor_id: "vend-uuid" }, error: null },
+        vendors: { data: { name: "Atlassian" }, error: null },
+        app_aliases: { data: [{ id: "a1" }, { id: "a2" }, { id: "a3" }], error: null },
+      }),
+    );
+    const res = await getCatalogMappingForApp("app1");
+    expect(res).toEqual({ ok: true, data: { mapped: true, productName: "Confluence", vendorName: "Atlassian", category: "Docs", aliasCount: 3 } });
+    if (res.ok && res.data.mapped) {
+      for (const f of ["canonical_app_id", "vendor_id", "tenant_id", "id", "normalized_name", "provenance"]) {
+        expect(Object.keys(res.data), `mapping DTO must not expose ${f}`).not.toContain(f);
+      }
+    }
+  });
+
+  it("no canonical_app_id → unmapped", async () => {
+    createClient.mockResolvedValue(mappingSupabase({ apps: { data: { canonical_app_id: null }, error: null } }));
+    expect(await getCatalogMappingForApp("app1")).toEqual({ ok: true, data: { mapped: false } });
+  });
+
+  it("canonical product hidden/missing (RLS or deleted) → unmapped, no id leak", async () => {
+    createClient.mockResolvedValue(
+      mappingSupabase({ apps: { data: { canonical_app_id: "prod-x" }, error: null }, app_products: { data: null, error: null } }),
+    );
+    expect(await getCatalogMappingForApp("app1")).toEqual({ ok: true, data: { mapped: false } });
+  });
+
+  it("a read error fails closed to query_failed", async () => {
+    createClient.mockResolvedValue(mappingSupabase({ apps: { data: null, error: { message: "boom" } } }));
+    expect(await getCatalogMappingForApp("app1")).toEqual({ ok: false, error: "query_failed" });
+  });
+
+  it("a product with no vendor → mapped with vendorName null", async () => {
+    createClient.mockResolvedValue(
+      mappingSupabase({
+        apps: { data: { canonical_app_id: "prod-uuid" }, error: null },
+        app_products: { data: { name: "Orphan", category: null, vendor_id: null }, error: null },
+        app_aliases: { data: [], error: null },
+      }),
+    );
+    expect(await getCatalogMappingForApp("app1")).toEqual({ ok: true, data: { mapped: true, productName: "Orphan", vendorName: null, category: null, aliasCount: 0 } });
   });
 });
