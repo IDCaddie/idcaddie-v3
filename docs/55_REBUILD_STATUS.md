@@ -1,5 +1,12 @@
 # 00 — Rebuild Status (Whole-Project, Plain English)
 
+> **CURRENT CURSOR (updated 2026-07-08):** `idcaddie-v3` main @ `7f7d050`, PRs merged **through #284** (latest = P-018a,
+> `/connectors` status badges + leak-scan). `idcaddie-connector-runner` main @ `84ecf6d`. **The `768f91a` / "through #264"
+> figures below are this page's original 2026-07-07 snapshot — historical, not current.** Governance unchanged: RISK-007
+> remains OPEN; Phase C remains BLOCKED; production untouched; connector live data-sync has not run (earlier hosted
+> staging RISK-007 proof steps occurred under gated procedures, but those were not Phase C live data-sync); old-app
+> parity is NOT complete.
+
 **This is the "where are we right now?" page for the ID Caddie rebuild.**
 It is written to be read by everyone on the team: engineers, product, security
 reviewers, future AI coding agents, and non-specialists. If you read only one
@@ -97,7 +104,8 @@ The single most important reason is the **authorization model**.
 
 ## 4. Current new-app state (repo: idcaddie-v3)
 
-- **FACT — current commit (SHA):** `idcaddie-v3` `main` is at **`768f91a`**, with GitHub
+- **FACT — commit at this snapshot (SHA; historical — current cursor is `7f7d050` / #284, see banner at top):**
+  `idcaddie-v3` `main` was at **`768f91a`**, with GitHub
   pull requests (PRs) merged **through #264**. (SHA quoted as the recorded canonical value
   for 2026-07-07; this page was written under a read-only, no-git constraint and did not
   re-derive it from the repository.)

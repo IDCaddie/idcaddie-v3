@@ -1,5 +1,12 @@
 # 14 — Do Not Copy From the Old App
 
+> **CURRENT CURSOR (updated 2026-07-08):** `idcaddie-v3` main @ `7f7d050`, PRs merged **through #284**.
+> `idcaddie-connector-runner` main @ `84ecf6d`. **The `768f91a` / "through #264" figure below is this page's original
+> 2026-07-07 snapshot — historical, not current.** The do-not-copy guidance itself is timeless and still applies.
+> Governance unchanged: RISK-007 remains OPEN; Phase C remains BLOCKED; production untouched; connector live data-sync
+> has not run (earlier hosted staging RISK-007 proof steps occurred under gated procedures, but those were not Phase C
+> live data-sync).
+
 **A safety guide for engineers, product, security reviewers, and AI coding agents.**
 Rebuild pack doc 14 of 7. Companions: `55_REBUILD_STATUS.md` (where we are now),
 `56_OLD_APP_PARITY_REGISTER.md` (old-app feature parity), `57_CONNECTOR_PARITY_REGISTER.md`

@@ -56,6 +56,16 @@ legitimately start before 2026-07-10.
 > source-secret deletion) → **R-018** (closure register) → **R-019** (Phase C unblock) → **C-2c** (hosted staging live
 > sync, gated). **RISK-007 remains OPEN; Phase C remains BLOCKED; live connector sync NOT authorized and has NOT run.**
 
+> **Update (2026-07-08, later — supersedes the cursor in the block above).** The round-2 safe-polish round + P-018a
+> have merged. **Current cursor: idcaddie-v3 `main` @ `7f7d050` (PRs through #284)** — the `c473c3b` in the prior block
+> is a superseded 2026-07-08 snapshot value. Merged since: **#280** docs refresh · **#281** `/files` status/type badges +
+> `/files` leak-scan (P-017a) · **#282** `/files` KPI summary cards (P-017b) · **#283** loading skeletons ×8 (P-020) ·
+> **#284 `/connectors` status badges + `/connectors` leak-scan — P-018a, COMPLETE / MERGED**. `/files` and `/connectors`
+> are now both enrolled in the ui-regression leak-scan. **Remaining round-2 item: P-017c (`/files` search/filter) — not
+> started.** **RISK-007 remains OPEN; Phase C remains BLOCKED; production untouched. Connector live data-sync has not
+> run. Earlier hosted staging RISK-007 proof steps occurred under gated procedures, but those were not Phase C live
+> data-sync.** Gated track (R-015 → R-018 → R-019 → C-2c) NOT started; R-015 not actionable until after 2026-07-10.
+
 ---
 
 ## 2. Ground rules for this window (what makes a task "this-window-safe")

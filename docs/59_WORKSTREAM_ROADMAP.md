@@ -21,8 +21,8 @@ per-PR log → [05_ENGINEERING_CHANGELOG.md](./05_ENGINEERING_CHANGELOG.md); con
 > ([10_DOCS_INDEX.md](./10_DOCS_INDEX.md)) needs reconciling so readers find the right "13". That is a docs-index defect, not a
 > change to either document's content.
 
-Today = **2026-07-08**. Repo HEADs at time of writing (FACT, from the canonical brief): `idcaddie-v3` main @ `c473c3b`
-(PRs through #278 merged); `idcaddie-connector-runner` main @ `84ecf6d`.
+Today = **2026-07-08**. Repo HEADs at time of writing (FACT): `idcaddie-v3` main @ `7f7d050`
+(PRs through #284 merged); `idcaddie-connector-runner` main @ `84ecf6d`.
 
 ---
 
@@ -58,7 +58,7 @@ is guarded by SECURITY DEFINER functions rather than an RLS policy.
 read-only page/section** + a **user-scoped RLS DAL** + a **pure helper** + **render/unit tests** — with **zero migration, no
 service-role, no client-side tenant filter, ids-as-keys/booleans, fail-closed**. This is the pattern to keep copying. (FACT:
 this pattern is what these PRs did; INFERENCE: that it stays the right default for the next **P** items.) **A follow-on
-UI-polish sprint (#273–#278, P-011–P-016)** extended this with a shared design-system layer (`src/components/*`) + pure
+UI-polish sprint (#273–#284, P-011–P-016 + round-2 P-017a/P-017b/P-020/P-018a)** extended this with a shared design-system layer (`src/components/*`) + pure
 presentation helpers over already-loaded data — same **zero-migration, RLS-first, no-new-dependency** discipline, mostly
 reusing existing DALs rather than adding new ones.
 
@@ -96,6 +96,14 @@ Summary first, full detail cards below.
 | P-014 | Contracts KPI summary row | DONE | #276 | idcaddie-v3 | Yes (done) |
 | P-015 | Dependency-free dashboard charts | DONE | #277 | idcaddie-v3 | Yes (done) |
 | P-016 | Account match-coverage visuals | DONE | #278 | idcaddie-v3 | Yes (done) |
+| P-017a | `/files` status/type badges + leak-scan enrollment | DONE | #281 | idcaddie-v3 | Yes (done) |
+| P-017b | `/files` KPI summary cards | DONE | #282 | idcaddie-v3 | Yes (done) |
+| P-020 | Loading skeletons (8 authenticated routes) | DONE | #283 | idcaddie-v3 | Yes (done) |
+| P-018a | `/connectors` status badges + leak-scan enrollment | DONE | #284 | idcaddie-v3 | Yes (done) |
+
+> **Note (round-2 polish, 2026-07-08).** #280 was a docs refresh (product status). P-017c (`/files` search/filter) is the
+> remaining round-2 item and has **not** started. `/files` and `/connectors` are now both enrolled in the ui-regression
+> leak-scan (#281, #284).
 
 > **Provenance caveat (INFERENCE-check).** These PR numbers are **FACT per the canonical PR map** in the project brief and
 > mirror [05_ENGINEERING_CHANGELOG.md](./05_ENGINEERING_CHANGELOG.md). This doc was written **read-only** — no `git`/`gh` was

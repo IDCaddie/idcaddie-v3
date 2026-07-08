@@ -1,7 +1,7 @@
 # 00 · Product Status — ID Caddie v3
 
 > **CURRENT STATUS — 2026-07-08 (this banner supersedes the stale 2026-06-17 snapshot below).**
-> idcaddie-v3 `main` @ `b3eb25f`; idcaddie-connector-runner `main` @ `84ecf6d`.
+> idcaddie-v3 `main` @ `7f7d050` (PRs through **#284**); idcaddie-connector-runner `main` @ `84ecf6d`.
 >
 > **The pre-2026-07-10 read-only product queue is COMPLETE** — PRs **#257–#271** merged (all read-only UI/DAL on
 > existing schema, zero migration, RLS-first, or docs): #257 dashboards promoted to home · #258 read-only Needs
@@ -11,10 +11,13 @@
 > #267 docs refresh · #268 audit search/filter · #269 docs refresh · #270 safe CSV export (apps + contracts) ·
 > #271 docs refresh.
 >
-> **A follow-on UI-polish sprint (#273–#279) is COMPLETE** — a shared design-system layer + dependency-free visuals, all
+> **A follow-on UI-polish sprint (#273–#284) is COMPLETE** — a shared design-system layer + dependency-free visuals, all
 > zero-migration / RLS-first / no new dependency: #273 semantic status badges · #274 org-name enrichment (real org NAMES
 > vs "Assigned"-only) · #275 shared StatCard/StatGrid · #276 contracts KPI summary · #277 dependency-free dashboard
-> charts · #278 account match-coverage visuals (coverage only, NOT UAR) · #279 docs refresh recording the sprint. No
+> charts · #278 account match-coverage visuals (coverage only, NOT UAR) · #279 docs refresh recording the sprint ·
+> #280 docs refresh (product status) · #281 file status/type badges + `/files` leak-scan enrollment · #282 files KPI
+> summary cards · #283 loading skeletons for authenticated routes · **#284 connectors status badges + `/connectors`
+> leak-scan enrollment (P-018a — COMPLETE / MERGED)**. `/connectors` is now enrolled in the ui-regression leak-scan. No
 > connector / live-sync / gated (R-/C-) track was touched.
 >
 > **Source of truth for the rebuild = the plain-English pack, docs 55–61:**
@@ -23,9 +26,10 @@
 > [59_WORKSTREAM_ROADMAP](./59_WORKSTREAM_ROADMAP.md) · [60_DO_NOT_COPY_FROM_OLD_APP](./60_DO_NOT_COPY_FROM_OLD_APP.md) ·
 > [61_NEXT_3_DAYS_PLAN](./61_NEXT_3_DAYS_PLAN.md). Per-PR detail: [05_ENGINEERING_CHANGELOG](./05_ENGINEERING_CHANGELOG.md).
 >
-> **Governance (unchanged): RISK-007 remains OPEN. Phase C remains BLOCKED. Live connector sync is NOT authorized and
-> has NOT run. Production is untouched.** Old-app parity is **NOT** complete — only the read-only *product queue* + the
-> UI-polish sprint (#273–#278) are.
+> **Governance (unchanged): RISK-007 remains OPEN. Phase C remains BLOCKED. Production is untouched. Connector live
+> data-sync has not run. Earlier hosted staging RISK-007 proof steps occurred under gated procedures, but those were
+> not Phase C live data-sync.** Old-app parity is **NOT** complete — only the read-only *product queue* + the
+> UI-polish sprint (#273–#284) are.
 > RISK-007 is **not** closed and Phase C is **not** unblocked by this doc. The PR counts / figures in the paragraph
 > below are a **stale 2026-06-17 snapshot kept for history** — trust this banner and docs 55–61 for the live state.
 
