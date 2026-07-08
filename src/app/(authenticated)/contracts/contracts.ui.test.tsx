@@ -36,9 +36,14 @@ describe("/contracts render", () => {
     });
     render(await ContractsPage());
     expect(screen.getByText("AWS EDP")).toBeTruthy();
-    expect(screen.getByText(/25,000/)).toBeTruthy(); // formatted value
+    expect(screen.getAllByText(/25,000/).length).toBeGreaterThan(0); // formatted value (KPI card + table cell)
     expect(screen.getByText("≤30d")).toBeTruthy(); // renewal attention badge
     expect(screen.getByText("no owner")).toBeTruthy(); // ownership chip
+    // KPI summary row (computed from the already-fetched rows)
+    expect(screen.getByText("Total contracts")).toBeTruthy();
+    expect(screen.getByText("Tracked value")).toBeTruthy();
+    expect(screen.getByText("Renewing soon")).toBeTruthy();
+    expect(screen.getByText("Missing owner")).toBeTruthy();
   });
 
   it("renders the empty state", async () => {

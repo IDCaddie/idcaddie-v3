@@ -2,8 +2,10 @@ import Link from "next/link";
 import { listContractsForCurrentUser } from "@/lib/data/contracts";
 import { formatMoney } from "@/lib/data/dashboard-overview";
 import { renewalFlag, type RenewalFlag } from "@/lib/data/contract-attention";
+import { summarizeContracts } from "@/lib/data/contracts-summary";
 import { ExportCsvButton } from "./export-csv-button";
 import { StatusBadge } from "@/components/badge";
+import { StatCard, StatGrid } from "@/components/stat-card";
 
 export const metadata = { title: "Contracts · ID Caddie" };
 
@@ -95,6 +97,46 @@ export default async function ContractsPage() {
               </span>
             </span>
           </div>
+          {(() => {
+            const stats = summarizeContracts(result.data, now);
+            const top = stats.byCurrency[0];
+            return (
+              <>
+                <StatGrid>
+                  <StatCard label="Total contracts" value={stats.total} sub={`${stats.active} active`} />
+                  <StatCard
+                    label="Tracked value"
+                    value={top ? formatMoney(top.total, top.currency) : "—"}
+                    sub={
+                      stats.byCurrency.length > 1
+                        ? `${stats.contractsWithCost} with a cost · +${stats.byCurrency.length - 1} more currency`
+                        : `${stats.contractsWithCost} with a cost`
+                    }
+                  />
+                  <StatCard
+                    label="Renewing soon"
+                    value={stats.dueWithin30}
+                    sub={`${stats.dueWithin90} within 90 days`}
+                    tone={stats.dueWithin30 > 0 ? "attention" : "success"}
+                  />
+                  <StatCard
+                    label="Missing renewal date"
+                    value={stats.missingRenewalDate}
+                    tone={stats.missingRenewalDate > 0 ? "attention" : "success"}
+                  />
+                  <StatCard
+                    label="Missing owner"
+                    value={stats.missingOwner}
+                    tone={stats.missingOwner > 0 ? "attention" : "success"}
+                  />
+                </StatGrid>
+                <p className="text-xs text-zinc-500">
+                  Tracked contract value (not invoice actuals); renewals use the renewal/end dates currently visible
+                  to you.
+                </p>
+              </>
+            );
+          })()}
           <div className="overflow-x-auto">
             <table className="w-full border-collapse text-left">
               <thead>
