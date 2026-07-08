@@ -43,6 +43,19 @@ legitimately start before 2026-07-10.
 **R-015 → R-018 → R-019**, and only after those, the first sanctioned connector sync **C-2c**
 (gated). Nothing on the connector/live-sync track can legitimately start before 2026-07-10.
 
+> **Update (2026-07-08) — the fresh UI-polish sprint is COMPLETE.** After the read-only product queue, a fresh
+> what-to-build-next audit produced a 6-PR UI-polish sprint, now all merged: **P-011 semantic status badges (#273),
+> P-012 org-name enrichment (#274), P-013 shared StatCard/StatGrid (#275), P-014 contracts KPI summary (#276),
+> P-015 dependency-free dashboard charts (#277), P-016 account match-coverage visuals (#278)** — idcaddie-v3 main @
+> `c473c3b`. It moved the app toward an enterprise UI feel: **semantic status colors · real org NAMES instead of
+> "Assigned"-only placeholders · shared stat cards · a contracts KPI row · dependency-free dashboard charts · account
+> match-coverage visuals** — all **zero-migration, RLS-first, no new dependency**. **No gated R-/C- work has started**
+> (no connector, live sync, RISK-007 criterion, or Phase C step touched). Next options: (a) an **optional fresh audit**
+> for another safe polish round (e.g. `/files`+`/connectors` KPIs/filters, global search, loading skeletons); (b) an
+> **optional docs/status refresh** of `00`/`05`; then the **gated** track on/after 2026-07-10 — **R-015** (criterion 15,
+> source-secret deletion) → **R-018** (closure register) → **R-019** (Phase C unblock) → **C-2c** (hosted staging live
+> sync, gated). **RISK-007 remains OPEN; Phase C remains BLOCKED; live connector sync NOT authorized and has NOT run.**
+
 ---
 
 ## 2. Ground rules for this window (what makes a task "this-window-safe")
