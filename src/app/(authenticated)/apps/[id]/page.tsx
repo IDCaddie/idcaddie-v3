@@ -13,6 +13,8 @@ import { appAttentionFlags } from "@/lib/data/apps-inventory";
 import { getCatalogMappingForApp } from "@/lib/data/catalog";
 import { listOrganizationsForCurrentUser } from "@/lib/data/organizations";
 import { buildOrgNameLookup, orgDisplayName } from "@/lib/data/organization-display";
+import { matchRateSummary, statusDistributionSegments } from "@/lib/data/account-match-summary";
+import { MatchRateMeter, StatusDistributionBar } from "@/components/match-rate-meter";
 
 export const metadata = { title: "App · ID Caddie" };
 
@@ -287,6 +289,17 @@ export default async function AppDetailPage({
                 <Field
                   label={`Stale candidates (>${STALE_CANDIDATE_DAYS}d)`}
                   value={String(summary.staleCandidates)}
+                />
+              </div>
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <MatchRateMeter summary={matchRateSummary(summary.matchedAccounts, summary.unmatchedAccounts)} />
+                <StatusDistributionBar
+                  label="Account status"
+                  {...statusDistributionSegments([
+                    { key: "active", label: "Active", count: summary.activeAccounts, tone: "success" },
+                    { key: "inactive", label: "Inactive", count: summary.inactiveAccounts, tone: "attention" },
+                    { key: "unknown", label: "Unknown", count: summary.unknownStatusAccounts, tone: "neutral" },
+                  ])}
                 />
               </div>
               <p className="text-xs text-zinc-500">
