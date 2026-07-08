@@ -8,6 +8,8 @@ import {
   getLatestSlackSyncRunForCurrentTenant,
   getSlackAppUserPresenceCountsForCurrentTenant,
 } from "@/lib/data/manual-sync-runs";
+import { Badge } from "@/components/badge";
+import { statusColor } from "@/components/status-tokens";
 import { slackRunStatusLabel } from "@/lib/data/slack-sync-display";
 
 export const metadata = { title: "Connectors · ID Caddie" };
@@ -74,8 +76,8 @@ export default async function ConnectorsPage() {
                   <tr key={c.id} className="border-b border-zinc-200 align-top dark:border-zinc-800">
                     <td className="py-2 pr-4 font-medium">{c.provider}</td>
                     <td className="py-2 pr-4">{c.displayName ?? <span className="text-zinc-500">—</span>}</td>
-                    <td className="py-2 pr-4 text-zinc-600 dark:text-zinc-400">
-                      {connectorStatusLabel(c.status)}
+                    <td className="py-2 pr-4">
+                      <Badge tone={statusColor(c.status)}>{connectorStatusLabel(c.status)}</Badge>
                     </td>
                     <td className="py-2 pr-4 text-zinc-600 dark:text-zinc-400">
                       {c.safeScopes.length > 0 ? c.safeScopes.join(", ") : "—"}
@@ -83,7 +85,7 @@ export default async function ConnectorsPage() {
                     <td className="py-2 pr-4 text-zinc-600 dark:text-zinc-400">
                       {c.lastRun ? (
                         <span>
-                          {runStatusLabel(c.lastRun.status)}
+                          <Badge tone={statusColor(c.lastRun.status)}>{runStatusLabel(c.lastRun.status)}</Badge>
                           {c.lastRun.completedAt ? ` · ${c.lastRun.completedAt.slice(0, 10)}` : ""}
                           {c.lastRun.failureLabel ? ` · ${c.lastRun.failureLabel}` : ""}
                         </span>
