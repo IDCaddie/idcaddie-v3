@@ -1,5 +1,11 @@
 # 12 · AI Feature Parity Register
 
+> **CURRENT CURSOR (updated 2026-07-08):** `idcaddie-v3` main @ `7f7d050`, PRs merged **through #284**.
+> `idcaddie-connector-runner` main @ `84ecf6d`. **The "Date of this register: 2026-07-07" line below is this register's
+> original snapshot date — historical.** No AI feature has shipped in v3 (AI document/file processing remains
+> not-started/deferred). Governance unchanged: RISK-007 remains OPEN; Phase C remains BLOCKED; production untouched;
+> connector live data-sync has not run.
+
 **Canonical source for: what AI features the old (legacy Firebase) app had, and how to rebuild each one
 *safely* in the v3 rebuild.** This is a parity + planning register, not a design doc and not a build. It
 belongs to the 7-doc rebuild pack and is a sibling of:
