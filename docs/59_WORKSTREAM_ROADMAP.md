@@ -122,6 +122,14 @@ Summary first, full detail cards below.
 > **no schema, tables, migrations, imports, connectors, or UI exist**. Nothing here changes RISK-007 (OPEN) or Phase C
 > (BLOCKED); connector live data-sync has not run; production untouched.
 
+> **Note (D-001 dashboard library / widget model design, 2026-07-08 — DESIGN-ONLY, complete).**
+> [64_DASHBOARD_LIBRARY_WIDGET_MODEL.md](./64_DASHBOARD_LIBRARY_WIDGET_MODEL.md) captures the future dashboard library +
+> widget model (saved dashboards, code-defined widget catalog, safe allowlisted widget config, templates, tenant/org/
+> role visibility via RLS) and a phased build order (D-002 read-only shell → D-010 caching). It proposes future tables +
+> widgets but **no schema, tables, widgets, dashboard writes, migrations, or UI exist** — v3 still ships only the static
+> `/dashboards`. Dashboard writes/sharing remain migration- and RLS-review-gated (no public links). Nothing here changes
+> RISK-007 (OPEN) or Phase C (BLOCKED); connector live data-sync has not run; production untouched.
+
 > **Provenance caveat (INFERENCE-check).** These PR numbers are **FACT per the canonical PR map** in the project brief and
 > mirror [05_ENGINEERING_CHANGELOG.md](./05_ENGINEERING_CHANGELOG.md). This doc was written **read-only** — no `git`/`gh` was
 > run to re-verify against GitHub. Treat each number as a recorded claim to reconcile at review time, not as independently
