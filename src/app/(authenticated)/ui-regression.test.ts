@@ -17,6 +17,7 @@ const PAGES = [
   "contracts/[id]/page.tsx",
   "catalog/page.tsx",
   "audit/page.tsx",
+  "files/page.tsx",
   "apps/export-csv-button.tsx",
   "contracts/export-csv-button.tsx",
 ];

@@ -1,5 +1,7 @@
 import Link from "next/link";
 import { listFilesForCurrentUser, fileStatusLabel, formatFileSize } from "@/lib/data/files";
+import { Badge } from "@/components/badge";
+import { statusColor } from "@/components/status-tokens";
 
 export const metadata = { title: "Files / Documents · ID Caddie" };
 
@@ -67,11 +69,15 @@ export default async function FilesPage() {
                         <span className="text-zinc-500">—</span>
                       )}
                     </td>
-                    <td className="py-2 pr-4 text-zinc-600 dark:text-zinc-400">
-                      {fileStatusLabel(f.uploadStatus)}
+                    <td className="py-2 pr-4">
+                      <Badge tone={statusColor(f.uploadStatus)}>{fileStatusLabel(f.uploadStatus)}</Badge>
                     </td>
-                    <td className="py-2 pr-4 text-zinc-600 dark:text-zinc-400">
-                      {f.contentType ?? "—"}
+                    <td className="py-2 pr-4">
+                      {f.contentType ? (
+                        <Badge tone="neutral">{f.contentType}</Badge>
+                      ) : (
+                        <span className="text-zinc-500">—</span>
+                      )}
                     </td>
                     <td className="py-2 pr-4 tabular-nums text-zinc-600 dark:text-zinc-400">
                       {formatFileSize(f.byteSize)}
