@@ -3,6 +3,7 @@ import { listContractsForCurrentUser } from "@/lib/data/contracts";
 import { formatMoney } from "@/lib/data/dashboard-overview";
 import { renewalFlag, type RenewalFlag } from "@/lib/data/contract-attention";
 import { ExportCsvButton } from "./export-csv-button";
+import { StatusBadge } from "@/components/badge";
 
 export const metadata = { title: "Contracts · ID Caddie" };
 
@@ -127,9 +128,7 @@ export default async function ContractsPage() {
                       {contract.vendorName ?? "—"}
                     </td>
                     <td className="py-2 pr-4">
-                      <span className="rounded-full border border-zinc-300 px-2 py-0.5 text-xs text-zinc-600 dark:border-zinc-700 dark:text-zinc-400">
-                        {contract.status}
-                      </span>
+                      <StatusBadge value={contract.status} />
                     </td>
                     <td className="py-2 pr-4 text-zinc-600 dark:text-zinc-400">
                       {contract.category ?? "—"}

@@ -9,6 +9,7 @@ import {
   type AppSort,
 } from "@/lib/data/apps-inventory";
 import { ExportCsvButton } from "./export-csv-button";
+import { StatusBadge } from "@/components/badge";
 
 export const metadata = { title: "Apps · ID Caddie" };
 
@@ -178,9 +179,7 @@ export default async function AppsPage({
                     <td className="py-2 pr-4 text-zinc-600 dark:text-zinc-400">{app.vendorName ?? "—"}</td>
                     <td className="py-2 pr-4 text-zinc-600 dark:text-zinc-400">{app.category ?? "—"}</td>
                     <td className="py-2 pr-4">
-                      <span className="rounded-full border border-zinc-300 px-2 py-0.5 text-xs text-zinc-600 dark:border-zinc-700 dark:text-zinc-400">
-                        {app.status}
-                      </span>
+                      <StatusBadge value={app.status} />
                     </td>
                     <td className="py-2 pr-4 text-right tabular-nums text-zinc-600 dark:text-zinc-400">
                       {app.linkedContractCount}
