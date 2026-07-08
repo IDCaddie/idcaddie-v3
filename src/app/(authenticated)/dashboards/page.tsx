@@ -5,6 +5,7 @@ import {
   formatMoney,
   type DashboardOverview,
 } from "@/lib/data/dashboard-overview-loader";
+import { StatCard, StatGrid } from "@/components/stat-card";
 
 export const metadata = { title: "Dashboards · ID Caddie" };
 
@@ -13,30 +14,6 @@ export const metadata = { title: "Dashboards · ID Caddie" };
 // authorization boundary. Every number is "visible to you", not an absolute total. Spend/renewals use
 // ONLY contract data (total_cost / currency / renewal_date / end_date / notice_deadline) — NO
 // invoices/license tables (default-deny), no connectors, no charts, no AI, no exports.
-function StatCard({
-  label,
-  value,
-  href,
-  sub,
-}: {
-  label: string;
-  value: number | null;
-  href: string;
-  sub?: string;
-}) {
-  return (
-    <Link
-      href={href}
-      className="rounded border border-zinc-200 p-4 transition hover:border-zinc-400 dark:border-zinc-800 dark:hover:border-zinc-600"
-    >
-      <div className="text-xs text-zinc-500">{label}</div>
-      <div className="text-2xl font-semibold tabular-nums">{value ?? "—"}</div>
-      {sub ? <div className="mt-1 text-xs text-zinc-500">{sub}</div> : null}
-      <div className="mt-2 text-xs text-zinc-500 underline">Open →</div>
-    </Link>
-  );
-}
-
 function SpendCard({ overview }: { overview: DashboardOverview }) {
   const spend = overview.spend;
   return (
@@ -154,7 +131,7 @@ export default async function DashboardsPage() {
         </p>
       </header>
 
-      <section className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+      <StatGrid>
         <StatCard label="Apps visible" value={s.appsVisible} href="/apps" />
         <StatCard label="Contracts visible" value={s.contractsVisible} href="/contracts" />
         <StatCard label="Files visible" value={s.filesVisible} href="/files" />
@@ -181,7 +158,7 @@ export default async function DashboardsPage() {
           <div className="text-sm font-medium">Cleanup queue (RLS-scoped)</div>
           <div className="mt-2 text-xs text-zinc-500 underline">Open →</div>
         </Link>
-      </section>
+      </StatGrid>
       <p className="text-xs text-zinc-500">
         Counts reflect only rows your tenant/org access allows (RLS-scoped). Matched/unmatched is the
         identity-account match status only (no person/IdP detail). “Recent audit entries” is a capped,
