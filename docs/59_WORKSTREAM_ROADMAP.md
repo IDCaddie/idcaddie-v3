@@ -113,6 +113,15 @@ Summary first, full detail cards below.
 > **M-001 / M-002** rows below (no schema yet). Product parity is **NOT** complete; the data-heavy + connector tracks stay
 > gated (RISK-007 OPEN, Phase C BLOCKED).
 
+> **Note (M-001 spend-intelligence design, 2026-07-08 — DESIGN-ONLY, complete).**
+> [63_SPEND_INTELLIGENCE_MODEL.md](./63_SPEND_INTELLIGENCE_MODEL.md) captures the spend-intelligence model (durable
+> subscription/license anchors, immutable normalized spend events, data-only attribution rules, a review/confirm queue,
+> multi-currency with preserved source truth, and source health) that must precede the invoices/license read surfaces —
+> reports come **last**. This is the **design** underpinning the migration-gated **M-001 (invoices)** and **M-002
+> (license/ELU)** build rows below; it proposes future tables + a phased build order (S1 schema/RLS → S8 reports) but
+> **no schema, tables, migrations, imports, connectors, or UI exist**. Nothing here changes RISK-007 (OPEN) or Phase C
+> (BLOCKED); connector live data-sync has not run; production untouched.
+
 > **Provenance caveat (INFERENCE-check).** These PR numbers are **FACT per the canonical PR map** in the project brief and
 > mirror [05_ENGINEERING_CHANGELOG.md](./05_ENGINEERING_CHANGELOG.md). This doc was written **read-only** — no `git`/`gh` was
 > run to re-verify against GitHub. Treat each number as a recorded claim to reconcile at review time, not as independently
