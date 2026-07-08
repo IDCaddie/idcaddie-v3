@@ -42,6 +42,8 @@ describe("/dashboards render", () => {
     expect(screen.getByText(/1 due in 30 days/)).toBeTruthy();
     expect(screen.getByText("AWS")).toBeTruthy();
     expect(screen.getByText(/1 missing a renewal date/)).toBeTruthy();
+    // dependency-free renewal segment bar renders its text legend (not color alone)
+    expect(screen.getByText(/Due ≤30 days/)).toBeTruthy();
   });
 
   it("renders empty/unavailable states without crashing", async () => {
@@ -53,5 +55,6 @@ describe("/dashboards render", () => {
     render(await DashboardsPage());
     expect(screen.getByText("No tracked contract spend yet.")).toBeTruthy();
     expect(screen.getByText("No upcoming renewals.")).toBeTruthy();
+    expect(screen.getByText("No dated renewals to summarize.")).toBeTruthy();
   });
 });

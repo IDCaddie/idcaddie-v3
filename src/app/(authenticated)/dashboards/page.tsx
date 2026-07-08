@@ -2,10 +2,15 @@ import Link from "next/link";
 import { getDashboardSummaryForCurrentUser } from "@/lib/data/dashboard";
 import {
   getDashboardOverviewForCurrentUser,
-  formatMoney,
   type DashboardOverview,
 } from "@/lib/data/dashboard-overview-loader";
 import { StatCard, StatGrid } from "@/components/stat-card";
+import {
+  buildSpendBarSegments,
+  buildRenewalSegmentSummary,
+  buildUpcomingRenewalRows,
+} from "@/lib/data/dashboard-charts";
+import { SpendBars, RenewalSegmentBar, UpcomingRenewalRows } from "@/components/simple-bars";
 
 export const metadata = { title: "Dashboards · ID Caddie" };
 
@@ -13,7 +18,8 @@ export const metadata = { title: "Dashboards · ID Caddie" };
 // counts, plus a contract spend/renewal overview from existing `contracts` fields); RLS is the
 // authorization boundary. Every number is "visible to you", not an absolute total. Spend/renewals use
 // ONLY contract data (total_cost / currency / renewal_date / end_date / notice_deadline) — NO
-// invoices/license tables (default-deny), no connectors, no charts, no AI, no exports.
+// invoices/license tables (default-deny), no connectors, no AI, no exports. Visuals are dependency-free
+// Tailwind/div bars over the already-fetched overview (no chart library).
 function SpendCard({ overview }: { overview: DashboardOverview }) {
   const spend = overview.spend;
   return (
@@ -25,16 +31,7 @@ function SpendCard({ overview }: { overview: DashboardOverview }) {
         <p className="text-sm text-zinc-500">No tracked contract spend yet.</p>
       ) : (
         <>
-          <ul className="space-y-1 text-sm">
-            {spend.byCurrency.map((c) => (
-              <li key={c.currency} className="tabular-nums">
-                <span className="font-semibold">{formatMoney(c.total, c.currency)}</span>{" "}
-                <span className="text-zinc-500">
-                  · {c.contractCount} contract{c.contractCount === 1 ? "" : "s"}
-                </span>
-              </li>
-            ))}
-          </ul>
+          <SpendBars segments={buildSpendBarSegments(spend)} />
           <p className="text-xs text-zinc-500">
             Total contract value visible to you, grouped by currency ({spend.contractsWithCost} contract
             {spend.contractsWithCost === 1 ? "" : "s"} with a recorded cost). Contract totals only — no
@@ -71,24 +68,8 @@ function RenewalsCard({ overview }: { overview: DashboardOverview }) {
               </Link>
             ) : null}
           </div>
-          {r.topUpcoming.length === 0 ? (
-            <p className="text-sm text-zinc-500">No upcoming renewals.</p>
-          ) : (
-            <ul className="space-y-1 text-sm">
-              {r.topUpcoming.map((it) => (
-                <li key={it.id}>
-                  <Link href={`/contracts/${it.id}`} className="underline">
-                    {it.contractName}
-                  </Link>{" "}
-                  <span className="text-zinc-500">
-                    — {it.date} ({it.daysUntil === 0 ? "today" : `in ${it.daysUntil}d`}
-                    {it.basis === "end" ? ", end date" : ""}
-                    {it.noticeDeadline ? `, notice by ${it.noticeDeadline}` : ""})
-                  </span>
-                </li>
-              ))}
-            </ul>
-          )}
+          <RenewalSegmentBar summary={buildRenewalSegmentSummary(r)} />
+          <UpcomingRenewalRows rows={buildUpcomingRenewalRows(r.topUpcoming)} />
           <p className="text-xs text-zinc-500">
             Soonest renewals visible to you, by renewal date (or end date). The full missing-renewal list is on
             Needs Attention.
@@ -101,7 +82,6 @@ function RenewalsCard({ overview }: { overview: DashboardOverview }) {
 
 const NOT_BUILT = [
   "Custom dashboard builder",
-  "Charts / visualizations",
   "Connector-driven spend / license dashboards",
   "AI dashboard insights",
   "Dashboard export",
