@@ -18,6 +18,7 @@ const PAGES = [
   "catalog/page.tsx",
   "audit/page.tsx",
   "files/page.tsx",
+  "connectors/page.tsx",
   "apps/export-csv-button.tsx",
   "contracts/export-csv-button.tsx",
 ];

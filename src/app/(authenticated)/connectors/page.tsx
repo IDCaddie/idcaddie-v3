@@ -126,9 +126,7 @@ export default async function ConnectorsPage() {
         ) : (
           <div className="rounded border border-zinc-300 p-4 dark:border-zinc-700">
             <div className="flex flex-wrap items-center gap-2">
-              <span className="rounded-full border border-zinc-300 px-2 py-0.5 text-xs text-zinc-600 dark:border-zinc-700 dark:text-zinc-400">
-                {slackRunStatusLabel(syncRun.data.status)}
-              </span>
+              <Badge tone={statusColor(syncRun.data.status)}>{slackRunStatusLabel(syncRun.data.status)}</Badge>
               <span className="text-zinc-500">
                 Started {syncRun.data.startedAt.slice(0, 16).replace("T", " ")}
                 {syncRun.data.finishedAt ? ` · finished ${syncRun.data.finishedAt.slice(0, 16).replace("T", " ")}` : ""}
