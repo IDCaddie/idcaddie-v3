@@ -1,19 +1,13 @@
 import Link from "next/link";
 import { getReportsSummaryForCurrentUser } from "@/lib/data/reports";
+import { StatCard, StatGrid } from "@/components/stat-card";
 
 export const metadata = { title: "Reports · ID Caddie" };
 
 // Read-only Reports view = simple "visible to you" summary counts from existing RLS-backed read surfaces.
 // It invents NO report capability: every number is an RLS-scoped count of rows the signed-in user may
 // already read. No generation workflow, no export/download, no scheduling, no AI, no connector data.
-function Stat({ label, value }: { label: string; value: number | null }) {
-  return (
-    <div className="rounded border border-zinc-200 p-3 dark:border-zinc-800">
-      <div className="text-xs text-zinc-500">{label}</div>
-      <div className="text-lg font-semibold tabular-nums">{value ?? "—"}</div>
-    </div>
-  );
-}
+// Tiles deep-link to the implemented page that owns each count (accounts/matched/unmatched → /people).
 
 const NOT_BUILT = [
   "Export / download (CSV, PDF)",
@@ -43,14 +37,14 @@ export default async function ReportsPage() {
         </p>
       </header>
 
-      <section className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-        <Stat label="Apps visible" value={s.appsVisible} />
-        <Stat label="Contracts visible" value={s.contractsVisible} />
-        <Stat label="App-user accounts visible" value={s.accountsVisible} />
-        <Stat label="Accounts matched" value={s.accountsMatched} />
-        <Stat label="Accounts unmatched" value={s.accountsUnmatched} />
-        <Stat label="Files visible" value={s.filesVisible} />
-      </section>
+      <StatGrid>
+        <StatCard label="Apps visible" value={s.appsVisible} href="/apps" />
+        <StatCard label="Contracts visible" value={s.contractsVisible} href="/contracts" />
+        <StatCard label="App-user accounts visible" value={s.accountsVisible} href="/people" />
+        <StatCard label="Accounts matched" value={s.accountsMatched} href="/people" />
+        <StatCard label="Accounts unmatched" value={s.accountsUnmatched} href="/people" />
+        <StatCard label="Files visible" value={s.filesVisible} href="/files" />
+      </StatGrid>
       <p className="text-xs text-zinc-500">
         Counts reflect only rows your tenant/org access allows; matched/unmatched is the identity-account
         match status only (no person/IdP detail, no spend, no license intelligence).
