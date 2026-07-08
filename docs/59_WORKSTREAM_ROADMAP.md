@@ -101,9 +101,17 @@ Summary first, full detail cards below.
 | P-020 | Loading skeletons (8 authenticated routes) | DONE | #283 | idcaddie-v3 | Yes (done) |
 | P-018a | `/connectors` status badges + leak-scan enrollment | DONE | #284 | idcaddie-v3 | Yes (done) |
 
-> **Note (round-2 polish, 2026-07-08).** #280 was a docs refresh (product status). P-017c (`/files` search/filter) is the
-> remaining round-2 item and has **not** started. `/files` and `/connectors` are now both enrolled in the ui-regression
-> leak-scan (#281, #284).
+> **Note (round-2 polish, 2026-07-08 — COMPLETE).** #280 was a docs refresh (product status). The round-2 mini-plan is
+> now fully merged: P-017a (#281), P-017b (#282), P-020 (#283), P-018a (#284), **P-017c (`/files` search/filter — #286)**.
+> `/files` and `/connectors` are both enrolled in the ui-regression leak-scan (#281, #284); current cursor main @ `689ea41`.
+
+> **Note (product-parity audit, 2026-07-08 — docs-only).** [62_OLD_UI_PRODUCT_PARITY_AUDIT.md](./62_OLD_UI_PRODUCT_PARITY_AUDIT.md)
+> captures the old-app UI/product breadth (screenshot-evidenced) and the safe rebuild tracks. Build-now safe tracks from it:
+> **P-023** (`/apps` KPI row), **P-018b** (`/connectors` KPI/status tiles), shared **PageHeader/SearchToolbar**, and
+> `/catalog` + `/needs-attention` StatCard/Badge adoption. New **design-first (docs-only)** tracks: **D-001** (dashboard
+> library / widget model + RLS design). Spend-intelligence / invoices / license design remains under the migration-gated
+> **M-001 / M-002** rows below (no schema yet). Product parity is **NOT** complete; the data-heavy + connector tracks stay
+> gated (RISK-007 OPEN, Phase C BLOCKED).
 
 > **Provenance caveat (INFERENCE-check).** These PR numbers are **FACT per the canonical PR map** in the project brief and
 > mirror [05_ENGINEERING_CHANGELOG.md](./05_ENGINEERING_CHANGELOG.md). This doc was written **read-only** — no `git`/`gh` was
