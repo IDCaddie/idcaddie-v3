@@ -2,6 +2,8 @@ import Link from "next/link";
 import { listFilesForCurrentUser, fileStatusLabel, formatFileSize } from "@/lib/data/files";
 import { Badge } from "@/components/badge";
 import { statusColor } from "@/components/status-tokens";
+import { summarizeFiles } from "@/lib/data/files-summary";
+import { StatCard, StatGrid } from "@/components/stat-card";
 
 export const metadata = { title: "Files / Documents · ID Caddie" };
 
@@ -44,6 +46,23 @@ export default async function FilesPage() {
           <div className="text-zinc-500">
             {result.data.length} file{result.data.length === 1 ? "" : "s"} visible to you
           </div>
+          {(() => {
+            const stats = summarizeFiles(result.data);
+            return (
+              <>
+                <StatGrid>
+                  <StatCard label="Total files" value={stats.total} sub={`${stats.distinctTypes} type${stats.distinctTypes === 1 ? "" : "s"}`} />
+                  <StatCard label="Uploaded" value={stats.uploaded} tone="success" />
+                  <StatCard label="Pending" value={stats.pending} tone={stats.pending > 0 ? "attention" : "neutral"} />
+                  <StatCard label="Failed" value={stats.failed} tone={stats.failed > 0 ? "danger" : "success"} />
+                  <StatCard label="Total size" value={formatFileSize(stats.totalBytes)} />
+                </StatGrid>
+                <p className="text-xs text-zinc-500">
+                  File metadata only (upload status, type, size) — no file content, extraction, or AI analysis.
+                </p>
+              </>
+            );
+          })()}
           <div className="overflow-x-auto">
             <table className="w-full border-collapse text-left">
               <thead>
