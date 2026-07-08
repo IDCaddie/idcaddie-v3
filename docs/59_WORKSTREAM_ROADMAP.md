@@ -21,8 +21,8 @@ per-PR log → [05_ENGINEERING_CHANGELOG.md](./05_ENGINEERING_CHANGELOG.md); con
 > ([10_DOCS_INDEX.md](./10_DOCS_INDEX.md)) needs reconciling so readers find the right "13". That is a docs-index defect, not a
 > change to either document's content.
 
-Today = **2026-07-07**. Repo HEADs at time of writing (FACT, from the canonical brief): `idcaddie-v3` main @ `768f91a`
-(PRs through #270 merged); `idcaddie-connector-runner` main @ `84ecf6d`.
+Today = **2026-07-08**. Repo HEADs at time of writing (FACT, from the canonical brief): `idcaddie-v3` main @ `c473c3b`
+(PRs through #278 merged); `idcaddie-connector-runner` main @ `84ecf6d`.
 
 ---
 
@@ -57,7 +57,10 @@ is guarded by SECURITY DEFINER functions rather than an RLS policy.
 **The safe-rebuild pattern (proven by #257–#270).** Every completed **P**/**Q** item below followed the same shape: a **NEW
 read-only page/section** + a **user-scoped RLS DAL** + a **pure helper** + **render/unit tests** — with **zero migration, no
 service-role, no client-side tenant filter, ids-as-keys/booleans, fail-closed**. This is the pattern to keep copying. (FACT:
-this pattern is what these PRs did; INFERENCE: that it stays the right default for the next **P** items.)
+this pattern is what these PRs did; INFERENCE: that it stays the right default for the next **P** items.) **A follow-on
+UI-polish sprint (#273–#278, P-011–P-016)** extended this with a shared design-system layer (`src/components/*`) + pure
+presentation helpers over already-loaded data — same **zero-migration, RLS-first, no-new-dependency** discipline, mostly
+reusing existing DALs rather than adding new ones.
 
 **"Safe before 2026-07-10" column.** This asks one question: *can this be done right now, under the safe-rebuild pattern,
 without touching any RISK-007-gated surface, the live connector sync, permanent source-secret deletion, or production?*
@@ -87,6 +90,12 @@ Summary first, full detail cards below.
 | P-008 | Needs Attention alias backlog | DONE | #266 | idcaddie-v3 | Yes (done) |
 | P-009 | Audit search / filter | DONE | #268 | idcaddie-v3 | Yes (done) |
 | P-010 | Safe CSV export (apps + contracts) | DONE | #270 | idcaddie-v3 | Yes (done) |
+| P-011 | Semantic status badges | DONE | #273 | idcaddie-v3 | Yes (done) |
+| P-012 | Org-name enrichment (app / contract detail) | DONE | #274 | idcaddie-v3 | Yes (done) |
+| P-013 | Shared StatCard / StatGrid | DONE | #275 | idcaddie-v3 | Yes (done) |
+| P-014 | Contracts KPI summary row | DONE | #276 | idcaddie-v3 | Yes (done) |
+| P-015 | Dependency-free dashboard charts | DONE | #277 | idcaddie-v3 | Yes (done) |
+| P-016 | Account match-coverage visuals | DONE | #278 | idcaddie-v3 | Yes (done) |
 
 > **Provenance caveat (INFERENCE-check).** These PR numbers are **FACT per the canonical PR map** in the project brief and
 > mirror [05_ENGINEERING_CHANGELOG.md](./05_ENGINEERING_CHANGELOG.md). This doc was written **read-only** — no `git`/`gh` was
@@ -398,6 +407,37 @@ the immediate ordering lives in [61_NEXT_3_DAYS_PLAN.md](./61_NEXT_3_DAYS_PLAN.m
 - **Next step:** The **pre-2026-07-10 read-only product queue (P-001–P-010, Q-001) is COMPLETE.** Deeper exports
   (dashboards/audit/paginated) are separate future items; the priority now shifts to the gated R-/C- track (below) on/after
   2026-07-10, plus an optional docs refresh of [00_PRODUCT_STATUS](./00_PRODUCT_STATUS.md) / [05_ENGINEERING_CHANGELOG](./05_ENGINEERING_CHANGELOG.md).
+
+### P-011–P-016 — UI-polish sprint (design-system + visuals)
+- **Status:** DONE (merged). · **GitHub PRs:** #273–#278 · **Repo:** idcaddie-v3
+- **Workstream:** Product (UI polish). A follow-on sprint from a fresh what-to-build-next audit, turning greyscale tables into
+  a coherent enterprise-feeling system. **Zero migration, RLS-first, no new dependency, no PII/identity/license/connector
+  surface touched.**
+- **Items (real PR numbers):**
+  - **P-011 — Semantic status badges — #273.** Shared `Badge`/`StatusBadge` + a pure `statusColor` map; adopted on the
+    `/apps`, `/contracts`, `/connectors` status pills. Seeds `src/components`.
+  - **P-012 — Org-name enrichment — #274.** `apps/[id]` + `contracts/[id]` resolve responsible/paying/procurement org ids to
+    NAMES via the existing members-read `organizations` DAL; falls back to "Assigned" for an id outside the caller's visible
+    set — never a raw UUID.
+  - **P-013 — Shared StatCard / StatGrid — #275.** One canonical stat primitive; consolidated the divergent stat markup on
+    `/dashboards` + `/reports`; reports tiles now deep-link to their owning pages.
+  - **P-014 — Contracts KPI summary row — #276.** A pure `summarizeContracts` aggregator over the already-fetched rows (total,
+    tracked value, renewing soon, missing renewal, missing owner) rendered with StatCard. Contract totals only — **not invoice
+    actuals**.
+  - **P-015 — Dependency-free dashboard charts — #277.** SVG/CSS spend bars + a renewal-urgency segment bar + ranked upcoming
+    rows over the already-fetched overview; **no chart library**. Closed the page's own "Charts — Not built yet" chip.
+  - **P-016 — Account match-coverage visuals — #278.** A match-rate meter + account-status distribution bar on `/people` +
+    `/apps/[id]`, over aggregates the pages already compute. Match **COVERAGE only — explicitly NOT UAR**; no `identity_accounts`,
+    people PII, or license data.
+- **Shape (INFERENCE-check):** presentation-first — shared `src/components/*` + pure helpers over already-loaded data; most PRs
+  added **no new DAL and widened no projection** (P-012 reuses the existing `organizations` DAL). Every value is shown as text
+  (charts/meters are never color-only; accessible labels present).
+- **Constraints (FACT):** no connector, live-sync, or gated (R-/C-) track was touched; no migration/SQL/RLS change; no
+  service-role; no client-side tenant filter; no default-deny / invoices / license tables; no
+  `connector_secrets`/`discovery_facts`/`fact_json`; no raw UUIDs. **RISK-007 stays OPEN; Phase C stays BLOCKED; live connector
+  sync NOT authorized and has NOT run.**
+- **Next step:** No safe-to-build-now product work is queued after this sprint; the priority is the gated R-/C- track (below)
+  on/after 2026-07-10, plus an optional docs refresh of [00_PRODUCT_STATUS](./00_PRODUCT_STATUS.md) / [05_ENGINEERING_CHANGELOG](./05_ENGINEERING_CHANGELOG.md).
 
 ### M-001 — Invoices RLS + read-only surface *(migration-gated)*
 - **Workstream:** Migration-gated data surfaces · **Scope:** A **new reviewed migration** adding the invoices table/columns
