@@ -11,6 +11,8 @@ import { classifySlackSync, SLACK_SYNC_COPY } from "@/lib/data/slack-sync-displa
 import { getLatestSlackSyncRunForCurrentTenant } from "@/lib/data/manual-sync-runs";
 import { appAttentionFlags } from "@/lib/data/apps-inventory";
 import { getCatalogMappingForApp } from "@/lib/data/catalog";
+import { listOrganizationsForCurrentUser } from "@/lib/data/organizations";
+import { buildOrgNameLookup, orgDisplayName } from "@/lib/data/organization-display";
 
 export const metadata = { title: "App · ID Caddie" };
 
@@ -41,6 +43,9 @@ export default async function AppDetailPage({
   const linkedContracts = result.ok ? await listContractsLinkedToApp(id) : null;
   const appUsers = result.ok ? await listAppUsersForApp(id) : null;
   const catalogMapping = result.ok ? await getCatalogMappingForApp(id) : null;
+  // RLS-visible organizations (id+name only) → id-to-name lookup for safe org display (never a raw UUID).
+  const orgs = result.ok ? await listOrganizationsForCurrentUser() : null;
+  const orgLookup = buildOrgNameLookup(orgs && orgs.ok ? orgs.data : []);
   // Minimal matched/unmatched status, derived server-side from RLS-scoped match rows for THIS roster's
   // app_users. Empty/failed map ⇒ status shown as "—" (unknown), never a misleading "unmatched".
   const matches =
@@ -189,15 +194,16 @@ export default async function AppDetailPage({
           <section className="space-y-2 text-sm">
             <h2 className="font-medium">Ownership</h2>
             <p className="text-xs text-zinc-500">
-              Presence only — owner user ids and organization ids are not shown (name enrichment is deferred).
+              Owners shown as Yes/No (no user ids). Organizations shown by name where visible to you, otherwise
+              “Assigned” — raw ids are never shown.
             </p>
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
               <Field label="Business owner assigned" value={result.data.hasBusinessOwner ? "Yes" : "No"} />
               <Field label="Technical owner assigned" value={result.data.hasTechnicalOwner ? "Yes" : "No"} />
               <Field label="Owner assigned (any)" value={hasOwner ? "Yes" : "No"} />
-              <Field label="Responsible org" value={result.data.responsibleOrgId ? "Assigned" : "—"} />
-              <Field label="Paying org" value={result.data.payingOrgId ? "Assigned" : "—"} />
-              <Field label="Procurement org" value={result.data.procurementOrgId ? "Assigned" : "—"} />
+              <Field label="Responsible org" value={orgDisplayName(result.data.responsibleOrgId, orgLookup)} />
+              <Field label="Paying org" value={orgDisplayName(result.data.payingOrgId, orgLookup)} />
+              <Field label="Procurement org" value={orgDisplayName(result.data.procurementOrgId, orgLookup)} />
             </div>
           </section>
 
