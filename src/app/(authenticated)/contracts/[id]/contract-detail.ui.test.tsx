@@ -11,11 +11,13 @@ vi.mock("@/lib/data/contracts", () => ({ getContractDetailForCurrentUser: vi.fn(
 vi.mock("@/lib/data/contract-files", () => ({ listContractFilesForCurrentUser: vi.fn() }));
 vi.mock("@/lib/data/links", () => ({ listAppsLinkedToContract: vi.fn() }));
 vi.mock("./contract-files", () => ({ ContractFiles: () => <div data-testid="contract-files" /> }));
+vi.mock("@/lib/data/organizations", () => ({ listOrganizationsForCurrentUser: vi.fn() }));
 
 import ContractDetailPage from "./page";
 import { getContractDetailForCurrentUser } from "@/lib/data/contracts";
 import { listContractFilesForCurrentUser } from "@/lib/data/contract-files";
 import { listAppsLinkedToContract } from "@/lib/data/links";
+import { listOrganizationsForCurrentUser } from "@/lib/data/organizations";
 
 const asMock = <T,>(fn: T) => fn as unknown as { mockResolvedValue: (v: unknown) => void };
 const OWNER_UUID = "99999999-8888-7777-6666-555555555555";
@@ -39,6 +41,7 @@ describe("/contracts/[id] render", () => {
     asMock(getContractDetailForCurrentUser).mockResolvedValue(detail);
     asMock(listAppsLinkedToContract).mockResolvedValue({ ok: true, data: [] });
     asMock(listContractFilesForCurrentUser).mockResolvedValue({ ok: true, data: [] });
+    asMock(listOrganizationsForCurrentUser).mockResolvedValue({ ok: true, data: [] });
 
     const { container } = render(await ContractDetailPage({ params: Promise.resolve({ id: "contract-uuid-xyz" }) }));
     expect(screen.getByText("Needs attention")).toBeTruthy();
@@ -49,5 +52,23 @@ describe("/contracts/[id] render", () => {
     // regression: no raw contract/owner UUID leaks into the rendered UI
     expect(container.textContent).not.toContain(OWNER_UUID);
     expect(container.textContent).not.toContain("contract-uuid-xyz");
+  });
+
+  it("resolves procurement/paying org ids to NAMES when visible, 'Assigned' when not — never a raw UUID", async () => {
+    const VISIBLE = "cccc1111-2222-3333-4444-555555555555";
+    const HIDDEN = "dddd9999-8888-7777-6666-555555555555";
+    asMock(getContractDetailForCurrentUser).mockResolvedValue({
+      ok: true,
+      data: { ...detail.data, procurementOrgId: VISIBLE, payingOrgId: HIDDEN },
+    });
+    asMock(listAppsLinkedToContract).mockResolvedValue({ ok: true, data: [] });
+    asMock(listContractFilesForCurrentUser).mockResolvedValue({ ok: true, data: [] });
+    asMock(listOrganizationsForCurrentUser).mockResolvedValue({ ok: true, data: [{ id: VISIBLE, name: "OMC Procurement" }] });
+
+    const { container } = render(await ContractDetailPage({ params: Promise.resolve({ id: "contract-uuid-xyz" }) }));
+    expect(screen.getByText("OMC Procurement")).toBeTruthy(); // procurement org visible → name
+    expect(screen.getByText("Assigned")).toBeTruthy(); // paying org present but not visible → "Assigned"
+    expect(container.textContent).not.toContain(VISIBLE);
+    expect(container.textContent).not.toContain(HIDDEN);
   });
 });

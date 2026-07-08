@@ -4,6 +4,8 @@ import { listContractFilesForCurrentUser } from "@/lib/data/contract-files";
 import { listAppsLinkedToContract } from "@/lib/data/links";
 import { formatMoney } from "@/lib/data/dashboard-overview";
 import { contractAttentionFlags } from "@/lib/data/contract-attention";
+import { listOrganizationsForCurrentUser } from "@/lib/data/organizations";
+import { buildOrgNameLookup, orgDisplayName } from "@/lib/data/organization-display";
 import { ContractFiles } from "./contract-files";
 
 export const metadata = { title: "Contract · ID Caddie" };
@@ -32,6 +34,9 @@ export default async function ContractDetailPage({
   const result = await getContractDetailForCurrentUser(id);
   const linkedApps = result.ok ? await listAppsLinkedToContract(id) : null;
   const files = result.ok ? await listContractFilesForCurrentUser(id) : null;
+  // RLS-visible organizations (id+name only) → id-to-name lookup for safe org display (never a raw UUID).
+  const orgs = result.ok ? await listOrganizationsForCurrentUser() : null;
+  const orgLookup = buildOrgNameLookup(orgs && orgs.ok ? orgs.data : []);
 
   // hasLinkedApp: true = ≥1 linked app, false = known-none, null = unknown (read failed) → not flagged.
   const hasLinkedApp = linkedApps && linkedApps.ok ? linkedApps.data.length > 0 : null;
@@ -138,11 +143,11 @@ export default async function ContractDetailPage({
           <section className="space-y-2 text-sm">
             <h2 className="font-medium">Ownership</h2>
             <p className="text-xs text-zinc-500">
-              Presence only — organization ids are not shown (name enrichment is deferred).
+              Organizations shown by name where visible to you, otherwise “Assigned” — raw ids are never shown.
             </p>
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <Field label="Procurement org" value={result.data.procurementOrgId ? "Assigned" : "—"} />
-              <Field label="Paying org" value={result.data.payingOrgId ? "Assigned" : "—"} />
+              <Field label="Procurement org" value={orgDisplayName(result.data.procurementOrgId, orgLookup)} />
+              <Field label="Paying org" value={orgDisplayName(result.data.payingOrgId, orgLookup)} />
             </div>
           </section>
 
