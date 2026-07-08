@@ -1,5 +1,7 @@
 import Link from "next/link";
 import { listIdentityAccountsForCurrentUser } from "@/lib/data/people";
+import { matchRateSummary } from "@/lib/data/account-match-summary";
+import { MatchRateMeter } from "@/components/match-rate-meter";
 
 export const metadata = { title: "People / Users · ID Caddie" };
 
@@ -75,6 +77,17 @@ export default async function PeoplePage() {
               label="Unmatched"
               value={result.data.matchStatusAvailable ? String(result.data.unmatchedAccounts) : "—"}
             />
+          </section>
+
+          <section className="max-w-md space-y-2 rounded border border-zinc-200 p-4 text-sm dark:border-zinc-800">
+            <MatchRateMeter
+              summary={matchRateSummary(result.data.matchedAccounts, result.data.unmatchedAccounts)}
+              available={result.data.matchStatusAvailable}
+            />
+            <p className="text-xs text-zinc-500">
+              This is app-account matching coverage, not a full user-access-review. It shows only whether a match
+              row exists for each visible account — never who it matched, license, or identity-provider data.
+            </p>
           </section>
 
           <section className="space-y-2 text-sm">

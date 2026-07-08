@@ -105,4 +105,28 @@ describe("/apps/[id] render", () => {
     expect(container.textContent).not.toContain(VISIBLE);
     expect(container.textContent).not.toContain(HIDDEN);
   });
+
+  it("renders the account match-coverage meter + status distribution for a populated roster, no raw ids", async () => {
+    asMock(getAppDetailForCurrentUser).mockResolvedValue(detail);
+    asMock(listContractsLinkedToApp).mockResolvedValue({ ok: true, data: [] });
+    asMock(listAppUsersForApp).mockResolvedValue({
+      ok: true,
+      data: [
+        { id: "user-uuid-1", displayName: "Alice", email: "alice@x.com", externalUserId: null, status: "active", licenseType: null, lastActiveAt: null },
+        { id: "user-uuid-2", displayName: "Bob", email: "bob@x.com", externalUserId: null, status: "inactive", licenseType: null, lastActiveAt: null },
+      ],
+    });
+    asMock(listMatchesForAppUsers).mockResolvedValue({ ok: true, data: [{ appUserId: "user-uuid-1" }] });
+    asMock(getCatalogMappingForApp).mockResolvedValue({ ok: true, data: { mapped: false } });
+    asMock(listOrganizationsForCurrentUser).mockResolvedValue({ ok: true, data: [] });
+
+    const { container } = render(await AppDetailPage({ params: Promise.resolve({ id: "app-uuid-abc" }) }));
+    expect(screen.getByText("Account summary")).toBeTruthy();
+    expect(screen.getByText("Match coverage")).toBeTruthy();
+    expect(screen.getAllByText("50%").length).toBeGreaterThan(0); // 1 of 2 matched, floored (meter + existing field)
+    expect(screen.getByText(/Active/)).toBeTruthy(); // status distribution legend
+    // no raw app_user/app UUID leaks
+    expect(container.textContent).not.toContain("user-uuid-1");
+    expect(container.textContent).not.toContain("app-uuid-abc");
+  });
 });
