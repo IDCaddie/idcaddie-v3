@@ -36,10 +36,15 @@ describe("/files render", () => {
     expect(html).toContain("text-green-700");
     expect(html).toContain("text-red-700");
     expect(html).toContain("text-amber-700");
-    // human status labels preserved inside the badges
-    expect(screen.getByText("Uploaded")).toBeTruthy();
+    // human status labels preserved inside the badges (also a KPI card label → 2 matches)
+    expect(screen.getAllByText("Uploaded").length).toBeGreaterThan(0);
     // content type renders inside a neutral badge; null contentType stays a quiet "—"
     expect(screen.getByText("application/pdf")).toBeTruthy();
+    // KPI summary header (computed from the already-fetched rows)
+    expect(screen.getByText("Total files")).toBeTruthy();
+    expect(screen.getByText("Total size")).toBeTruthy();
+    expect(screen.getByText("Failed")).toBeTruthy();
+    expect(screen.getByText(/File metadata only/)).toBeTruthy();
 
     // regression: no storage path / hash / raw tenant / uploader / connector secret leaks into the UI
     for (const forbidden of ["storage_path", "storage_bucket", "sha256", "tenant_id", "uploaded_by", "connector_secrets", "discovery_facts", "fact_json"]) {
