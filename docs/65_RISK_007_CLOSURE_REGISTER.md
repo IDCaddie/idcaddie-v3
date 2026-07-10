@@ -10,8 +10,10 @@
 > [04_RISK_REGISTER.md](./04_RISK_REGISTER.md). Those are **not** this register; this doc (65) is.
 >
 > **Hard guardrails (do not violate):** this register **does NOT unblock Phase C**, **does NOT authorize C-2c or any
-> connector live data-sync**, and **does NOT touch production**. Phase C remains **BLOCKED**; unblocking it is the
-> **separate** R-019 decision (criterion 19). Connector live data-sync **has not run**. Production is **untouched**.
+> connector live data-sync**, and **does NOT touch production**. **This register did not unblock Phase C** — unblocking
+> it was the **separate** R-019 decision (criterion 19), subsequently recorded in
+> [66_PHASE_C_UNBLOCK_DECISION.md](./66_PHASE_C_UNBLOCK_DECISION.md) (Phase C UNBLOCKED as a governance state only; C-2c
+> still a separate per-run decision, NOT started). Connector live data-sync **has not run**. Production is **untouched**.
 
 ---
 
@@ -32,10 +34,12 @@ revocation, and permanent deletion of the source secret). Its closure criteria a
   including the newly merged **R-015 / criterion 15** permanent-deletion confirmation (PR **#290**).
 - **RISK-007: READY FOR CLOSURE.** On **merge of this closure register (R-018)**, RISK-007 is **CLOSED at its defined
   staging-scope closure criteria**. It is **not fully closed until this register merges**.
-- **Phase C: REMAINS BLOCKED.** Closing RISK-007 does **not** unblock Phase C. **R-019 (criterion 19)** — the Phase C
-  unblock — is a **separate explicit human decision**, never bundled with this register and never implied by it.
+- **Phase C: NOT unblocked by this register.** Closing RISK-007 does **not** unblock Phase C. **R-019 (criterion 19)** —
+  the Phase C unblock — is a **separate explicit human decision**, never bundled with this register and never implied by
+  it. *(Update 2026-07-10: R-019 subsequently unblocked Phase C as a **governance state only** — see
+  [66_PHASE_C_UNBLOCK_DECISION.md](./66_PHASE_C_UNBLOCK_DECISION.md); C-2c remains a separate per-run decision, NOT started.)*
 - **No live sync. No production.** Connector live data-sync **has not run**; production (`dzbfxulvxchdemcettrx`) is
-  **untouched**; **C-2c is not started or authorized** by this register.
+  **untouched**; **C-2c is not started or authorized** by this register or by the R-019 governance unblock.
 
 ---
 
@@ -86,12 +90,15 @@ Phase C unblock.
 
 ## 5. What happens next (sequenced; each separate)
 
-1. **R-018 (this register)** — reviewed + merged → RISK-007 closed at its staging-defined criteria.
-2. **R-019 (criterion 19)** — the Phase C unblock: a **separate explicit Sam GO**, after RISK-007 closure. **Not started.**
-3. **C-2c** — the first sanctioned connector data-sync, only after R-019. **Not started / not authorized.**
+1. **R-018 (this register)** — reviewed + merged (**PR #291**) → RISK-007 closed at its staging-defined criteria. **DONE.**
+2. **R-019 (criterion 19)** — the Phase C unblock: explicit Sam GO (2026-07-10), recorded in
+   [66_PHASE_C_UNBLOCK_DECISION.md](./66_PHASE_C_UNBLOCK_DECISION.md). **DONE — Phase C UNBLOCKED as a governance state
+   only** (does NOT run C-2c / live sync / production).
+3. **C-2c** — the first sanctioned connector data-sync, only after R-019. **NOT started / NOT authorized** — a separate
+   per-run Sam GO + a clean Phase-2c readiness run are still required.
 
-**Order:** R-015 (done, #290) → **R-018 (this)** → R-019 → C-2c. Never skip a step; never bundle a Phase C unblock with a
-run.
+**Order:** R-015 (done, #290) → R-018 (done, #291) → R-019 (done, docs/66 — Phase C governance UNBLOCKED) → **C-2c (NOT
+started)**. Never skip a step; never bundle a C-2c run / live sync / production action with this governance unblock.
 
 ---
 
