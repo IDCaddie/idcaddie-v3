@@ -13,6 +13,7 @@ import {
   listConnectorsForCurrentUser,
   connectorStatusLabel,
   runStatusLabel,
+  runCountsLabel,
 } from "./connectors";
 
 type TableData = { data: unknown[] | null; error: unknown };
@@ -37,6 +38,15 @@ describe("connectorStatusLabel / runStatusLabel", () => {
     expect(runStatusLabel("timed_out")).toBe("Timed out");
     expect(runStatusLabel(null)).toBe("—");
     expect(runStatusLabel(undefined)).toBe("—");
+  });
+});
+
+describe("runCountsLabel", () => {
+  it("summarizes safe counters; hides failed when 0; empty when all null", () => {
+    expect(runCountsLabel({ recordsSeen: 3, recordsImported: 3, recordsFailed: 0 })).toBe("3 seen · 3 imported");
+    expect(runCountsLabel({ recordsSeen: 3, recordsImported: 1, recordsFailed: 2 })).toBe("3 seen · 1 imported · 2 failed");
+    expect(runCountsLabel({ recordsSeen: 0, recordsImported: 0, recordsFailed: 0 })).toBe("0 seen · 0 imported");
+    expect(runCountsLabel({ recordsSeen: null, recordsImported: null, recordsFailed: null })).toBe("");
   });
 });
 

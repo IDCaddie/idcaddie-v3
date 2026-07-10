@@ -3,6 +3,7 @@ import {
   listConnectorsForCurrentUser,
   connectorStatusLabel,
   runStatusLabel,
+  runCountsLabel,
 } from "@/lib/data/connectors";
 import {
   getLatestSlackSyncRunForCurrentTenant,
@@ -87,6 +88,7 @@ export default async function ConnectorsPage() {
                         <span>
                           <Badge tone={statusColor(c.lastRun.status)}>{runStatusLabel(c.lastRun.status)}</Badge>
                           {c.lastRun.completedAt ? ` · ${c.lastRun.completedAt.slice(0, 10)}` : ""}
+                          {runCountsLabel(c.lastRun) ? ` · ${runCountsLabel(c.lastRun)}` : ""}
                           {c.lastRun.failureLabel ? ` · ${c.lastRun.failureLabel}` : ""}
                         </span>
                       ) : (
