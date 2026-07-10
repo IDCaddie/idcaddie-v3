@@ -2,8 +2,10 @@
 
 **Purpose.** This is the single "what shipped / what's in flight / what's next" list for the v3 rebuild, keyed by **stable
 workstream IDs** and pinned to **real, merged GitHub PR numbers**. It replaces the six conflicting "next PRs" lists scattered
-across the old parity docs. It is a planning + status doc — it does **not** change any gate. **RISK-007 remains OPEN; Phase C
-remains BLOCKED; live connector sync has NOT run; production is untouched.**
+across the old parity docs. It is a planning + status doc — it does **not** change any gate. **Governance (current, 2026-07-10):
+RISK-007 is CLOSED at its staging-defined criteria (R-018/#291); Phase C is UNBLOCKED as a governance state only (R-019/#292);
+C-2c has NOT started and remains a separate per-run decision (its own explicit Sam GO + a clean Phase-2c readiness run);
+live connector sync has NOT run; production is untouched.**
 
 Part of the 7-doc rebuild pack. Cross-references: current state → [55_REBUILD_STATUS.md](./55_REBUILD_STATUS.md); old-app
 parity rows → [56_OLD_APP_PARITY_REGISTER.md](./56_OLD_APP_PARITY_REGISTER.md); connector parity →

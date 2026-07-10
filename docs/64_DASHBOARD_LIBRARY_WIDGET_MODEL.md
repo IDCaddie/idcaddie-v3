@@ -1,7 +1,7 @@
 # 64 — Dashboard Library / Widget Model (D-001, design-only)
 
 > **CURRENT CURSOR (2026-07-08):** `idcaddie-v3` main @ `c39c20a` (PRs through **#288**); `idcaddie-connector-runner`
-> main @ `84ecf6d` (untouched). Governance unchanged: **RISK-007 remains OPEN; Phase C remains BLOCKED; connector live
+> main @ `84ecf6d` (untouched). Governance (current, 2026-07-10): **RISK-007 is CLOSED at its staging-defined criteria; Phase C is UNBLOCKED as a governance state only (C-2c has NOT started — separate per-run Sam GO + clean Phase-2c readiness run required); connector live
 > data-sync has not run; production untouched.**
 >
 > **THIS IS A DESIGN DOCUMENT ONLY.** No schema, tables, widgets, dashboard writes, migrations, or UI exist or are
@@ -290,6 +290,7 @@ unblock Phase C · run live sync · touch production. Design document only.
 
 ---
 
-*Design-only. No schema, tables, widgets, dashboard writes, migrations, or UI exist or are created here. RISK-007
-remains OPEN; Phase C remains BLOCKED; connector live data-sync has not run; production untouched; old-app parity is
-NOT complete.*
+*Design-only. No schema, tables, widgets, dashboard writes, migrations, or UI exist or are created here. Governance
+(current, 2026-07-10): RISK-007 is CLOSED at its staging-defined criteria; Phase C is UNBLOCKED as a governance state
+only (C-2c has NOT started — separate per-run Sam GO + clean Phase-2c readiness run required); connector live data-sync
+has not run; production untouched; old-app parity is NOT complete.*

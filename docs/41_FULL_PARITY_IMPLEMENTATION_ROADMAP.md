@@ -5,6 +5,13 @@ implementation **epics**, dependency gates, connector waves, and realistic PR-co
 code-derived inventory ([40](./40_CODE_DERIVED_OLD_APP_INVENTORY.md)). **This PR creates a full-parity
 implementation roadmap; it does not implement parity.**
 
+> **Current authoritative governance state (updated 2026-07-10 — supersedes the "RISK-007 remains OPEN / Phase C remains
+> BLOCKED" gating annotations throughout this roadmap):** **RISK-007 is CLOSED at its staging-defined criteria** (R-018 /
+> PR #291); **Phase C is UNBLOCKED as a governance state only** (R-019 / PR #292, `docs/66`). **C-2c has NOT started and
+> remains a separate per-run decision requiring its own explicit Sam GO and a clean Phase-2c readiness run. Connector
+> live data-sync has NOT run. Production is untouched.** The in-body "RISK-007 open / Phase C blocked" annotations below
+> are historical; the authoritative current state is docs/04/52/59/65/66.
+
 > ## ⚠️ STATUS BANNER (do not remove)
 > - **This PR creates a full-parity implementation roadmap; it does not implement parity.** No feature built.
 > - **OMC requires full old-app parity before cutover unless OMC explicitly waives a specific capability. The MVP
