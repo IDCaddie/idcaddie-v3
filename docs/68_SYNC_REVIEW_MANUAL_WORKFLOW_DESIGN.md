@@ -153,9 +153,16 @@ new mechanism):
 | **Promotion** (confirmed → `app_users`) | **YES** — no editor write authority on `app_users`; requires a validated `SECURITY DEFINER` promotion function (or resolver integration) + a narrow EXECUTE grant. |
 | People / identity matching from facts | **YES + privacy review** — deferred. |
 
-**Conclusion:** the review-**status** workflow (confirm/reject + audit) is buildable with **no migration**. The
-**promotion** step **does require a migration** — so per the standing rule, **stop and get explicit approval before
-building promotion** (§11). The first PR (§9) deliberately excludes promotion and thus needs no migration.
+**Conclusion:** the review-**status** workflow (confirm/reject + audit) is buildable with **no migration** *except for the
+audit trail* — because `audit_logs` is app-write-protected, the sanctioned audit path is a `SECURITY DEFINER`
+audit-on-write trigger (like `contracts_audit_on_write`, 0010), which **is** a migration. The **promotion** step also
+requires a migration. So per the standing rule, migrations are stop-and-ask.
+
+> **Status — PR A (2026-07-10):** the **audit-trigger migration only** is prepared: `0042_discovery_facts_audit_on_write.sql`
+> (a metadata-only `SECURITY DEFINER` `AFTER UPDATE OF review_status/reviewed_by/reviewed_at/rejected_reason` trigger,
+> mirroring 0010) + RLS suite Test 62. **PR A does NOT implement or authorize the confirm/reject actions or any UI**, adds
+> no policy/grant, keeps `audit_logs` app-write-protected, and is **prepared local-only — NOT applied** (no hosted
+> Supabase). Building the confirm/reject actions + UI remains a separate, later, explicitly-approved step (§9/§11).
 
 ---
 
