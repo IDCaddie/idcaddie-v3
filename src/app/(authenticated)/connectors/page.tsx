@@ -192,11 +192,19 @@ export default async function ConnectorsPage() {
                 App user accounts: <span className="font-medium text-zinc-700 dark:text-zinc-300">{review.data.appUserAccounts}</span>
               </p>
             ) : null}
+            {review.data.pending > 0 ? (
+              <p className="mt-3 flex flex-wrap items-baseline gap-2">
+                <Link href="/connectors/review" className="text-sm font-medium underline">
+                  Review pending items
+                </Link>
+                <span className="text-xs text-zinc-500">Open the review queue</span>
+              </p>
+            ) : null}
           </div>
         )}
         <p className="text-xs text-zinc-500">
-          Counts only — no item details, personal data, payloads, tokens, or secrets are shown. Reviewing items is not
-          built yet.
+          Counts only — no item details, personal data, payloads, tokens, or secrets are shown here. Confirm / reject
+          happens on the separate review page (this page stays read-only).
         </p>
       </section>
 
