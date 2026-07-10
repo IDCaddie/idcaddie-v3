@@ -6,9 +6,11 @@
 > (#301: `confirmPendingReview` / `rejectPendingReview`). This doc extends the manual-workflow design in
 > [68_SYNC_REVIEW_MANUAL_WORKFLOW_DESIGN.md](./68_SYNC_REVIEW_MANUAL_WORKFLOW_DESIGN.md).
 >
-> **THIS IS A DESIGN PROPOSAL ONLY.** No route, page, component, server-action wiring, migration, or test is created
-> here. It runs no hosted command and does not touch `/connectors`. It asks for the §7 approvals before any
-> implementation. Staging-safe, production-neutral; no production-readiness claim.
+> **DESIGN + STATUS.** Sections 0–7 are the original design proposal (the §7 items were approved). The route was
+> subsequently **implemented** — `/connectors/review` (**#303**) plus a navigation-only CTA from `/connectors` (**#304**) —
+> and a **PARTIAL staging human test** is recorded in **§8** below: the **viewer** and **confirm** paths **PASSED**;
+> **reject**, **stale / repeat-no-op**, and **deep audit** verification remain **DEFERRED / not tested** (see §8). No
+> migration in this design (0042 was applied separately). Staging-safe, production-neutral; no production-readiness claim.
 
 ---
 
@@ -154,7 +156,46 @@ the #301 helpers + a count-only `getSyncReviewGroups()` DAL + the §6 tests. **N
 
 ---
 
-*Design proposal only. No route/page/component/server-action/migration/test is created; no query or hosted command was
-run; `/connectors` untouched; no promotion; no row bodies/PII. RISK-007 remains CLOSED at its staging-defined criteria;
+## 8. Staging human-test evidence (2026-07-10)
+
+A **partial** end-to-end human test of `/connectors/review` on **staging only**. **Environment:** staging ref
+`ycdpzduxugdsffjqyoai`; app URL `https://idcaddie-v3.vercel.app`; **production ref `dzbfxulvxchdemcettrx` never linked,
+targeted, queried, or changed.** No connector run; no production action; no code changes; **no row bodies / PII inspected**
+(counts and safe metadata only).
+
+**A. Viewer — PASS.** Account `tenant-viewer-a@idcaddie-staging.local` (Storage Verifier Tenant A · **viewer**):
+- Grouped counts render; **Pending 3**.
+- **No** confirm/reject controls shown.
+- Read-only banner ("read-only access — reviewing requires an editor role") visible.
+- No row details / PII shown. `/connectors` remained read-only.
+
+**B/C. Editor + Confirm — PASS.** Account `tenant-editor-a@idcaddie-staging.local` (Storage Verifier Tenant A · **editor**):
+- **Pre-action (counts/metadata only):** one pending batch — provider **slack**, type **App user accounts**, opaque
+  source run id **`25bda7ae`** (truncated), **Pending 3**. No individual rows / explicit fact IDs displayed; confirm +
+  reject controls present.
+- **Confirm action:** success message **"Confirmed 3 items."**; **Pending 3 → 0**; **Confirmed 0 → 3**; the batch
+  **disappeared from the pending list**. Counts only — no row bodies inspected.
+
+**D. Reject — NOT TESTED (deferred).** The only pending batch was consumed by the confirm above, so no batch remained to
+reject. Reject-path behavior (including the fixed-enum-only guard) is **not claimed** here — it remains covered by the
+`sync-review-actions` + route action unit tests, pending a future staging run with a second batch.
+
+**E. Stale / repeat-no-op — NOT TESTED (deferred).** Not exercised in this session; **not claimed**. (Unit tests cover
+the guarded pending-only / 0-row no-op path.)
+
+**F. Deep audit verification — DEFERRED.** Verifying the 0042 audit rows on staging via direct SQL requires the DB
+password (a secret); per the hosted-apply hard stops that was **not** performed. The 0042 audit is asserted metadata-only
+by the **T62 RLS suite** (CI). **No secret value was read or printed.**
+
+**G. Regression.** `/connectors` stayed read-only; `/connectors/review` showed no forbidden data (counts/safe metadata
+only); no promotion occurred; no connector run; production untouched.
+
+**Net:** **viewer + confirm paths PASSED on staging;** **reject, stale/no-op, and deep audit remain DEFERRED / not
+tested** (do not read this as reject/stale/audit having passed).
+
+---
+
+*Sections 0–7 are the design; §8 records a partial staging human test. `/connectors` stays read-only; no promotion; no
+row bodies/PII; no migration in this doc; no production action. RISK-007 remains CLOSED at its staging-defined criteria;
 Phase C remains UNBLOCKED as a governance state only; the C-2c sync ran on staging only; production untouched; no
 production action is authorized.*
