@@ -39,7 +39,7 @@ describe("/connectors render", () => {
           status: "active", // → success (green)
           safeScopes: ["users:read"],
           createdAt: "2026-07-01T00:00:00Z",
-          lastRun: { status: "succeeded", completedAt: "2026-07-02T00:00:00Z", failureCode: null, failureLabel: null }, // → green
+          lastRun: { status: "succeeded", startedAt: "2026-07-02T00:00:00Z", completedAt: "2026-07-02T00:00:00Z", failureCode: null, failureLabel: null, recordsSeen: 3, recordsImported: 3, recordsFailed: 0 }, // → green; safe counters render
         },
       ],
     });
@@ -67,6 +67,9 @@ describe("/connectors render", () => {
     expect(html).toContain("text-green-700");
     // the Slack-sync run status now renders as a shared badge too (red danger tone), not the old monochrome pill
     expect(html).toContain("text-red-700");
+
+    // post-sync truthfulness: the latest run's SAFE record counters render (counts only — no row bodies/PII)
+    expect(screen.getByText(/3 seen · 3 imported/)).toBeTruthy();
 
     // safe readiness copy still present; the disabled "Not built yet" affordances remain
     expect(screen.getByText("Slack sync status")).toBeTruthy();

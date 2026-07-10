@@ -66,6 +66,18 @@ export function runStatusLabel(status: string | null | undefined): string {
   return known[status] ?? status;
 }
 
+// Safe, human-readable summary of a run's record counters — e.g. "3 seen · 3 imported" or "3 seen · 1 imported · 2
+// failed". Counts only (never a row body / PII / token). Returns "" when no counter is present. Pure; never throws.
+export function runCountsLabel(
+  run: Pick<ConnectorRunSummary, "recordsSeen" | "recordsImported" | "recordsFailed">,
+): string {
+  const parts: string[] = [];
+  if (run.recordsSeen != null) parts.push(`${run.recordsSeen} seen`);
+  if (run.recordsImported != null) parts.push(`${run.recordsImported} imported`);
+  if (run.recordsFailed != null && run.recordsFailed > 0) parts.push(`${run.recordsFailed} failed`);
+  return parts.join(" · ");
+}
+
 // List the connectors the current user may read (RLS-scoped) + each connector's most recent run. Two
 // RLS-filtered reads of Tier-1 tables only. Fails closed on the connectors read; a failed runs read is
 // non-fatal (lastRun null) — a missing run must never erase a readable connector row.
