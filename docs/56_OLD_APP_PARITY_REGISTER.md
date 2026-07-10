@@ -3,8 +3,7 @@
 > **CURRENT CURSOR (updated 2026-07-08):** `idcaddie-v3` main @ `7f7d050`, PRs merged **through #284**.
 > `idcaddie-connector-runner` main @ `84ecf6d`. **The `768f91a` / "through #264" figures below are this register's
 > original 2026-07-07 snapshot — historical, not current.** The per-row PR/workstream tags below remain accurate for the
-> rows they cite. Governance (current, 2026-07-10): RISK-007 is CLOSED at its staging-defined criteria; Phase C is UNBLOCKED as a governance state only (C-2c has NOT started — separate per-run Sam GO + clean Phase-2c readiness run required); production untouched; connector
-> live data-sync has not run (earlier hosted staging RISK-007 proof steps occurred under gated procedures, but those were
+> rows they cite. Governance (current, 2026-07-10): RISK-007 is CLOSED at its staging-defined criteria; Phase C is UNBLOCKED as a governance state only (C-2c staging live sync completed 2026-07-10 (staging-only; production untouched; connector-runner PR #36)); production untouched; the C-2c connector live data-sync ran on staging only (connector-runner PR #36, 2026-07-10) (earlier hosted staging RISK-007 proof steps occurred under gated procedures, but those were
 > not Phase C live data-sync); old-app parity is NOT complete.
 
 **One-line purpose:** a single, honest, row-by-row map of what the **old ID Caddie app** (legacy Firebase app) let a user do, versus what the **new app** (this repo, `idcaddie-v3`) actually ships today — with, for every row, whether it is **safe to build before 2026-07-10**, what it would require (a database change, a live connector run, a privacy review), how risky it is, and the single next action.

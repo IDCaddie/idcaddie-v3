@@ -4,8 +4,8 @@
 workstream IDs** and pinned to **real, merged GitHub PR numbers**. It replaces the six conflicting "next PRs" lists scattered
 across the old parity docs. It is a planning + status doc — it does **not** change any gate. **Governance (current, 2026-07-10):
 RISK-007 is CLOSED at its staging-defined criteria (R-018/#291); Phase C is UNBLOCKED as a governance state only (R-019/#292);
-C-2c has NOT started and remains a separate per-run decision (its own explicit Sam GO + a clean Phase-2c readiness run);
-live connector sync has NOT run; production is untouched.**
+C-2c staging live sync completed 2026-07-10 (staging-only, production untouched; connector-runner PR #36);
+the C-2c live connector sync ran on staging only (connector-runner PR #36, 2026-07-10); production is untouched.**
 
 Part of the 7-doc rebuild pack. Cross-references: current state → [55_REBUILD_STATUS.md](./55_REBUILD_STATUS.md); old-app
 parity rows → [56_OLD_APP_PARITY_REGISTER.md](./56_OLD_APP_PARITY_REGISTER.md); connector parity →
@@ -122,7 +122,7 @@ Summary first, full detail cards below.
 > reports come **last**. This is the **design** underpinning the migration-gated **M-001 (invoices)** and **M-002
 > (license/ELU)** build rows below; it proposes future tables + a phased build order (S1 schema/RLS → S8 reports) but
 > **no schema, tables, migrations, imports, connectors, or UI exist**. Nothing here changes RISK-007 (OPEN) or Phase C
-> (BLOCKED); connector live data-sync has not run; production untouched.
+> (BLOCKED); the C-2c connector live data-sync ran on staging only (connector-runner PR #36, 2026-07-10); production untouched.
 
 > **Note (D-001 dashboard library / widget model design, 2026-07-08 — DESIGN-ONLY, complete).**
 > [64_DASHBOARD_LIBRARY_WIDGET_MODEL.md](./64_DASHBOARD_LIBRARY_WIDGET_MODEL.md) captures the future dashboard library +
@@ -130,7 +130,7 @@ Summary first, full detail cards below.
 > role visibility via RLS) and a phased build order (D-002 read-only shell → D-010 caching). It proposes future tables +
 > widgets but **no schema, tables, widgets, dashboard writes, migrations, or UI exist** — v3 still ships only the static
 > `/dashboards`. Dashboard writes/sharing remain migration- and RLS-review-gated (no public links). Nothing here changes
-> RISK-007 (OPEN) or Phase C (BLOCKED); connector live data-sync has not run; production untouched.
+> RISK-007 (OPEN) or Phase C (BLOCKED); the C-2c connector live data-sync ran on staging only (connector-runner PR #36, 2026-07-10); production untouched.
 
 > **Provenance caveat (INFERENCE-check).** These PR numbers are **FACT per the canonical PR map** in the project brief and
 > mirror [05_ENGINEERING_CHANGELOG.md](./05_ENGINEERING_CHANGELOG.md). This doc was written **read-only** — no `git`/`gh` was
@@ -377,7 +377,7 @@ hard-blocked at entrypoint, connection, and task-def. Read alongside
   track.
 - **Result:** **Phase C UNBLOCKED as a governance state only.** This does **NOT** run C-2c, does **NOT** run connector
   live data-sync, does **NOT** touch production, and does **NOT** authorize any production action. **C-2c remains a
-  separate per-run decision requiring its own explicit Sam GO and a clean Phase-2c readiness run; C-2c has NOT started.**
+  separate per-run decision requiring its own explicit Sam GO and a clean Phase-2c readiness run; C-2c staging live sync completed (connector-runner PR #36).**
 - **Risk reduced:** n/a (governance state change only).
 - **Tradeoff:** **Never imply a C-2c run / live sync / production action from this unblock** — each remains separate.
 - **Dependencies:** R-018 (closure register) + RISK-007 closed — **both met (#291).**

@@ -3,7 +3,7 @@
 > **CURRENT CURSOR (updated 2026-07-08):** `idcaddie-v3` main @ `7f7d050`, PRs merged **through #284** (latest = P-018a,
 > `/connectors` status badges + leak-scan). `idcaddie-connector-runner` main @ `84ecf6d`. **The `768f91a` / "through #264"
 > figures below are this page's original 2026-07-07 snapshot — historical, not current.** Governance unchanged: RISK-007
-> remains OPEN; Phase C remains BLOCKED; production untouched; connector live data-sync has not run (earlier hosted
+> remains OPEN; Phase C remains BLOCKED; production untouched; the C-2c connector live data-sync ran on staging only (connector-runner PR #36, 2026-07-10) (earlier hosted
 > staging RISK-007 proof steps occurred under gated procedures, but those were not Phase C live data-sync); old-app
 > parity is NOT complete.
 
@@ -288,9 +288,7 @@ the AI design doc `docs/16_CONTRACT_PDF_AI_EXTRACTION_DESIGN.md`):
   one-off gated exception.
 - **Status (FACT, updated 2026-07-10):** **Phase C is UNBLOCKED as a governance state only** — RISK-007 **criterion 19**
   (R-019) recorded the explicit human decision after RISK-007 closure (`docs/66`, PR #292). The earlier "Phase C is
-  BLOCKED" on this page was accurate before that decision and is now historical. **C-2c has NOT started and remains a
-  separate per-run decision requiring its own explicit Sam GO and a clean Phase-2c readiness run. Connector live
-  data-sync has NOT run. Production is untouched.**
+  BLOCKED" on this page was accurate before that decision and is now historical. **C-2c staging live sync completed 2026-07-10, separately, on staging only (connector-runner PR #36); the connector live data-sync ran on staging only. Production is untouched — no production live sync is authorized.**
 - **Terminology warning (FACT):** Older design docs sometimes use "Phase C" to mean the hosted-runner
   secret-*ingestion* step (parts of which have happened on staging). This page uses "Phase C" only in
   the governance/roadmap sense above: the gated live-execution phase, which remains BLOCKED. If you

@@ -6,9 +6,7 @@ working days from **2026-07-07 to 2026-07-10** and hands off to the full plan in
 
 > **Current authoritative governance state (updated 2026-07-10 — supersedes the "RISK-007 is OPEN / Phase C is BLOCKED"
 > reminders in the dated body below):** **RISK-007 is CLOSED at its staging-defined criteria** (R-018 / PR #291);
-> **Phase C is UNBLOCKED as a governance state only** (R-019 / PR #292, `docs/66`). **C-2c has NOT started and remains a
-> separate per-run decision requiring its own explicit Sam GO and a clean Phase-2c readiness run. Connector live
-> data-sync has NOT run. Production is untouched.** The dated 2026-07-07→10 plan below is historical.
+> **Phase C is UNBLOCKED as a governance state only** (R-019 / PR #292, `docs/66`). **C-2c staging live sync completed 2026-07-10, separately, on staging only (connector-runner PR #36); the connector live data-sync ran on staging only. Production is untouched — no production live sync is authorized.** The dated 2026-07-07→10 plan below is historical.
 
 It is written for the whole team — engineers, product, security reviewers, future AI
 coding agents, and non-specialists.

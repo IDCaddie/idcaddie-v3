@@ -12,8 +12,9 @@
 > **Hard guardrails (do not violate):** this register **does NOT unblock Phase C**, **does NOT authorize C-2c or any
 > connector live data-sync**, and **does NOT touch production**. **This register did not unblock Phase C** — unblocking
 > it was the **separate** R-019 decision (criterion 19), subsequently recorded in
-> [66_PHASE_C_UNBLOCK_DECISION.md](./66_PHASE_C_UNBLOCK_DECISION.md) (Phase C UNBLOCKED as a governance state only; C-2c
-> still a separate per-run decision, NOT started). Connector live data-sync **has not run**. Production is **untouched**.
+> [66_PHASE_C_UNBLOCK_DECISION.md](./66_PHASE_C_UNBLOCK_DECISION.md) (Phase C UNBLOCKED as a governance state only). This
+> register did not run C-2c or any connector live data-sync. *(Update 2026-07-10: C-2c staging live sync subsequently ran,
+> separately, on staging — connector-runner PR #36; production untouched.)* Production is **untouched**.
 
 ---
 
@@ -38,8 +39,7 @@ revocation, and permanent deletion of the source secret). Its closure criteria a
   the Phase C unblock — is a **separate explicit human decision**, never bundled with this register and never implied by
   it. *(Update 2026-07-10: R-019 subsequently unblocked Phase C as a **governance state only** — see
   [66_PHASE_C_UNBLOCK_DECISION.md](./66_PHASE_C_UNBLOCK_DECISION.md); C-2c remains a separate per-run decision, NOT started.)*
-- **No live sync. No production.** Connector live data-sync **has not run**; production (`dzbfxulvxchdemcettrx`) is
-  **untouched**; **C-2c is not started or authorized** by this register or by the R-019 governance unblock.
+- **No live sync. No production.** This register did not run C-2c or any connector live data-sync; production (`dzbfxulvxchdemcettrx`) is **untouched**. *(Update 2026-07-10: C-2c staging live sync ran later, separately, on staging — connector-runner PR #36; production untouched.)*
 
 ---
 
@@ -81,7 +81,8 @@ register must not be read to imply:
   Slack re-issued the same token, so a provider-side new-token rotation was not forced (future hardening, not a blocker).
 - **No broad per-tenant / multi-provider proof at scale** — one real staging Slack path proved the mechanism; other
   providers and per-tenant customer credentials at scale remain future, gated work.
-- **No connector data-sync** — the connector live data-sync has **not** run.
+- **Connector data-sync** — the first C-2c connector live data-sync did **not** run as part of this closure register; it
+  ran later, separately, on **staging only** (connector-runner PR #36, 2026-07-10; production untouched).
 
 These are recorded openly so closure of the defined criteria is not mistaken for parity, production-readiness, or a
 Phase C unblock.
@@ -94,15 +95,15 @@ Phase C unblock.
 2. **R-019 (criterion 19)** — the Phase C unblock: explicit Sam GO (2026-07-10), recorded in
    [66_PHASE_C_UNBLOCK_DECISION.md](./66_PHASE_C_UNBLOCK_DECISION.md). **DONE — Phase C UNBLOCKED as a governance state
    only** (does NOT run C-2c / live sync / production).
-3. **C-2c** — the first sanctioned connector data-sync, only after R-019. **NOT started / NOT authorized** — a separate
-   per-run Sam GO + a clean Phase-2c readiness run are still required.
+3. **C-2c** — the first sanctioned connector data-sync, after R-019. **DONE — staging live sync completed 2026-07-10**
+   (connector-runner PR #36; `succeeded`, `records_seen=3`, staging-only, production untouched). Not a production live sync.
 
-**Order:** R-015 (done, #290) → R-018 (done, #291) → R-019 (done, docs/66 — Phase C governance UNBLOCKED) → **C-2c (NOT
-started)**. Never skip a step; never bundle a C-2c run / live sync / production action with this governance unblock.
+**Order:** R-015 (done, #290) → R-018 (done, #291) → R-019 (done, docs/66 — Phase C governance UNBLOCKED) → **C-2c (staging
+live sync completed, connector-runner PR #36)**. Never bundle a C-2c run / live sync / production action with the governance
+unblock — C-2c was its own separately-authorized step, staging-only; no production live sync is authorized.
 
 ---
 
 *Governance record only. No code, schema, migration, DAL, connector-runner, hosted command, secret read, live sync, or
 production change. This register did not unblock Phase C; the separate R-019 decision ([docs/66](./66_PHASE_C_UNBLOCK_DECISION.md))
-subsequently did — Phase C is UNBLOCKED as a governance state only. C-2c has NOT started (separate per-run Sam GO + clean
-Phase-2c readiness run required); connector live data-sync has not run; production untouched.*
+subsequently did — Phase C is UNBLOCKED as a governance state only. C-2c staging live sync completed 2026-07-10, separately, on staging only (connector-runner PR #36); the connector live data-sync ran on staging only; production untouched.*
