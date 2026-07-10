@@ -2,8 +2,8 @@
 
 > **CURRENT CURSOR (updated 2026-07-08):** `idcaddie-v3` main @ `7f7d050`, PRs merged **through #284**.
 > `idcaddie-connector-runner` main @ `84ecf6d`. **The "As of 2026-07-07" line below is this register's original snapshot
-> date — historical.** Connector-scoped governance (current, 2026-07-10): RISK-007 is CLOSED at its staging-defined criteria; Phase C is UNBLOCKED as a governance state only (C-2c has NOT started — separate per-run Sam GO + clean Phase-2c readiness run required); production
-> untouched. **Connector live data-sync has not run. Earlier hosted staging RISK-007 proof steps occurred under gated
+> date — historical.** Connector-scoped governance (current, 2026-07-10): RISK-007 is CLOSED at its staging-defined criteria; Phase C is UNBLOCKED as a governance state only (C-2c staging live sync completed 2026-07-10 (staging-only; production untouched; connector-runner PR #36)); production
+> untouched. **The C-2c connector live data-sync ran on staging only (connector-runner PR #36, 2026-07-10); production untouched. Earlier hosted staging RISK-007 proof steps occurred under gated
 > procedures, but those were not Phase C live data-sync.**
 
 **Part of the 7-document rebuild pack.** Companion docs (cross-referenced by filename below):

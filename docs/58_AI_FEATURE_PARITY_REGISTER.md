@@ -3,8 +3,8 @@
 > **CURRENT CURSOR (updated 2026-07-08):** `idcaddie-v3` main @ `7f7d050`, PRs merged **through #284**.
 > `idcaddie-connector-runner` main @ `84ecf6d`. **The "Date of this register: 2026-07-07" line below is this register's
 > original snapshot date — historical.** No AI feature has shipped in v3 (AI document/file processing remains
-> not-started/deferred). Governance (current, 2026-07-10): RISK-007 is CLOSED at its staging-defined criteria; Phase C is UNBLOCKED as a governance state only (C-2c has NOT started — separate per-run Sam GO + clean Phase-2c readiness run required); production untouched;
-> connector live data-sync has not run.
+> not-started/deferred). Governance (current, 2026-07-10): RISK-007 is CLOSED at its staging-defined criteria; Phase C is UNBLOCKED as a governance state only (C-2c staging live sync completed 2026-07-10 (staging-only; production untouched; connector-runner PR #36)); production untouched;
+> the C-2c connector live data-sync ran on staging only (connector-runner PR #36, 2026-07-10).
 
 **Canonical source for: what AI features the old (legacy Firebase) app had, and how to rebuild each one
 *safely* in the v3 rebuild.** This is a parity + planning register, not a design doc and not a build. It

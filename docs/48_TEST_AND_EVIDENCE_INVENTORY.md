@@ -5,7 +5,7 @@ the two in-scope repos — `idcaddie-v3` (the app + canonical docs) and `idcaddi
 ECS/Fargate secret-ingest runner). Its purpose is to let an external reviewer orient quickly without needing hosted
 credentials or a live run.
 
-> **Posture (current, 2026-07-10):** **RISK-007 is CLOSED at its staging-defined criteria (R-018/#291). Phase C is UNBLOCKED as a governance state only (R-019/#292)** — C-2c has NOT started (separate per-run Sam GO + clean Phase-2c readiness run required); connector live data-sync has NOT run; production untouched. Nothing here closes RISK-007,
+> **Posture (current, 2026-07-10):** **RISK-007 is CLOSED at its staging-defined criteria (R-018/#291). Phase C is UNBLOCKED as a governance state only (R-019/#292)** — C-2c staging live sync completed (connector-runner PR #36) (separate per-run Sam GO + clean Phase-2c readiness run required); the C-2c connector live data-sync ran on staging only (connector-runner PR #36, 2026-07-10); production untouched. Nothing here closes RISK-007,
 > unblocks Phase C, or claims the first-real-token dry-run / B2c-run / decrypt-use / production / full-vault closure is
 > complete. **No secret values, DB URLs, passwords, tokens, private keys, ciphertext, or KMS key IDs/ARNs appear in this
 > file.** Dates are UTC.
@@ -126,7 +126,7 @@ docs/04_RISK_REGISTER.md (RISK-007 milestone, PR #220/#221) ◀───┘  run
 - **Hosted RLS-suite parity** — the full `org_rls_test.sql` has not been re-run against a disposable hosted project (`verify-staging-rls-suite.mjs` prepared, not run).
 - **Production** — untouched. No production KMS/IAM separation, no production live ingest.
 - **Uncommitted operational evidence** — the ECR image scan (0 findings), the IAM role-separation simulations, and the KMS round-trip metadata (§4b) were run and passed during the approved sequence but are **not yet recorded in a committed evidence doc**; a follow-up evidence PR should capture them (redacted).
-- **Governance (2026-07-10):** **RISK-007 is CLOSED at its staging-defined criteria (R-018/#291); Phase C is UNBLOCKED as a governance state only (R-019/#292)** — C-2c has NOT started and remains a separate per-run decision (its own explicit Sam GO + a clean Phase-2c readiness run); connector live data-sync has NOT run; production untouched.
+- **Governance (2026-07-10):** **RISK-007 is CLOSED at its staging-defined criteria (R-018/#291); Phase C is UNBLOCKED as a governance state only (R-019/#292)** — C-2c staging live sync completed 2026-07-10 (staging-only, production untouched; connector-runner PR #36); the C-2c connector live data-sync ran on staging only (connector-runner PR #36, 2026-07-10); production untouched.
 
 ---
 

@@ -4,9 +4,22 @@
 still required, who runs it, and where the evidence is recorded. Closing RISK-007 and unblocking Phase C were separate
 explicit human decisions (criterion 18/19). **Update (2026-07-10): RISK-007 is CLOSED at its staging-defined criteria
 (R-018 / PR #291); Phase C is UNBLOCKED as a governance state only (R-019, [docs/66](./66_PHASE_C_UNBLOCK_DECISION.md)).**
-The Phase C unblock does **NOT** run C-2c, does **NOT** run connector live data-sync, and does **NOT** touch production —
-C-2c remains a separate per-run decision (its own explicit Sam GO + a clean Phase-2c readiness run). **Connector live
-data-sync has not run; production untouched.**
+The Phase C unblock (R-019) did **NOT** itself run C-2c, run connector live data-sync, or touch production — C-2c was a
+separate per-run decision. **Update (2026-07-10): C-2c staging live sync has since run, separately, on staging only**
+(connector-runner PR #36 / `STAGING_LIVE_RUN_EVIDENCE.md` §14; `succeeded`, `records_seen=3`, `discovery_facts
+app_user_account=3`, leak-scan clean). **Production (`dzbfxulvxchdemcettrx`) untouched; this does not authorize a
+production live sync.**
+
+> **C-2c staging live-sync evidence (metadata/counts only — full redacted detail in connector-runner
+> `docs/STAGING_LIVE_RUN_EVIDENCE.md` §14, PR #36):** environment **staging only** — AWS `833822972703` / `ca-central-1`,
+> Supabase ref `ycdpzduxugdsffjqyoai`; production ref `dzbfxulvxchdemcettrx` **not touched**. connector-runner commit
+> `0d7dcfa` (PR #35 fixed the crypto secret kind to `oauth_access_token`); image digest
+> `sha256:cc16db325057b4382754339e7bf0e5ec6ee50e8f4a10003fd7b1dde34309d440`; live task id
+> `aa61597dcd254df485d8dd2efbc4f4a0`; DB run id `25bda7ae-3698-4976-b347-2132fc56dcca`; `connector_runs status=succeeded`,
+> `records_seen=3`; `discovery_facts app_user_account=3`, `review_status pending=3`. Exact-pattern leak scan: **zero hits**
+> for token / DB URL / ciphertext / DEK / AEAD / nonce / injected-secret-env (generic postgres/postgresql hits were only
+> pg SSL-warning text, not a DB URL). Temporary task definitions 1/2/3 inactive; active connector-sync task definitions
+> after cleanup = `[]`. **Staging-only; no production live sync is authorized.**
 
 Canonical criteria source: the RISK-007 row in [docs/04](./04_RISK_REGISTER.md). Design: [42](./42_CONNECTOR_CREDENTIAL_VAULT_DESIGN.md)
 / [44](./44_CONNECTOR_CREDENTIAL_REAL_TOKEN_THREAT_MODEL.md). Evidence inventory: [48](./48_TEST_AND_EVIDENCE_INVENTORY.md).
@@ -118,8 +131,8 @@ Criteria 3–14 are DONE-staging. What remains, in the safe order (do NOT jump a
 6. **`connectors.status` / `granted_scopes_safe` follow-up — decoupled.** A product decision on activation ownership; it
    **does NOT gate RISK-007 closure** and is tracked separately.
 
-**RISK-007 is CLOSED at its staging-defined criteria (R-018 / PR #291, docs/65); Phase C is UNBLOCKED as a governance state only (R-019, docs/66) — C-2c remains a separate per-run decision and has NOT started; connector live data-sync has NOT run.**
-Staging only (`ycdpzduxugdsffjqyoai`); production (`dzbfxulvxchdemcettrx`) untouched; connector live data-sync has not run.
+**RISK-007 is CLOSED at its staging-defined criteria (R-018 / PR #291, docs/65); Phase C is UNBLOCKED as a governance state only (R-019, docs/66); C-2c staging live sync has now run separately (connector-runner PR #36) — staging-only, `succeeded`, `records_seen=3`.**
+Staging only (`ycdpzduxugdsffjqyoai`); production (`dzbfxulvxchdemcettrx`) untouched; the C-2c connector live data-sync ran on **staging only** — no production live sync is authorized.
 
 **Staging-run follow-ups (do NOT reopen RISK-007; do NOT gate closure on their own):**
 - **Connector activation:** `connectors.status` is still `pending` and `granted_scopes_safe` is `NULL` after RUN GATE A —

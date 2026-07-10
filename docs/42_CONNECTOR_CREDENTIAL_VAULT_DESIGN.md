@@ -7,7 +7,7 @@ in the CI RLS suite; `0029` runner-secret grants hosted-verified staging + produ
 governance state only (R-019/#292).** Broader connector / real-customer-credential use + cutover remain **future/gated**
 (hosted KMS/IAM separation for customer secrets at scale, provider-side token rotation, the full connector path, and
 production). **C-2c — the first connector data-sync — has NOT started and remains a separate per-run decision requiring
-its own explicit Sam GO and a clean Phase-2c readiness run; connector live data-sync has NOT run; production untouched.**
+its own explicit Sam GO and a clean Phase-2c readiness run; the C-2c connector live data-sync ran on staging only (connector-runner PR #36, 2026-07-10); production untouched.**
 See [04 §RISK-007](./04_RISK_REGISTER.md). Only ONE staging app-level Slack client secret was ingested envelope-only so
 far (connector-runner PR #16). *(The per-section "RISK-007 remains OPEN" status notes later in this design doc are
 design-time notes — historical; the authoritative current state is this paragraph + docs/04/52/65/66.)*

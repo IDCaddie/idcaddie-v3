@@ -1,7 +1,7 @@
 # 62 — Old UI / Product Parity Audit (screenshot-evidenced)
 
 > **CURRENT CURSOR (2026-07-08):** `idcaddie-v3` main @ `689ea41` (PRs through **#286**); `idcaddie-connector-runner`
-> main @ `84ecf6d` (untouched). Governance (current, 2026-07-10): **RISK-007 is CLOSED at its staging-defined criteria; Phase C is UNBLOCKED as a governance state only (C-2c has NOT started — separate per-run Sam GO + clean Phase-2c readiness run required); connector live
+> main @ `84ecf6d` (untouched). Governance (current, 2026-07-10): **RISK-007 is CLOSED at its staging-defined criteria; Phase C is UNBLOCKED as a governance state only (C-2c staging live sync completed 2026-07-10 (staging-only; production untouched; connector-runner PR #36)); connector live
 > data-sync has not run; production untouched.** Old-app parity is **NOT** complete. This is a docs-only product audit —
 > it changes no code, schema, or security posture.
 
@@ -229,5 +229,4 @@ list rules), but it **should** rebuild that cockpit experience on the new RLS-fi
 read-only cockpit now, and bringing the data-heavy modules (invoices, license/spend, identity/risk, dashboard builder)
 online behind reviewed migrations + RLS tests, with the connector/live-sync track staying gated.
 
-**v3 is safer and RLS-first, but not old-app parity complete.** RISK-007 is CLOSED at its staging-defined criteria; Phase C is UNBLOCKED as a governance state only (C-2c has NOT started — separate per-run Sam GO + clean Phase-2c readiness run required); connector
-live data-sync has not run; production is untouched.
+**v3 is safer and RLS-first, but not old-app parity complete.** RISK-007 is CLOSED at its staging-defined criteria; Phase C is UNBLOCKED as a governance state only (C-2c staging live sync completed 2026-07-10 (staging-only; production untouched; connector-runner PR #36)); the C-2c connector live data-sync ran on staging only (connector-runner PR #36, 2026-07-10); production is untouched.

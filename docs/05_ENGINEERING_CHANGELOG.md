@@ -8,9 +8,7 @@ from PRs verified via `git log` / `gh pr list`.
 ---
 
 > **Current authoritative governance state (2026-07-10):** **RISK-007 is CLOSED at its staging-defined criteria**
-> (R-018 / PR #291); **Phase C is UNBLOCKED as a governance state only** (R-019 / PR #292, `docs/66`). **C-2c has NOT
-> started and remains a separate per-run decision requiring its own explicit Sam GO and a clean Phase-2c readiness run.
-> Connector live data-sync has NOT run. Production is untouched.** The dated entries below record the governance posture
+> (R-018 / PR #291); **Phase C is UNBLOCKED as a governance state only** (R-019 / PR #292, `docs/66`). **C-2c staging live sync completed 2026-07-10, separately, on staging only (connector-runner PR #36); the connector live data-sync ran on staging only. Production is untouched — no production live sync is authorized.** The dated entries below record the governance posture
 > **as of each PR's date** and are historical — where an older entry says "RISK-007 remains OPEN" / "Phase C remains
 > BLOCKED", that was accurate at that entry's date; this banner is the current state.
 
