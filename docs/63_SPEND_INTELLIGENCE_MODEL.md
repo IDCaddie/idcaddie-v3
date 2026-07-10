@@ -1,7 +1,7 @@
 # 63 — Spend Intelligence Model (M-001, design-only)
 
 > **CURRENT CURSOR (2026-07-08):** `idcaddie-v3` main @ `e0e8fd0` (PRs through **#287**); `idcaddie-connector-runner`
-> main @ `84ecf6d` (untouched). Governance unchanged: **RISK-007 remains OPEN; Phase C remains BLOCKED; connector live
+> main @ `84ecf6d` (untouched). Governance (current, 2026-07-10): **RISK-007 is CLOSED at its staging-defined criteria; Phase C is UNBLOCKED as a governance state only (C-2c has NOT started — separate per-run Sam GO + clean Phase-2c readiness run required); connector live
 > data-sync has not run; production untouched.**
 >
 > **THIS IS A DESIGN DOCUMENT ONLY.** No schema, tables, migrations, imports, finance connectors, or UI exist or are
@@ -303,6 +303,7 @@ design document only; every "table"/"field"/"phase" above is a proposal for late
 
 ---
 
-*Design-only. No schema, tables, migrations, imports, connectors, or UI exist or are created here. RISK-007 remains
-OPEN; Phase C remains BLOCKED; connector live data-sync has not run; production untouched; old-app parity is NOT
-complete.*
+*Design-only. No schema, tables, migrations, imports, connectors, or UI exist or are created here. Governance (current,
+2026-07-10): RISK-007 is CLOSED at its staging-defined criteria; Phase C is UNBLOCKED as a governance state only (C-2c
+has NOT started — separate per-run Sam GO + clean Phase-2c readiness run required); connector live data-sync has not
+run; production untouched; old-app parity is NOT complete.*

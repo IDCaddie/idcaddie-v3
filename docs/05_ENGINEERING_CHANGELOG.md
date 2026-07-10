@@ -7,6 +7,13 @@ from PRs verified via `git log` / `gh pr list`.
 
 ---
 
+> **Current authoritative governance state (2026-07-10):** **RISK-007 is CLOSED at its staging-defined criteria**
+> (R-018 / PR #291); **Phase C is UNBLOCKED as a governance state only** (R-019 / PR #292, `docs/66`). **C-2c has NOT
+> started and remains a separate per-run decision requiring its own explicit Sam GO and a clean Phase-2c readiness run.
+> Connector live data-sync has NOT run. Production is untouched.** The dated entries below record the governance posture
+> **as of each PR's date** and are historical — where an older entry says "RISK-007 remains OPEN" / "Phase C remains
+> BLOCKED", that was accurate at that entry's date; this banner is the current state.
+
 ### feat(ui) — round-2 polish: /files + /connectors + skeletons, P-018a complete (PRs #280–#284) · 2026-07-08
 - **Consolidated entry** for the round-2 safe-polish PRs merged after the #273–#279 sprint. idcaddie-v3 `main` @ `7f7d050` (current cursor, PRs through **#284**); idcaddie-connector-runner `main` @ `84ecf6d` (untouched).
 - **PRs (presentation-first — shared `src/components` + pure helpers over already-loaded data; or docs; all zero-migration, RLS-first, no new dependency):** #280 docs refresh (product status after the sprint) · #281 file status/type badges + `/files` enrolled in the ui-regression leak-scan (semantic `Badge`/`statusColor` on `uploadStatus`; neutral badge on `contentType`) · #282 files KPI summary cards (pure `summarizeFiles` → `StatGrid`; total/uploaded/pending/failed/size) · #283 loading skeletons for authenticated routes (net-new `skeleton.tsx` + 8 route `loading.tsx`; static, no data) · **#284 connectors status badges + `/connectors` enrolled in the ui-regression leak-scan — this is P-018a, COMPLETE / MERGED** (the last hand-rolled Slack-sync run pill → shared `Badge`, humanized `slackRunStatusLabel` preserved).

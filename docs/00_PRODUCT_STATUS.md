@@ -26,7 +26,7 @@
 > [59_WORKSTREAM_ROADMAP](./59_WORKSTREAM_ROADMAP.md) · [60_DO_NOT_COPY_FROM_OLD_APP](./60_DO_NOT_COPY_FROM_OLD_APP.md) ·
 > [61_NEXT_3_DAYS_PLAN](./61_NEXT_3_DAYS_PLAN.md). Per-PR detail: [05_ENGINEERING_CHANGELOG](./05_ENGINEERING_CHANGELOG.md).
 >
-> **Governance (unchanged): RISK-007 remains OPEN. Phase C remains BLOCKED. Production is untouched. Connector live
+> **Governance (current, 2026-07-10): RISK-007 is CLOSED at its staging-defined criteria (R-018/#291). Phase C is UNBLOCKED as a governance state only (R-019/#292) — C-2c has NOT started and remains a separate per-run decision requiring its own explicit Sam GO and a clean Phase-2c readiness run. Production is untouched. Connector live
 > data-sync has not run. Earlier hosted staging RISK-007 proof steps occurred under gated procedures, but those were
 > not Phase C live data-sync.** Old-app parity is **NOT** complete — only the read-only *product queue* + the
 > UI-polish sprint (#273–#284) are.

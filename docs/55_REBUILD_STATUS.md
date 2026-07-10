@@ -259,8 +259,9 @@ the AI design doc `docs/16_CONTRACT_PDF_AI_EXTRACTION_DESIGN.md`):
 - **What RISK-007 is (FACT):** RISK-007 is the governance risk that gates real connector-secret
   handling and deletion — i.e., the risk we must close before we are allowed to treat live
   connector-credential handling as a normal, sanctioned operation.
-- **Status (FACT):** **RISK-007 is OPEN.** It must not be marked closed on this page or anywhere
-  else until its remaining criteria are recorded green and a closure register PR is drafted.
+- **Status (FACT, updated 2026-07-10):** **RISK-007 is CLOSED at its staging-defined criteria** — criteria 3–17 recorded
+  green-staging and the closure register (R-018) merged as PR #291 (`docs/65`); the earlier "RISK-007 is OPEN" on this
+  page was accurate before that merge and is now historical.
 - **Remaining criteria (FACT, from the closure tracker `docs/52_RISK_007_CLOSURE_EVIDENCE_TRACKER.md`):**
   - **Criterion 15** — permanent deletion of the staging source Slack **client** secret. It is
     scheduled behind a recovery window and is **actionable only after 2026-07-10**; a human
@@ -285,9 +286,11 @@ the AI design doc `docs/16_CONTRACT_PDF_AI_EXTRACTION_DESIGN.md`):
 - **What Phase C is (FACT):** Phase C is the **gated live-connector-execution phase** — the point at
   which running real connector data-syncs becomes a sanctioned, normal operation rather than a
   one-off gated exception.
-- **Status (FACT):** **Phase C is BLOCKED.** It is unblocked only by RISK-007 **criterion 19**,
-  which is a **separate, explicit human decision made after RISK-007 closure** — never bundled into a
-  run PR, and never implied by a green sync.
+- **Status (FACT, updated 2026-07-10):** **Phase C is UNBLOCKED as a governance state only** — RISK-007 **criterion 19**
+  (R-019) recorded the explicit human decision after RISK-007 closure (`docs/66`, PR #292). The earlier "Phase C is
+  BLOCKED" on this page was accurate before that decision and is now historical. **C-2c has NOT started and remains a
+  separate per-run decision requiring its own explicit Sam GO and a clean Phase-2c readiness run. Connector live
+  data-sync has NOT run. Production is untouched.**
 - **Terminology warning (FACT):** Older design docs sometimes use "Phase C" to mean the hosted-runner
   secret-*ingestion* step (parts of which have happened on staging). This page uses "Phase C" only in
   the governance/roadmap sense above: the gated live-execution phase, which remains BLOCKED. If you

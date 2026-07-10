@@ -103,5 +103,6 @@ started)**. Never skip a step; never bundle a C-2c run / live sync / production 
 ---
 
 *Governance record only. No code, schema, migration, DAL, connector-runner, hosted command, secret read, live sync, or
-production change. Phase C remains BLOCKED; R-019 is the separate Phase C unblock decision; connector live data-sync has
-not run; production untouched; C-2c not started.*
+production change. This register did not unblock Phase C; the separate R-019 decision ([docs/66](./66_PHASE_C_UNBLOCK_DECISION.md))
+subsequently did — Phase C is UNBLOCKED as a governance state only. C-2c has NOT started (separate per-run Sam GO + clean
+Phase-2c readiness run required); connector live data-sync has not run; production untouched.*
