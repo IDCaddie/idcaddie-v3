@@ -8,9 +8,9 @@
 >
 > **DESIGN + STATUS.** Sections 0–7 are the original design proposal (the §7 items were approved). The route was
 > subsequently **implemented** — `/connectors/review` (**#303**) plus a navigation-only CTA from `/connectors` (**#304**) —
-> and a **PARTIAL staging human test** is recorded in **§8** below: the **viewer**, **confirm**, and **reject** paths
-> **PASSED**; **stale / repeat-no-op** and **deep audit** verification remain **DEFERRED / not tested**, and
-> **persistence-after-refresh is not yet recorded** (see §8). No
+> and a **staging human test** is recorded in **§8** below: the **viewer**, **confirm**, **reject**, and
+> **stale / repeat-no-op** paths **PASSED**, and **persistence-after-action PASSED**; only **deep audit** (pg_catalog /
+> audit metadata) verification remains **DEFERRED / not tested** (see §8). No
 > migration in this design (0042 was applied separately). Staging-safe, production-neutral; no production-readiness claim.
 
 ---
@@ -184,13 +184,23 @@ opaque run id **`5a9d0000`**, **exactly 2 pending rows**, synthetic-only data �
 - **Reject action** (reason **"Not a real account"**): success message **"Rejected 2 items."**; **Pending 2 → 0**;
   **Rejected 0 → 2**; Confirmed **remained 3**; the batch **disappeared from the pending list**. No row details / PII
   shown; no promotion, delete, connector run, or production action.
-- **Persistence-after-refresh: NOT YET RECORDED** — a manual page refresh confirming the same post-reject counts was not
-  captured, so persistence is **not** marked passed.
+- **Persistence-after-action: PASS** — confirmed during the stale test (§E): after the route reloaded, the post-action
+  counts persisted (Pending 0 / Confirmed 3 / Rejected 4).
 
-**E. Stale / repeat-no-op — NOT TESTED (deferred).** Still not human-tested: after the reject transition the batch leaves
-the pending list, so exercising a repeat-reject on the *same* batch (the 0-row / stale no-op path) needs a fresh pending
-batch to re-attempt. **Not claimed.** (The `sync-review-actions` + route-action unit tests cover the guarded pending-only
-/ 0-row no-op path.)
+**E. Stale / repeat-no-op — PASS (2026-07-10); persistence-after-action — PASS.** A fresh synthetic pending batch was
+seeded via the staging-only, **human-applied** fixture `supabase/fixtures/staging_sync_review_stale_verification.sql`
+(provider **test_fixture**, fact type **app_user_account**, opaque run id **`5a9e0000`**, **exactly 2 pending rows**,
+synthetic-only — no PII). Pre-test (counts only): Pending **2**, Confirmed **3**, Rejected **2**; the batch was opened in
+**two browser tabs before any action**.
+- **Tab A (reject once):** success **"Rejected 2 items."**; **Pending 2 → 0**; **Rejected 2 → 4**; Confirmed **stayed 3**;
+  the batch disappeared from the pending list.
+- **Tab B (stale — same batch, tab NOT refreshed):** reject clicked → **"No pending items changed."**; Pending **stayed
+  0**, Confirmed **stayed 3**, Rejected **stayed 4**; no batch reappeared. This proves the **guarded stale / repeat action
+  is a 0-row no-op** (the `.eq("review_status","pending")` guard matches nothing once the batch is already rejected).
+- **Persistence — PASS:** after the route reloaded, the post-action state persisted (Pending **0** / Confirmed **3** /
+  Rejected **4**).
+
+No row details / PII shown; no promotion, delete, connector run, production action, or live-run change.
 
 **F. Deep audit verification — DEFERRED.** Verifying the 0042 audit rows on staging via direct SQL requires the DB
 password (a secret); per the hosted-apply hard stops that was **not** performed. The 0042 audit is asserted metadata-only
@@ -199,9 +209,9 @@ by the **T62 RLS suite** (CI). **No secret value was read or printed.**
 **G. Regression.** `/connectors` stayed read-only; `/connectors/review` showed no forbidden data (counts/safe metadata
 only); no promotion occurred; no connector run; production untouched.
 
-**Net:** **viewer, confirm, and reject paths PASSED on staging;** **stale / repeat-no-op and deep audit remain
-DEFERRED / not tested, and persistence-after-refresh is not yet recorded** (do not read this as stale/no-op, deep audit,
-or persistence having passed).
+**Net:** **viewer, confirm, reject, and stale / repeat-no-op paths PASSED on staging, and persistence-after-action
+PASSED;** only **deep audit (pg_catalog / audit-metadata) verification remains DEFERRED / not tested** (do not read the
+deep-audit item as having passed — it is covered metadata-only by the T62 RLS suite in CI). Production untouched.
 
 ---
 
