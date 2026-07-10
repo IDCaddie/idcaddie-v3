@@ -42,12 +42,14 @@ declare
   v_live   uuid := '25bda7ae-3698-4976-b347-2132fc56dcca';  -- the live confirmed run — must NEVER be touched
 begin
   -- (a) Resolve "Storage Verifier Tenant A" safely; fail closed if missing or ambiguous.
-  select count(*), min(id) into v_cnt, v_tenant from public.tenants where name = 'Storage Verifier Tenant A';
+  --     Count first, abort on 0 or >1, THEN `select id into strict` (which itself re-asserts exactly one row).
+  select count(*) into v_cnt from public.tenants where name = 'Storage Verifier Tenant A';
   if v_cnt = 0 then
     raise exception 'FIXTURE ABORT: tenant "Storage Verifier Tenant A" not found on this database — refusing to seed.';
   elsif v_cnt > 1 then
     raise exception 'FIXTURE ABORT: tenant name "Storage Verifier Tenant A" is ambiguous (% rows) — refusing to seed.', v_cnt;
   end if;
+  select id into strict v_tenant from public.tenants where name = 'Storage Verifier Tenant A';
 
   -- (b) Guard: the synthetic run id must never collide with the live confirmed run id.
   if v_run = v_live then
