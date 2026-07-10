@@ -266,7 +266,7 @@ hard-blocked at entrypoint, connection, and task-def. Read alongside
 | C-2b | Runner live wiring (INERT-by-default) | DONE (merged, inert) | #33 | idcaddie-connector-runner | Done (inert; nothing runs) |
 | C-2c | First hosted staging live read-only Slack sync | PLANNED — readiness-only, **NOT authorized** | TBD | idcaddie-connector-runner | **GATED** — needs explicit decisions (see below) |
 | R-015 | Permanent deletion of staging source Slack **client** secret (criterion 15) | PENDING — date-gated | TBD | AWS op; evidence in idcaddie-v3 [docs/52](./52_RISK_007_CLOSURE_EVIDENCE_TRACKER.md) | **No** — actionable **only after 2026-07-10** |
-| R-018 | RISK-007 closure register PR (criterion 18) | PENDING — gated on 3–15 green | TBD | idcaddie-v3 | **No** — cannot draft until 15 is green |
+| R-018 | RISK-007 closure register PR (criterion 18) | **RECORDED — closure register drafted ([docs/65](./65_RISK_007_CLOSURE_REGISTER.md)); criteria 3–17 green-staging; RISK-007 READY FOR CLOSURE (closes on merge)** | TBD | idcaddie-v3 | Docs-only; does **not** unblock Phase C (R-019 separate) |
 | R-019 | Phase C unblock (criterion 19) | BLOCKED — separate human decision | TBD | governance decision | **No** — do **not** unblock Phase C |
 
 ### C-2a — Runner DB write boundary (migration `0041`)
@@ -348,17 +348,22 @@ hard-blocked at entrypoint, connection, and task-def. Read alongside
 - **Next step:** After 2026-07-10, a human operator confirms permanent deletion and records evidence in the docs/52 tracker.
 
 ### R-018 — RISK-007 closure register PR (criterion 18)
-- **Status:** PENDING — gated on criteria **3–15 all green**. · **GitHub PR:** TBD · **Repo:** idcaddie-v3
-- **Scope:** Draft the closure-register update **only after** all required evidence (criteria 3–15) is recorded green. The
-  docs/52 tracker is **explicitly NOT** this PR.
-- **Why:** The formal governance artifact that would let RISK-007 be closed.
-- **Result:** Not drafted. (FACT.)
+- **Status:** **RECORDED (2026-07-10)** — closure register drafted in
+  [65_RISK_007_CLOSURE_REGISTER.md](./65_RISK_007_CLOSURE_REGISTER.md); criteria **3–17 green-staging** (criterion 15 via
+  R-015 / PR #290). · **GitHub PR:** TBD · **Repo:** idcaddie-v3
+- **Scope:** The closure-register update drafted **after** all required evidence (criteria 3–15) recorded green. The
+  docs/52 tracker is **explicitly NOT** this PR — docs/65 is.
+- **Why:** The formal governance artifact that lets RISK-007 be closed.
+- **Result:** **Drafted (docs/65).** Closure evidence COMPLETE; RISK-007 **READY FOR CLOSURE — closed at its
+  staging-defined criteria on merge of this register.** (FACT.)
 - **Risk reduced:** Governance artifact (no runtime risk change).
-- **Tradeoff:** **Must NOT flip RISK-007 to closed inside any run PR** — closure is its own reviewed step.
-- **Dependencies:** R-015 (criterion 15) + criteria 3–14 green.
-- **Blocked-by:** Criterion 15 (≥ 2026-07-10).
-- **Safe before 2026-07-10:** **No** — cannot be prepared until 15 is green (post-2026-07-10).
-- **Next step:** After R-015, draft the closure register.
+- **Tradeoff:** **Must NOT flip RISK-007 to closed inside any run PR, and must NOT unblock Phase C** — closure is
+  recorded only in the register (docs/65); Phase C unblock is the separate R-019 decision.
+- **Dependencies:** R-015 (criterion 15) + criteria 3–14 green — **all met.**
+- **Blocked-by:** — (none; criterion 15 green as of 2026-07-10).
+- **Safe before 2026-07-10:** was No (needed 15 green); now recorded.
+- **Next step:** Review + merge this register → RISK-007 closed (staging criteria). **Phase C stays BLOCKED; R-019
+  (Phase C unblock) is a separate decision — not started.**
 
 ### R-019 — Phase C unblock (criterion 19)
 - **Status:** BLOCKED — a **separate explicit human decision AFTER RISK-007 closure**. · **GitHub PR:** TBD · **Repo:**
