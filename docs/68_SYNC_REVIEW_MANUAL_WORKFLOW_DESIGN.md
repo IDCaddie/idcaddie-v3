@@ -164,6 +164,17 @@ requires a migration. So per the standing rule, migrations are stop-and-ask.
 > no policy/grant, keeps `audit_logs` app-write-protected, and is **prepared local-only — NOT applied** (no hosted
 > Supabase). Building the confirm/reject actions + UI remains a separate, later, explicitly-approved step (§9/§11).
 
+> **Staging apply evidence (2026-07-10) — migration 0042 only, staging only:** applied to **staging ref
+> `ycdpzduxugdsffjqyoai`** via `supabase db push --linked` (linked project confirmed = staging; production ref
+> `dzbfxulvxchdemcettrx` present in the org but **NOT linked/targeted**). Before apply: `0042` pending (Local only). After
+> apply: `supabase migration list --linked` shows **`0042 | 0042 | 0042` (remote-applied)**; the push finished exit 0 with
+> only the `drop trigger if exists` NOTICE (first-time create) — so the `CREATE FUNCTION … SECURITY DEFINER` + `CREATE
+> TRIGGER … AFTER UPDATE OF review_status/reviewed_by/reviewed_at/rejected_reason` DDL committed (a failed DDL would abort
+> and not record the migration). **Deep `pg_catalog` metadata assertions (prosecdef / tgtype / audit-policy) via direct
+> SQL were NOT run — they require the DB password (a secret), which was not handled per the hosted-apply hard stops; those
+> assertions run in the T62 RLS suite (CI / local disposable Postgres).** No confirm/reject action, no UI, no
+> `/connectors` change, no connector run, no `get-secret-value`, no secret value printed. **Production untouched.**
+
 ---
 
 ## 8. Tests required before implementation
