@@ -9,6 +9,7 @@ import {
   getLatestSlackSyncRunForCurrentTenant,
   getSlackAppUserPresenceCountsForCurrentTenant,
 } from "@/lib/data/manual-sync-runs";
+import { getSyncReviewCounts, syncReviewLeadLabel, syncReviewHasAwaiting } from "@/lib/data/sync-review";
 import { Badge } from "@/components/badge";
 import { statusColor } from "@/components/status-tokens";
 import { slackRunStatusLabel } from "@/lib/data/slack-sync-display";
@@ -27,6 +28,8 @@ export default async function ConnectorsPage() {
   // Read-only Slack sync status — the latest manual run + active/stale presence counts, RLS-scoped. Safe aggregates only.
   const syncRun = await getLatestSlackSyncRunForCurrentTenant();
   const presence = await getSlackAppUserPresenceCountsForCurrentTenant();
+  // Count-only review-queue summary (RLS-scoped aggregates; no item bodies/PII). Reviewing items is not built yet.
+  const review = await getSyncReviewCounts();
 
   return (
     <main className="flex flex-1 flex-col gap-6 p-8">
@@ -163,6 +166,38 @@ export default async function ConnectorsPage() {
             {" "}(stale = not seen in the most recent successful sync; marked, never deleted).
           </p>
         ) : null}
+      </section>
+
+      <section className="space-y-3 text-sm">
+        <h2 className="font-medium">Sync review</h2>
+        {!review.ok ? (
+          <p className="text-sm text-red-600">
+            Could not load the sync review summary right now. Please try again later.
+          </p>
+        ) : !syncReviewHasAwaiting(review.data) ? (
+          <div className="rounded border border-zinc-300 p-4 text-sm dark:border-zinc-700">
+            <div className="font-medium">No items awaiting review.</div>
+          </div>
+        ) : (
+          <div className="rounded border border-zinc-300 p-4 dark:border-zinc-700">
+            <div className="font-medium">{syncReviewLeadLabel(review.data)}</div>
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <Badge tone={review.data.pending > 0 ? "attention" : "neutral"}>Pending {review.data.pending}</Badge>
+              <Badge tone={review.data.needsReview > 0 ? "attention" : "neutral"}>Needs review {review.data.needsReview}</Badge>
+              <Badge tone="success">Confirmed {review.data.confirmed}</Badge>
+              <Badge tone={review.data.rejected > 0 ? "danger" : "neutral"}>Rejected {review.data.rejected}</Badge>
+            </div>
+            {review.data.appUserAccounts > 0 ? (
+              <p className="mt-2 text-xs text-zinc-500">
+                App user accounts: <span className="font-medium text-zinc-700 dark:text-zinc-300">{review.data.appUserAccounts}</span>
+              </p>
+            ) : null}
+          </div>
+        )}
+        <p className="text-xs text-zinc-500">
+          Counts only — no item details, personal data, payloads, tokens, or secrets are shown. Reviewing items is not
+          built yet.
+        </p>
       </section>
 
       <section className="space-y-2 text-sm">

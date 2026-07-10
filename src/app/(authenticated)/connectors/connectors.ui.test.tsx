@@ -16,6 +16,11 @@ vi.mock("@/lib/data/manual-sync-runs", () => ({
   getLatestSlackSyncRunForCurrentTenant: vi.fn(),
   getSlackAppUserPresenceCountsForCurrentTenant: vi.fn(),
 }));
+// Stub only the count DAL; keep the pure syncReviewLeadLabel/syncReviewHasAwaiting helpers real.
+vi.mock("@/lib/data/sync-review", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/data/sync-review")>("@/lib/data/sync-review");
+  return { ...actual, getSyncReviewCounts: vi.fn() };
+});
 
 import ConnectorsPage from "./page";
 import { listConnectorsForCurrentUser } from "@/lib/data/connectors";
@@ -23,6 +28,9 @@ import {
   getLatestSlackSyncRunForCurrentTenant,
   getSlackAppUserPresenceCountsForCurrentTenant,
 } from "@/lib/data/manual-sync-runs";
+import { getSyncReviewCounts } from "@/lib/data/sync-review";
+
+const REVIEW_ZERO = { pending: 0, needsReview: 0, confirmed: 0, rejected: 0, total: 0, appUserAccounts: 0 };
 
 const asMock = <T,>(fn: T) => fn as unknown as { mockResolvedValue: (v: unknown) => void };
 afterEach(cleanup);
@@ -59,6 +67,7 @@ describe("/connectors render", () => {
       },
     });
     asMock(getSlackAppUserPresenceCountsForCurrentTenant).mockResolvedValue({ ok: true, data: { active: 5, stale: 2 } });
+    asMock(getSyncReviewCounts).mockResolvedValue({ ok: true, data: { ...REVIEW_ZERO, pending: 3, total: 3, appUserAccounts: 3 } });
 
     const { container } = render(await ConnectorsPage());
     const html = container.innerHTML;
@@ -70,6 +79,12 @@ describe("/connectors render", () => {
 
     // post-sync truthfulness: the latest run's SAFE record counters render (counts only — no row bodies/PII)
     expect(screen.getByText(/3 seen · 3 imported/)).toBeTruthy();
+
+    // Sync review card: pending count renders as a count-only line (no item bodies/PII)
+    expect(screen.getByText("Sync review")).toBeTruthy();
+    expect(screen.getByText("3 items pending review from the last sync")).toBeTruthy();
+    expect(screen.getByText("Pending 3")).toBeTruthy();
+    expect(screen.getByText(/Counts only — no item details/)).toBeTruthy();
 
     // safe readiness copy still present; the disabled "Not built yet" affordances remain
     expect(screen.getByText("Slack sync status")).toBeTruthy();
@@ -85,5 +100,27 @@ describe("/connectors render", () => {
     for (const forbidden of ["connector_secrets", "ciphertext", "access_token", "refresh_token", "dek_wrapped", "getsecretvalue"]) {
       expect(container.textContent?.toLowerCase()).not.toContain(forbidden);
     }
+  });
+
+  it("Sync review card shows the empty state when nothing is awaiting review", async () => {
+    asMock(listConnectorsForCurrentUser).mockResolvedValue({ ok: true, data: [] });
+    asMock(getLatestSlackSyncRunForCurrentTenant).mockResolvedValue({ ok: true, data: null });
+    asMock(getSlackAppUserPresenceCountsForCurrentTenant).mockResolvedValue({ ok: true, data: { active: 0, stale: 0 } });
+    asMock(getSyncReviewCounts).mockResolvedValue({ ok: true, data: { ...REVIEW_ZERO, confirmed: 5, total: 5 } });
+
+    render(await ConnectorsPage());
+    expect(screen.getByText("No items awaiting review.")).toBeTruthy();
+    expect(screen.queryByText(/pending review from the last sync/)).toBeNull();
+  });
+
+  it("Sync review card fails closed to a safe error line (no crash, no leak)", async () => {
+    asMock(listConnectorsForCurrentUser).mockResolvedValue({ ok: true, data: [] });
+    asMock(getLatestSlackSyncRunForCurrentTenant).mockResolvedValue({ ok: true, data: null });
+    asMock(getSlackAppUserPresenceCountsForCurrentTenant).mockResolvedValue({ ok: true, data: { active: 0, stale: 0 } });
+    asMock(getSyncReviewCounts).mockResolvedValue({ ok: false, error: "query_failed" });
+
+    render(await ConnectorsPage());
+    expect(screen.getByText("Could not load the sync review summary right now. Please try again later.")).toBeTruthy();
+    expect(screen.queryByText("query_failed")).toBeNull();
   });
 });
