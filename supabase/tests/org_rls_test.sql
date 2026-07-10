@@ -3710,6 +3710,124 @@ do $$ begin
   assert not has_table_privilege('connector_runner','public.app_users','DELETE'), 'T61f connector_runner must have NO DELETE on app_users';
 end $$;
 
+-- ── Test 62: discovery_facts REVIEW audit-on-write (migration 0042) — metadata-only, UPDATE-only ────────────
+-- The 0042 SECURITY DEFINER trigger records an ACCEPTED review-status change to audit_logs with METADATA ONLY. Seeds
+-- facts carrying FORBIDDEN-field VALUES so we can prove none leak into the audit row. Drives the trigger via the existing
+-- 0025 editor UPDATE RLS (PR A is the trigger only — no confirm/reject app action is tested or implemented here).
+reset role;
+insert into public.discovery_facts
+  (id, tenant_id, schema_version, fact_type, source_type, source_provider, observed_at, fact_json, natural_key, signal_id, source_record_id, provenance_json)
+values
+  ('df420000-0000-0000-0000-0000000000a1','11111111-1111-1111-1111-111111111111','1','app_user_account','identity_provider_discovery','slack', now(),
+   '{"email":"leak-me@example.com"}'::jsonb,'natkey-leak','signal-leak','srcrec-leak','{"p":"leak"}'::jsonb),
+  ('df420000-0000-0000-0000-0000000000a2','11111111-1111-1111-1111-111111111111','1','app_user_account','identity_provider_discovery','slack', now(),
+   '{"email":"leak2@example.com"}'::jsonb,'natkey-leak2','signal-leak2','srcrec-leak2','{"p":"leak2"}'::jsonb),
+  ('df420000-0000-0000-0000-0000000000a3','11111111-1111-1111-1111-111111111111','1','app_user_account','identity_provider_discovery','slack', now(),
+   '{"email":"leak3@example.com"}'::jsonb,'natkey-leak3','signal-leak3','srcrec-leak3','{"p":"leak3"}'::jsonb);
+
+-- 62a: trigger exists, is AFTER UPDATE (not INSERT/DELETE), and the function is SECURITY DEFINER.
+do $$ begin
+  assert exists (select 1 from pg_trigger t join pg_class c on c.oid = t.tgrelid
+    where c.relname = 'discovery_facts' and t.tgname = 'discovery_facts_audit_on_write' and not t.tgisinternal),
+    'T62a discovery_facts_audit_on_write trigger must exist';
+  assert (select prosecdef from pg_proc where proname = 'audit_discovery_fact_review'),
+    'T62a audit_discovery_fact_review must be SECURITY DEFINER';
+end $$;
+
+-- 62b: INSERT must NOT audit (the 3 seeds above must have produced no discovery_fact audit rows).
+do $$ declare v int; begin
+  select count(*) into v from public.audit_logs
+    where resource_id in ('df420000-0000-0000-0000-0000000000a1','df420000-0000-0000-0000-0000000000a2','df420000-0000-0000-0000-0000000000a3');
+  assert v = 0, format('T62b INSERT of discovery_facts must not audit (saw %s)', v);
+end $$;
+
+-- 62c: editor confirm (pending→confirmed) writes EXACTLY ONE metadata-only audit row; actor = the editor's JWT sub;
+--      NONE of the forbidden fields appear as a KEY or as a leaked VALUE.
+select set_config('request.jwt.claims','{"sub":"0a000000-0000-0000-0000-0000000000ed"}',false);  -- editor_a
+set role authenticated;
+update public.discovery_facts
+  set review_status = 'confirmed', reviewed_by = '0a000000-0000-0000-0000-0000000000ed', reviewed_at = now()
+  where id = 'df420000-0000-0000-0000-0000000000a1';
+reset role;
+do $$ declare v int; a uuid; act text; res text; tn uuid; j jsonb; begin
+  select count(*) into v from public.audit_logs where resource_id = 'df420000-0000-0000-0000-0000000000a1';
+  assert v = 1, format('T62c editor confirm must write exactly 1 audit row, saw %s', v);
+  select actor_user_id, action, resource_type, tenant_id, after_json into a, act, res, tn, j
+    from public.audit_logs where resource_id = 'df420000-0000-0000-0000-0000000000a1';
+  assert act = 'discovery_fact.confirmed', format('T62c action should be discovery_fact.confirmed, got %s', act);
+  assert res = 'discovery_fact', format('T62c resource_type should be discovery_fact, got %s', res);
+  assert tn = '11111111-1111-1111-1111-111111111111', 'T62c audit tenant must be the fact tenant';
+  assert a = '0a000000-0000-0000-0000-0000000000ed', format('T62c actor must be the writing editor (auth.uid), got %s', a);
+  assert j->>'old_review_status' = 'pending', format('T62c old_review_status should be pending, got %s', j->>'old_review_status');
+  assert j->>'new_review_status' = 'confirmed', format('T62c new_review_status should be confirmed, got %s', j->>'new_review_status');
+  assert j->>'reviewed_by' = '0a000000-0000-0000-0000-0000000000ed', 'T62c reviewed_by must be recorded';
+  assert j->>'table' = 'discovery_facts', 'T62c table name must be recorded';
+  assert not (j ? 'fact_json') and not (j ? 'natural_key') and not (j ? 'signal_id')
+     and not (j ? 'source_record_id') and not (j ? 'provenance_json'),
+    'T62c audit after_json must carry no forbidden KEY';
+  assert (j::text) not like '%leak-me@example.com%' and (j::text) not like '%natkey-leak%'
+     and (j::text) not like '%signal-leak%' and (j::text) not like '%srcrec-leak%',
+    'T62c audit after_json must carry no forbidden VALUE (fact_json/natural_key/signal_id/source_record_id/provenance)';
+end $$;
+
+-- 62d: editor reject (pending→rejected + fixed reason code) audits a SECOND row carrying the reason (never PII).
+select set_config('request.jwt.claims','{"sub":"0a000000-0000-0000-0000-0000000000ed"}',false);
+set role authenticated;
+update public.discovery_facts
+  set review_status = 'rejected', rejected_reason = 'not_a_real_account', reviewed_by = '0a000000-0000-0000-0000-0000000000ed', reviewed_at = now()
+  where id = 'df420000-0000-0000-0000-0000000000a2';
+reset role;
+do $$ declare v int; j jsonb; begin
+  select count(*) into v from public.audit_logs where resource_id = 'df420000-0000-0000-0000-0000000000a2' and action = 'discovery_fact.rejected';
+  assert v = 1, format('T62d editor reject must write exactly 1 rejected audit row, saw %s', v);
+  select after_json into j from public.audit_logs where resource_id = 'df420000-0000-0000-0000-0000000000a2';
+  assert j->>'rejected_reason' = 'not_a_real_account', 'T62d rejected_reason (fixed code) must be recorded';
+  assert j->>'new_review_status' = 'rejected', 'T62d rejected transition must be recorded';
+end $$;
+
+-- 62e: a NON-review UPDATE (confidence only) must NOT audit — the trigger fires only on review-column changes.
+select set_config('request.jwt.claims','{"sub":"0a000000-0000-0000-0000-0000000000ed"}',false);
+set role authenticated;
+update public.discovery_facts set confidence = 0.5 where id = 'df420000-0000-0000-0000-0000000000a3';
+reset role;
+do $$ declare v int; begin
+  select count(*) into v from public.audit_logs where resource_id = 'df420000-0000-0000-0000-0000000000a3';
+  assert v = 0, format('T62e a non-review UPDATE (confidence) must not audit, saw %s', v);
+end $$;
+
+-- 62f: discovery_facts review UPDATE stays EDITOR-ONLY — a viewer cannot update (RLS) → 0 rows, no audit.
+select set_config('request.jwt.claims','{"sub":"0a000000-0000-0000-0000-000000000002"}',false);  -- viewer_a
+set role authenticated;
+do $$ declare v int; begin
+  update public.discovery_facts set review_status = 'confirmed', reviewed_by = '0a000000-0000-0000-0000-000000000002', reviewed_at = now()
+    where id = 'df420000-0000-0000-0000-0000000000a3';
+  get diagnostics v = row_count;
+  assert v = 0, format('T62f viewer (non-editor) must not update discovery_facts (%s rows)', v);
+end $$;
+reset role;
+do $$ declare v int; begin
+  select count(*) into v from public.audit_logs where resource_id = 'df420000-0000-0000-0000-0000000000a3';
+  assert v = 0, 'T62f a denied (0-row) update must not audit';
+end $$;
+
+-- 62g: audit_logs stays app-write-protected — 0042 added NO `authenticated` INSERT path (trigger-written only).
+select set_config('request.jwt.claims','{"sub":"0a000000-0000-0000-0000-0000000000ed"}',false);
+set role authenticated;
+do $$ declare ok boolean := false; begin
+  begin
+    insert into public.audit_logs (tenant_id, action, resource_type) values ('11111111-1111-1111-1111-111111111111','forge','discovery_fact');
+  exception when others then ok := true; end;
+  assert ok, 'T62g authenticated must NOT be able to directly insert audit_logs (still append-only / trigger-written only)';
+end $$;
+reset role;
+
+-- 62h: no broad grant / no service-role bypass added by 0042 — connector_runner still has NOTHING on discovery_facts.
+do $$ begin
+  assert not has_table_privilege('connector_runner','public.discovery_facts','UPDATE'), 'T62h connector_runner must have NO UPDATE on discovery_facts';
+  assert not has_table_privilege('connector_runner','public.discovery_facts','SELECT'), 'T62h connector_runner must have NO SELECT on discovery_facts';
+  assert not has_table_privilege('connector_runner','public.discovery_facts','INSERT'), 'T62h connector_runner must have NO INSERT on discovery_facts';
+end $$;
+
 reset role;
 reset session authorization;
 
