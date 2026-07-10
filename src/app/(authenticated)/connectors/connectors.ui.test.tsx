@@ -86,6 +86,10 @@ describe("/connectors render", () => {
     expect(screen.getByText("Pending 3")).toBeTruthy();
     expect(screen.getByText(/Counts only — no item details/)).toBeTruthy();
 
+    // navigation-only CTA to the dedicated review route (a plain link — NOT a form/button/action)
+    const cta = screen.getByRole("link", { name: "Review pending items" });
+    expect(cta.getAttribute("href")).toBe("/connectors/review");
+
     // safe readiness copy still present; the disabled "Not built yet" affordances remain
     expect(screen.getByText("Slack sync status")).toBeTruthy();
     expect(screen.getAllByText("Not built yet").length).toBeGreaterThan(0);
@@ -111,6 +115,8 @@ describe("/connectors render", () => {
     render(await ConnectorsPage());
     expect(screen.getByText("No items awaiting review.")).toBeTruthy();
     expect(screen.queryByText(/pending review from the last sync/)).toBeNull();
+    // CTA is absent when pending = 0 (nothing to review)
+    expect(screen.queryByRole("link", { name: "Review pending items" })).toBeNull();
   });
 
   it("Sync review card fails closed to a safe error line (no crash, no leak)", async () => {
