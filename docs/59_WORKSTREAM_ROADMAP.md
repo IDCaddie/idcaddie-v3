@@ -267,7 +267,7 @@ hard-blocked at entrypoint, connection, and task-def. Read alongside
 | C-2c | First hosted staging live read-only Slack sync | PLANNED — readiness-only, **NOT authorized** | TBD | idcaddie-connector-runner | **GATED** — needs explicit decisions (see below) |
 | R-015 | Permanent deletion of staging source Slack **client** secret (criterion 15) | PENDING — date-gated | TBD | AWS op; evidence in idcaddie-v3 [docs/52](./52_RISK_007_CLOSURE_EVIDENCE_TRACKER.md) | **No** — actionable **only after 2026-07-10** |
 | R-018 | RISK-007 closure register PR (criterion 18) | **RECORDED — closure register drafted ([docs/65](./65_RISK_007_CLOSURE_REGISTER.md)); criteria 3–17 green-staging; RISK-007 READY FOR CLOSURE (closes on merge)** | TBD | idcaddie-v3 | Docs-only; does **not** unblock Phase C (R-019 separate) |
-| R-019 | Phase C unblock (criterion 19) | BLOCKED — separate human decision | TBD | governance decision | **No** — do **not** unblock Phase C |
+| R-019 | Phase C unblock (criterion 19) | **DONE — Phase C UNBLOCKED (governance only), R-019 ([docs/66](./66_PHASE_C_UNBLOCK_DECISION.md))** | TBD | governance decision | Docs-only; does **not** run C-2c / live sync / production — C-2c stays a separate per-run GO |
 
 ### C-2a — Runner DB write boundary (migration `0041`)
 - **Status:** DONE — applied + verified on hosted staging **2026-07-06** (runner evidence "Gate 2a"). · **GitHub PR:** #255
@@ -362,19 +362,23 @@ hard-blocked at entrypoint, connection, and task-def. Read alongside
 - **Dependencies:** R-015 (criterion 15) + criteria 3–14 green — **all met.**
 - **Blocked-by:** — (none; criterion 15 green as of 2026-07-10).
 - **Safe before 2026-07-10:** was No (needed 15 green); now recorded.
-- **Next step:** Review + merge this register → RISK-007 closed (staging criteria). **Phase C stays BLOCKED; R-019
-  (Phase C unblock) is a separate decision — not started.**
+- **Next step:** Merged (#291) → RISK-007 closed (staging criteria). Phase C unblock recorded separately as **R-019**
+  (below).
 
 ### R-019 — Phase C unblock (criterion 19)
-- **Status:** BLOCKED — a **separate explicit human decision AFTER RISK-007 closure**. · **GitHub PR:** TBD · **Repo:**
-  governance decision (not a code PR).
-- **Scope:** An explicit Sam GO to unblock Phase C — **never bundled** with a run and **never implied** by a green sync.
-- **Why:** Phase C = the gated live-connector-execution phase; unblocking it is the highest-consequence decision on this
+- **Status:** **DONE — Phase C UNBLOCKED (governance only), 2026-07-10**, by explicit Sam GO (`GO R-019 PHASE C UNBLOCK
+  DOCS ONLY`). Decision record: [66_PHASE_C_UNBLOCK_DECISION.md](./66_PHASE_C_UNBLOCK_DECISION.md). · **GitHub PR:** TBD ·
+  **Repo:** governance decision (docs only).
+- **Scope:** The explicit Sam decision that unblocked the Phase C **governance gate** — **never bundled** with a run and
+  **never implied** by a green sync; recorded as its own artifact.
+- **Why:** Phase C = the gated live-connector-execution phase; unblocking it was the highest-consequence decision on this
   track.
-- **Result:** BLOCKED. (FACT.)
-- **Risk reduced:** n/a.
-- **Tradeoff:** **Never imply Phase C unblock from a green run.**
-- **Dependencies:** R-018 (closure register) + RISK-007 formally closed.
+- **Result:** **Phase C UNBLOCKED as a governance state only.** This does **NOT** run C-2c, does **NOT** run connector
+  live data-sync, does **NOT** touch production, and does **NOT** authorize any production action. **C-2c remains a
+  separate per-run decision requiring its own explicit Sam GO and a clean Phase-2c readiness run; C-2c has NOT started.**
+- **Risk reduced:** n/a (governance state change only).
+- **Tradeoff:** **Never imply a C-2c run / live sync / production action from this unblock** — each remains separate.
+- **Dependencies:** R-018 (closure register) + RISK-007 closed — **both met (#291).**
 - **Blocked-by:** RISK-007 OPEN.
 - **Safe before 2026-07-10:** **No — do NOT unblock Phase C.**
 - **Next step:** Only after RISK-007 closure; recommended sequence is **R-015 → R-018 → R-019**, then a sanctioned first

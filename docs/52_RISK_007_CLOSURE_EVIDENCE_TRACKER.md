@@ -1,8 +1,12 @@
 # 52 · RISK-007 closure-criteria evidence tracker
 
 **Tracker only — NOT the closure PR.** This lists every RISK-007 closure criterion, its current evidence status, the proof
-still required, who runs it, and where the evidence is recorded. It **does not close RISK-007 and does not unblock Phase
-C** — both are separate explicit human decisions (criterion 18/19). **RISK-007 remains OPEN; Phase C remains BLOCKED.**
+still required, who runs it, and where the evidence is recorded. Closing RISK-007 and unblocking Phase C were separate
+explicit human decisions (criterion 18/19). **Update (2026-07-10): RISK-007 is CLOSED at its staging-defined criteria
+(R-018 / PR #291); Phase C is UNBLOCKED as a governance state only (R-019, [docs/66](./66_PHASE_C_UNBLOCK_DECISION.md)).**
+The Phase C unblock does **NOT** run C-2c, does **NOT** run connector live data-sync, and does **NOT** touch production —
+C-2c remains a separate per-run decision (its own explicit Sam GO + a clean Phase-2c readiness run). **Connector live
+data-sync has not run; production untouched.**
 
 Canonical criteria source: the RISK-007 row in [docs/04](./04_RISK_REGISTER.md). Design: [42](./42_CONNECTOR_CREDENTIAL_VAULT_DESIGN.md)
 / [44](./44_CONNECTOR_CREDENTIAL_REAL_TOKEN_THREAT_MODEL.md). Evidence inventory: [48](./48_TEST_AND_EVIDENCE_INVENTORY.md).
@@ -33,7 +37,7 @@ Gate checklists: [51](./51_RUN_GATES_A_B_PRERUN_CHECKLISTS.md) + connector-runne
 | 16 | Production not touched until explicitly approved | **DONE (ongoing invariant)** | Production ref `dzbfxulvxchdemcettrx` hard-blocked in every gate/ingest guard; no production apply/run occurred | Keep enforced through every gate | human operator (invariant) | Stop the moment any production identity/ref/apply appears |
 | 17 | First-real-token / B2c / decrypt-use evidence recorded in docs | **DONE (2026-07-10)** — RUN GATE A + decrypt/use + RUN GATE B + criterion-15 deletion all recorded | Redacted evidence recorded: connector-runner `docs/STAGING_LIVE_RUN_EVIDENCE.md` §8 (exchange + envelope store) + §9 (decrypt/use + Slack `auth.test`) + §11 (RUN GATE B rotation/revocation); this tracker rows 6/7/8/10/12/13/14; **criterion 15 permanent-deletion confirmation now recorded (R-015 / PR #290, row 15).** | Criterion 15 (last open evidence item) now recorded → criterion-17 evidence **COMPLETE** | agent-buildable (done) | Do not record evidence for a run that has not happened |
 | 18 | RISK-007 closure register PR prepared only after all required evidence exists | **DONE — closure register recorded (R-018, 2026-07-10)** | Register drafted in [65_RISK_007_CLOSURE_REGISTER.md](./65_RISK_007_CLOSURE_REGISTER.md) — criteria **3–17 green-staging** (incl. criterion 15 via R-015 / PR #290, `ResourceNotFoundException`, metadata-only). Closure evidence **COMPLETE**; RISK-007 **READY FOR CLOSURE** — **CLOSED at its staging-defined criteria on merge of the register**. This tracker is NOT that register; docs/65 is. | **Recorded (this row).** RISK-007 closure register prepared. Does **NOT** unblock Phase C (criterion 19 / R-019 stays separate) and does **NOT** authorize C-2c or any live sync. | agent-buildable (done) — reviewed + merged closes RISK-007 | Closure recorded ONLY in the register (docs/65); **never** implied Phase C unblock; no production; no live sync |
-| 19 | Phase C unblock remains SEPARATE | **BLOCKED (separate decision)** | — | An explicit human decision **after** RISK-007 closure — never bundled with a run or this tracker | explicit Sam GO | Never imply Phase C unblock from a green run |
+| 19 | Phase C unblock remains SEPARATE | **DONE — Phase C UNBLOCKED (governance only), R-019, 2026-07-10** | Explicit Sam GO (`GO R-019 PHASE C UNBLOCK DOCS ONLY`) after RISK-007 closure (R-018/#291). Decision record: [66_PHASE_C_UNBLOCK_DECISION.md](./66_PHASE_C_UNBLOCK_DECISION.md). **Phase C is UNBLOCKED as a governance state only** — this does **NOT** run C-2c, does **NOT** run connector live data-sync, does **NOT** touch production, and does **NOT** authorize any production action. | **Recorded (this row).** C-2c remains a **separate per-run decision** requiring its own explicit Sam GO + a clean Phase-2c readiness run. | explicit Sam GO (done) | Governance state only; never run C-2c/live-sync/production from this decision |
 
 ## Current completed evidence (recorded)
 - **Staging app-level Slack client-secret envelope ingest — SUCCESS** (envelope-only), via the separate connector-runner
@@ -114,7 +118,7 @@ Criteria 3–14 are DONE-staging. What remains, in the safe order (do NOT jump a
 6. **`connectors.status` / `granted_scopes_safe` follow-up — decoupled.** A product decision on activation ownership; it
    **does NOT gate RISK-007 closure** and is tracked separately.
 
-**RISK-007 remains OPEN until the closure register (R-018, docs/65) merges; Phase C remains BLOCKED (R-019 separate).**
+**RISK-007 is CLOSED at its staging-defined criteria (R-018 / PR #291, docs/65); Phase C is UNBLOCKED as a governance state only (R-019, docs/66) — C-2c remains a separate per-run decision and has NOT started; connector live data-sync has NOT run.**
 Staging only (`ycdpzduxugdsffjqyoai`); production (`dzbfxulvxchdemcettrx`) untouched; connector live data-sync has not run.
 
 **Staging-run follow-ups (do NOT reopen RISK-007; do NOT gate closure on their own):**
