@@ -5,7 +5,7 @@ import path from "node:path";
 const createClient = vi.fn();
 vi.mock("@/lib/supabase/server", () => ({ createClient: () => createClient() }));
 
-import { getSyncReviewCounts, syncReviewLeadLabel, syncReviewHasAwaiting } from "./sync-review";
+import { getSyncReviewCounts, syncReviewLeadLabel, syncReviewHasAwaiting, getSyncReviewPendingGroups } from "./sync-review";
 
 // Capturing mock: records every .from(table).select(cols, opts).eq(col, val); resolves the count keyed by the eq VALUE
 // (review_status value or fact_type value). Proves the query is count-only and never selects a body column.
@@ -96,5 +96,50 @@ describe("sync-review DAL + connectors page never leak a body/secret column", ()
     for (const forbidden of ["discovery_facts", "fact_json", "connector_secret"]) {
       expect(page).not.toContain(forbidden);
     }
+  });
+});
+
+// Grouped read: selects ONLY safe metadata columns for pending rows and groups them — never a body column.
+function makeGroupsSupabase(rows: unknown[] | null, error: unknown, cap: { cols?: unknown; eqs: [string, string][] }) {
+  return {
+    from: () => ({
+      select: (cols: unknown) => {
+        cap.cols = cols;
+        return { eq: (col: string, val: string) => { cap.eqs.push([col, val]); return Promise.resolve({ data: rows, error }); } };
+      },
+    }),
+  };
+}
+
+describe("getSyncReviewPendingGroups — count-only batches, safe columns, fail-closed", () => {
+  it("selects only safe metadata (no body column), guards pending, no tenant filter, and groups by run+type+provider", async () => {
+    const cap: { cols?: unknown; eqs: [string, string][] } = { eqs: [] };
+    createClient.mockResolvedValue(makeGroupsSupabase(
+      [
+        { source_run_id: "run-1", fact_type: "app_user_account", source_provider: "slack", created_at: "2026-07-10T01:00:00Z" },
+        { source_run_id: "run-1", fact_type: "app_user_account", source_provider: "slack", created_at: "2026-07-10T02:00:00Z" },
+        { source_run_id: "run-1", fact_type: "group", source_provider: "slack", created_at: "2026-07-10T03:00:00Z" },
+        { source_run_id: "run-2", fact_type: "app_user_account", source_provider: "okta", created_at: "2026-07-09T00:00:00Z" },
+      ],
+      null,
+      cap,
+    ));
+    const res = await getSyncReviewPendingGroups();
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(cap.cols).toBe("source_run_id, fact_type, source_provider, created_at"); // never a body column
+    expect(String(cap.cols)).not.toMatch(/fact_json|natural_key|signal_id|source_record_id|provenance_json/);
+    expect(cap.eqs).toContainEqual(["review_status", "pending"]);
+    expect(cap.eqs.map(([c]) => c)).not.toContain("tenant_id");
+    expect(res.data).toHaveLength(3); // (run1,users) (run1,group) (run2,users)
+    const run1users = res.data.find((g) => g.sourceRunId === "run-1" && g.factType === "app_user_account");
+    expect(run1users?.pending).toBe(2);
+    expect(run1users?.firstSeen).toBe("2026-07-10T01:00:00Z");
+    expect(run1users?.lastSeen).toBe("2026-07-10T02:00:00Z");
+  });
+
+  it("fails closed on a DB error", async () => {
+    createClient.mockResolvedValue(makeGroupsSupabase(null, { message: "boom" }, { eqs: [] }));
+    expect(await getSyncReviewPendingGroups()).toEqual({ ok: false, error: "query_failed" });
   });
 });

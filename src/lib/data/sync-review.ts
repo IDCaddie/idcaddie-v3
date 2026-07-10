@@ -71,3 +71,52 @@ export function syncReviewLeadLabel(counts: Pick<SyncReviewCounts, "pending">): 
 export function syncReviewHasAwaiting(counts: Pick<SyncReviewCounts, "pending" | "needsReview">): boolean {
   return counts.pending + counts.needsReview > 0;
 }
+
+// A pending review batch, grouped by (source_run_id, fact_type, source_provider). Safe metadata + a count only — never
+// a row body / PII / id. `sourceRunId` is an opaque run uuid; `factType`/`provider` are enums/labels.
+export type SyncReviewPendingGroup = {
+  sourceRunId: string | null;
+  factType: string;
+  provider: string;
+  pending: number;
+  firstSeen: string; // min created_at in the group
+  lastSeen: string; // max created_at in the group
+};
+
+// The current tenant's PENDING discovery facts, aggregated into (run, type, provider) batches — the unit the review
+// route confirms/rejects. Reads ONLY safe metadata columns (source_run_id / fact_type / source_provider / created_at)
+// for review_status='pending' rows and groups them in-process — NEVER a body column (no fact_json / natural_key /
+// signal_id / source_record_id / provenance_json / email / name / id), never a caller tenant_id (RLS scopes rows).
+// Fails closed. Returns only per-batch counts + timestamps; individual rows are never surfaced.
+export async function getSyncReviewPendingGroups(): Promise<DataResult<SyncReviewPendingGroup[]>> {
+  const supabase = await createClient();
+
+  const { data, error } = await supabase
+    .from("discovery_facts")
+    .select("source_run_id, fact_type, source_provider, created_at")
+    .eq("review_status", "pending");
+  if (error) {
+    console.error("[data/sync-review] getSyncReviewPendingGroups query failed");
+    return { ok: false, error: "query_failed" };
+  }
+
+  const byKey = new Map<string, SyncReviewPendingGroup>();
+  for (const r of data ?? []) {
+    const sourceRunId = (r.source_run_id as string | null) ?? null;
+    const factType = String(r.fact_type);
+    const provider = String(r.source_provider);
+    const createdAt = String(r.created_at);
+    const key = `${sourceRunId ?? "—"}|${factType}|${provider}`;
+    const g = byKey.get(key);
+    if (!g) {
+      byKey.set(key, { sourceRunId, factType, provider, pending: 1, firstSeen: createdAt, lastSeen: createdAt });
+    } else {
+      g.pending += 1;
+      if (createdAt < g.firstSeen) g.firstSeen = createdAt;
+      if (createdAt > g.lastSeen) g.lastSeen = createdAt;
+    }
+  }
+  // Newest batch first (by lastSeen), stable.
+  const groups = [...byKey.values()].sort((a, b) => (a.lastSeen < b.lastSeen ? 1 : a.lastSeen > b.lastSeen ? -1 : 0));
+  return { ok: true, data: groups };
+}
