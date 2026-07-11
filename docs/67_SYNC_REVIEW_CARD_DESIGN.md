@@ -73,7 +73,10 @@ Card on `/connectors` (or `/needs-attention` — see §9 open question). Counts 
 - **Empty state:** `No items awaiting review.`
 - **Error state:** `Could not load the sync review summary right now. Please try again later.`
 - **Safety caption (verbatim intent):** `Counts only — no item details, personal data, payloads, tokens, or secrets
-  are shown or stored here. Reviewing items (confirm/reject) is not built yet.`
+  are shown or stored here. Confirm / reject happens on the separate review page (this page stays read-only).`
+  > **Update (2026-07-10):** this proposal originally noted confirm / reject was "not built yet." It is now built on the
+  > separate `/connectors/review` route (#303), reached via a navigation-only CTA (#304); `/connectors` stays read-only.
+  > The caption above matches the shipped copy. See [69 §8–§9](./69_SYNC_REVIEW_ROUTE_DESIGN.md).
 
 **Critical UI-source rule:** the **page source must contain none of the leak-scan forbidden literals**
 (`discovery_facts`, `fact_json`, `connector_secrets`, `ciphertext`, `getSecretValue`). The page imports a
