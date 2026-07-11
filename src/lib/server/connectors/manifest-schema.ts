@@ -113,7 +113,9 @@ export const ProviderManifestSchema = z
     try { url = new URL(m.base_url); } catch { ctx.addIssue({ code: "custom", path: ["base_url"], message: "base_url must be a valid absolute URL" }); }
     if (url) {
       if (url.protocol !== "https:") ctx.addIssue({ code: "custom", path: ["base_url"], message: "base_url must be https" });
-      const allowed = PROVIDER_HOST_ALLOWLIST[m.provider_id];
+      // OWN-property lookup only — an inherited key (`constructor`, `__proto__`, `toString`, …) must NOT resolve to an
+      // Object.prototype internal (which would be a non-array → `.includes` TypeError, or a truthy non-allowlist). Fail closed.
+      const allowed = Object.prototype.hasOwnProperty.call(PROVIDER_HOST_ALLOWLIST, m.provider_id) ? PROVIDER_HOST_ALLOWLIST[m.provider_id] : undefined;
       if (!allowed) ctx.addIssue({ code: "custom", path: ["provider_id"], message: `no host allowlist for provider '${m.provider_id}'` });
       else if (!allowed.includes(url.hostname)) ctx.addIssue({ code: "custom", path: ["base_url"], message: `base_url host '${url.hostname}' is not allowlisted for '${m.provider_id}'` });
     }

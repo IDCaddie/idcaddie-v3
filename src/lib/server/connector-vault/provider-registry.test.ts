@@ -171,3 +171,36 @@ describe("microsoft_entra — inert canonical provider identity (P5E2.1)", () =>
     expect(isConnectorProviderReady("scim_fixture")).toBe(false);
   });
 });
+
+// Hardening — provider lookups must do OWN-property checks so an INHERITED object key can never resolve to an
+// Object.prototype internal and masquerade as a provider (previously getConnectorProvider("constructor") returned the
+// Object constructor, so isSupportedConnectorProvider("constructor") was true).
+describe("connector registry lookups fail closed for INHERITED object keys (no prototype-chain traversal)", () => {
+  const INHERITED = ["constructor", "toString", "valueOf", "hasOwnProperty", "__proto__", "prototype", "isPrototypeOf", "propertyIsEnumerable", "toLocaleString"];
+
+  it("every inherited key → null / not-supported / not-ready / no capabilities", () => {
+    for (const k of INHERITED) {
+      expect(getConnectorProvider(k), k).toBeNull();
+      expect(isSupportedConnectorProvider(k), k).toBe(false);
+      expect(isConnectorProviderReady(k), k).toBe(false);
+      expect(getProviderCapabilities(k), k).toEqual([]);
+    }
+  });
+
+  it("no inherited function/object is ever returned as a provider definition", () => {
+    for (const k of INHERITED) expect(typeof getConnectorProvider(k)).not.toBe("function");
+  });
+
+  it("valid OWN providers are unchanged (slack ready-state, scim_fixture / microsoft_entra inert)", () => {
+    for (const p of ["slack", "scim_fixture", "microsoft_entra"]) {
+      expect(isSupportedConnectorProvider(p), p).toBe(true);
+      expect(getConnectorProvider(p), p).not.toBeNull();
+    }
+    expect(getProviderCapabilities("slack")).toContain("read_users");
+    expect(isConnectorProviderReady("slack")).toBe(false);   // still inert
+    expect(isConnectorProviderReady("scim_fixture")).toBe(false);
+    expect(isConnectorProviderReady("microsoft_entra")).toBe(false);
+    // an ordinary unknown string still fails closed (no behavior change)
+    expect(getConnectorProvider("totally_unknown")).toBeNull();
+  });
+});

@@ -345,3 +345,34 @@ describe("microsoft_entra host allowlist (P5E2.1) — EXACT global Graph host on
     }
   });
 });
+
+// Hardening — the host-allowlist lookup must be OWN-property only so an INHERITED provider_id (`constructor`, `__proto__`,
+// `toString`, …) obtains NO allowlist and FAILS CLOSED without throwing (previously PROVIDER_HOST_ALLOWLIST["constructor"]
+// resolved to the Object constructor — a non-array whose `.includes` threw a TypeError during validation).
+describe("host allowlist fails closed for INHERITED provider_ids (no crash, no prototype leakage)", () => {
+  const INHERITED = ["constructor", "toString", "valueOf", "hasOwnProperty", "__proto__", "prototype", "isPrototypeOf", "propertyIsEnumerable", "toLocaleString"];
+
+  it("no inherited key is an OWN entry of PROVIDER_HOST_ALLOWLIST; own entries unchanged", () => {
+    for (const k of INHERITED) expect(Object.prototype.hasOwnProperty.call(PROVIDER_HOST_ALLOWLIST, k), k).toBe(false);
+    expect(PROVIDER_HOST_ALLOWLIST.microsoft_entra).toEqual(["graph.microsoft.com"]);
+    expect(PROVIDER_HOST_ALLOWLIST.slack).toEqual(["slack.com"]);
+    expect(PROVIDER_HOST_ALLOWLIST.scim_fixture).toEqual(["scim.fixture.invalid"]);
+  });
+
+  it("a manifest with an inherited provider_id fails validation WITHOUT throwing (no inherited object treated as config)", () => {
+    for (const pid of INHERITED) {
+      const m = base(); m.provider_id = pid; m.base_url = "https://graph.microsoft.com/v1.0"; // otherwise-valid https URL
+      let r: ReturnType<typeof validateManifestObject> | undefined;
+      expect(() => { r = validateManifestObject(m, `inherited:${pid}`); }, pid).not.toThrow();
+      expect(r!.ok, pid).toBe(false); // fail closed: no allowlist + unsupported provider
+    }
+  });
+
+  it("REGRESSION: real providers still validate against their exact host; unknown normal strings still fail closed", () => {
+    expect(validateManifestObject(slack, "slack.v1.json").ok).toBe(true);
+    const e = base(); e.provider_id = "microsoft_entra"; e.base_url = "https://graph.microsoft.com/v1.0";
+    expect(validateManifestObject(e, "entra").ok).toBe(true);
+    const u = base(); u.provider_id = "not_a_provider"; u.base_url = "https://graph.microsoft.com/v1.0";
+    expect(validateManifestObject(u, "unknown").ok).toBe(false);
+  });
+});

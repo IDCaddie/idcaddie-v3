@@ -212,9 +212,12 @@ export function listConnectorProviders(): readonly ConnectorProviderDefinition[]
     .sort((a, b) => a.id.localeCompare(b.id));
 }
 
-// Look up one provider's safe metadata; returns null for an unknown/undefined id (fail closed).
+// Look up one provider's safe metadata; returns null for an unknown/undefined id (fail closed). Uses an OWN-property
+// check so an inherited object key (`constructor`, `toString`, `__proto__`, `hasOwnProperty`, …) can NEVER resolve to an
+// Object.prototype internal and masquerade as a provider — the lookup does no prototype-chain traversal.
 export function getConnectorProvider(providerId: string): ConnectorProviderDefinition | null {
   if (!providerId || typeof providerId !== "string") return null;
+  if (!Object.prototype.hasOwnProperty.call(CONNECTOR_PROVIDERS, providerId)) return null;
   return CONNECTOR_PROVIDERS[providerId as ConnectorProviderId] ?? null;
 }
 
