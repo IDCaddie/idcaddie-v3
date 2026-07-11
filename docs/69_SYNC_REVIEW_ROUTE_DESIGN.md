@@ -213,9 +213,36 @@ only); no promotion occurred; no connector run; production untouched.
 PASSED;** only **deep audit (pg_catalog / audit-metadata) verification remains DEFERRED / not tested** (do not read the
 deep-audit item as having passed — it is covered metadata-only by the T62 RLS suite in CI). Production untouched.
 
+## 9. Closure — Sync Review browser/workflow track (2026-07-10)
+
+The **status-only Sync Review workflow is functionally human-verified on staging.** The browser workflow has **no
+remaining functional test gaps**: every interactive path a reviewer exercises has passed on staging.
+
+| Path / criterion | Status |
+| --- | --- |
+| Viewer behavior (read-only, no controls) | **PASS** |
+| Confirm path | **PASS** |
+| Reject path | **PASS** |
+| Stale / repeat no-op (guarded `pending`-only 0-row UPDATE) | **PASS** |
+| Persistence after action (counts survive reload) | **PASS** |
+| Migration `0042_discovery_facts_audit_on_write` applied to staging | **APPLIED** |
+| Audit-trigger + policy behavior (metadata-only) | **Covered by T62 RLS suite in CI** |
+| Deep hosted `pg_catalog` / audit-metadata verification | **DEFERRED** |
+
+**The deferred deep metadata check is not a blocker for closing the browser/workflow implementation track**, because the
+0042 trigger and the `discovery_facts` policy assertions are covered by **T62** in CI. The deferred check is **not
+completed** — verifying the 0042 audit rows on staging via direct SQL needs the DB password (a secret), which stays out
+of scope; **no claim is made that the deep hosted metadata verification passed.**
+
+**Not implied by this closure:** no production readiness, no production deployment, no cutover approval. This closes only
+the *browser/workflow implementation track* for the status-only Sync Review surface. No connector sync was rerun; no
+promotion to `app_users` / `people` / `identity_matches` occurred; no row body or PII was exposed; **production
+untouched.** No unrelated risk or governance gate is closed here (RISK-007 and Phase C are unchanged — see the footer).
+
 ---
 
-*Sections 0–7 are the design; §8 records a partial staging human test. `/connectors` stays read-only; no promotion; no
-row bodies/PII; no migration in this doc; no production action. RISK-007 remains CLOSED at its staging-defined criteria;
+*Sections 0–7 are the design; §8 records the staging human test and §9 closes the browser/workflow track (functionally
+verified on staging; only the deep `pg_catalog` metadata check is deferred). `/connectors` stays read-only; no promotion;
+no row bodies/PII; no migration in this doc; no production action. RISK-007 remains CLOSED at its staging-defined criteria;
 Phase C remains UNBLOCKED as a governance state only; the C-2c sync ran on staging only; production untouched; no
 production action is authorized.*

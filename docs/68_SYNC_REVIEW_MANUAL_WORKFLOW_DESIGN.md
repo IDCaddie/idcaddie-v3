@@ -8,6 +8,17 @@
 > **THIS IS A DESIGN PROPOSAL ONLY.** No code, schema, migration, mutation, or UI is created here; no query was run; the
 > `/connectors` leak-scan is unchanged. It proposes the *manual review workflow* for pending discovery items and asks for
 > the explicit approvals in §11 before any implementation. Not a production-readiness claim; staging-safe.
+>
+> **STATUS UPDATE (2026-07-10) — status-only slice CLOSED on staging.** The **status-only** slice of this workflow
+> (confirm / reject / stale-no-op) is now implemented and **functionally human-verified on staging**: the count-only
+> card (#297), the server-only status actions (#301), the dedicated `/connectors/review` route (#303), the
+> navigation-only `/connectors` CTA (#304), and migration `0042_discovery_facts_audit_on_write` (applied to staging).
+> Viewer, confirm, reject, stale/repeat-no-op, and persistence-after-action all PASS on staging — see
+> [69 §8–§9](./69_SYNC_REVIEW_ROUTE_DESIGN.md). The audit trigger + policy behaviour is covered metadata-only by the
+> **T62 RLS suite** in CI; only the deep hosted `pg_catalog` metadata verification remains **DEFERRED** (not completed —
+> needs the DB password) and is **not** claimed passed. The **promotion path** (facts → `app_users` / `people` /
+> identity matches) remains a **separate, PII-heavy, deferred** track (this closure does not touch it). No production
+> readiness / deployment / cutover is implied; **production untouched.**
 
 ---
 
