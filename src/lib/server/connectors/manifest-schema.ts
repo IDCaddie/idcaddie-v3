@@ -23,9 +23,13 @@ export const PAGINATION_STYLES = ["cursor", "page", "offset", "link", "none"] as
 // item-schema registry (Phase 1b) — not yet built; the manifest layer treats `item_schema_ref` as an opaque string.
 export const EMIT_FACT_TYPES = ["none", "app_user_account", "app_discovery", "app_instance_identity", "group", "group_membership"] as const;
 
-// Per-provider host allowlist. base_url's host must be listed here. Extended one reviewed provider at a time.
+// Per-provider host allowlist. base_url's host must be listed here (EXACT hostname match — no wildcard, no suffix match).
+// Extended one reviewed provider at a time.
 export const PROVIDER_HOST_ALLOWLIST: Readonly<Record<string, readonly string[]>> = {
   slack: ["slack.com"],
+  // Synthetic SCIM proof provider — the reserved, NON-ROUTABLE `.invalid` TLD (RFC 6761). Fixture-only; cannot resolve to
+  // any real service; not a vendor/customer domain. Exact host only (the superRefine below does `allowed.includes(host)`).
+  scim_fixture: ["scim.fixture.invalid"],
 };
 
 // field_map values are a DOT-PATH into the response item, optionally negated with ONE leading "!". NOTHING ELSE — no

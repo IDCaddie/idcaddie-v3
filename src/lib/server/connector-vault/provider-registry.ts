@@ -26,7 +26,8 @@ export type ConnectorProviderId =
   | "microsoft_entra"
   | "zoom"
   | "atlassian"
-  | "github";
+  | "github"
+  | "scim_fixture"; // SYNTHETIC SCIM 2.0 proof provider (fixture-only, non-routable) — NOT a real vendor. See SCIM_FIXTURE below.
 
 export type ConnectorProviderAuthKind = "oauth2" | "api_key"; // metadata only — no secret handling here
 export type ConnectorProviderCategory = "collaboration" | "identity" | "productivity" | "developer" | "finance";
@@ -164,14 +165,38 @@ const MICROSOFT_ENTRA: ConnectorProviderDefinition = {
   enabled: false,
 };
 
-// The registry, keyed by provider id. Slack (deep-sync skeleton) + the inert future identity-discovery
-// connectors. Each is added as a definition (the type space already lists them) and stays inert until its
+// SYNTHETIC SCIM 2.0 FIXTURE provider — NOT a real vendor and never live. It exists ONLY so the Connector Framework can
+// certify a fixture-only SCIM proof (see the connector-runner's docs/SCIM_PROOF_PROVIDER_DESIGN.md). Its host (allowlisted
+// in manifest-schema.ts) is the reserved, NON-ROUTABLE `.invalid` TLD (RFC 6761) — it can never resolve to any real
+// service. Inert: disabled, no credentials, no OAuth, no API, no sync; it carries no vendor or customer identity.
+const SCIM_FIXTURE: ConnectorProviderDefinition = {
+  id: "scim_fixture",
+  displayName: "SCIM (synthetic fixture — certification only)",
+  category: "identity",
+  authKind: "api_key", // a STATIC bearer shape in fixtures only — no OAuth flow, no token refresh, no real credential
+  kind: "identity_provider_discovery",
+  capabilities: [],
+  discoveryCapabilities: ["discover_assigned_users"], // SCIM /Users; /Groups is a later, separate phase
+  status: "disabled",
+  reviewGate: "connector-framework-fixture-certification",
+  riskLevel: "low",
+  requiredScopes: ["urn:ietf:params:scim:schemas:core:2.0:User.read"], // display-only SCIM read scope
+  helpCopy:
+    "Synthetic SCIM 2.0 fixture provider for Connector Framework certification only — NOT a real vendor and never " +
+    "connected. Its host is the reserved non-routable .invalid domain; no credentials are stored, and discovery/sync " +
+    "are not built. It exists purely so the framework can certify a fixture-only SCIM proof.",
+  enabled: false,
+};
+
+// The registry, keyed by provider id. Slack (deep-sync skeleton) + the inert future identity-discovery connectors + the
+// synthetic SCIM fixture. Each is added as a definition (the type space already lists them) and stays inert until its
 // own reviewed PR.
 const CONNECTOR_PROVIDERS: Readonly<Partial<Record<ConnectorProviderId, ConnectorProviderDefinition>>> = {
   slack: SLACK,
   okta: OKTA,
   google_workspace: GOOGLE_WORKSPACE,
   microsoft_entra: MICROSOFT_ENTRA,
+  scim_fixture: SCIM_FIXTURE,
 };
 
 // Connector KINDS that are discovery sources (find apps fast) vs the single deep-sync runner kind.

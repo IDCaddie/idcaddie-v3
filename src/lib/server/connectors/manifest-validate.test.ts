@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import * as validateModule from "./manifest-validate";
 import { validateManifestObject, validateManifestsDir, MANIFESTS_DIR } from "./manifest-validate";
+import { PROVIDER_HOST_ALLOWLIST } from "./manifest-schema";
 import { parseDiscoveryFact } from "../connector-vault/discovery-facts";
 
 // Phase 1a — pure contract/config validation. INERT: no fetch, no DB, no token, no sync.
@@ -158,5 +159,41 @@ describe("field_map keys must be valid fields of the emitted fact type (cross-ch
       for (const key of Object.keys(fm)) if (!keyRecognized(emits, key)) bad.push(`${ep.id}: '${key}' is not a field of '${emits}'`);
     }
     expect(bad).toEqual([]);
+  });
+});
+
+describe("scim_fixture host allowlist (P5A.1) — exact synthetic non-routable host, fail-closed", () => {
+  // A structurally-valid manifest under the scim_fixture provider (reuses the Slack manifest shape; only provider_id +
+  // base_url matter for the host-allowlist gate this test exercises — SCIM endpoints/schemas are a later phase).
+  const scim = (): Obj => { const m = base(); m.provider_id = "scim_fixture"; m.base_url = "https://scim.fixture.invalid/scim/v2"; return m; };
+
+  it("accepts the EXACT synthetic host (supported provider + https + allowlisted host)", () => {
+    expect(validateManifestObject(scim(), "scim").ok).toBe(true);
+  });
+  it("rejects a lookalike subdomain of the fixture host (exact match only)", () => {
+    const m = scim(); m.base_url = "https://evil.scim.fixture.invalid/scim/v2";
+    expect(validateManifestObject(m, "scim").ok).toBe(false);
+  });
+  it("rejects a suffix-confusion host (fixture host as a prefix of a longer domain)", () => {
+    const m = scim(); m.base_url = "https://scim.fixture.invalid.evil.example/scim/v2";
+    expect(validateManifestObject(m, "scim").ok).toBe(false);
+  });
+  it("rejects HTTP where HTTPS is required, even for the allowlisted host", () => {
+    const m = scim(); m.base_url = "http://scim.fixture.invalid/scim/v2";
+    expect(validateManifestObject(m, "scim").ok).toBe(false);
+  });
+  it("rejects a host not allowlisted for scim_fixture (no cross-provider host reuse)", () => {
+    const m = scim(); m.base_url = "https://slack.com/api"; // slack's host, but under scim_fixture
+    expect(validateManifestObject(m, "scim").ok).toBe(false);
+  });
+  it("the allowlist is exact per-provider with NO wildcard/localhost/IP, and Slack's entry is unchanged", () => {
+    expect(PROVIDER_HOST_ALLOWLIST.scim_fixture).toEqual(["scim.fixture.invalid"]); // exactly one, reserved .invalid TLD
+    expect(PROVIDER_HOST_ALLOWLIST.slack).toEqual(["slack.com"]); // unchanged
+    for (const hosts of Object.values(PROVIDER_HOST_ALLOWLIST)) {
+      for (const h of hosts) {
+        expect(h).not.toContain("*"); // no wildcard
+        expect(h).not.toMatch(/^\.|localhost|^\d+\.\d+\.\d+\.\d+$/); // no leading-dot suffix, localhost, or bare IP
+      }
+    }
   });
 });
