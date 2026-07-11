@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { resolveTenantContext } from "@/lib/auth/tenant-context";
 import { getSyncReviewCounts, getSyncReviewPendingGroups } from "@/lib/data/sync-review";
+import { getAppUserAccountPromotionReadiness } from "@/lib/data/promotion-readiness";
 import { REVIEW_REJECT_REASONS } from "@/lib/data/sync-review-actions";
 import { confirmReviewBatchAction, rejectReviewBatchAction } from "./actions";
 import { Badge } from "@/components/badge";
@@ -57,6 +58,9 @@ export default async function SyncReviewPage({
 
   const counts = await getSyncReviewCounts();
   const groups = await getSyncReviewPendingGroups();
+  // Read-only, COUNT-ONLY promotion-readiness for confirmed app_user_account facts (docs/70 P1). No promotion here —
+  // just a readout of what confirmed data means. Same summary for viewers and editors (no controls, no server action).
+  const readiness = await getAppUserAccountPromotionReadiness();
 
   return (
     <main className="flex flex-1 flex-col gap-6 p-8">
@@ -173,6 +177,33 @@ export default async function SyncReviewPage({
           Batches group pending items by sync run + type. Confirm / reject applies to a whole batch and updates status
           only — no item details are shown, nothing is promoted to an account, and nothing is ever deleted.
         </p>
+      </section>
+
+      <section className="space-y-3 text-sm">
+        <h2 className="font-medium">Import readiness</h2>
+        <p className="text-xs text-zinc-500">
+          Read-only readiness for confirmed Slack app-user accounts — counts only. Nothing here imports or changes an
+          account, and no accounts have been imported. This is a summary of what the confirmed data means, not an action.
+        </p>
+        {!readiness.ok ? (
+          <p className="text-sm text-red-600">Import readiness is unavailable right now. Please try again later.</p>
+        ) : readiness.data.total === 0 ? (
+          <div className="rounded border border-zinc-300 p-4 text-sm dark:border-zinc-700">
+            <div className="font-medium">No confirmed accounts to assess yet.</div>
+            <p className="mt-1 text-zinc-600 dark:text-zinc-400">
+              Readiness counts appear here once app-user accounts are confirmed in review.
+            </p>
+          </div>
+        ) : (
+          <StatGrid>
+            <StatCard label="Total confirmed accounts" value={readiness.data.total} />
+            <StatCard label="Ready to add" value={readiness.data.ready} tone={readiness.data.ready > 0 ? "success" : "neutral"} />
+            <StatCard label="Already represented" value={readiness.data.alreadyRepresented} />
+            <StatCard label="Conflicts" value={readiness.data.conflict} tone={readiness.data.conflict > 0 ? "danger" : "neutral"} />
+            <StatCard label="Missing required data" value={readiness.data.missingRequired} tone={readiness.data.missingRequired > 0 ? "attention" : "neutral"} />
+            <StatCard label="Unsupported" value={readiness.data.unsupported} />
+          </StatGrid>
+        )}
       </section>
     </main>
   );

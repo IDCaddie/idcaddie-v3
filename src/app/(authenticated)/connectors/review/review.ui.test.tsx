@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import { render, screen, cleanup } from "@testing-library/react";
 import fs from "node:fs";
 import path from "node:path";
@@ -11,13 +11,18 @@ vi.mock("next/link", () => ({
 }));
 vi.mock("@/lib/auth/tenant-context", () => ({ resolveTenantContext: vi.fn() }));
 vi.mock("@/lib/data/sync-review", () => ({ getSyncReviewCounts: vi.fn(), getSyncReviewPendingGroups: vi.fn() }));
+vi.mock("@/lib/data/promotion-readiness", () => ({ getAppUserAccountPromotionReadiness: vi.fn() }));
 vi.mock("./actions", () => ({ confirmReviewBatchAction: vi.fn(), rejectReviewBatchAction: vi.fn() }));
 
 import SyncReviewPage from "./page";
 import { resolveTenantContext } from "@/lib/auth/tenant-context";
 import { getSyncReviewCounts, getSyncReviewPendingGroups } from "@/lib/data/sync-review";
+import { getAppUserAccountPromotionReadiness } from "@/lib/data/promotion-readiness";
 
 const asMock = <T,>(fn: T) => fn as unknown as { mockResolvedValue: (v: unknown) => void };
+// Readiness has its own tests below; default it to the empty state so the OTHER tests render without caring about it.
+const READINESS_ZERO = { ok: true, data: { total: 0, ready: 0, alreadyRepresented: 0, conflict: 0, missingRequired: 0, unsupported: 0 } };
+beforeEach(() => asMock(getAppUserAccountPromotionReadiness).mockResolvedValue(READINESS_ZERO));
 afterEach(cleanup);
 
 const COUNTS = { ok: true, data: { pending: 3, needsReview: 0, confirmed: 0, rejected: 0, total: 3, appUserAccounts: 3 } };
@@ -86,6 +91,83 @@ describe("/connectors/review", () => {
     cleanup();
     render(await render_({ status: "update_failed" }));
     expect(screen.getByText(/Could not update review items/)).toBeTruthy();
+  });
+});
+
+// Import readiness (docs/70 P1) — read-only count-only summary; identical for viewer + editor; no controls; fail-closed.
+describe("/connectors/review — Import readiness (read-only counts)", () => {
+  const READINESS = { ok: true, data: { total: 20, ready: 6, alreadyRepresented: 5, conflict: 4, missingRequired: 3, unsupported: 2 } };
+  const LABELS = ["Total confirmed accounts", "Ready to add", "Already represented", "Conflicts", "Missing required data", "Unsupported"];
+  const withReview = () => {
+    asMock(getSyncReviewCounts).mockResolvedValue(COUNTS);
+    asMock(getSyncReviewPendingGroups).mockResolvedValue({ ok: true, data: [GROUP] });
+  };
+
+  it("renders all six readiness buckets with counts, plus the read-only / not-imported explanation", async () => {
+    setRole("editor"); withReview();
+    asMock(getAppUserAccountPromotionReadiness).mockResolvedValue(READINESS);
+    render(await render_());
+    expect(screen.getByText("Import readiness")).toBeTruthy();
+    for (const label of LABELS) expect(screen.getByText(label)).toBeTruthy();
+    expect(screen.getByText("20")).toBeTruthy(); // total (unique value)
+    expect(screen.getByText(/no accounts have been imported/i)).toBeTruthy();
+  });
+
+  it("viewer and editor see the SAME count-only readiness summary (no controls in either)", async () => {
+    for (const role of ["viewer", "editor"]) {
+      setRole(role); withReview();
+      asMock(getAppUserAccountPromotionReadiness).mockResolvedValue(READINESS);
+      render(await render_());
+      for (const label of LABELS) expect(screen.getByText(label)).toBeTruthy();
+      expect(screen.getByText("20")).toBeTruthy();
+      // NO control implying import/promotion exists (assert on control NAMES — the safe copy may say "promoted"/"import"
+      // in prose, which is fine; what must not exist is an import/promote/execute button or link).
+      expect(screen.queryByRole("button", { name: /import|promote|execute|add|dry.?run/i })).toBeNull();
+      expect(screen.queryByRole("link", { name: /import|promote|execute|add|dry.?run/i })).toBeNull();
+      cleanup();
+    }
+  });
+
+  it("total = 0 → empty state, and the six buckets are NOT shown", async () => {
+    setRole("editor"); withReview();
+    asMock(getAppUserAccountPromotionReadiness).mockResolvedValue(READINESS_ZERO);
+    render(await render_());
+    expect(screen.getByText("No confirmed accounts to assess yet.")).toBeTruthy();
+    expect(screen.queryByText("Ready to add")).toBeNull();
+    expect(screen.queryByText("Conflicts")).toBeNull();
+  });
+
+  it("DAL error → fail-closed unavailable state, leaking no value", async () => {
+    setRole("editor"); withReview();
+    asMock(getAppUserAccountPromotionReadiness).mockResolvedValue({ ok: false, error: "query_failed" });
+    const { container } = render(await render_());
+    expect(screen.getByText(/Import readiness is unavailable right now/)).toBeTruthy();
+    expect(container.textContent).not.toContain("query_failed");
+    expect(screen.queryByText("Ready to add")).toBeNull();
+  });
+
+  it("readiness UI adds NO buttons/forms/server-action path (editor, no pending batches)", async () => {
+    setRole("editor");
+    asMock(getSyncReviewCounts).mockResolvedValue({ ok: true, data: { ...COUNTS.data, pending: 0, total: 0, appUserAccounts: 0 } });
+    asMock(getSyncReviewPendingGroups).mockResolvedValue({ ok: true, data: [] }); // no confirm/reject forms
+    asMock(getAppUserAccountPromotionReadiness).mockResolvedValue(READINESS);
+    const { container } = render(await render_());
+    for (const label of LABELS) expect(screen.getByText(label)).toBeTruthy(); // readiness still rendered
+    expect(screen.queryByRole("button")).toBeNull(); // ...with zero controls
+    expect(container.querySelector("form")).toBeNull();
+    expect(container.querySelector("input")).toBeNull();
+  });
+
+  it("renders no row-level identifiers or PII in the readiness summary", async () => {
+    setRole("editor"); withReview();
+    asMock(getAppUserAccountPromotionReadiness).mockResolvedValue(READINESS);
+    const { container } = render(await render_());
+    const txt = (container.textContent ?? "").toLowerCase();
+    // structural body-field identifiers that would only appear if a row body leaked (the page's safety copy legitimately
+    // mentions "tokens"/"secrets", so we assert on leak-field NAMES + an email shape, never the bare safety words).
+    for (const forbidden of ["fact_json", "natural_key", "signal_id", "source_record_id", "provenance_json", "external_user_id", "@example.com"]) {
+      expect(txt).not.toContain(forbidden);
+    }
   });
 });
 
