@@ -30,6 +30,12 @@ export const PROVIDER_HOST_ALLOWLIST: Readonly<Record<string, readonly string[]>
   // Synthetic SCIM proof provider — the reserved, NON-ROUTABLE `.invalid` TLD (RFC 6761). Fixture-only; cannot resolve to
   // any real service; not a vendor/customer domain. Exact host only (the superRefine below does `allowed.includes(host)`).
   scim_fixture: ["scim.fixture.invalid"],
+  // Microsoft Entra directory discovery via the Microsoft Graph API — the EXACT global Graph host ONLY (canonical host
+  // policy for the future fixture-certified Graph `/users` connector). Deliberately NO sovereign-cloud Graph hosts
+  // (graph.microsoft.us / dod-graph.microsoft.us / microsoftgraph.chinacloudapi.cn), NO token host (login.microsoftonline.com),
+  // NO parent domain, NO wildcard/suffix — exact equality only. The `microsoft_entra` provider stays inert (disabled,
+  // not connectable); no Graph runtime/manifest/schema/OAuth exists yet.
+  microsoft_entra: ["graph.microsoft.com"],
 };
 
 // field_map values are a DOT-PATH into the response item, optionally negated with ONE leading "!". NOTHING ELSE — no

@@ -287,3 +287,61 @@ describe("link pagination next_path (P5E0.1) — bounded property reference, DAT
     expect(validateManifestObject(unk, "x").ok).toBe(false);
   });
 });
+
+// P5E2.1 — canonical host policy for Microsoft Entra directory discovery via Microsoft Graph: the EXACT global Graph host
+// only. HTTPS-mandatory, exact hostname equality (the superRefine does `allowed.includes(url.hostname)`); no wildcard/
+// suffix/subdomain/parent/sovereign/token host, and no cross-provider host reuse. Port enforcement is the RUNTIME P2
+// boundary's job (the manifest schema gates https + exact hostname only) — unchanged here.
+describe("microsoft_entra host allowlist (P5E2.1) — EXACT global Graph host only, fail closed, no cross-provider reuse", () => {
+  const entra = (): Obj => { const m = base(); m.provider_id = "microsoft_entra"; m.base_url = "https://graph.microsoft.com/v1.0"; return m; };
+
+  it("accepts the EXACT global Graph host over HTTPS", () => {
+    expect(validateManifestObject(entra(), "entra").ok).toBe(true);
+  });
+  it("requires HTTPS even for the allowlisted host", () => {
+    const m = entra(); m.base_url = "http://graph.microsoft.com/v1.0";
+    expect(validateManifestObject(m, "entra").ok).toBe(false);
+  });
+  it("EXACT host only — trailing-dot / subdomain / suffix-confusion / lookalike / parent / token / sovereign / IP / localhost / wildcard all fail closed", () => {
+    for (const host of [
+      "https://graph.microsoft.com./v1.0",              // trailing dot
+      "https://api.graph.microsoft.com/v1.0",           // subdomain
+      "https://graph.microsoft.com.evil.example/v1.0",  // suffix confusion
+      "https://evilgraph.microsoft.com/v1.0",           // lookalike prefix
+      "https://microsoft.com/v1.0",                     // parent domain (no parent trust)
+      "https://login.microsoftonline.com/token",        // token host — never allowlisted
+      "https://graph.microsoft.us/v1.0",                // sovereign cloud — deliberately excluded
+      "https://dod-graph.microsoft.us/v1.0",            // sovereign cloud
+      "https://microsoftgraph.chinacloudapi.cn/v1.0",   // sovereign cloud
+      "https://localhost/v1.0",
+      "https://127.0.0.1/v1.0",
+      "https://10.0.0.1/v1.0",                          // private IP literal
+      "https://169.254.169.254/v1.0",                   // link-local metadata IP
+      "https://*.microsoft.com/v1.0",                   // wildcard-like string
+    ]) {
+      const m = entra(); m.base_url = host;
+      expect(validateManifestObject(m, `entra:${host}`).ok, host).toBe(false);
+    }
+  });
+  it("CROSS-PROVIDER ISOLATION — no provider inherits another provider's hosts", () => {
+    // microsoft_entra cannot use slack / scim hosts
+    for (const h of ["https://slack.com/api", "https://scim.fixture.invalid/scim/v2"]) {
+      const m = entra(); m.base_url = h;
+      expect(validateManifestObject(m, `entra@${h}`).ok, h).toBe(false);
+    }
+    // slack + scim_fixture cannot use the Graph host
+    const s = base(); s.provider_id = "slack"; s.base_url = "https://graph.microsoft.com/v1.0";
+    expect(validateManifestObject(s, "slack@graph").ok).toBe(false);
+    const sc = base(); sc.provider_id = "scim_fixture"; sc.base_url = "https://graph.microsoft.com/v1.0";
+    expect(validateManifestObject(sc, "scim@graph").ok).toBe(false);
+  });
+  it("the allowlist entry is EXACTLY the one global host with NO wildcard; slack + scim_fixture entries unchanged", () => {
+    expect(PROVIDER_HOST_ALLOWLIST.microsoft_entra).toEqual(["graph.microsoft.com"]);
+    expect(PROVIDER_HOST_ALLOWLIST.slack).toEqual(["slack.com"]);
+    expect(PROVIDER_HOST_ALLOWLIST.scim_fixture).toEqual(["scim.fixture.invalid"]);
+    for (const h of PROVIDER_HOST_ALLOWLIST.microsoft_entra) {
+      expect(h).not.toContain("*"); // no wildcard
+      expect(h).not.toMatch(/^\.|localhost|^\d+\.\d+\.\d+\.\d+$/); // no leading-dot suffix, localhost, or bare IP
+    }
+  });
+});

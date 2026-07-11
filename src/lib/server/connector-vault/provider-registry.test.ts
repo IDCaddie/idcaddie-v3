@@ -139,3 +139,35 @@ describe("scim_fixture — synthetic SCIM proof provider (P5A.1)", () => {
     expect(s.enabled).toBe(false);
   });
 });
+
+describe("microsoft_entra — inert canonical provider identity (P5E2.1)", () => {
+  it("is a SUPPORTED canonical provider id that resolves to an INERT, disabled, unconfigured definition", () => {
+    expect(isSupportedConnectorProvider("microsoft_entra")).toBe(true);
+    const def = getConnectorProvider("microsoft_entra");
+    expect(def).not.toBeNull();
+    const d = def as ConnectorProviderDefinition;
+    expect(d.id).toBe("microsoft_entra");
+    expect(d.category).toBe("identity");
+    expect(d.enabled).toBe(false); // never production-enabled
+    expect(d.status).not.toBe("not_connected"); // not connectable
+    expect(isConnectorProviderReady("microsoft_entra")).toBe(false); // inert — cannot connect/sync/credential
+    // safe metadata only — no host/token/secret/oauth field carries a credential or a URL
+    const flat = JSON.stringify({ ...d, helpCopy: undefined }).toLowerCase();
+    for (const bad of ["token", "secret", "client_id", "client_secret", "://", "graph.microsoft.com"]) expect(flat).not.toContain(bad);
+  });
+
+  it("fails closed for near-miss ids — NO fallback / alias to microsoft_entra", () => {
+    for (const miss of ["microsoft-entra", "microsoft_entra_extra", "Microsoft_Entra", "entra", "graph", "microsoftentra", "azure_ad"]) {
+      expect(getConnectorProvider(miss), miss).toBeNull();
+      expect(isSupportedConnectorProvider(miss), miss).toBe(false);
+      expect(isConnectorProviderReady(miss), miss).toBe(false);
+    }
+  });
+
+  it("adding microsoft_entra does not regress slack / scim_fixture (still inert, unchanged)", () => {
+    expect((getConnectorProvider("slack") as ConnectorProviderDefinition).status).toBe("skeleton");
+    expect((getConnectorProvider("scim_fixture") as ConnectorProviderDefinition).status).toBe("disabled");
+    expect(isConnectorProviderReady("slack")).toBe(false);
+    expect(isConnectorProviderReady("scim_fixture")).toBe(false);
+  });
+});
