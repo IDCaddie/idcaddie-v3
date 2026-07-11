@@ -110,3 +110,32 @@ describe("provider-registry module is server-safe + scoped (no secrets/tokens/ap
     }
   });
 });
+
+describe("scim_fixture — synthetic SCIM proof provider (P5A.1)", () => {
+  it("is a SUPPORTED canonical provider id and resolves to an inert, clearly-synthetic, disabled definition", () => {
+    expect(isSupportedConnectorProvider("scim_fixture")).toBe(true);
+    const def = getConnectorProvider("scim_fixture");
+    expect(def).not.toBeNull();
+    const d = def as ConnectorProviderDefinition;
+    expect(d.id).toBe("scim_fixture");
+    expect(d.displayName.toLowerCase()).toMatch(/fixture|synthetic/); // cannot be confused with a real vendor
+    expect(d.category).toBe("identity");
+    expect(d.status).toBe("disabled");
+    expect(d.enabled).toBe(false); // never production-enabled
+    expect(isConnectorProviderReady("scim_fixture")).toBe(false); // inert — cannot connect/sync/credential
+  });
+
+  it("fails closed for near-miss ids — no fallback to scim_fixture or slack", () => {
+    for (const miss of ["scim_fixtur", "scimfixture", "scim", "scim-fixture", "SCIM_FIXTURE", "fixture"]) {
+      expect(getConnectorProvider(miss)).toBeNull();
+      expect(isSupportedConnectorProvider(miss)).toBe(false);
+    }
+  });
+
+  it("Slack provider metadata is unchanged (no regression from adding scim_fixture)", () => {
+    const s = getConnectorProvider("slack") as ConnectorProviderDefinition;
+    expect(s.id).toBe("slack");
+    expect(s.status).toBe("skeleton");
+    expect(s.enabled).toBe(false);
+  });
+});

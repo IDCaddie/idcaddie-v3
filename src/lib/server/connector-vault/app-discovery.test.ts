@@ -35,7 +35,7 @@ describe("connector taxonomy — discovery connectors vs deep-sync runners", () 
   it("classifies discovery providers separately from deep-sync providers", () => {
     const discovery = listDiscoveryProviders().map((d) => d.id).sort();
     const deepSync = listDeepSyncProviders().map((d) => d.id).sort();
-    expect(discovery).toEqual(["google_workspace", "microsoft_entra", "okta"]);
+    expect(discovery).toEqual(["google_workspace", "microsoft_entra", "okta", "scim_fixture"]); // scim_fixture = synthetic identity-discovery proof (P5A.1)
     expect(deepSync).toEqual(["slack"]);
     // the two sets are disjoint
     expect(discovery.some((d) => deepSync.includes(d))).toBe(false);
