@@ -197,3 +197,93 @@ describe("scim_fixture host allowlist (P5A.1) — exact synthetic non-routable h
     }
   });
 });
+
+// P5E0.1 — the `link` pagination style gains ONE required, bounded `next_path` field: a conservative dotted PROPERTY
+// REFERENCE (e.g. Microsoft Graph `@odata.nextLink`) that IDENTIFIES the response field holding an opaque continuation URL.
+// It is DATA ONLY — no expression/JSONPath/URL/host/method/query/secret/prototype access, no runtime extraction added here.
+describe("link pagination next_path (P5E0.1) — bounded property reference, DATA ONLY", () => {
+  // Swap the emitting users.list endpoint onto a `link` pagination shape (item_schema_ref + field_map already present).
+  const link = (next_path: unknown): Obj => ({ style: "link", items_path: "value", next_path, max_pages: 5 }) as Obj;
+  const withLink = (next_path: unknown): Obj => { const m = base(); users(m).pagination = link(next_path); return m; };
+  const okLink = (next_path: unknown): boolean => validateManifestObject(withLink(next_path), `next_path:${String(next_path)}`).ok;
+
+  it("ACCEPTS a valid link manifest with next_path '@odata.nextLink' (the required Microsoft Graph key shape)", () => {
+    const r = validateManifestObject(withLink("@odata.nextLink"), "graph");
+    expect(errs(r).join("; ")).toBe("");
+    expect(r.ok).toBe(true);
+  });
+
+  it("ACCEPTS other simple dotted property paths (identifies data, no @ required)", () => {
+    for (const p of ["nextLink", "pagination.next", "meta.paging.next_url", "a_1.b2"]) {
+      expect(okLink(p), `expected accept for '${p}'`).toBe(true);
+    }
+  });
+
+  it("REJECTS a link manifest MISSING next_path (the field is required for style 'link')", () => {
+    const m = base(); users(m).pagination = { style: "link", items_path: "value", max_pages: 5 };
+    expect(validateManifestObject(m, "x").ok).toBe(false);
+  });
+
+  it("REJECTS non-property-path values: empty, oversized, whitespace, brackets, wildcard, recursion, slash, URL, interpolation, empty/dup segments, control chars", () => {
+    const rejected: Array<[string, unknown]> = [
+      ["empty string", ""],
+      ["oversized (>256)", "a".repeat(257)],
+      ["whitespace", "a b"],
+      ["leading space", " a"],
+      ["bracket index", "profile[0]"],
+      ["bracket key", "profile['next']"],
+      ["wildcard", "a.*"],
+      ["recursive descent", "..next"],
+      ["slash path", "a/b"],
+      ["url", "https://x.example/next?skip=1"],
+      ["protocol-relative url", "//x.example/next"],
+      ["env interpolation", "${NEXT}"],
+      ["template", "`a`"],
+      ["expression", "a + b"],
+      ["function call", "next(1)"],
+      ["leading dot", ".a"],
+      ["trailing dot", "a."],
+      ["empty/duplicate segment", "a..b"],
+      ["newline control char", "a\nb"],
+      ["tab control char", "a\tb"],
+      ["null byte", "a" + String.fromCharCode(0) + "b"],
+      ["at-only segment", "@"],
+      ["double at", "@@odata"],
+      ["digit-leading segment", "1a"],
+      ["non-string number", 5],
+      ["non-string object", { p: "x" }],
+    ];
+    for (const [label, val] of rejected) {
+      expect(okLink(val), `expected reject for ${label}`).toBe(false);
+    }
+  });
+
+  it("REJECTS prototype-pollution segments (with or without a leading @), anywhere in the path", () => {
+    for (const p of ["__proto__", "constructor", "prototype", "a.__proto__", "a.constructor.b", "@__proto__", "meta.prototype"]) {
+      expect(okLink(p), `expected reject for '${p}'`).toBe(false);
+    }
+  });
+
+  it("REJECTS next_path supplied to a NON-link style (discriminated .strict() union forbids the extra field)", () => {
+    // page style with an extra next_path
+    const m1 = base(); users(m1).pagination = { style: "page", page_param: "page", items_path: "value", next_path: "@odata.nextLink", max_pages: 5 };
+    expect(validateManifestObject(m1, "x").ok).toBe(false);
+    // none style with an extra next_path
+    const m2 = base(); users(m2).pagination = { style: "none", items_path: "value", next_path: "@odata.nextLink" };
+    expect(validateManifestObject(m2, "x").ok).toBe(false);
+  });
+
+  it("REGRESSION: cursor / offset / none styles are unchanged; unknown styles still fail closed", () => {
+    // Slack's shipped cursor manifest still validates (its cursor next_path is a plain string — unchanged by this PR)
+    expect(validateManifestObject(slack, "slack.v1.json").ok).toBe(true);
+    // an offset-style endpoint still validates (no next_path required/allowed)
+    const off = base(); users(off).pagination = { style: "offset", offset_param: "startIndex", limit_param: "count", items_path: "value", max_pages: 5 };
+    expect(validateManifestObject(off, "x").ok).toBe(true);
+    // a cursor-style endpoint still validates (its own next_path grammar is untouched)
+    const cur = base(); users(cur).pagination = { style: "cursor", cursor_param: "cursor", next_path: "response_metadata.next_cursor", items_path: "value", max_pages: 5 };
+    expect(validateManifestObject(cur, "x").ok).toBe(true);
+    // an unknown pagination style still fails closed
+    const unk = base(); users(unk).pagination = { style: "graphql", items_path: "value", max_pages: 5 };
+    expect(validateManifestObject(unk, "x").ok).toBe(false);
+  });
+});

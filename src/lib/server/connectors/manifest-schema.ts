@@ -39,6 +39,25 @@ export const FieldMapValueSchema = z
   .string()
   .regex(FIELD_MAP_VALUE, "field_map value must be a dot-path or !dot-path (no expressions/code)");
 
+// A NEXT-LINK PATH identifies the response field holding an OPAQUE continuation URL (e.g. Microsoft Graph's
+// `@odata.nextLink`) for the `link` pagination style. It IDENTIFIES DATA ONLY — it is NOT an expression, a JSONPath
+// engine, a URL, a host, an HTTP method, a query param, or code; it cannot read a secret or import anything. Grammar:
+// dot-separated segments, each an identifier optionally prefixed with a SINGLE `@` (for OData annotation keys like
+// `@odata`); NO empty segment (rejects leading/trailing/double dots), and no brackets, `*`, slashes, whitespace, or
+// control chars. Prototype-pollution segments (`__proto__`/`constructor`/`prototype`, with or without a leading `@`) are
+// rejected below. Bounded length. Extraction logic (reading the value) is a SEPARATE, later reviewed change — not here.
+export const NEXT_LINK_PATH = /^@?[A-Za-z_][A-Za-z0-9_]*(\.@?[A-Za-z_][A-Za-z0-9_]*)*$/;
+const NEXT_LINK_FORBIDDEN_SEGMENTS: ReadonlySet<string> = new Set(["__proto__", "constructor", "prototype"]);
+export const NextLinkPathSchema = z
+  .string()
+  .min(1)
+  .max(256)
+  .regex(NEXT_LINK_PATH, "next_path must be a dotted property reference (e.g. @odata.nextLink) — no expressions, URLs, brackets, wildcards, slashes, or whitespace")
+  .refine(
+    (p) => p.split(".").every((seg) => !NEXT_LINK_FORBIDDEN_SEGMENTS.has(seg.replace(/^@/, ""))),
+    "next_path must not reference a prototype-pollution key (__proto__ / constructor / prototype)",
+  );
+
 const StaticQueryValue = z.union([z.string(), z.number(), z.boolean()]); // static, non-secret params only
 
 // Pagination — a union of strict shapes. Every paginated style REQUIRES max_pages (a hard cap). "none" = single page.
@@ -46,7 +65,7 @@ const PaginationSchema = z.union([
   z.object({ style: z.literal("cursor"), cursor_param: z.string().min(1), next_path: z.string().min(1), items_path: z.string().min(1), max_pages: z.number().int().positive() }).strict(),
   z.object({ style: z.literal("page"), page_param: z.string().min(1), items_path: z.string().min(1), max_pages: z.number().int().positive() }).strict(),
   z.object({ style: z.literal("offset"), offset_param: z.string().min(1), limit_param: z.string().min(1), items_path: z.string().min(1), max_pages: z.number().int().positive() }).strict(),
-  z.object({ style: z.literal("link"), items_path: z.string().min(1), max_pages: z.number().int().positive() }).strict(),
+  z.object({ style: z.literal("link"), items_path: z.string().min(1), next_path: NextLinkPathSchema, max_pages: z.number().int().positive() }).strict(),
   z.object({ style: z.literal("none"), items_path: z.string().min(1) }).strict(),
 ]);
 
