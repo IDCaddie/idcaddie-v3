@@ -585,6 +585,54 @@ export type Database = {
         }
         Relationships: []
       }
+      connector_credential_references: {
+        Row: {
+          connector_id: string
+          created_at: string
+          credential_secret_ref: string
+          credential_version: string
+          id: string
+          provider: string
+          tenant_id: string
+          updated_at: string
+        }
+        Insert: {
+          connector_id: string
+          created_at?: string
+          credential_secret_ref: string
+          credential_version: string
+          id?: string
+          provider: string
+          tenant_id: string
+          updated_at?: string
+        }
+        Update: {
+          connector_id?: string
+          created_at?: string
+          credential_secret_ref?: string
+          credential_version?: string
+          id?: string
+          provider?: string
+          tenant_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "connector_credential_references_connector_same_tenant"
+            columns: ["connector_id", "tenant_id"]
+            isOneToOne: false
+            referencedRelation: "connectors"
+            referencedColumns: ["id", "tenant_id"]
+          },
+          {
+            foreignKeyName: "connector_credential_references_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       connector_runs: {
         Row: {
           completed_at: string | null
@@ -1909,6 +1957,36 @@ export type Database = {
       pgp_armor_headers: {
         Args: { "": string }
         Returns: Record<string, unknown>[]
+      }
+      runner_finish_connector_run: {
+        Args: {
+          p_error_class: string
+          p_items_seen: number
+          p_run_id: string
+          p_status: string
+          p_tenant_id: string
+        }
+        Returns: undefined
+      }
+      runner_insert_discovery_fact: {
+        Args: {
+          p_confidence: number
+          p_fact_json: Json
+          p_fact_type: string
+          p_natural_key: string
+          p_observed_at: string
+          p_provenance_json: Json
+          p_signal_id: string
+          p_source_provider: string
+          p_source_run_id: string
+          p_source_type: string
+          p_tenant_id: string
+        }
+        Returns: undefined
+      }
+      runner_open_connector_run: {
+        Args: { p_connector_id: string; p_tenant_id: string }
+        Returns: string
       }
     }
     Enums: {

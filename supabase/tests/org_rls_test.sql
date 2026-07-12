@@ -2173,7 +2173,7 @@ do $$ begin
          'T43 runner holds ZERO TABLE-LEVEL privilege on connector_secrets (0029 grants are COLUMN-scoped — see T50)';
   assert (select coalesce(array_agg(distinct privilege_type::text), array[]::text[]) from information_schema.role_table_grants
           where grantee='connector_runner' and table_schema='public' and table_name='connectors') = array[]::text[],
-         'T43 runner must hold ZERO privilege on connectors (deferred)';
+         'T43 runner holds ZERO TABLE-LEVEL privilege on connectors (0043 grants a COLUMN-scoped SELECT — see connector_credential_reference_test)';
   assert (select coalesce(array_agg(distinct privilege_type::text), array[]::text[]) from information_schema.role_table_grants
           where grantee='connector_runner' and table_schema='public' and table_name='connector_runs') = array[]::text[],
          'T43 runner must hold ZERO privilege on connector_runs (deferred)';
@@ -2296,7 +2296,7 @@ do $$ begin
          'T44 runner holds ZERO TABLE-LEVEL privilege on connector_secrets (0029 grants are COLUMN-scoped — see T50)';
   assert (select coalesce(array_agg(distinct privilege_type::text), array[]::text[]) from information_schema.role_table_grants
           where grantee='connector_runner' and table_schema='public' and table_name='connectors') = array[]::text[],
-         'T44 runner must STILL hold ZERO privilege on connectors';
+         'T44 runner STILL holds ZERO TABLE-LEVEL privilege on connectors (0043 COLUMN-scoped SELECT only)';
   assert (select coalesce(array_agg(distinct privilege_type::text), array[]::text[]) from information_schema.role_table_grants
           where grantee='connector_runner' and table_schema='public' and table_name='connector_runs') = array[]::text[],
          'T44 runner must STILL hold ZERO privilege on connector_runs';

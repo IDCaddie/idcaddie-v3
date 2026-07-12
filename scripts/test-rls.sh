@@ -104,7 +104,10 @@ grant update (upload_status) on public.files to authenticated;
 -- granted to authenticated/anon on it). T42's exact-zero-privilege array is the backstop.
 -- connector_app_secrets (migration 0035) is the APP-SCOPED OAuth client-secret store — another Tier-2 deny-all
 -- table (RLS-enabled, ZERO policies, no grant); revoke it back here too. T56's deny-all assertions are the backstop.
-revoke all on public.connector_secrets, public.connectors, public.connector_runs, public.oauth_pending, public.connector_app_secrets from authenticated, anon;
+-- connector_credential_references (migration 0043) is the credential-reference Tier-2 deny-all table (RLS-enabled, ZERO
+-- policies, revoke-all from anon/authenticated; connector_runner column-SELECT only); revoke it back here too so the suite
+-- mirrors the real deny-all posture. connector_credential_reference_test's C3 exact-zero-privilege array is the backstop.
+revoke all on public.connector_secrets, public.connectors, public.connector_runs, public.oauth_pending, public.connector_app_secrets, public.connector_credential_references from authenticated, anon;
 grant select on public.connectors, public.connector_runs to authenticated;
 SQL
 
