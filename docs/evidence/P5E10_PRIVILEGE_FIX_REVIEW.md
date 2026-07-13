@@ -185,3 +185,12 @@ Synthetic approval/cancel/expiry records → confirm nothing runnable → create
 first-time AWS/ECS credential verification) → **exactly one** live ECS discovery task → reconcile + release lock → verify ECS idle
 / no service / no schedule / no promotion → S2 disabled dry-run evidence → honest gate matrix (S1 PASS only if the run + every
 durable-control proof pass; S2 FAIL/BLOCKED; S3–S5 BLOCKED) → final gates both repos → commit both locally (no push).
+
+## Resolution (2026-07-13, after approval)
+
+The fix and the "explicit revoke in every deny-all migration" pattern were **approved**; global default privileges left unchanged;
+`service_role` not tightened this phase; the ACL regression tests retained (anon/authenticated zero EXECUTE; `connector_runner`
+exactly the intended set; no `admin_*`; no internal fencing helper). The above sequence then **completed**: one durable S1 run
+executed on staging (exit 0, `records_seen=5`, terminal `succeeded`, lock released, **no promotion**), ECS idle afterward, kill
+switch returned to fail-closed; S2 disabled dry-run proven; S3–S5 BLOCKED. **Gate S1 = PASS.** Evidence: connector-runner
+`docs/evidence/P5E10_ENTRA_S1_REPEAT_RUN.md` + `P5E11_ENTRA_S2_DRY_RUN.md`.
