@@ -113,16 +113,17 @@ grant update (upload_status) on public.files to authenticated;
 -- connector_run_control_plane_test exact-zero-privilege arrays are the backstop.
 revoke all on public.connector_secrets, public.connectors, public.connector_runs, public.oauth_pending, public.connector_app_secrets, public.connector_credential_references, public.connector_run_authorizations, public.connector_run_attempts, public.connector_run_locks, public.connector_run_alerts, public.connector_schedule_policies, public.connector_kill_switches from authenticated, anon;
 grant select on public.connectors, public.connector_runs to authenticated;
--- The 0044 control-plane FUNCTIONS are the security boundary (all mutation is via them). The blanket `grant execute on all
--- functions ... to authenticated` above re-broadens them, masking the migration's `revoke from public` + role-scoped grants
--- (admin_* -> service_role, runner_* -> connector_runner). Re-revoke them from authenticated/anon here so the suite mirrors the
--- REAL hosted posture (connector_run_control_plane_test's CP9 role-boundary asserts are the backstop). connector_runner keeps its
--- explicit grants; the 0041 runner_open/finish/insert functions are intentionally NOT in this list (unchanged).
+-- The 0044 control-plane FUNCTIONS are the security boundary (all mutation is via them). On hosted Supabase, migration 0045
+-- revokes EXECUTE from public/anon/authenticated (0044 alone only revoked from public, and Supabase's ALTER DEFAULT PRIVILEGES
+-- grants anon/authenticated EXECUTE on function creation — the real gap 0045 closes). But the blanket `grant execute on all
+-- functions ... to authenticated` above RE-broadens them here, so re-revoke them from authenticated/anon in lockstep so the suite
+-- reflects the REAL hosted (post-0045) deny posture (connector_run_control_plane_test's CP9/CP9b asserts are the backstop).
+-- connector_runner keeps its explicit grants; the 0041 runner_open/finish/insert functions are intentionally NOT in this list.
 do $$ declare f record; begin
   for f in select p.oid::regprocedure as sig from pg_proc p where p.pronamespace='public'::regnamespace and p.proname in (
     'admin_create_run_authorization','admin_approve_run_authorization','admin_cancel_run_authorization','admin_expire_stale_authorizations',
-    'admin_upsert_schedule_policy','admin_upsert_kill_switch','connector_execution_permitted','runner_read_authorization',
-    'runner_assert_no_active_run','runner_claim_authorization','runner_acquire_lock','runner_renew_lock','runner_release_lock',
+    'admin_reconcile_stuck_run','admin_upsert_schedule_policy','admin_upsert_kill_switch','connector_execution_permitted','runner_read_authorization',
+    'runner_assert_no_active_run','runner_claim_authorization','runner_acquire_lock','runner_assert_fencing','runner_renew_lock','runner_release_lock',
     'runner_mark_launch_attempted','runner_record_task_identity','runner_record_start','runner_record_success','runner_record_failure',
     'runner_record_timeout','runner_record_ambiguous','runner_reconcile_result','runner_record_alert','runner_latest_run_state')
   loop execute format('revoke execute on function %s from authenticated, anon', f.sig); end loop;

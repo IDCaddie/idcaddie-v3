@@ -68,6 +68,11 @@ create table if not exists public.connector_run_authorizations (
 );
 create index if not exists cra_owner_idx on public.connector_run_authorizations (tenant_id, connector_id, provider, status);
 create index if not exists cra_plan_hash_idx on public.connector_run_authorizations (plan_hash);
+-- At most ONE active authorization per connector: the DB-level backstop for the claim's assert_no_active_run TOCTOU. Two
+-- concurrent claims of different authorizations both pass the non-locking pre-check, but only one can commit an active status.
+create unique index if not exists cra_one_active_per_connector
+  on public.connector_run_authorizations (tenant_id, connector_id, provider)
+  where status in ('claimed','launch_attempted','running');
 
 -- 2. ATTEMPT — one execution attempt of an authorization + its aggregate, sanitized result.
 create table if not exists public.connector_run_attempts (
@@ -290,6 +295,37 @@ begin
   get diagnostics v_n = row_count; return v_n;
 end; $$;
 
+-- ── ADMIN recovery: resolve a run STUCK in an active state (the runner crashed after claim/launch, before a terminal write). ──
+-- Without this, a stuck 'claimed'/'launch_attempted'/'running' authorization blocks every future claim forever (assert_no_active_run
+-- + the active-partial-unique index), and the timeout writer needs a live fenced lock the dead runner no longer holds. This is the
+-- ONLY function-only recovery path. It REFUSES a genuinely live run (lock held + lease still valid) so it can never abort a
+-- running task; it acts only once the lease has expired (dead holder). Marks the active attempt + authorization timed_out and
+-- expires the lock. service_role (admin) only; audited via result_code.
+create or replace function public.admin_reconcile_stuck_run(p_authorization_id uuid, p_by text, p_reason text)
+returns text language plpgsql security definer set search_path = '' as $$
+declare v_tenant uuid; v_connector uuid; v_provider text; v_status text;
+begin
+  select tenant_id, connector_id, provider, status into v_tenant, v_connector, v_provider, v_status
+    from public.connector_run_authorizations where id=p_authorization_id;
+  if v_status is null then raise exception 'authorization not found'; end if;
+  if v_status not in ('claimed','launch_attempted','running') then
+    raise exception 'authorization is not in a stuck active state';
+  end if;
+  if exists (select 1 from public.connector_run_locks
+              where tenant_id=v_tenant and connector_id=v_connector and provider=v_provider
+                and status='held' and lease_expires_at > now()) then
+    raise exception 'run is still live (lock lease valid); refusing to reconcile';
+  end if;
+  update public.connector_run_attempts
+     set result_status='timed_out', finished_at=now(), failure_category='reconciled_stuck',
+         result_code=left(coalesce(p_reason,'reconciled'),64), updated_at=now()
+   where authorization_id=p_authorization_id and (result_status is null or result_status='running');
+  update public.connector_run_authorizations set status='timed_out', updated_at=now() where id=p_authorization_id;
+  update public.connector_run_locks set status='expired', released_at=now(), holder_attempt_id=null, updated_at=now()
+   where tenant_id=v_tenant and connector_id=v_connector and provider=v_provider and status<>'released';
+  return 'timed_out';
+end; $$;
+
 create or replace function public.admin_upsert_schedule_policy(
   p_tenant_id uuid, p_connector_id uuid, p_provider text, p_enabled boolean
 ) returns uuid language plpgsql security definer set search_path = '' as $$
@@ -356,6 +392,11 @@ create or replace function public.runner_claim_authorization(
 ) returns uuid language plpgsql security definer set search_path = '' as $$
 declare v_attempt uuid;
 begin
+  -- fail-closed at the DB: no claim unless every applicable kill switch permits it (not merely the operator's pre-check).
+  -- ponytail: staging-only plane (see header); a future production gate (Phase C) parameterizes the environment.
+  if not public.connector_execution_permitted(p_tenant_id, p_connector_id, p_provider, 'staging') then
+    raise exception 'execution blocked by kill switch';
+  end if;
   perform public.runner_assert_no_active_run(p_tenant_id, p_connector_id, p_provider);
   -- atomic transition approved -> claimed with the FULL exact-config match; not-found = expired/cancelled/already-claimed/mismatch
   update public.connector_run_authorizations set status='claimed', updated_at=now()
@@ -377,6 +418,7 @@ create or replace function public.runner_acquire_lock(
 ) returns bigint language plpgsql security definer set search_path = '' as $$
 declare v_gen bigint;
 begin
+  if p_lease_seconds is null or p_lease_seconds <= 0 then raise exception 'lease seconds must be positive'; end if; -- no null/self-brick lease
   insert into public.connector_run_locks (tenant_id, connector_id, provider, generation, holder_authorization_id, holder_attempt_id, acquired_at, lease_expires_at, status)
     values (p_tenant_id, p_connector_id, p_provider, 1, p_authorization_id, p_attempt_id, now(), now() + make_interval(secs => p_lease_seconds), 'held')
   on conflict (tenant_id, connector_id, provider) do update
@@ -406,6 +448,7 @@ end; $$;
 create or replace function public.runner_renew_lock(p_attempt_id uuid, p_generation bigint, p_lease_seconds integer)
 returns void language plpgsql security definer set search_path = '' as $$
 begin
+  if p_lease_seconds is null or p_lease_seconds <= 0 then raise exception 'lease seconds must be positive'; end if;
   perform public.runner_assert_fencing(p_attempt_id, p_generation);
   update public.connector_run_locks l set lease_expires_at = now() + make_interval(secs => p_lease_seconds), updated_at=now()
     from public.connector_run_attempts a
@@ -522,8 +565,9 @@ create or replace function public.runner_record_alert(
 ) returns uuid language plpgsql security definer set search_path = '' as $$
 declare v_id uuid;
 begin
-  -- defense in depth: refuse an obviously-sensitive summary (a secret/token/ARN/DB-URL shape)
-  if p_summary ~* '(arn:aws|eyj[a-z0-9]|bearer |access_token|client_secret|postgres://|@[a-z0-9.-]+\.(com|net))' then
+  -- defense in depth: refuse an obviously-sensitive summary (a secret/token/ARN/DB-URL shape). Catches postgres:// and
+  -- postgresql://, ANY scheme carrying userinfo (scheme://user@host), and Supabase (.co) / common DB hosts.
+  if p_summary ~* '(arn:aws|eyj[a-z0-9]|bearer |access_token|client_secret|postgres(ql)?://|[a-z][a-z0-9+.-]*://[^ ]*@|@[a-z0-9.-]+\.(com|net|co|io|dev))' then
     raise exception 'alert summary must be sanitized';
   end if;
   insert into public.connector_run_alerts (tenant_id, connector_id, provider, authorization_id, attempt_id, severity, category, sanitized_summary)
@@ -546,7 +590,8 @@ end; $$;
 revoke all on function
   public.admin_create_run_authorization(uuid,uuid,text,text,text,text,text,text,integer,text,text,timestamptz),
   public.admin_approve_run_authorization(uuid,text,text), public.admin_cancel_run_authorization(uuid,text,text),
-  public.admin_expire_stale_authorizations(), public.admin_upsert_schedule_policy(uuid,uuid,text,boolean),
+  public.admin_expire_stale_authorizations(), public.admin_reconcile_stuck_run(uuid,text,text),
+  public.admin_upsert_schedule_policy(uuid,uuid,text,boolean),
   public.admin_upsert_kill_switch(text,text,boolean,text,text),
   public.connector_execution_permitted(uuid,uuid,text,text),
   public.runner_read_authorization(uuid,uuid,uuid,text,text,text,text,text,text,integer,text),
@@ -564,7 +609,8 @@ revoke all on function
 grant execute on function
   public.admin_create_run_authorization(uuid,uuid,text,text,text,text,text,text,integer,text,text,timestamptz),
   public.admin_approve_run_authorization(uuid,text,text), public.admin_cancel_run_authorization(uuid,text,text),
-  public.admin_expire_stale_authorizations(), public.admin_upsert_schedule_policy(uuid,uuid,text,boolean),
+  public.admin_expire_stale_authorizations(), public.admin_reconcile_stuck_run(uuid,text,text),
+  public.admin_upsert_schedule_policy(uuid,uuid,text,boolean),
   public.admin_upsert_kill_switch(text,text,boolean,text,text)
   to service_role;
 

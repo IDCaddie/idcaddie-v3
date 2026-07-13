@@ -24,12 +24,24 @@ One row per `(tenant_id, connector_id, provider)` (unique). Fields: `generation`
   matches zero rows (it targets `generation = <old>`), so it cannot free a lock it no longer owns.
 - **Release** — a terminal result (`succeeded`/`failed`/`timed_out`/`ambiguous`) releases the lock atomically as part of the same
   function, only for the matching generation.
+- **Crash recovery** — if a runner dies after `claim`/`launch` but before a terminal write, the authorization is stuck
+  `claimed`/`launch_attempted`/`running` and (by the rules above) blocks every future claim, while the timeout writer needs a live
+  fenced lock the dead runner no longer holds. `admin_reconcile_stuck_run(authorization_id, by, reason)` (service_role only) is the
+  function-only recovery: it **refuses** a genuinely live run (lock `held` + lease still valid — never aborts a running task) and,
+  once the lease has expired, marks the active attempt + authorization `timed_out` and expires the lock, freeing the connector.
+  There is no auto-retry — recovery only unblocks; a re-run still needs a fresh admin-approved authorization.
+- **Kill switch is enforced at the DB, not just the caller** — `runner_claim_authorization` itself calls
+  `connector_execution_permitted` first and raises `execution blocked by kill switch` if any applicable layer is disabled, so a
+  `connector_runner` cannot claim/lock/launch by skipping the operator's pre-check. Fail-closed at the durable choke point.
 
 ### Concurrency proof
 
-`connector_run_control_plane_test.sql` (CP4) proves: first acquire → generation 1; a held+valid lock re-acquire → conflict; an
-expired-lease takeover → generation 2; a result write with the **stale** generation 1 → rejected (`stale fencing token`); the
-current generation 2 finalizes + releases. Run against local Postgres under `scripts/test-rls.sh` (not mocks).
+`connector_run_control_plane_test.sql` proves, against local Postgres under `scripts/test-rls.sh` (not mocks): first acquire →
+generation 1; a held+valid lock re-acquire → conflict; an expired-lease takeover → generation 2; a result write with the **stale**
+generation 1 → rejected (`stale fencing token`); the current generation 2 finalizes + releases (CP4–CP5). CP10 proves a disabled
+kill switch blocks an actual **claim** (not just the helper's return); CP11 proves a crashed run (stuck active + expired lease) is
+recovered by `admin_reconcile_stuck_run` while a live run is refused; CP12 proves the active-authorization partial unique index
+rejects a second active authorization for one connector.
 
 ## Idempotency
 
@@ -38,8 +50,11 @@ Three layers, so one logical run has at most one effect:
 1. **Authorization idempotency key** — `connector_run_authorizations.idempotency_key` is globally UNIQUE: one key → at most one
    authorization → at most one claim → at most one attempt.
 2. **One active run per connector** — `runner_assert_no_active_run` (called inside `runner_claim_authorization`) rejects a claim if
-   any authorization for the connector is in `claimed`/`launch_attempted`/`running`, or any attempt is `running`. `max_concurrent_runs`
-   is CHECK-pinned to 1 in `connector_schedule_policies`.
+   any authorization for the connector is in `claimed`/`launch_attempted`/`running`, or any attempt is `running`. Because that
+   pre-check is a non-locking read (a TOCTOU window for two *distinct* approved authorizations), a **partial unique index**
+   `cra_one_active_per_connector` on `(tenant_id, connector_id, provider) WHERE status IN ('claimed','launch_attempted','running')`
+   is the DB-level backstop: only one authorization can hold an active status at a time, so a raced second claim's commit fails.
+   `max_concurrent_runs` is CHECK-pinned to 1 in `connector_schedule_policies`.
 3. **Discovery-fact idempotency** — the underlying `0041` `runner_insert_discovery_fact` uses `ON CONFLICT DO NOTHING` on
    `(tenant_id, source_provider, fact_type, signal_id)`, so a re-run (e.g. after a partial write) does not duplicate facts.
 
@@ -52,6 +67,7 @@ records are immutable except idempotent `runner_reconcile_result` (safe aggregat
 
 ## Sanitization
 
-Alerts (`runner_record_alert`) reject a secret/token/ARN/DB-URL-shaped summary. `sanitized_task_id` is CHECK-constrained to not
+Alerts (`runner_record_alert`) reject a secret/token/ARN/DB-URL-shaped summary — the URL check matches `postgres://` and
+`postgresql://`, any scheme carrying userinfo (`scheme://user@host`), and Supabase (`.co`) / common DB hosts. `sanitized_task_id` is CHECK-constrained to not
 begin with `arn:`. No control-plane column stores a secret, token, full ARN, DB URL, credential, or raw payload — only masked/hashed
 identifiers and aggregate metadata.

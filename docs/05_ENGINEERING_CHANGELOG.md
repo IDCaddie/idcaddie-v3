@@ -12,6 +12,13 @@ from PRs verified via `git log` / `gh pr list`.
 > **as of each PR's date** and are historical — where an older entry says "RISK-007 remains OPEN" / "Phase C remains
 > BLOCKED", that was accurate at that entry's date; this banner is the current state.
 
+### fix(db) — connector execution control plane: deny-all EXECUTE hardening + review fixes (P5E10–P5E12, staging-applied) · 2026-07-13
+
+- **Migrations `0044` + `0045` applied to hosted staging** (`ycdpz…`; production untouched). `0044` is the provider-neutral connector **execution control plane** — 6 Tier-2 deny-all tables + 25 `SECURITY DEFINER` functions gating every connector run S1–S5 (discovery-only / promotion-disabled / one-shot enforced by CHECK). It **activates nothing**: a run still requires an approved+claimed authorization, an acquired fenced lock, and every applicable kill switch enabled.
+- **Hosted privilege P0 found + fixed.** Applying `0044` to staging revealed that Supabase's `ALTER DEFAULT PRIVILEGES` grants EXECUTE on new `public` functions to `anon`/`authenticated`, so `0044`'s `revoke … from public` left all 25 functions anon/authenticated-executable via PostgREST RPC (incl. `admin_upsert_kill_switch`). Forward-only **`0045`** revokes EXECUTE from `public, anon, authenticated`; re-verified on staging: request-role EXECUTE = **0**; `connector_runner` holds exactly the intended **17**; `service_role` unchanged (trusted). New **CP9b/CP9c** (ACL-level deny-all + runner boundary) + a **default-privilege regression test** reproduce the Supabase mechanism so a future migration cannot reintroduce it. **New required pattern:** every deny-all / control-plane migration must `revoke execute … from public, anon, authenticated`.
+- **Review hardening on `0044`** (three-reviewer pass): `admin_reconcile_stuck_run` crash recovery (refuses a live run), DB-enforced kill switch inside `runner_claim_authorization`, `cra_one_active_per_connector` partial unique index (claim-TOCTOU backstop), lease-seconds validation, tightened alert-URL sanitizer.
+- Evidence: [`P5E10_CONTROL_PLANE_REVIEW`](./evidence/P5E10_CONTROL_PLANE_REVIEW.md), [`P5E10_PRIVILEGE_FIX_REVIEW`](./evidence/P5E10_PRIVILEGE_FIX_REVIEW.md). **For this Microsoft Entra execution work, RISK-007 stays OPEN and the Entra live path (Phase C) stays BLOCKED; `microsoft_entra` remains `certificationOnly`; staging only.** No S1 run has executed (paused for review at that gate).
+
 ### feat(db) — connector credential-reference persistence: deny-all table + runner-read DAL, Phase 5D (PR #318) · 2026-07-12
 
 - **PRs:** #318 (`feat/connector-credential-reference`).
