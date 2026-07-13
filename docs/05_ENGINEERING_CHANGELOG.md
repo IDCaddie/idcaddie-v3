@@ -12,6 +12,28 @@ from PRs verified via `git log` / `gh pr list`.
 > **as of each PR's date** and are historical — where an older entry says "RISK-007 remains OPEN" / "Phase C remains
 > BLOCKED", that was accurate at that entry's date; this banner is the current state.
 
+### feat(db) — bounded connector schedule policy: Gate S2 scheduler control plane (P5E13, staging-applied DISABLED) · 2026-07-13
+
+- **Migration `0046`** extends the execution control plane with a bounded **schedule policy** (campaign binding + `draft→approved→
+  enabled→…→completed` lifecycle, staging-only CHECK, `max_slots`/`max_successful`), a `connector_schedule_slots` deny-all table, and
+  an **atomic `scheduler_materialize_slot`** (policy-row-locked; unique `(policy,slot)`/`(policy,scheduled_at)`/idempotency-key;
+  materialization-counter slot numbering; reuses 0044's claim/lock/fencing/kill-switch) + `scheduler_begin_slot`/`_finalize_slot`/
+  `scheduler_policy_state` + `admin_*_schedule_policy` + `admin_reconcile_stuck_slot`. The 0045 deny-all pattern is baked in
+  (`revoke execute … from public, anon, authenticated`); re-verified on staging: request-role EXECUTE = 0; connector_runner = the 4
+  scheduler_* only.
+- **A 4th execution is structurally impossible:** `max_slots=3` + the counter rejecting `> max_slots` + unique slot keys + the
+  `max_successful` re-check at begin (fixes the P1 where the cap was only checked at materialize) + the schedule `EndDate` + scheduler
+  shutdown. Both DB and scheduler cap independently.
+- **Reviews (3, adversarial):** no P0; one P1 (`max_successful` cap) fixed; a proactive slot-numbering robustness change; P3s
+  accepted. Dispositions: [`P5E13_S2_REVIEW`](./evidence/P5E13_S2_REVIEW.md).
+- **Applied to staging + scaffolded DISABLED:** the schedule policy (`fe0dcc62…`, caps 3/3), the connector-runner-side scheduler IAM
+  role, and ONE DISABLED EventBridge Scheduler schedule (0 retries, count 1, sanitized input). Disabled proof clean (0 slots/runnable/
+  held; kill switches off; ECS idle; entra runs/facts unchanged). Evidence: [`P5E13_S2_SCHEDULE_POLICY_STAGING`](./evidence/P5E13_S2_SCHEDULE_POLICY_STAGING.md),
+  [model](./CONNECTOR_SCHEDULE_POLICY_MODEL.md).
+- **S2 remains FAIL** — the bounded live campaign (≤3 slots) is **not yet run**, blocked on the operator/CI-built scheduled image (the
+  scheduled entrypoint is new code, not in the S1 image). S3–S5 BLOCKED; `microsoft_entra` `certificationOnly`; RISK-007 OPEN; Phase C
+  BLOCKED; staging only.
+
 ### fix(db) — connector execution control plane: deny-all EXECUTE hardening + review fixes (P5E10–P5E12, staging-applied) · 2026-07-13
 
 - **Migrations `0044` + `0045` applied to hosted staging** (`ycdpz…`; production untouched). `0044` is the provider-neutral connector **execution control plane** — 6 Tier-2 deny-all tables + 25 `SECURITY DEFINER` functions gating every connector run S1–S5 (discovery-only / promotion-disabled / one-shot enforced by CHECK). It **activates nothing**: a run still requires an approved+claimed authorization, an acquired fenced lock, and every applicable kill switch enabled.
