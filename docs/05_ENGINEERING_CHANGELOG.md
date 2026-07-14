@@ -2461,7 +2461,10 @@ mandatory-gate assertion (`runner_assert_not_pilot_governed`) so a customer conn
 **Validated locally (GREEN):** migration-safety pass; the Docker RLS suite applies `0047` + runs `connector_customer_pilot_test.sql`
 PL0–PL9 (all pass); connector-runner `tsc` + 733 tests + `vendor:verify` + `deploy:check` all green. **3-reviewer adversarial review**
 (consent/isolation, execution-gating, privacy) — all confirmed findings fixed: one **P1** (customer-reference opacity) + five P2 +
-one P3; everything else held. **Hosted apply of `0047` to staging is PENDING** (needs the staging DB credential). **Gate S3 = BLOCKED**
-until the hosted apply + verification pass; then a real pilot is a separate explicit GO. Entra stays `certificationOnly`; **RISK-007
-OPEN, Phase C BLOCKED**; staging only (`ycdpz…`); production (`dzbf…`) untouched.
+one P3; everything else held. **Hosted-verified on staging (2026-07-14):** `0047` applied (sole new migration); hosted ACLs correct
+(request roles hold 0 EXECUTE on the 16 pilot functions — Supabase default privileges did not reintroduce request-role execution;
+connector_runner = exactly the 4 runner fns, 0 table DML); all 20 synthetic lifecycle proofs pass and roll back (zero fixtures
+persist); the plane is dormant (0 enabled/runnable pilots, S2 schedule DISABLED, ECS 0/0/0); no secret/token/Graph/customer
+execution. **Gate S3 = READY FOR ONE PILOT** (never PASS); enabling a real pilot is a further separate explicit GO. Entra stays
+`certificationOnly`; **RISK-007 OPEN, Phase C BLOCKED**; staging only (`ycdpz…`); production (`dzbf…`) untouched.
 
