@@ -2468,3 +2468,17 @@ persist); the plane is dormant (0 enabled/runnable pilots, S2 schedule DISABLED,
 execution. **Gate S3 = READY FOR ONE PILOT** (never PASS); enabling a real pilot is a further separate explicit GO. Entra stays
 `certificationOnly`; **RISK-007 OPEN, Phase C BLOCKED**; staging only (`ycdpz…`); production (`dzbf…`) untouched.
 
+## P5E15 — first customer-pilot authorization framework (customer-agnostic scaffolding) · 2026-07-14
+
+Docs-only preparation so ONE real customer pilot can later be authorized without redesign — **no customer facts, no pilot record, no
+hosted write, no code change.** Adds the authorization packet template + completeness rules
+([`docs/templates/CONNECTOR_CUSTOMER_PILOT_AUTHORIZATION_PACKET.md`](./templates/CONNECTOR_CUSTOMER_PILOT_AUTHORIZATION_PACKET.md)),
+the authorization flow + disabled-record criteria + readiness checklist ([`docs/CONNECTOR_FIRST_CUSTOMER_PILOT_AUTHORIZATION.md`](./CONNECTOR_FIRST_CUSTOMER_PILOT_AUTHORIZATION.md)),
+and the runner first-run operator plan (26 steps), a 30-condition abort matrix, and a run checklist. Every customer-specific item
+defaults to **NOT PROVIDED**; the packet is blank opaque-reference fields only (a secret/PEM/URL/email-shaped value is rejected by the
+`0047` opacity guard). **No customer is identified and no authorization packet was supplied — S3 PILOT AUTHORIZATION = BLOCKED —
+MISSING REQUIRED CUSTOMER EVIDENCE.** The S3 gate stays READY FOR ONE PILOT (machinery ready); a first customer run needs a filled
+packet + a fresh explicit GO. No secret/token/Graph/ECS/pilot-enable/customer-data/production. Entra stays `certificationOnly`;
+**RISK-007 OPEN, Phase C BLOCKED**; staging only. Evidence: [`docs/evidence/P5E15_FIRST_CUSTOMER_PILOT_PREFLIGHT.md`](./evidence/P5E15_FIRST_CUSTOMER_PILOT_PREFLIGHT.md)
++ connector-runner `docs/evidence/P5E15_ENTRA_FIRST_CUSTOMER_PILOT_PREFLIGHT.md`.
+
