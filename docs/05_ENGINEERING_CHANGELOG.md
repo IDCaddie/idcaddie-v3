@@ -2440,3 +2440,31 @@ Evidence:
 
 `RISK-007` remains OPEN. This verifies the production DB schema and grant surface only; it does not prove hosted KMS/IAM separation, real credential storage, rotation/revocation, audit, live provider token storage, or cutover readiness. Cutover remains BLOCKED.
 
+## P5E14 — connector customer-pilot control plane (Gate S3 readiness) · 2026-07-14
+
+Migration `0047` adds the provider-neutral **customer-pilot** control plane: 5 Tier-2 deny-all tables (`connector_pilot_enrollments`/
+`_consents`/`_incidents`/`_exit_reviews`/`_deletion_jobs`) + 16 `SECURITY DEFINER` functions (11 `admin_*`→service_role, 4
+`runner_*`→connector_runner, 1 internal opaque-reference guard), and a `'pilot'` scope on `0044`'s `connector_kill_switches` CHECK.
+Deny-all + fail-closed throughout: RLS + zero policies + revoke-all; `set search_path=''` + schema-qualified; EXECUTE revoked from
+public/anon/authenticated (the `0045` pattern). One enabled pilot (partial unique index); one active per connector; manual-only;
+discovery-only; promotion-disabled; `schedule_allowed=false`; retention 1..90; ≤3 runs; composite same-tenant FK for isolation;
+consent required before approval + re-checked at execution; deletion is plan+approve only (never auto-executes). Companion
+connector-runner change adds the fail-closed pilot gate, permission/consent validator (NO customer token acquired — synthetic
+fixtures), the reserve-before-run orchestrator, the manual-entrypoint customer-pilot mode + scheduled manual-only refusal, and a
+mandatory-gate assertion (`runner_assert_not_pilot_governed`) so a customer connector cannot run off the ungated synthetic path.
+
+**The plane activates nothing.** No pilot is enabled; no customer data/token/secret/Graph; no promotion; no schedule. Docs:
+[`CONNECTOR_CUSTOMER_PILOT_MODEL.md`](./CONNECTOR_CUSTOMER_PILOT_MODEL.md), [`CONNECTOR_CUSTOMER_CONSENT_MODEL.md`](./CONNECTOR_CUSTOMER_CONSENT_MODEL.md),
+[`CONNECTOR_PILOT_RETENTION_AND_DELETION.md`](./CONNECTOR_PILOT_RETENTION_AND_DELETION.md); evidence
+[`evidence/P5E14_CUSTOMER_PILOT_CONTROL_PLANE_STAGING.md`](./evidence/P5E14_CUSTOMER_PILOT_CONTROL_PLANE_STAGING.md).
+
+**Validated locally (GREEN):** migration-safety pass; the Docker RLS suite applies `0047` + runs `connector_customer_pilot_test.sql`
+PL0–PL9 (all pass); connector-runner `tsc` + 733 tests + `vendor:verify` + `deploy:check` all green. **3-reviewer adversarial review**
+(consent/isolation, execution-gating, privacy) — all confirmed findings fixed: one **P1** (customer-reference opacity) + five P2 +
+one P3; everything else held. **Hosted-verified on staging (2026-07-14):** `0047` applied (sole new migration); hosted ACLs correct
+(request roles hold 0 EXECUTE on the 16 pilot functions — Supabase default privileges did not reintroduce request-role execution;
+connector_runner = exactly the 4 runner fns, 0 table DML); all 20 synthetic lifecycle proofs pass and roll back (zero fixtures
+persist); the plane is dormant (0 enabled/runnable pilots, S2 schedule DISABLED, ECS 0/0/0); no secret/token/Graph/customer
+execution. **Gate S3 = READY FOR ONE PILOT** (never PASS); enabling a real pilot is a further separate explicit GO. Entra stays
+`certificationOnly`; **RISK-007 OPEN, Phase C BLOCKED**; staging only (`ycdpz…`); production (`dzbf…`) untouched.
+
