@@ -56,3 +56,31 @@ returns the approved digest (see connector-runner `docs/evidence/P5E13_IMAGE_BUI
 register the scheduled task-def revision → repoint the disabled schedule target + re-bind the digest/window into the policy →
 approve the policy → enable narrow kill switches → enable policy → enable schedule → observe ≤3 slots → disable → reconcile.
 **S2 stays FAIL until that live campaign completes.** S3–S5 remain BLOCKED.
+
+---
+
+## Campaign results — S2 = PASS (2026-07-14)
+
+The bounded live campaign ran end-to-end on staging: **exactly 3 scheduled slots, all succeeded, one ECS task each**, launched
+solely by the EventBridge Scheduler (no manual `run-task`). Approved image `@sha256:f4563ad8…`, scheduled task-def revision 1.
+
+| | Slot 1 | Slot 2 | Slot 3 |
+|---|---|---|---|
+| scheduled (UTC) | ~23:49 | ~01:49 | ~03:49 |
+| status | succeeded | succeeded | succeeded |
+| records_seen | 5 | 5 | 5 |
+| pages | 1 | 1 | 1 |
+| fencing generation | 2 | 3 | 4 |
+| idempotency key | `slot-76cf0f74…` | `slot-7ff31b4d…` | `slot-895aaada…` |
+| retry / throttle | 0 / 0 | 0 / 0 | 0 / 0 |
+| lock released | yes | yes | yes |
+
+- **Activation** `2026-07-13T23:44:49Z`; schedule window `23:49:24Z → 05:49:24Z`; **campaign ended ~`03:52Z`** (shutdown after slot 3).
+- **Tasks:** 3 (one per slot). **Secret reads / token requests / Graph pages:** 1 each per slot (3 / 3 / 3). **Aggregate records seen:** 15 (5 × 3).
+- **Idempotency:** total Entra `discovery_facts` stayed **5** across all 3 runs (each run emitted 5, all deduped by 0041 `ON CONFLICT DO NOTHING`); each slot has a distinct deterministic idempotency key. **No-promotion:** all facts `review_status=pending`.
+- **No overlap:** `running=0` between slots; one attempt/task per slot; each slot's authorization terminal before the next.
+- **Logs:** each task emitted only the redacted `ENTRA_SCHEDULED_SLOT_SUMMARY {slotNumber,status,usersSeen,factsEmitted,pages}`; leak scans clean (no email/UPN/uuid/token/DB-URL/ARN).
+- **Shutdown:** AWS schedule DISABLED; policy auto-completed (`completed`); global kill switch disabled (`connector_execution_permitted=false`); a 4th slot materialization was **rejected** (structurally impossible); 0 runnable authorizations, 0 held locks, 0 ambiguous; ECS idle 0/0/0; no other enabled schedule.
+
+**Gate S2 = PASS.** Every Phase-16 criterion met. S3–S5 remain BLOCKED; `microsoft_entra` `certificationOnly`; RISK-007 OPEN; Phase C
+BLOCKED; staging only; no production access. The disabled schedule + terminal policy are kept for audit.

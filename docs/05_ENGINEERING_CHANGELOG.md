@@ -12,6 +12,22 @@ from PRs verified via `git log` / `gh pr list`.
 > **as of each PR's date** and are historical — where an older entry says "RISK-007 remains OPEN" / "Phase C remains
 > BLOCKED", that was accurate at that entry's date; this banner is the current state.
 
+### feat(ops) — Gate S2 bounded live scheduled campaign: 3 slots, all succeeded — S2 = PASS (P5E13) · 2026-07-14
+
+- The bounded live S2 campaign ran on staging on the operator/CI-built, scan-passed image `@sha256:f4563ad8…` (scheduled task-def
+  rev 1), launched **solely by one EventBridge Scheduler schedule** (no manual `run-task`). **Exactly 3 slots, all succeeded, one
+  ECS task each** — `records_seen=5`, 1 Graph page, fencing generations 2/3/4, retry/throttle 0, distinct deterministic idempotency
+  keys, no overlap (`running=0` between slots).
+- **Idempotent + no promotion:** total Entra `discovery_facts` stayed **5** across all 3 runs (each emitted 5, all deduped by 0041
+  `ON CONFLICT DO NOTHING`); all facts `review_status=pending`; no `app_users`/`people`/identity write. Sanitized redacted logs
+  (leak-clean).
+- **Clean shutdown:** AWS schedule DISABLED; policy auto-completed (`completed`); global kill switch disabled; a 4th slot
+  materialization **rejected** (structurally impossible); 0 runnable authorizations / held locks / ambiguous; ECS idle; no other
+  enabled schedule; no production access.
+- **Gate S2 = PASS** (every Phase-16 criterion met). Evidence: [`P5E13_S2_SCHEDULE_POLICY_STAGING`](./evidence/P5E13_S2_SCHEDULE_POLICY_STAGING.md)
+  + connector-runner `docs/evidence/P5E13_ENTRA_S2_SCHEDULED_STAGING.md`. S3–S5 remain **BLOCKED**; `microsoft_entra`
+  `certificationOnly`; RISK-007 OPEN; Phase C BLOCKED; staging only.
+
 ### feat(db) — bounded connector schedule policy: Gate S2 scheduler control plane (P5E13, staging-applied DISABLED) · 2026-07-13
 
 - **Migration `0046`** extends the execution control plane with a bounded **schedule policy** (campaign binding + `draft→approved→
