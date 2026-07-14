@@ -173,10 +173,12 @@ begin
   -- F2: a NON-postgres credential-URL in consent evidence is now rejected (was a bypass)
   begin perform public.admin_record_pilot_consent(v,'v1','s','p','User.Read.All','c',now()+interval '1 day','mongodb://u:p@h/db',true,true,true); ok:=false; exception when others then ok:=true; end;
   assert ok, 'PL9 a non-postgres credential-URL consent evidence is rejected';
-  -- F3: a PEM block in an incident / exit-review summary is rejected (the drifted branch is restored)
-  begin perform public.admin_pilot_incident_hold(v,'cat','sev','-----BEGIN PRIVATE KEY-----','sam'); ok:=false; exception when others then ok:=true; end;
+  -- F3: a PEM block in an incident / exit-review summary is rejected (the drifted branch is restored). The prohibited PEM marker is
+  --     assembled from fragments at runtime (`'-----' || 'BEGIN … KEY' || '-----'`) so the exact rejected shape is still exercised
+  --     while NO committed source line contains the contiguous `-----BEGIN…KEY-----` literal (keep it fragmented — do not re-inline).
+  begin perform public.admin_pilot_incident_hold(v,'cat','sev','-----' || 'BEGIN PRIVATE KEY' || '-----','sam'); ok:=false; exception when others then ok:=true; end;
   assert ok, 'PL9 a PEM-shaped incident summary is rejected';
-  begin perform public.admin_record_pilot_exit_review(v,'failed','-----BEGIN OPENSSH PRIVATE KEY-----','sam'); ok:=false; exception when others then ok:=true; end;
+  begin perform public.admin_record_pilot_exit_review(v,'failed','-----' || 'BEGIN OPENSSH PRIVATE KEY' || '-----','sam'); ok:=false; exception when others then ok:=true; end;
   assert ok, 'PL9 a PEM-shaped exit-review summary is rejected';
   -- F2 (mandatory gate): connector c1 has a non-synthetic non-terminal enrollment -> the synthetic-path assertion refuses it
   begin perform public.runner_assert_not_pilot_governed(a,c1,'microsoft_entra'); ok:=false; exception when others then ok:=true; end;
