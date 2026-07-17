@@ -11,7 +11,7 @@ const passInput: OktaConnectGateInput = {
   organizationId: "org-1",
   rawOrganization: "acme.okta.com",
   requestedScopes: ["okta.users.read"],
-  callbackPath: "/connectors/oauth/callback",
+  callbackPath: "/connectors/oauth/okta/callback",
   returnRoute: "/connectors/okta/status",
 };
 // Deps that would let ALL gates pass — only constructible by explicitly overriding lifecycle + governance + flags in a test.

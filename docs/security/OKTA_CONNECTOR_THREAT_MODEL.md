@@ -158,3 +158,18 @@ Format per threat: **Attack → Impact → Prevention → Detection → Residual
 - **Token-exchange + vault write**: interface only; the live HTTP + envelope-encrypted vault write is the future authorized edge.
 
 RISK-007 remains OPEN. Phase C remains BLOCKED. Okta + Microsoft Entra remain `certificationOnly`.
+
+---
+
+## P5E18b addendum — staging connection path (still dormant)
+
+P5E18b adds the real staging PATH (persistence + exchange + write boundaries + a dedicated callback route + migration 0048) while keeping every real action fail-closed. New surfaces map to the threats above:
+
+- **PKCE verifier theft (#2):** the verifier now has a concrete transient store — short-TTL, one-time (`takeOnce` deletes), auto-expiry, server-only, never in a cookie/URL/audit/log and never persisted in `oauth_pending` or any app table. Only the S256 challenge is persisted. Evidence: `okta-pkce-verifier-store.ts` + `okta-staging-wiring.test.ts`.
+- **Token leakage (#11):** the token-exchange adapter validates the response (Bearer, EXACT `okta.users.read` scope, expiry, size, content-type) and hands the raw token straight to the vault-write boundary — never a raw token in a log/exception/audit/return (only a branded `VaultBoundAccessTokenRef`). Evidence: `okta-token-exchange-adapter.test.ts` (asserts the raw token never appears in the result).
+- **Credential-reference substitution / partial write (#12):** the credential-write boundary is write-only (no read-after-write of the value), idempotent, atomic — rolls the secret back if the DB reference write fails; the full ref is never returned to a customer. Evidence: `okta-credential-write.ts` + rollback test.
+- **Open redirect / callback confusion (#4, #7):** the callback route is provider-ISOLATED at `/connectors/oauth/okta/callback` (zero Slack coupling), uses a server-trusted exact redirect, never echoes the code, and redirects only to a fixed customer-safe path; the exchange is invoked only on `validated_no_exchange` (unreachable while certificationOnly) plus an env gate off by default + in production.
+- **Cross-org access / tenant isolation (#6):** migration 0048 issuer binding is RLS org-manager-read-only + server-only-write, with a partial unique index preventing an issuer from being actively bound to a second org. Evidence: `connector_okta_issuer_binding_test.sql` (I1 cross-org denied, I4 reassignment blocked).
+- **Production activation by misconfig (#18):** the issuer binding is CHECK-constrained to `environment='staging'`; the client config requires staging; the runner consumption boundary rejects production; the AWS IaC refuses any production ref/wildcard; migration 0048 was NOT applied to hosted staging and no AWS resource was created. New env gate `isOktaCallbackEnabled` is off by default + in production.
+
+private_key_jwt signing remains KMS-backed + unbuilt; no client secret exists; no real Okta call is made anywhere. RISK-007 OPEN; Phase C BLOCKED; Okta certificationOnly.

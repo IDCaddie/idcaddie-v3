@@ -18,7 +18,7 @@ if (typeof (globalThis as { window?: unknown }).window !== "undefined") {
   throw new Error("connector-vault/okta-live/okta-connect-gate is server-only and must not be imported in client code");
 }
 
-const FIXED_CALLBACK_PATH = "/connectors/oauth/callback";
+const FIXED_CALLBACK_PATH = "/connectors/oauth/okta/callback";
 const DEFAULT_ADMIN_ROLES = ["owner", "admin"] as const;
 
 // Internal block reasons — for logs/tests only, NEVER shown to a customer. Ordered to match the gate sequence.
