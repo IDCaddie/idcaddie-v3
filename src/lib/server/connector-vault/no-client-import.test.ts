@@ -48,6 +48,11 @@ const CRYPTO_REL_HINTS = [
   "connector-vault/provider-registry",
   "server/connector-vault/provider-registry",
   "lib/server/connector-vault/provider-registry",
+  // P5E18a dormant Okta live-connection foundation — the whole okta-live/ dir is server-only and must never be imported from a
+  // "use client" file or from src/app (the real path stays unreachable from the client/route tree).
+  "connector-vault/okta-live/",
+  "server/connector-vault/okta-live/",
+  "lib/server/connector-vault/okta-live/",
   "connector-vault/providers/slack-oauth",
   "server/connector-vault/providers/slack-oauth",
   "lib/server/connector-vault/providers/slack-oauth",
