@@ -2536,6 +2536,37 @@ OPEN, Phase C BLOCKED**. Docs: [`CONNECTOR_CUSTOMER_EXPERIENCE.md`](./CONNECTOR_
 [`evidence/P5E17_CONNECTOR_CUSTOMER_UI.md`](./evidence/P5E17_CONNECTOR_CUSTOMER_UI.md) + connector-runner
 `docs/evidence/P5E17_OKTA_UI_DORMANCY.md`.
 
+## P5E18a — dormant Okta live-connection foundation (foundation-only, no live path) · 2026-07-17
+
+A production-grade, **entirely DORMANT** foundation for a future authorized Okta pilot — the real path is disabled and unexercised.
+New `src/lib/server/connector-vault/okta-live/` (server-only, browser-sentinel + `no-client-import` guard): provider contract
+(read-only capabilities; EXACT scope `okta.users.read`; enumerated prohibited scopes; provider LIFECYCLE `certificationOnly` kept
+SEPARATE from any UI label); a strict server-side SSRF-safe org/issuer validator (rejects non-https, credentials, ports, paths,
+localhost/loopback, private + link-local IPs incl. `169.254.169.254`, IP literals, punycode/IDN, non-Okta domains — never trusts
+the client normalizer, never a network call); an OAuth TRANSACTION model reusing the provider-neutral HMAC-signed 8-field `state`
+plus PKCE(S256) with the **verifier held server-side and never persisted/logged** (kept out of `oauth_pending` whose helper forbids
+it); a pure authorize-URL builder (authorization-code + PKCE, exact scope/redirect, `client_id` via a credential-reference
+abstraction, no secret/implicit/token); a multi-gate connect route (each gate fails independently; fails closed at certificationOnly
++ governance); a callback foundation with 13 ordered gates that STOPS before token exchange (Okta reason codes kept SEPARATE from
+the `oauth_pending.last_rejected_code` CHECK — no drift); a token-exchange INTERFACE only (throwing dormant factory; success type
+exposes only a branded `VaultBoundAccessTokenRef`, never a raw token); a connection-state model whose execution eligibility (10
+independent gates) is SEPARATE from display state (no reachable state is runnable); a dormant first-sync authorization model (absent
+by default; staging + manual only; caps 0; denied); sanitized audit-event builders (closed non-secret key allowlist, stable reason
+codes, no wiring); and a dormant admin-gated idempotent disconnect (reveals no reference; revocation via an unimplemented sink).
+Governance gate pins **Phase C BLOCKED / RISK-007 OPEN / hosted OAuth disabled**. Phase 14 adds client-safe future-state labels
+(`okta-connection-labels.ts`) while the real connection stays UNAVAILABLE and Okta keeps showing as **Preview** (the simulated P5E17
+walkthrough is unchanged). **No migration** — the one genuine schema gap (per-org issuer binding) is modeled at the app layer and
+DEFERRED to the credential-provisioning phase (P5E18a persists no rows); reuses `connectors`/0043/0044/0046/0047/`oauth_pending`
+unchanged. **runner** (`feat/okta-certification-foundation`): a dormant `okta-provider-scaffold.ts` (describe + ordered dispatch
+guard that makes Okta impossible to dispatch while certificationOnly + no-PII logging) reusing the P5E16 okta-* modules; the live
+**framework-registry is untouched** so `resolveFrameworkProvider("okta")` stays `provider_not_registered`. **~103 new v3 tests +
+18 new runner tests**; v3 `tsc` 0 + full suite green; runner full suite **836 green** (Entra regressions intact). **No real Okta
+OAuth app, no client secret, no authorization code exchanged, no token, no Okta API call, no credential reference created, no
+connector execution, no ECS task, no schedule, no hosted migration, no production access — none.** Okta + `microsoft_entra` remain
+`certificationOnly`; **RISK-007 OPEN, Phase C BLOCKED.** Docs: [`security/OKTA_CONNECTOR_THREAT_MODEL.md`](./security/OKTA_CONNECTOR_THREAT_MODEL.md),
+[`runbooks/OKTA_FIRST_PILOT_RUNBOOK.md`](./runbooks/OKTA_FIRST_PILOT_RUNBOOK.md) (NOT AUTHORIZED), evidence
+[`evidence/P5E18A_OKTA_LIVE_PATH_FOUNDATION.md`](./evidence/P5E18A_OKTA_LIVE_PATH_FOUNDATION.md).
+
 ## P5E17b — connector UI visual/UX polish (preview-only, no new capability) · 2026-07-17
 
 A focused UX refinement pass over the P5E17 customer connector UI — **no new capability, no live path changed**. Marketplace:
