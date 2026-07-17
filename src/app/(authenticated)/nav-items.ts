@@ -29,10 +29,10 @@ export const NAV_SECTIONS: NavSection[] = [
       { label: "Apps", href: "/apps" },
       // Read-only canonical app graph (vendors → products → aliases) from 0024; RLS-scoped, safe projection only.
       { label: "App Catalog", href: "/catalog", note: "read-only" },
-      // Read-only connector metadata (provider/label/status/scopes + latest run). No connecting,
-      // credentials, OAuth, sync, or disconnect — see the page's "Not built yet" copy. The vault is
-      // still not usable for real credentials.
-      { label: "Connectors", href: "/connectors", note: "read-only metadata" },
+      // Customer connector marketplace (browse / search / connect in preview). Connecting runs a SIMULATED
+      // preview flow only — no credentials, OAuth, sync, or provider activation. The vault is still not
+      // usable for real credentials; the operator sync-review workflow lives at /connectors/review.
+      { label: "Connectors", href: "/connectors", note: "preview" },
       { label: "AI / Analysis", href: null },
     ],
   },

@@ -2505,3 +2505,62 @@ BLOCKED**; synthetic-staging + certification only. Docs: [`OKTA_CONNECTOR_MODEL.
 [`evidence/P5E16_OKTA_CONNECTOR_FOUNDATION.md`](./evidence/P5E16_OKTA_CONNECTOR_FOUNDATION.md) + connector-runner
 `docs/OKTA_AUTHENTICATION_DESIGN.md`/`OKTA_CERTIFICATION_PLAN.md`/`OKTA_STAGING_OPERATIONS.md`/`docs/evidence/P5E16_OKTA_CONNECTOR_FOUNDATION.md`.
 
+## P5E17 — customer connector experience (Okta-first, preview-only) · 2026-07-17
+
+The customer-facing connector **experience** — marketplace → Okta detail → simulated connect wizard → preview management — so we can
+see and refine exactly how a customer would connect an app, while every connector stays certification-only and non-runnable. New
+`src/lib/customer-connectors/` centralizes the sole internal→customer mapping: `catalog.ts` (server-only; 12 curated providers —
+Okta/Entra/Slack are "Preview", the other 8 "Coming soon", `scim_fixture` never surfaced; **`canSync`/`canSchedule` always false**;
+**`canConnect` = Okta-only AND registry-not-ready** so a genuinely-runnable provider can never be shown as a mere preview),
+`catalog-types.ts` (client-safe types + categories), `okta-content.ts` (customer copy + **SSRF-safe `validateOktaOrgHost`, no
+network** — rejects non-Okta domains, schemes, credentials, ports, paths, localhost/internal, IPv4/IPv6), `demo-store.ts`
+(**`sessionStorage`-only** preview state under one isolated key — never a DB/connector/credential/OAuth/token/secret/ECS/schedule
+write), reactive `use-demo-connection.ts`, `view.ts`. Routes: `/connectors` (server shell + `<ConnectorMarketplace/>` island:
+search + status/category filters), `/connectors/[provider]` (detail + `<ConnectorDetailCta/>`), `/connectors/[provider]/connect`
+(guarded + `<OktaConnectWizard/>`: 5-step SIMULATED flow — **no OAuth redirect, no Okta navigation, no network**; success writes
+only the `sessionStorage` preview connection, a simulated failure writes nothing), `/connectors/[provider]/status`
+(`<ConnectorStatusView/>`: data access / sync settings [Manual / Unavailable in preview / Never / Not scheduled] / **Run supervised
+first sync DISABLED** / Pause·Resume·Reconnect·Disconnect touch only preview state). The old internal-diagnostic `/connectors` page
+(Slack-sync status + "Not built yet" chips) was replaced; the operator **sync-review** workflow (`/connectors/review`) and the inert
+**OAuth callback** route are unchanged and preserved (footer links to review). Two fixes found while building: split pure
+types/constants into `catalog-types.ts` so the client marketplace no longer pulls the server-only provider registry into the browser
+bundle (its sentinel would have thrown); and made `useDemoConnection` derive from a stable raw-string snapshot (the prior
+`getSnapshot` returned a fresh object each call — infinite-loop risk). Guards (Phase 12): static UI-surface scan
+(`customer-connectors-safety.test.ts` — no fetch/XHR/token/secret/OAuth-endpoint/ECS/schedule/`process.env`; no added callback route;
+islands vs server shells; `sessionStorage`-only) + the existing client/server boundary guard (now excludes `*.test.*`) + runtime
+tests proving no Okta navigation, no token/password field, no real Okta/authorize link. `tsc` exit 0 + `lint` 0 errors + **1396
+tests (74 new) green** + `next build` green (4 new routes; callback/review preserved; RSC boundary clean). **No real Okta tenant/
+credential/token/OAuth/API/ECS/schedule/promotion/production — none.** Okta + `microsoft_entra` remain `certificationOnly`; **RISK-007
+OPEN, Phase C BLOCKED**. Docs: [`CONNECTOR_CUSTOMER_EXPERIENCE.md`](./CONNECTOR_CUSTOMER_EXPERIENCE.md),
+[`OKTA_CUSTOMER_CONNECTION_FLOW.md`](./OKTA_CUSTOMER_CONNECTION_FLOW.md), evidence
+[`evidence/P5E17_CONNECTOR_CUSTOMER_UI.md`](./evidence/P5E17_CONNECTOR_CUSTOMER_UI.md) + connector-runner
+`docs/evidence/P5E17_OKTA_UI_DORMANCY.md`.
+
+## P5E17b — connector UI visual/UX polish (preview-only, no new capability) · 2026-07-17
+
+A focused UX refinement pass over the P5E17 customer connector UI — **no new capability, no live path changed**. Marketplace:
+compact header ("Connect your business apps to discover users, access, and software usage." + a small "Preview connectors do not
+import data." note), prominent search, status filters primary / category filters visually secondary, stronger card hierarchy
+(larger icon+name, muted category, solid CTA for the connectable provider, muted-but-accessible coming-soon cards, equal card
+height, ≤2 capability chips; Okta caps → Users / Account status). Okta detail: constrained (~1120px) two-column hero (identity +
+value on the left; primary "Connect Okta" + "Setup takes about 2 minutes" on the right), the old "Learn how it works" button
+demoted to a subtle "See what ID Caddie can access" text link that scrolls to the access section; equal-height access cards with
+precise wording ("What ID Caddie can access" — Users / Account status / Basic profile information (name, username, email); "cannot
+access" — Passwords / MFA information / …); scope reduced to three chips (Users only / Read-only / No automatic sync) + one plain
+line. Wizard: moved into a centered setup card (~720px) on a clean background, simplified to **four customer-facing steps**
+(Organization → Permissions → Authorize → Connected; the connection check folds into the authorize→connected transition) with a
+strong "Step N of 4" progress bar, one preview banner (non-terminal only), guided org copy + a safe bare-label normalizer
+("acme" → "acme.okta.com"; validator UNCHANGED and strict) with a "Use a custom Okta domain" advanced toggle, plain-language
+permissions + one technical scope (`okta.users.read`), a neutral "Authorize with Okta" preview panel (no Okta-branding mimicry, no
+redirect), and concrete honest checks (Okta organization confirmed / Read-only access approved / No data imported yet / Ready for
+first sync — no encryption/health/tenant claims). Management page: clearer header + summary + sectioned panels; first-sync uses
+`aria-disabled` (stays focusable so its explanation is announced). A11y/copy fixes from three reviewers applied (equal-height card
+wrappers, empty-state radius, gated preview banner, `role="alert"` on the org error, plain-language security wording, removed
+redundant preview bullet). `tsc` exit 0 + `lint` 0 errors + **1404 tests (82 in the connector UI) green** + `next build` green
+(routes unchanged: `/connectors`, `/connectors/[provider]`, `…/connect`, `…/status`; callback/review preserved; RSC boundary
+clean). **No live OAuth, no Okta callback, no Okta API/credential/token, no ECS/sync/schedule, no connector-table or DB write, no
+production target — none.** Okta + `microsoft_entra` remain `certificationOnly`; **RISK-007 OPEN, Phase C BLOCKED**. Runner
+unchanged. Docs updated: [`CONNECTOR_CUSTOMER_EXPERIENCE.md`](./CONNECTOR_CUSTOMER_EXPERIENCE.md),
+[`OKTA_CUSTOMER_CONNECTION_FLOW.md`](./OKTA_CUSTOMER_CONNECTION_FLOW.md),
+[`evidence/P5E17_CONNECTOR_CUSTOMER_UI.md`](./evidence/P5E17_CONNECTOR_CUSTOMER_UI.md).
+
