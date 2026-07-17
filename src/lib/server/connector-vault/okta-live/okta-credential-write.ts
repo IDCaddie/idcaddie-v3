@@ -14,8 +14,9 @@ if (typeof (globalThis as { window?: unknown }).window !== "undefined") {
   throw new Error("connector-vault/okta-live/okta-credential-write is server-only and must not be imported in client code");
 }
 
-// WRITE-ONLY secret store: put returns a POINTER (ref + version); markRevoked flips a revocation marker. NO getSecretValue, NO
-// read-after-write of the secret VALUE. Least-privilege, staging-named. NO real implementation in this phase.
+// WRITE-ONLY secret store: put returns a POINTER (ref + version); markRevoked flips a revocation marker. It does NOT read a
+// secret value back (no read-after-write of the secret VALUE) — reading secret material is the runner's task-role boundary, never
+// the app's. Least-privilege, staging-named. NO real implementation in this phase.
 export interface OktaSecretStoreWriter {
   putSecret(input: { namespace: string; name: string; tokenRef: VaultBoundAccessTokenRef; correlationId: string }): Promise<{ credentialSecretRef: string; credentialVersion: string }>;
   markRevoked(input: { credentialSecretRef: string; credentialVersion: string }): Promise<void>;
