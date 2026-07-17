@@ -1,132 +1,92 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi, afterEach } from "vitest";
-import { render, screen, cleanup } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { render, screen, cleanup, fireEvent, within } from "@testing-library/react";
 
+// P5E17 — the customer connector MARKETPLACE (the replaced /connectors page). Proves: real catalog → safe customer cards,
+// Okta is preview-connectable, unbuilt providers show "Coming soon", search + status + category filters work, the operator
+// sync-review link is preserved, and NO internal governance wording leaks. The catalog reads the server-only provider
+// registry, so we mock the registry (isConnectorProviderReady=false reproduces production: nothing is live).
 vi.mock("next/link", () => ({
-  default: ({ href, children }: { href: unknown; children: React.ReactNode }) => (
-    <a href={typeof href === "string" ? href : "#"}>{children}</a>
+  default: ({ href, children, ...rest }: { href: unknown; children: React.ReactNode }) => (
+    <a href={typeof href === "string" ? href : "#"} {...rest}>{children}</a>
   ),
 }));
-// Stub only the DAL reads; keep the pure connectorStatusLabel/runStatusLabel/slackRunStatusLabel helpers real.
-vi.mock("@/lib/data/connectors", async () => {
-  const actual = await vi.importActual<typeof import("@/lib/data/connectors")>("@/lib/data/connectors");
-  return { ...actual, listConnectorsForCurrentUser: vi.fn() };
-});
-vi.mock("@/lib/data/manual-sync-runs", () => ({
-  getLatestSlackSyncRunForCurrentTenant: vi.fn(),
-  getSlackAppUserPresenceCountsForCurrentTenant: vi.fn(),
+vi.mock("@/lib/server/connector-vault/provider-registry", () => ({
+  getConnectorProvider: () => null,
+  isConnectorProviderReady: () => false, // every provider inert today — reproduces production
 }));
-// Stub only the count DAL; keep the pure syncReviewLeadLabel/syncReviewHasAwaiting helpers real.
-vi.mock("@/lib/data/sync-review", async () => {
-  const actual = await vi.importActual<typeof import("@/lib/data/sync-review")>("@/lib/data/sync-review");
-  return { ...actual, getSyncReviewCounts: vi.fn() };
-});
 
 import ConnectorsPage from "./page";
-import { listConnectorsForCurrentUser } from "@/lib/data/connectors";
-import {
-  getLatestSlackSyncRunForCurrentTenant,
-  getSlackAppUserPresenceCountsForCurrentTenant,
-} from "@/lib/data/manual-sync-runs";
-import { getSyncReviewCounts } from "@/lib/data/sync-review";
 
-const REVIEW_ZERO = { pending: 0, needsReview: 0, confirmed: 0, rejected: 0, total: 0, appUserAccounts: 0 };
-
-const asMock = <T,>(fn: T) => fn as unknown as { mockResolvedValue: (v: unknown) => void };
+beforeEach(() => window.sessionStorage.clear());
 afterEach(cleanup);
 
-describe("/connectors render", () => {
-  it("renders connector + Slack-sync statuses as shared badges, keeps safe readiness copy, leaks no secrets", async () => {
-    asMock(listConnectorsForCurrentUser).mockResolvedValue({
-      ok: true,
-      data: [
-        {
-          id: "conn-1",
-          provider: "slack",
-          displayName: "Acme Slack",
-          status: "active", // → success (green)
-          safeScopes: ["users:read"],
-          createdAt: "2026-07-01T00:00:00Z",
-          lastRun: { status: "succeeded", startedAt: "2026-07-02T00:00:00Z", completedAt: "2026-07-02T00:00:00Z", failureCode: null, failureLabel: null, recordsSeen: 3, recordsImported: 3, recordsFailed: 0 }, // → green; safe counters render
-        },
-      ],
-    });
-    asMock(getLatestSlackSyncRunForCurrentTenant).mockResolvedValue({
-      ok: true,
-      data: {
-        status: "failed", // → danger (red)
-        startedAt: "2026-07-02T00:00:00Z",
-        finishedAt: "2026-07-02T00:05:00Z",
-        errorCode: "auth_expired",
-        failedStage: "auth",
-        appUsersWritten: 0,
-        peopleWritten: 0,
-        matchesWritten: 0,
-        skipped: 0,
-        appUsersMarkedStale: 0,
-      },
-    });
-    asMock(getSlackAppUserPresenceCountsForCurrentTenant).mockResolvedValue({ ok: true, data: { active: 5, stale: 2 } });
-    asMock(getSyncReviewCounts).mockResolvedValue({ ok: true, data: { ...REVIEW_ZERO, pending: 3, total: 3, appUserAccounts: 3 } });
+async function renderPage() {
+  return render(await ConnectorsPage());
+}
 
-    const { container } = render(await ConnectorsPage());
-    const html = container.innerHTML;
+describe("/connectors marketplace", () => {
+  it("renders the real catalog as safe customer cards; Okta is connectable, unbuilt providers are Coming soon", async () => {
+    const { container } = await renderPage();
+    // Okta card: connectable preview → its CTA label is "Connect Okta"
+    expect(screen.getByText("Connect Okta")).toBeTruthy();
+    // A not-yet-built provider (Salesforce) is present as "Coming soon" (there are several; assert at least one)
+    expect(screen.getByText("Salesforce")).toBeTruthy();
+    expect(screen.getAllByText("Coming soon").length).toBeGreaterThan(0);
+    // 12 curated providers → 12 cards
+    expect(container.querySelectorAll("ul li").length).toBeGreaterThanOrEqual(12);
+  });
 
-    // connector status + last-run status render as shared badges (green success tone)
-    expect(html).toContain("text-green-700");
-    // the Slack-sync run status now renders as a shared badge too (red danger tone), not the old monochrome pill
-    expect(html).toContain("text-red-700");
+  it("preserves the operator sync-review link and introduces no run/connect server action", async () => {
+    await renderPage();
+    const review = screen.getByRole("link", { name: "Go to sync review" });
+    expect(review.getAttribute("href")).toBe("/connectors/review");
+    // marketplace is browse-only: filter controls are buttons, but there is no form/submit that mutates anything
+    expect(document.querySelector("form")).toBeNull();
+  });
 
-    // post-sync truthfulness: the latest run's SAFE record counters render (counts only — no row bodies/PII)
-    expect(screen.getByText(/3 seen · 3 imported/)).toBeTruthy();
-
-    // Sync review card: pending count renders as a count-only line (no item bodies/PII)
-    expect(screen.getByText("Sync review")).toBeTruthy();
-    expect(screen.getByText("3 items pending review from the last sync")).toBeTruthy();
-    expect(screen.getByText("Pending 3")).toBeTruthy();
-    expect(screen.getByText(/Counts only — no item details/)).toBeTruthy();
-
-    // navigation-only CTA to the dedicated review route (a plain link — NOT a form/button/action)
-    const cta = screen.getByRole("link", { name: "Review pending items" });
-    expect(cta.getAttribute("href")).toBe("/connectors/review");
-
-    // safe readiness copy still present; the disabled "Not built yet" affordances remain
-    expect(screen.getByText("Slack sync status")).toBeTruthy();
-    expect(screen.getAllByText("Not built yet").length).toBeGreaterThan(0);
-
-    // no run-sync / connect control introduced (page is fully read-only — no interactive buttons; the
-    // "Disconnect / revoke" etc. are DISABLED "Not built yet" chips, which is correct and safe).
-    expect(screen.queryByRole("button")).toBeNull();
-
-    // no LEAKED credential/secret VALUE or field name. (The page legitimately says "credentials, tokens, secrets are
-    // not shown here" in its disclaimer, so we assert on real leak-field identifiers — never in safe copy — not the
-    // bare words.)
-    for (const forbidden of ["connector_secrets", "ciphertext", "access_token", "refresh_token", "dek_wrapped", "getsecretvalue"]) {
-      expect(container.textContent?.toLowerCase()).not.toContain(forbidden);
+  it("leaks no internal governance wording", async () => {
+    const { container } = await renderPage();
+    const text = (container.textContent ?? "").toLowerCase();
+    for (const forbidden of [
+      "certificationonly", "certification only", "risk-007", "execution authorization", "credential reference",
+      "tenant binding", "kill switch", "promotion", "canonical", "connector runner", "task definition", "task-def",
+      "credential", "secret", "token", "ecs task",
+    ]) {
+      expect(text.includes(forbidden), `should not surface "${forbidden}"`).toBe(false);
     }
   });
 
-  it("Sync review card shows the empty state when nothing is awaiting review", async () => {
-    asMock(listConnectorsForCurrentUser).mockResolvedValue({ ok: true, data: [] });
-    asMock(getLatestSlackSyncRunForCurrentTenant).mockResolvedValue({ ok: true, data: null });
-    asMock(getSlackAppUserPresenceCountsForCurrentTenant).mockResolvedValue({ ok: true, data: { active: 0, stale: 0 } });
-    asMock(getSyncReviewCounts).mockResolvedValue({ ok: true, data: { ...REVIEW_ZERO, confirmed: 5, total: 5 } });
-
-    render(await ConnectorsPage());
-    expect(screen.getByText("No items awaiting review.")).toBeTruthy();
-    expect(screen.queryByText(/pending review from the last sync/)).toBeNull();
-    // CTA is absent when pending = 0 (nothing to review)
-    expect(screen.queryByRole("link", { name: "Review pending items" })).toBeNull();
+  it("search filters by name and shows the empty state for no matches", async () => {
+    await renderPage();
+    const search = screen.getByRole("searchbox");
+    fireEvent.change(search, { target: { value: "okta" } });
+    expect(screen.getByText("Okta")).toBeTruthy();
+    expect(screen.queryByText("Salesforce")).toBeNull();
+    fireEvent.change(search, { target: { value: "zzznope" } });
+    expect(screen.getByText("No connectors match your search")).toBeTruthy();
   });
 
-  it("Sync review card fails closed to a safe error line (no crash, no leak)", async () => {
-    asMock(listConnectorsForCurrentUser).mockResolvedValue({ ok: true, data: [] });
-    asMock(getLatestSlackSyncRunForCurrentTenant).mockResolvedValue({ ok: true, data: null });
-    asMock(getSlackAppUserPresenceCountsForCurrentTenant).mockResolvedValue({ ok: true, data: { active: 0, stale: 0 } });
-    asMock(getSyncReviewCounts).mockResolvedValue({ ok: false, error: "query_failed" });
+  it("status + category filters narrow the grid", async () => {
+    await renderPage();
+    // Category: Identity → Okta + Microsoft Entra ID only
+    fireEvent.click(screen.getByRole("button", { name: "Identity" }));
+    expect(screen.getByText("Okta")).toBeTruthy();
+    expect(screen.getByText("Microsoft Entra ID")).toBeTruthy();
+    expect(screen.queryByText("Salesforce")).toBeNull();
+    // Reset, then status: Coming soon → hides the preview-available providers (Okta)
+    fireEvent.click(screen.getByRole("button", { name: "All categories" }));
+    fireEvent.click(screen.getByRole("button", { name: "Coming soon" }));
+    expect(screen.queryByText("Okta")).toBeNull();
+    expect(screen.getByText("Salesforce")).toBeTruthy();
+  });
 
-    render(await ConnectorsPage());
-    expect(screen.getByText("Could not load the sync review summary right now. Please try again later.")).toBeTruthy();
-    expect(screen.queryByText("query_failed")).toBeNull();
+  it("a connectable card is a link to its detail route; a coming-soon card is inert", async () => {
+    await renderPage();
+    const oktaLink = screen.getByRole("link", { name: /^Okta —/ });
+    expect(oktaLink.getAttribute("href")).toBe("/connectors/okta");
+    // Salesforce (coming soon) renders no link/href to a connect flow
+    const sf = screen.getByText("Salesforce").closest("li");
+    expect(sf && within(sf as HTMLElement).queryByRole("link")).toBeNull();
   });
 });

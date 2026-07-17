@@ -151,7 +151,9 @@ function importsCrypto(src: string): boolean {
 }
 
 describe("connector vault crypto is server-only (no client/app import path)", () => {
-  const files = walk(SRC).filter((f) => !f.includes(path.join("server", "connector-vault")));
+  // Exclude the server-vault dir itself AND test files: the guard protects SHIPPED bundles, and a test may legitimately
+  // mock/import a server-only module (e.g. vi.mock(".../provider-registry")) — tests never reach the browser.
+  const files = walk(SRC).filter((f) => !f.includes(path.join("server", "connector-vault")) && !/\.test\.(ts|tsx)$/.test(f));
 
   it("no \"use client\" file imports the connector vault crypto module", () => {
     const offenders = files.filter((f) => {
@@ -192,7 +194,9 @@ const OAUTH_REL_HINTS = [
 const CALLBACK_ROUTE = path.join(SRC, "app", "(authenticated)", "connectors", "oauth", "callback", "route.ts");
 
 describe("connector vault oauth-state is server-only (only the inert callback route may import it)", () => {
-  const files = walk(SRC).filter((f) => !f.includes(path.join("server", "connector-vault")));
+  // Exclude the server-vault dir itself AND test files: the guard protects SHIPPED bundles, and a test may legitimately
+  // mock/import a server-only module (e.g. vi.mock(".../provider-registry")) — tests never reach the browser.
+  const files = walk(SRC).filter((f) => !f.includes(path.join("server", "connector-vault")) && !/\.test\.(ts|tsx)$/.test(f));
   const importsOauth = (src: string) => OAUTH_REL_HINTS.some((h) => src.includes(h));
 
   it("no \"use client\" file imports the oauth-state module", () => {

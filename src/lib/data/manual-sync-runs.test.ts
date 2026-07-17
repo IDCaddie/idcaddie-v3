@@ -77,11 +77,12 @@ describe("sync-status DAL + connectors page never reference a secret/PII column"
       expect(page).not.toContain(forbidden);
     }
   });
-  it("the connectors page is a read-only server component — no interactive trigger/action element", () => {
+  it("the connectors page shell is a server component — no server action/form; interactivity lives in a client island", () => {
     const raw = fs.readFileSync(path.resolve(__dirname, "..", "..", "app", "(authenticated)", "connectors", "page.tsx"), "utf8");
-    // "use client" / onClick / <form> / <button> / action= would all imply an actionable surface — none may appear.
+    // P5E17: the page is now the customer marketplace. The page.tsx SHELL stays a server component — no "use client",
+    // no onClick, no <form>/<button>, no server action= — the browse/search/filter interactivity is delegated to the
+    // client island (<ConnectorMarketplace/>), and the preview connect flow is simulated + sessionStorage-only.
     for (const banned of ['"use client"', "onClick", "<form", "<button", "action="]) expect(raw).not.toContain(banned);
-    // the disabled "Not built yet" capability chips are allowed (they are static spans, not actions).
-    expect(raw).toContain("Not built yet");
+    expect(raw).toContain("ConnectorMarketplace"); // interactivity delegated to the labeled client island
   });
 });
