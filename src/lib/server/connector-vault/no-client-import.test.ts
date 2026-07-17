@@ -48,11 +48,6 @@ const CRYPTO_REL_HINTS = [
   "connector-vault/provider-registry",
   "server/connector-vault/provider-registry",
   "lib/server/connector-vault/provider-registry",
-  // P5E18a dormant Okta live-connection foundation — the whole okta-live/ dir is server-only and must never be imported from a
-  // "use client" file or from src/app (the real path stays unreachable from the client/route tree).
-  "connector-vault/okta-live/",
-  "server/connector-vault/okta-live/",
-  "lib/server/connector-vault/okta-live/",
   "connector-vault/providers/slack-oauth",
   "server/connector-vault/providers/slack-oauth",
   "lib/server/connector-vault/providers/slack-oauth",
@@ -197,6 +192,9 @@ const OAUTH_REL_HINTS = [
   "connector-vault/connector-oauth-config", "server/connector-vault/connector-oauth-config", "lib/server/connector-vault/connector-oauth-config",
 ];
 const CALLBACK_ROUTE = path.join(SRC, "app", "(authenticated)", "connectors", "oauth", "callback", "route.ts");
+// The dedicated Okta callback route (P5E18b) — a server-only route.ts that also uses the oauth-state signer. Allowed alongside
+// the Slack callback route as an oauth-state importer.
+const OKTA_CALLBACK_ROUTE = path.join(SRC, "app", "(authenticated)", "connectors", "oauth", "okta", "callback", "route.ts");
 
 describe("connector vault oauth-state is server-only (only the inert callback route may import it)", () => {
   // Exclude the server-vault dir itself AND test files: the guard protects SHIPPED bundles, and a test may legitimately
@@ -212,12 +210,12 @@ describe("connector vault oauth-state is server-only (only the inert callback ro
     expect(offenders).toEqual([]);
   });
 
-  it("the ONLY src/app file importing oauth-state is the inert callback route handler", () => {
+  it("the ONLY src/app files importing oauth-state are the inert callback route handlers (Slack + Okta)", () => {
     const appDir = path.join(SRC, "app");
     const offenders = files
       .filter((f) => f.startsWith(appDir))
       .filter((f) => importsOauth(fs.readFileSync(f, "utf8")))
-      .filter((f) => f !== CALLBACK_ROUTE);
+      .filter((f) => f !== CALLBACK_ROUTE && f !== OKTA_CALLBACK_ROUTE);
     expect(offenders).toEqual([]);
   });
 
@@ -225,5 +223,34 @@ describe("connector vault oauth-state is server-only (only the inert callback ro
     const src = fs.readFileSync(path.join(SRC, "lib", "server", "connector-vault", "oauth-state.ts"), "utf8");
     expect(src).toMatch(/server-only/);
     expect(src).toMatch(/globalThis[^\n]*window/);
+  });
+});
+
+// P5E18b — the dormant Okta live-connection foundation (okta-live/) is server-only. NO "use client" file may import it, and the
+// ONLY src/app file that may import it is the dedicated, provider-selecting Okta OAuth callback route (a route.ts is server code,
+// never client/browser code, and stops before token exchange while certificationOnly).
+const OKTA_REL_HINTS = [
+  "connector-vault/okta-live/", "server/connector-vault/okta-live/", "lib/server/connector-vault/okta-live/",
+];
+
+describe("connector vault okta-live is server-only (only the dormant okta callback route may import it)", () => {
+  const files = walk(SRC).filter((f) => !f.includes(path.join("server", "connector-vault")) && !/\.test\.(ts|tsx)$/.test(f));
+  const importsOkta = (src: string) => OKTA_REL_HINTS.some((h) => src.includes(h));
+
+  it("no \"use client\" file imports okta-live", () => {
+    const offenders = files.filter((f) => {
+      const src = fs.readFileSync(f, "utf8");
+      return /^\s*["']use client["']/m.test(src) && importsOkta(src);
+    });
+    expect(offenders).toEqual([]);
+  });
+
+  it("the ONLY src/app file importing okta-live is the dedicated okta callback route", () => {
+    const appDir = path.join(SRC, "app");
+    const offenders = files
+      .filter((f) => f.startsWith(appDir))
+      .filter((f) => importsOkta(fs.readFileSync(f, "utf8")))
+      .filter((f) => f !== OKTA_CALLBACK_ROUTE);
+    expect(offenders).toEqual([]);
   });
 });

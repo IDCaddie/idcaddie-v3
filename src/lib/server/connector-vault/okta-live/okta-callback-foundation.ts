@@ -19,7 +19,7 @@ if (typeof (globalThis as { window?: unknown }).window !== "undefined") {
   throw new Error("connector-vault/okta-live/okta-callback-foundation is server-only and must not be imported in client code");
 }
 
-const FIXED_CALLBACK_PATH = "/connectors/oauth/callback";
+const FIXED_CALLBACK_PATH = "/connectors/oauth/okta/callback";
 // An Okta authorization code is an opaque bounded string. We validate SHAPE only and never echo the value.
 const AUTH_CODE_RE = /^[A-Za-z0-9._~-]{16,512}$/;
 

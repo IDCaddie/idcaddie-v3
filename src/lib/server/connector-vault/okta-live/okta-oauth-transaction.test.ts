@@ -15,7 +15,7 @@ const baseInput = {
   requestedScopes: ["okta.users.read"],
   issuerUrl: "https://acme.okta.com",
   orgHostname: "acme.okta.com",
-  redirectUri: "https://idcaddie-v3.vercel.app/connectors/oauth/callback",
+  redirectUri: "https://idcaddie-v3.vercel.app/connectors/oauth/okta/callback",
   returnRoute: "/connectors/okta/status",
   correlationId: "corr-okta-001",
 };

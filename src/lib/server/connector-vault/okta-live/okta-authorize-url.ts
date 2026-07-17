@@ -28,8 +28,8 @@ export function isValidOktaClientId(v: unknown): v is string {
 
 // The exact callback path an Okta app must register + the builder must emit (no trailing slash). Kept in lockstep with the
 // provider-neutral connector-oauth-config.
-const CALLBACK_PATH = "/connectors/oauth/callback";
-const REDIRECT_RE = /^https:\/\/[a-z0-9.-]+\/connectors\/oauth\/callback$/;
+const CALLBACK_PATH = "/connectors/oauth/okta/callback";
+const REDIRECT_RE = /^https:\/\/[a-z0-9.-]+\/connectors\/oauth\/okta\/callback$/;
 // The exact authorize path on the Okta org authorization server.
 const AUTHORIZE_PATH = "/oauth2/v1/authorize";
 const CODE_CHALLENGE_RE = /^[A-Za-z0-9_-]{43}$/; // base64url sha256, unpadded

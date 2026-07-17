@@ -6,7 +6,7 @@ import { buildOktaAuthorizeUrl, isValidOktaClientId, type OktaClientIdSource } f
 const SYNTH_CLIENT_ID = "0oaEXAMPLEexampleABCDE"; // obviously synthetic Okta 0oa… client id (public, not a secret)
 const source: OktaClientIdSource = { resolveClientId: () => SYNTH_CLIENT_ID };
 const CHALLENGE = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"; // 43-char base64url (RFC 7636 example)
-const REDIRECT = "https://idcaddie-v3.vercel.app/connectors/oauth/callback";
+const REDIRECT = "https://idcaddie-v3.vercel.app/connectors/oauth/okta/callback";
 const base = { issuerUrl: "https://acme.okta.com", clientIdSource: source, redirectUri: REDIRECT, scopes: ["okta.users.read"], state: "signed.state.value", codeChallenge: CHALLENGE };
 
 describe("buildOktaAuthorizeUrl", () => {

@@ -9,7 +9,7 @@ const NOW = 1_700_000_000_000;
 const TENANT = "11111111-1111-1111-1111-111111111111";
 const ORG = "22222222-2222-2222-2222-222222222222";
 const SUBJECT = "33333333-3333-3333-3333-333333333333";
-const REDIRECT = "https://idcaddie-v3.vercel.app/connectors/oauth/callback";
+const REDIRECT = "https://idcaddie-v3.vercel.app/connectors/oauth/okta/callback";
 const ISSUER = "https://acme.okta.com";
 const CORR = "corr-okta-cb-1";
 const CODE = "AbCd1234_synthetic-auth-code-value-xyz"; // synthetic; must never be echoed
@@ -28,7 +28,7 @@ const txn = (over: Partial<OktaCallbackTransaction> = {}): OktaCallbackTransacti
   redirectUri: REDIRECT, issuerUrl: ISSUER, orgHostname: "acme.okta.com", expiresAt: NOW + 300_000, consumedAt: null, ...over,
 });
 const input = (over: Partial<OktaCallbackInput> = {}): OktaCallbackInput => ({
-  callbackPath: "/connectors/oauth/callback", expectedProvider: "okta",
+  callbackPath: "/connectors/oauth/okta/callback", expectedProvider: "okta",
   query: new URLSearchParams({ state: STATE, code: CODE }),
   session: { subject: SUBJECT, tenantId: TENANT, organizationId: ORG },
   serverTrustedRedirectUri: REDIRECT, expectedIssuerUrl: ISSUER, transaction: txn(), pkceVerifierAvailable: true, ...over,

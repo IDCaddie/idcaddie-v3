@@ -111,8 +111,10 @@ grant update (upload_status) on public.files to authenticated;
 -- connector_kill_switches — are all Tier-2 deny-all tables (RLS-enabled, ZERO policies, revoke-all from anon/authenticated; all
 -- mutation via SECURITY DEFINER functions only). Revoke them back here so the suite mirrors the real deny-all posture; the
 -- connector_run_control_plane_test exact-zero-privilege arrays are the backstop.
-revoke all on public.connector_secrets, public.connectors, public.connector_runs, public.oauth_pending, public.connector_app_secrets, public.connector_credential_references, public.connector_run_authorizations, public.connector_run_attempts, public.connector_run_locks, public.connector_run_alerts, public.connector_schedule_policies, public.connector_schedule_slots, public.connector_kill_switches, public.connector_pilot_enrollments, public.connector_pilot_consents, public.connector_pilot_incidents, public.connector_pilot_exit_reviews, public.connector_pilot_deletion_jobs from authenticated, anon;
+revoke all on public.connector_secrets, public.connectors, public.connector_runs, public.oauth_pending, public.connector_app_secrets, public.connector_credential_references, public.connector_run_authorizations, public.connector_run_attempts, public.connector_run_locks, public.connector_run_alerts, public.connector_schedule_policies, public.connector_schedule_slots, public.connector_kill_switches, public.connector_pilot_enrollments, public.connector_pilot_consents, public.connector_pilot_incidents, public.connector_pilot_exit_reviews, public.connector_pilot_deletion_jobs, public.connector_okta_issuer_bindings from authenticated, anon;
 grant select on public.connectors, public.connector_runs to authenticated;
+-- connector_okta_issuer_bindings (0048): hosted posture is SELECT-only for authenticated (org-manager RLS scopes rows), NO write.
+grant select on public.connector_okta_issuer_bindings to authenticated;
 -- The 0044 control-plane FUNCTIONS are the security boundary (all mutation is via them). On hosted Supabase, migration 0045
 -- revokes EXECUTE from public/anon/authenticated (0044 alone only revoked from public, and Supabase's ALTER DEFAULT PRIVILEGES
 -- grants anon/authenticated EXECUTE on function creation — the real gap 0045 closes). But the blanket `grant execute on all

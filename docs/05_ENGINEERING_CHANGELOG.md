@@ -2536,6 +2536,39 @@ OPEN, Phase C BLOCKED**. Docs: [`CONNECTOR_CUSTOMER_EXPERIENCE.md`](./CONNECTOR_
 [`evidence/P5E17_CONNECTOR_CUSTOMER_UI.md`](./evidence/P5E17_CONNECTOR_CUSTOMER_UI.md) + connector-runner
 `docs/evidence/P5E17_OKTA_UI_DORMANCY.md`.
 
+## P5E18b — Okta staging connection preparation (local; hosted-staging remained read-only) · 2026-07-17
+
+Prepared the real Okta staging connection PATH — hosted-staging metadata + secret-reference wiring — and STOPPED before authorization
+redirect, token exchange, API calls, and any sync. All new work is local + reversible; **no hosted mutation** (migration 0048 was
+NOT applied to staging; no AWS resource created; hosted staging was read-only). Migration `0048_connector_okta_issuer_binding.sql`
+adds the non-secret per-org Okta issuer binding (org/provider/host/canonical https issuer/environment/lifecycle/exact scope/audit;
+CHECKs provider=okta + scope `{okta.users.read}` + https + staging-only; partial unique indexes → one active binding/org and no
+cross-org issuer reassignment; composite same-tenant FK; NO secret fields; RLS org-manager-read + server-only-write) — **applied to
+LOCAL only** (RLS suite green, test T64 I0–I4); the hosted staging apply is a reviewed, GO-gated command sequence (evidence doc).
+New server-only `okta-live/` modules: a transient PKCE-verifier store (short-TTL, one-time, never persisted/logged); an OAuth
+transaction persistence boundary (non-secret record, single-use consume + replay/expiry/invalidation); a server-only client-config
+model (client id ABSENT until operator-supplied → fails closed; private_key_jwt); a real token-exchange adapter kept DORMANT
+(dependency-injected transport, exercised only with mocked HTTP — HTTPS-only issuer-bound `/oauth2/v1/token`, POST, code grant,
+exact redirect, PKCE, strict timeout/AbortSignal, no broad retries, max size + content-type validation, EXACT-scope enforcement,
+raw token handed straight to the vault-write boundary and never logged/returned — only a branded reference); a write-only
+credential-write boundary (app DB gets only a reference + metadata; idempotent; atomic secret↔reference rollback; no real secret
+body); connected-unsynced persistence (atomic, rollback); and a staging-safe admin-gated idempotent disconnect (revokes the
+credential reference via a sink; no real Okta revocation). A DEDICATED, provider-isolated Okta callback route
+(`/connectors/oauth/okta/callback`) runs the 13 ordered gates and invokes the exchange adapter ONLY on `validated_no_exchange`
+(unreachable while certificationOnly) — plus an env gate off by default + in production; the auth code is never echoed; the redirect
+is a fixed customer-safe path (tests prove the exchange is never called under current gates). Client-auth DECISION: **private_key_jwt**
+(matches the runner Okta design; not silently switched). **runner**: a dormant Okta credential-consumption boundary (validated
+reference + issuer binding + the full dispatch guard; the credential resolver is invoked only when every gate passes — never today)
++ Okta AWS IaC as reviewable change specs (`deploy/scripts/okta-secret-read-grant.sh`, `deploy/OKTA_STAGING_IAM.md`; NOT applied;
+`deploy:check` green). `tsc` 0 both; v3 full suite **1527 green** + runner **841 green**; `vendor:verify` + `deploy:check` green.
+**Migration 0048 NOT applied to hosted staging; no AWS hosted mutation; no Okta app/client-id/client-secret; no authorization code;
+no token; no Okta API call; no credential body/reference; no connector execution; no ECS task; no schedule; no first-sync
+authorization; no production access — none.** Okta + `microsoft_entra` remain `certificationOnly`; **RISK-007 OPEN, Phase C BLOCKED.**
+Docs: [`runbooks/OKTA_STAGING_APP_SETUP.md`](./runbooks/OKTA_STAGING_APP_SETUP.md) (operator, NOT AUTHORIZED),
+[`security/OKTA_CONNECTOR_THREAT_MODEL.md`](./security/OKTA_CONNECTOR_THREAT_MODEL.md), evidence
+[`evidence/P5E18B_OKTA_STAGING_CONNECTION_PREPARATION.md`](./evidence/P5E18B_OKTA_STAGING_CONNECTION_PREPARATION.md) +
+[`evidence/P5E18B_IMPLEMENTATION_DECISION_RECORD.md`](./evidence/P5E18B_IMPLEMENTATION_DECISION_RECORD.md).
+
 ## P5E18a — dormant Okta live-connection foundation (foundation-only, no live path) · 2026-07-17
 
 A production-grade, **entirely DORMANT** foundation for a future authorized Okta pilot — the real path is disabled and unexercised.

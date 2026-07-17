@@ -31,7 +31,7 @@ describe("okta credential-reference boundary", () => {
     const txn: OktaOAuthTransaction = {
       provider: "okta", correlationId: "c", tenantId: "t", organizationId: "o", connectorId: null, subject: "s",
       requestedScopes: ["okta.users.read"], issuerUrl: "https://acme.okta.com", orgHostname: "acme.okta.com",
-      redirectUri: "https://idcaddie-v3.vercel.app/connectors/oauth/callback", returnRoute: "/connectors/okta/status",
+      redirectUri: "https://idcaddie-v3.vercel.app/connectors/oauth/okta/callback", returnRoute: "/connectors/okta/status",
       pkceChallenge: "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM", pkceMethod: "S256", state: "signed.state",
       createdAt: 1, expiresAt: 2, singleUse: true, consumedAt: null, failureReason: null,
     };
