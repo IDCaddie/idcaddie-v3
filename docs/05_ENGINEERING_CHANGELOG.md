@@ -2536,6 +2536,25 @@ OPEN, Phase C BLOCKED**. Docs: [`CONNECTOR_CUSTOMER_EXPERIENCE.md`](./CONNECTOR_
 [`evidence/P5E17_CONNECTOR_CUSTOMER_UI.md`](./evidence/P5E17_CONNECTOR_CUSTOMER_UI.md) + connector-runner
 `docs/evidence/P5E17_OKTA_UI_DORMANCY.md`.
 
+## P5E18c — apply Okta staging schema + provision the staging vault/IAM boundary (dormant) · 2026-07-17
+
+Applied the approved Okta staging SCHEMA and provisioned the staging VAULT/IAM boundary — all dormant, no secret material, nothing
+activated. **Migration 0048 applied to hosted STAGING only** (`ycdpzduxugdsffjqyoai`, after positively confirming the ref + a dry-run
+showing only 0048 pending): the non-secret Okta issuer-binding table + RLS. Verified on staging via safe metadata — `table_exists=1`,
+`rls_enabled=true`, 4 CHECK constraints, 2 partial unique indexes, 1 org-manager policy — and safe aggregates: **0** issuer bindings,
+**0** okta connectors, **0** okta credential references, **0** okta `oauth_pending` rows (the migration activated no application
+behavior). An **EMPTY** Okta staging secret container `/idcaddie/staging/connector/okta/staging-app-v1` was created on AWS Secrets
+Manager (833822972703, ca-central-1) with **NO secret material** (no version; tagged `State=dormant`, `SecretMaterial=none`), and the
+reviewed least-privilege IAM read grant (`idcaddie-staging-okta-secret-read`: `GetSecretValue` on the exact one ARN, no wildcard,
+no production ref) was attached to the shared runner **task** role `idcaddie-staging-slack-taskread` (execution role untouched).
+Dormancy proven post-provisioning: Okta stays `certificationOnly`; runner `resolveFrameworkProvider("okta")`=`provider_not_registered`
++ dispatch=`provider_certification_only`; the secret container holds no version; ECS `idcaddie-staging-connector-runner`=0 running/
+pending/services; row counts remain zero. **No secret material created/read/printed (no `get-secret-value`); no Okta app; no client
+id; no client secret; no token; no authorization code; no Okta API call; no credential reference; no connector execution; no ECS
+task; no schedule; no first-sync authorization; no production access — none.** Okta + `microsoft_entra` remain `certificationOnly`;
+**RISK-007 OPEN, Phase C BLOCKED.** Docs: [`evidence/P5E18C_OKTA_STAGING_SCHEMA_AND_VAULT.md`](./evidence/P5E18C_OKTA_STAGING_SCHEMA_AND_VAULT.md),
+[`runbooks/OKTA_STAGING_APP_SETUP.md`](./runbooks/OKTA_STAGING_APP_SETUP.md) + connector-runner `deploy/OKTA_STAGING_IAM.md`.
+
 ## P5E18b — Okta staging connection preparation (local; hosted-staging remained read-only) · 2026-07-17
 
 Prepared the real Okta staging connection PATH — hosted-staging metadata + secret-reference wiring — and STOPPED before authorization
