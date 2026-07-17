@@ -34,17 +34,25 @@ describe("connector status / management", () => {
     expect(screen.getByRole("link", { name: "Connect Okta" }).getAttribute("href")).toBe("/connectors/okta/connect");
   });
 
-  it("connected → status, data access, sync settings; first sync is disabled", () => {
+  it("connected → summary, sections, and a disabled first-sync with explanation", () => {
     connect();
     render(<ConnectorStatusView connector={okta} />);
-    expect(screen.getByText("Connected")).toBeTruthy();
+    // "Connected" appears in the badge AND the Connection-status section — both are expected
+    expect(screen.getAllByText("Connected").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText("Ready for a supervised first sync")).toBeTruthy(); // summary line
     expect(screen.getByText("Data access")).toBeTruthy();
-    expect(screen.getByText("Users")).toBeTruthy();
-    // sync settings communicate nothing is live
+    expect(screen.getByText("Account status")).toBeTruthy();
+    expect(screen.getByText("Basic profile information")).toBeTruthy();
+    // sync section communicates nothing is live / scheduled
+    expect(screen.getByText("Not started")).toBeTruthy();
     expect(screen.getByText("Never")).toBeTruthy();
-    expect(screen.getByText("Not scheduled")).toBeTruthy();
+    expect(screen.getByText("Unavailable during preview")).toBeTruthy();
+    // first sync is aria-disabled (NOT native disabled, so it stays focusable) + a discoverable explanation via aria-describedby
     const firstSync = screen.getByRole("button", { name: "Run supervised first sync" });
-    expect((firstSync as HTMLButtonElement).disabled).toBe(true);
+    expect(firstSync.getAttribute("aria-disabled")).toBe("true");
+    expect((firstSync as HTMLButtonElement).disabled).toBe(false); // focusable → explanation is reachable
+    const noteId = firstSync.getAttribute("aria-describedby");
+    expect(noteId && document.getElementById(noteId)?.textContent).toMatch(/isn’t available yet/);
   });
 
   it("Pause / Resume toggle only the preview state", () => {
@@ -52,7 +60,7 @@ describe("connector status / management", () => {
     render(<ConnectorStatusView connector={okta} />);
     fireEvent.click(screen.getByRole("button", { name: "Pause connection" }));
     expect(getDemoConnection("okta")?.status).toBe("paused_preview");
-    expect(screen.getByText("Paused")).toBeTruthy();
+    expect(screen.getAllByText("Paused").length).toBeGreaterThanOrEqual(1); // badge + status section
     fireEvent.click(screen.getByRole("button", { name: "Resume connection" }));
     expect(getDemoConnection("okta")?.status).toBe("connected_preview");
   });

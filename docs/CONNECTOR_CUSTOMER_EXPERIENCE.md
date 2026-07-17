@@ -9,6 +9,11 @@ This doc is the canonical description of the customer experience and its safety 
 [`OKTA_CUSTOMER_CONNECTION_FLOW.md`](./OKTA_CUSTOMER_CONNECTION_FLOW.md); the build evidence is in
 [`evidence/P5E17_CONNECTOR_CUSTOMER_UI.md`](./evidence/P5E17_CONNECTOR_CUSTOMER_UI.md).
 
+> **P5E17b (visual/UX polish):** a follow-up pass refined the marketplace header + card hierarchy, the Okta detail into a
+> constrained two-column hero with an improved "can / cannot access" explanation, and the wizard into a centered setup card with a
+> **four-step** flow (Organization → Permissions → Authorize → Connected) and a strong progress bar. It changed **no** routes,
+> capabilities, or safety posture — everything below still holds. See the P5E17b changelog entry.
+
 ## Why preview-only
 
 The connector runner, credential vault, and provider registry are all still gated. Okta and Microsoft Entra are

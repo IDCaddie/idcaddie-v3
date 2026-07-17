@@ -11,18 +11,16 @@ export const metadata = { title: "Connectors · ID Caddie" };
 export default async function ConnectorsPage() {
   const connectors = listCustomerConnectors();
   return (
-    <main className="flex flex-1 flex-col gap-6 p-8">
+    <main className="flex flex-1 flex-col gap-5 p-8">
       <header className="space-y-1">
         <div className="text-sm">
           <Link href="/dashboards" className="text-zinc-500 hover:underline">
             ← Back
           </Link>
         </div>
-        <h1 className="text-xl font-semibold">Connectors</h1>
-        <p className="text-sm text-zinc-600 dark:text-zinc-400">
-          Connect your apps so ID Caddie can help you see who has access. Available connectors are in preview — you can walk
-          through connecting, and nothing syncs until a connection is fully ready.
-        </p>
+        <h1 className="text-2xl font-semibold tracking-tight">Connectors</h1>
+        <p className="text-sm text-zinc-600 dark:text-zinc-400">Connect your business apps to discover users, access, and software usage.</p>
+        <p className="text-xs text-zinc-400 dark:text-zinc-500">Preview connectors do not import data.</p>
       </header>
 
       <ConnectorMarketplace connectors={connectors} />

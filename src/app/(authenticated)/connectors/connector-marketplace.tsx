@@ -33,12 +33,16 @@ export function ConnectorMarketplace({ connectors }: { connectors: CustomerConne
     });
   }, [connectors, query, category, status, demoMap]);
 
+  // Status pills are the primary filter (standard weight); category pills are visually secondary (smaller, lighter).
   const pill = (active: boolean) =>
     `rounded-full border px-3 py-1 text-xs transition-colors ${active ? "border-zinc-900 bg-zinc-900 text-white dark:border-white dark:bg-white dark:text-zinc-900" : "border-zinc-300 text-zinc-600 hover:border-zinc-400 dark:border-zinc-700 dark:text-zinc-400"}`;
+  const catPill = (active: boolean) =>
+    `rounded-full border px-2.5 py-0.5 text-[11px] transition-colors ${active ? "border-zinc-700 bg-zinc-100 text-zinc-900 dark:border-zinc-400 dark:bg-zinc-800 dark:text-zinc-100" : "border-zinc-200 text-zinc-500 hover:border-zinc-300 dark:border-zinc-800 dark:text-zinc-400"}`;
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-col gap-3">
+      <div className="space-y-3">
+        {/* Prominent search */}
         <div>
           <label htmlFor={searchId} className="sr-only">Search connectors</label>
           <input
@@ -47,24 +51,27 @@ export function ConnectorMarketplace({ connectors }: { connectors: CustomerConne
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search connectors…"
-            className="w-full max-w-md rounded border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
+            className="w-full max-w-lg rounded-lg border border-zinc-300 px-3.5 py-2.5 text-sm shadow-sm placeholder:text-zinc-400 focus:border-zinc-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400 dark:border-zinc-700 dark:bg-zinc-900"
           />
         </div>
+        {/* Status — primary filter, directly under search */}
         <div className="flex flex-wrap gap-2" role="group" aria-label="Filter by status">
           {STATUS_FILTERS.map((s) => (
             <button key={s.key} type="button" aria-pressed={status === s.key} onClick={() => setStatus(s.key)} className={pill(status === s.key)}>{s.label}</button>
           ))}
         </div>
-        <div className="flex flex-wrap gap-2" role="group" aria-label="Filter by category">
-          <button type="button" aria-pressed={category === "all"} onClick={() => setCategory("all")} className={pill(category === "all")}>All categories</button>
+        {/* Category — secondary filter */}
+        <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Filter by category">
+          <span aria-hidden="true" className="text-[11px] uppercase tracking-wide text-zinc-400 dark:text-zinc-500">Category</span>
+          <button type="button" aria-pressed={category === "all"} onClick={() => setCategory("all")} className={catPill(category === "all")}>All categories</button>
           {CUSTOMER_CATEGORIES.map((cat) => (
-            <button key={cat} type="button" aria-pressed={category === cat} onClick={() => setCategory(cat)} className={pill(category === cat)}>{cat}</button>
+            <button key={cat} type="button" aria-pressed={category === cat} onClick={() => setCategory(cat)} className={catPill(category === cat)}>{cat}</button>
           ))}
         </div>
       </div>
 
       {filtered.length === 0 ? (
-        <div className="rounded border border-zinc-300 p-6 text-center text-sm dark:border-zinc-700">
+        <div className="rounded-xl border border-zinc-200 p-6 text-center text-sm dark:border-zinc-800">
           <div className="font-medium">No connectors match your search</div>
           <p className="mt-1 text-zinc-600 dark:text-zinc-400">Try a different search or clear the filters.</p>
         </div>

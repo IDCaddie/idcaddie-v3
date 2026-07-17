@@ -30,18 +30,27 @@ beforeEach(() => window.sessionStorage.clear());
 afterEach(cleanup);
 
 describe("connector detail page", () => {
-  it("Okta detail shows the value/reads/never-access content + Connect Okta CTA", async () => {
+  it("Okta detail: hero name, access/exclusion cards, setup time, and demoted access link", async () => {
     const { container } = render(await DetailPage({ params: Promise.resolve({ provider: "okta" }) }));
-    expect(screen.getByRole("heading", { name: "Connect Okta" })).toBeTruthy();
-    expect(screen.getByText("What ID Caddie reads")).toBeTruthy();
-    expect(screen.getByText("What ID Caddie never accesses")).toBeTruthy();
-    expect(screen.getByText("Passwords")).toBeTruthy(); // a never-accessed item
-    expect(screen.getByText(/About 2 minutes/)).toBeTruthy();
+    // Hero heading is the provider name (not "Connect Okta" — that is now the CTA)
+    expect(screen.getByRole("heading", { name: "Okta" })).toBeTruthy();
+    // access-explanation cards use the new precise wording
+    expect(screen.getByText("What ID Caddie can access")).toBeTruthy();
+    expect(screen.getByText("What ID Caddie cannot access")).toBeTruthy();
+    expect(screen.getByText(/Basic profile information, such as name, username, and email address/)).toBeTruthy();
+    expect(screen.getByText("Passwords")).toBeTruthy(); // a cannot-access item
+    expect(screen.getByText("MFA information")).toBeTruthy();
+    // setup-time text lives in the hero CTA column
+    expect(screen.getByText(/Setup takes about 2 minutes/)).toBeTruthy();
+    // primary CTA + demoted secondary (a subtle text link to #access, NOT a competing "Learn how it works" button)
     expect(screen.getByRole("link", { name: "Connect Okta" }).getAttribute("href")).toBe("/connectors/okta/connect");
-    expect(screen.getByRole("link", { name: "Learn how it works" }).getAttribute("href")).toBe("#how-it-works");
-    // detail copy (incl. the initial-scope pills) must not leak internal governance wording (Phase 11)
+    expect(screen.getByRole("link", { name: "See what ID Caddie can access" }).getAttribute("href")).toBe("#access");
+    expect(screen.queryByRole("link", { name: "Learn how it works" })).toBeNull();
+    // initial-scope pills use the concise wording (Phase 5)
+    expect(screen.getByText("No automatic sync")).toBeTruthy();
+    // detail copy must not leak internal governance wording (Phase 16)
     const text = (container.textContent ?? "").toLowerCase();
-    for (const forbidden of ["promotion", "canonical", "certificationonly", "risk-007", "credential", "kill switch", "connector runner", "task definition", "ecs"]) {
+    for (const forbidden of ["promotion", "canonical", "certificationonly", "risk-007", "credential", "kill switch", "connector runner", "pagination metadata", "task definition"]) {
       expect(text.includes(forbidden), `detail must not surface "${forbidden}"`).toBe(false);
     }
   });
@@ -54,10 +63,12 @@ describe("connector detail page", () => {
 });
 
 describe("ConnectorDetailCta (demo-aware)", () => {
-  it("connectable → Connect + Learn how it works", () => {
+  it("connectable → strong Connect CTA + setup time + subtle access link (no competing secondary button)", () => {
     render(<ConnectorDetailCta connector={oktaConnector} />);
     expect(screen.getByRole("link", { name: "Connect Okta" })).toBeTruthy();
-    expect(screen.getByRole("link", { name: "Learn how it works" })).toBeTruthy();
+    expect(screen.getByText(/Setup takes about 2 minutes/)).toBeTruthy();
+    expect(screen.getByRole("link", { name: "See what ID Caddie can access" }).getAttribute("href")).toBe("#access");
+    expect(screen.queryByRole("link", { name: "Learn how it works" })).toBeNull();
   });
 
   it("connected in preview → View connection + connected note (no Connect)", () => {

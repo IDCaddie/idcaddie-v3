@@ -22,7 +22,7 @@ type CatalogSeed = { provider: string; displayName: string; category: CustomerCa
 // The customer catalog — a curated marketing list (superset of the internal registry; the 8 not-yet-built providers are shown as
 // "Coming soon"). Internal-only providers (e.g. the scim_fixture certification fixture) are deliberately NOT listed.
 const CATALOG: readonly CatalogSeed[] = [
-  { provider: "okta", displayName: "Okta", category: "Identity", description: "Discover users and account status from your Okta organization.", capabilities: ["Users", "User status", "Approved profile fields"], setupTime: "About 2 minutes", icon: { initial: "O", tint: "sky" } },
+  { provider: "okta", displayName: "Okta", category: "Identity", description: "Discover users and account status from your Okta organization.", capabilities: ["Users", "Account status"], setupTime: "About 2 minutes", icon: { initial: "O", tint: "sky" } },
   { provider: "microsoft_entra", displayName: "Microsoft Entra ID", category: "Identity", description: "Discover directory users and account status from Microsoft Entra ID.", capabilities: ["Users", "Account status"], setupTime: "About 2 minutes", icon: { initial: "E", tint: "indigo" } },
   { provider: "slack", displayName: "Slack", category: "Collaboration", description: "Discover members and workspace access from Slack.", capabilities: ["Members", "Workspace access"], setupTime: "About 2 minutes", icon: { initial: "S", tint: "violet" } },
   { provider: "google_workspace", displayName: "Google Workspace", category: "Productivity", description: "Discover users and groups from your Google Workspace directory.", capabilities: ["Users", "Groups"], setupTime: "About 2 minutes", icon: { initial: "G", tint: "emerald" } },

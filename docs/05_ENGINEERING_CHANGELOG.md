@@ -2536,3 +2536,31 @@ OPEN, Phase C BLOCKED**. Docs: [`CONNECTOR_CUSTOMER_EXPERIENCE.md`](./CONNECTOR_
 [`evidence/P5E17_CONNECTOR_CUSTOMER_UI.md`](./evidence/P5E17_CONNECTOR_CUSTOMER_UI.md) + connector-runner
 `docs/evidence/P5E17_OKTA_UI_DORMANCY.md`.
 
+## P5E17b — connector UI visual/UX polish (preview-only, no new capability) · 2026-07-17
+
+A focused UX refinement pass over the P5E17 customer connector UI — **no new capability, no live path changed**. Marketplace:
+compact header ("Connect your business apps to discover users, access, and software usage." + a small "Preview connectors do not
+import data." note), prominent search, status filters primary / category filters visually secondary, stronger card hierarchy
+(larger icon+name, muted category, solid CTA for the connectable provider, muted-but-accessible coming-soon cards, equal card
+height, ≤2 capability chips; Okta caps → Users / Account status). Okta detail: constrained (~1120px) two-column hero (identity +
+value on the left; primary "Connect Okta" + "Setup takes about 2 minutes" on the right), the old "Learn how it works" button
+demoted to a subtle "See what ID Caddie can access" text link that scrolls to the access section; equal-height access cards with
+precise wording ("What ID Caddie can access" — Users / Account status / Basic profile information (name, username, email); "cannot
+access" — Passwords / MFA information / …); scope reduced to three chips (Users only / Read-only / No automatic sync) + one plain
+line. Wizard: moved into a centered setup card (~720px) on a clean background, simplified to **four customer-facing steps**
+(Organization → Permissions → Authorize → Connected; the connection check folds into the authorize→connected transition) with a
+strong "Step N of 4" progress bar, one preview banner (non-terminal only), guided org copy + a safe bare-label normalizer
+("acme" → "acme.okta.com"; validator UNCHANGED and strict) with a "Use a custom Okta domain" advanced toggle, plain-language
+permissions + one technical scope (`okta.users.read`), a neutral "Authorize with Okta" preview panel (no Okta-branding mimicry, no
+redirect), and concrete honest checks (Okta organization confirmed / Read-only access approved / No data imported yet / Ready for
+first sync — no encryption/health/tenant claims). Management page: clearer header + summary + sectioned panels; first-sync uses
+`aria-disabled` (stays focusable so its explanation is announced). A11y/copy fixes from three reviewers applied (equal-height card
+wrappers, empty-state radius, gated preview banner, `role="alert"` on the org error, plain-language security wording, removed
+redundant preview bullet). `tsc` exit 0 + `lint` 0 errors + **1404 tests (82 in the connector UI) green** + `next build` green
+(routes unchanged: `/connectors`, `/connectors/[provider]`, `…/connect`, `…/status`; callback/review preserved; RSC boundary
+clean). **No live OAuth, no Okta callback, no Okta API/credential/token, no ECS/sync/schedule, no connector-table or DB write, no
+production target — none.** Okta + `microsoft_entra` remain `certificationOnly`; **RISK-007 OPEN, Phase C BLOCKED**. Runner
+unchanged. Docs updated: [`CONNECTOR_CUSTOMER_EXPERIENCE.md`](./CONNECTOR_CUSTOMER_EXPERIENCE.md),
+[`OKTA_CUSTOMER_CONNECTION_FLOW.md`](./OKTA_CUSTOMER_CONNECTION_FLOW.md),
+[`evidence/P5E17_CONNECTOR_CUSTOMER_UI.md`](./evidence/P5E17_CONNECTOR_CUSTOMER_UI.md).
+

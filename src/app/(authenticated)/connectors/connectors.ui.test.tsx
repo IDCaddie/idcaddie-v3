@@ -37,6 +37,29 @@ describe("/connectors marketplace", () => {
     expect(container.querySelectorAll("ul li").length).toBeGreaterThanOrEqual(12);
   });
 
+  it("shows the compact P5E17b header copy + preview note", async () => {
+    await renderPage();
+    expect(screen.getByRole("heading", { level: 1, name: "Connectors" })).toBeTruthy();
+    expect(screen.getByText("Connect your business apps to discover users, access, and software usage.")).toBeTruthy();
+    expect(screen.getByText("Preview connectors do not import data.")).toBeTruthy();
+    // the old long defensive copy is gone
+    expect(screen.queryByText(/nothing syncs until a connection is fully ready/)).toBeNull();
+  });
+
+  it("Okta card has a strong CTA and at most two capability chips; coming-soon cards are muted + disabled", async () => {
+    const { container } = await renderPage();
+    // Okta capability chips reduced to two (Users, Account status)
+    const oktaCard = screen.getByText("Okta").closest("a");
+    expect(oktaCard).not.toBeNull();
+    const chips = (oktaCard as HTMLElement).querySelectorAll("span.rounded.border");
+    expect(chips.length).toBeLessThanOrEqual(2);
+    // a coming-soon card's CTA is marked disabled (muted, non-interactive)
+    const sf = screen.getByText("Salesforce").closest("div");
+    const disabledCta = container.querySelector('[aria-disabled="true"]');
+    expect(disabledCta?.textContent).toBe("Coming soon");
+    expect(sf).not.toBeNull();
+  });
+
   it("preserves the operator sync-review link and introduces no run/connect server action", async () => {
     await renderPage();
     const review = screen.getByRole("link", { name: "Go to sync review" });

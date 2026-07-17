@@ -1,5 +1,22 @@
 # P5E17 — customer connector UI (evidence)
 
+> **P5E17b addendum (visual/UX polish, 2026-07-17):** a follow-up refinement pass on this same UI — **no new capability, no route
+> change, no safety-posture change.** Marketplace: compact header ("Connect your business apps to discover users, access, and
+> software usage." + "Preview connectors do not import data."), prominent search, secondary category filters, stronger card
+> hierarchy (larger icon/name, muted category, solid CTA for the connectable provider, muted-but-accessible coming-soon, equal card
+> height, ≤2 chips; Okta caps → Users / Account status). Okta detail: constrained two-column hero (~1120px), primary CTA + "Setup
+> takes about 2 minutes" on the right, demoted "See what ID Caddie can access" text link, equal-height access cards with precise
+> wording, three-chip scope + one line. Wizard: centered setup card (~720px), **four steps** (Organization → Permissions →
+> Authorize → Connected; check folded into authorize→connected) with a strong "Step N of 4" bar, one preview banner (non-terminal),
+> safe bare-label normalizer (`normalizeOrgInput`; validator UNCHANGED) + custom-domain toggle, neutral "Authorize with Okta"
+> panel, concrete honest checks (no encryption/health/tenant claims). Management: header + summary + sectioned panels; first-sync
+> `aria-disabled` (focusable). Three reviewers (visual / copy / a11y+responsive) returned **no P0**; their P1s were applied
+> (equal-height wrappers, empty-state radius, gated banner, `role="alert"` org error, plain-language security wording, dropped a
+> redundant preview bullet). Validation after polish: `tsc` 0, `lint` 0 errors, **1404 tests (82 connector-UI) green**, `next
+> build` green (routes unchanged; callback/review preserved; RSC boundary clean), no-real-tokens pass, docs-drift 0/0, `diff
+> --check` clean, NUL scan clean. Runner unchanged. Details: the P5E17b changelog entry. The original P5E17 evidence below is
+> unchanged.
+
 **Status: the customer-facing connector experience (marketplace → Okta detail → simulated connect wizard → preview management) is
 built, tested, and GREEN as a PREVIEW.** Date 2026-07-17. **No live connector run, no credential, no OAuth, no token, no Okta API
 call, no ECS task, no schedule, no canonical promotion, no production access — none.** Okta and Microsoft Entra remain

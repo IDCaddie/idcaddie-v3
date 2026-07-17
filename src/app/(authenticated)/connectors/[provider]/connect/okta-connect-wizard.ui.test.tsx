@@ -2,8 +2,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, cleanup, fireEvent } from "@testing-library/react";
 
-// P5E17 — the Okta preview connection WIZARD. Proves the simulated 5-step flow, org-address validation surfacing, and the
-// CORE safety properties: NO real OAuth redirect (router.push / window.location never navigate to Okta), NO password/token/
+// P5E17 / P5E17b — the Okta preview connection WIZARD. Proves the SIMULATED 4-step flow, org-address validation surfacing, and
+// the CORE safety properties: NO real OAuth redirect (router.push / window.location never navigate to Okta), NO password/token/
 // secret field, and the ONLY persisted state is the sessionStorage preview connection (written on success, absent on failure).
 const push = vi.fn();
 const replace = vi.fn();
@@ -28,31 +28,43 @@ const typeOrg = (v: string) => fireEvent.change(screen.getByLabelText("Okta orga
 const submitOrg = () => fireEvent.click(screen.getByRole("button", { name: "Continue" }));
 
 describe("Okta connect wizard — flow", () => {
-  it("rejects a bad org address, accepts a valid one, then walks to a successful preview connection", () => {
+  it("rejects a bad org address, accepts a valid one, then walks the 4-step flow to a successful preview connection", () => {
     render(<OktaConnectWizard provider="okta" />);
-    // preview banner is unmissable on step one
-    expect(screen.getByText(/Preview mode/)).toBeTruthy();
+    // exactly ONE preview banner, and it shows the concise Phase-10 copy
+    expect(screen.getAllByText(/Preview mode/).length).toBe(1);
+    // step 1 of 4 — Organization, with the guided helper copy
+    expect(screen.getByText("Step 1 of 4")).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Your Okta organization" })).toBeTruthy();
+    expect(screen.getByText("Enter the address your team uses to sign in to Okta.")).toBeTruthy();
 
     // invalid → inline error, stays on org step
     typeOrg("evil.com");
     submitOrg();
     expect(screen.getByText(/ending in .okta.com/)).toBeTruthy();
-    expect(screen.queryByText("Permissions")).toBeNull();
+    expect(screen.queryByText("Step 2 of 4")).toBeNull();
 
-    // valid → permissions step (read-only)
+    // valid → step 2 Permissions (read-only)
     typeOrg("acme.okta.com");
     submitOrg();
+    expect(screen.getByText("Step 2 of 4")).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Permissions" })).toBeTruthy();
+    expect(screen.getByText("ID Caddie requests read-only access to:")).toBeTruthy();
     expect(screen.getByText(/okta.users.read/)).toBeTruthy();
+    expect(screen.getByText("ID Caddie cannot change users, passwords, MFA settings, or applications.")).toBeTruthy();
 
-    // permissions → authorize PREVIEW (no redirect)
+    // step 3 → Authorize PREVIEW (no redirect), Phase-10 copy
     fireEvent.click(screen.getByRole("button", { name: "Continue to Okta" }));
-    expect(screen.getByRole("heading", { name: "Okta authorization preview" })).toBeTruthy();
+    expect(screen.getByText("Step 3 of 4")).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Authorize with Okta" })).toBeTruthy();
+    expect(screen.getByText(/redirected securely to Okta to approve read-only access/)).toBeTruthy();
     expect(push).not.toHaveBeenCalled(); // NO navigation to Okta
 
-    // simulate approval → connection check → complete
+    // simulate approval → concrete connection checks → complete
     fireEvent.click(screen.getByRole("button", { name: "Simulate approval" }));
-    expect(screen.getByRole("heading", { name: "Connection check" })).toBeTruthy();
+    expect(screen.getByText("Okta organization confirmed")).toBeTruthy();
+    expect(screen.getByText("No data imported yet")).toBeTruthy();
+    expect(screen.getByText("Ready for first sync")).toBeTruthy();
+    expect(screen.queryByText("Connection encrypted")).toBeNull(); // no unverifiable claim
     fireEvent.click(screen.getByRole("button", { name: "Complete connection" }));
 
     // success + the ONLY state write: the sessionStorage preview connection
@@ -63,6 +75,18 @@ describe("Okta connect wizard — flow", () => {
     expect(push).not.toHaveBeenCalled(); // still no real navigation anywhere in the happy path
   });
 
+  it("normalizes a bare organization label to <label>.okta.com (near one-click)", () => {
+    render(<OktaConnectWizard provider="okta" />);
+    typeOrg("acme"); // bare label, no dot
+    submitOrg();
+    // advances (normalized to acme.okta.com and validated) and records the normalized host on completion
+    expect(screen.getByText("Step 2 of 4")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Continue to Okta" }));
+    fireEvent.click(screen.getByRole("button", { name: "Simulate approval" }));
+    fireEvent.click(screen.getByRole("button", { name: "Complete connection" }));
+    expect(getDemoConnection("okta")?.orgHost).toBe("acme.okta.com");
+  });
+
   it("a simulated failed approval writes NO preview state", () => {
     render(<OktaConnectWizard provider="okta" />);
     typeOrg("acme.okta.com");
@@ -71,6 +95,22 @@ describe("Okta connect wizard — flow", () => {
     fireEvent.click(screen.getByRole("button", { name: "Simulate a failed approval" }));
     expect(screen.getByText("Connection not completed")).toBeTruthy();
     expect(getDemoConnection("okta")).toBeNull();
+  });
+});
+
+describe("Okta connect wizard — accessibility", () => {
+  it("marks the active progress step with aria-current and does not announce terminal states as a numbered step", () => {
+    const { container } = render(<OktaConnectWizard provider="okta" />);
+    // exactly one active step marker on the progress bar
+    expect(container.querySelectorAll('[aria-current="step"]').length).toBe(1);
+    // drive to the terminal failed state
+    typeOrg("acme.okta.com");
+    submitOrg();
+    fireEvent.click(screen.getByRole("button", { name: "Continue to Okta" }));
+    fireEvent.click(screen.getByRole("button", { name: "Simulate a failed approval" }));
+    // progress bar (and its step numbering) is gone on the terminal state
+    expect(screen.queryByText(/Step \d of 4/)).toBeNull();
+    expect(container.querySelector('[role="status"]')).not.toBeNull(); // result announced via role=status
   });
 });
 

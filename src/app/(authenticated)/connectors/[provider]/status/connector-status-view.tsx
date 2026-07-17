@@ -8,13 +8,17 @@ import { useDemoConnection } from "@/lib/customer-connectors/use-demo-connection
 import { setDemoConnection, clearDemoConnection } from "@/lib/customer-connectors/demo-store";
 import type { CustomerConnector } from "@/lib/customer-connectors/catalog-types";
 
-const primary = "inline-block rounded bg-zinc-900 px-4 py-2 text-sm text-white disabled:cursor-not-allowed disabled:opacity-50 dark:bg-white dark:text-zinc-900";
-const secondary = "inline-block rounded border border-zinc-300 px-4 py-2 text-sm dark:border-zinc-700";
-const panel = "rounded-lg border border-zinc-200 p-4 dark:border-zinc-800";
+const primary = "inline-flex items-center justify-center rounded-md bg-zinc-900 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50 dark:bg-white dark:text-zinc-900";
+const secondary = "inline-flex items-center justify-center rounded-md border border-zinc-300 px-4 py-2 text-sm dark:border-zinc-700";
+const panel = "rounded-xl border border-zinc-200 p-5 dark:border-zinc-800";
+const heading = "text-sm font-semibold text-zinc-900 dark:text-zinc-100";
+// First-sync is not available in preview. Uses aria-disabled (NOT native disabled) so it stays keyboard-focusable and its
+// aria-describedby explanation is reachable/announced; the onClick is a no-op guard.
+const firstSyncDisabled = "inline-flex cursor-not-allowed items-center justify-center rounded-md bg-zinc-100 px-4 py-2 text-sm font-semibold text-zinc-400 dark:bg-zinc-800 dark:text-zinc-500";
 
 // The connected-state management view for a preview connection. Entirely driven by the sessionStorage demo state. Actions mutate
 // ONLY the demo state — NO server execution authorization, NO task launch, NO schedule, NO credential/token/API. "Run supervised
-// first sync" is disabled (a safe explanation), scheduling is shown as unavailable.
+// first sync" is disabled (with a plain-language explanation); scheduling is shown as unavailable during preview.
 export function ConnectorStatusView({ connector: c }: { connector: CustomerConnector }) {
   const demo = useDemoConnection(c.provider);
   const router = useRouter();
@@ -35,49 +39,63 @@ export function ConnectorStatusView({ connector: c }: { connector: CustomerConne
   const paused = demo.status === "paused_preview";
 
   return (
-    <div className="max-w-3xl space-y-5" aria-live="polite">
-      <div className="flex items-center gap-4">
-        <ConnectorIcon initial={c.icon.initial} tint={c.icon.tint} size="lg" />
-        <div>
-          <div className="text-lg font-semibold">{c.displayName}</div>
+    <div className="max-w-3xl space-y-6" aria-live="polite">
+      {/* Header */}
+      <div className="flex items-start gap-4">
+        <ConnectorIcon initial={c.icon.initial} tint={c.icon.tint} size="xl" />
+        <div className="space-y-1">
+          <h2 className="text-xl font-semibold tracking-tight">{c.displayName}</h2>
           <div className="flex items-center gap-2 text-sm">
             <Badge tone={paused ? "attention" : "success"} variant="solid">{paused ? "Paused" : "Connected"}</Badge>
-            <span className="text-zinc-500 dark:text-zinc-400">Preview mode · No sync run yet</span>
+            <span className="text-zinc-500 dark:text-zinc-400">· Preview</span>
           </div>
+          <p className="text-sm text-zinc-600 dark:text-zinc-400">{paused ? "Paused — resume to continue in preview." : "Ready for a supervised first sync"}</p>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+      {/* Sections */}
+      <div className="grid gap-4 sm:grid-cols-2">
         <section className={panel}>
-          <h2 className="text-sm font-medium">Data access</h2>
+          <h3 className={heading}>Connection status</h3>
           <ul className="mt-2 space-y-1 text-sm text-zinc-600 dark:text-zinc-400">
-            <li>Users</li><li>User status</li><li>Approved profile fields</li>
+            <li>{paused ? "Paused" : "Connected"}</li>
+            <li>No sync has run</li>
           </ul>
         </section>
+
         <section className={panel}>
-          <h2 className="text-sm font-medium">Security</h2>
+          <h3 className={heading}>Data access</h3>
+          <ul className="mt-2 space-y-1 text-sm text-zinc-600 dark:text-zinc-400">
+            <li>Users</li>
+            <li>Account status</li>
+            <li>Basic profile information</li>
+          </ul>
+        </section>
+
+        <section className={panel}>
+          <h3 className={heading}>Sync</h3>
+          <dl className="mt-2 space-y-1 text-sm text-zinc-600 dark:text-zinc-400">
+            <div className="flex justify-between gap-2"><dt>First sync</dt><dd className="text-zinc-800 dark:text-zinc-200">Not started</dd></div>
+            <div className="flex justify-between gap-2"><dt>Last sync</dt><dd className="text-zinc-800 dark:text-zinc-200">Never</dd></div>
+            <div className="flex justify-between gap-2"><dt>Scheduling</dt><dd className="text-zinc-800 dark:text-zinc-200">Unavailable during preview</dd></div>
+          </dl>
+        </section>
+
+        <section className={panel}>
+          <h3 className={heading}>Security</h3>
           <ul className="mt-2 space-y-1 text-sm text-zinc-600 dark:text-zinc-400">
             <li>Read-only</li>
-            <li>Least privilege</li>
-            <li>Reauthorization: <span className="text-zinc-800 dark:text-zinc-200">Not required</span></li>
-            <li>Connection health: <span className="text-zinc-800 dark:text-zinc-200">Good (preview)</span></li>
+            <li>Only the access listed above</li>
+            <li>Reauthorization not required</li>
           </ul>
-        </section>
-        <section className={`${panel} sm:col-span-2`}>
-          <h2 className="text-sm font-medium">Sync settings</h2>
-          <dl className="mt-2 grid grid-cols-1 gap-x-6 gap-y-1 text-sm text-zinc-600 sm:grid-cols-2 dark:text-zinc-400">
-            <div className="flex justify-between gap-2"><dt>First sync</dt><dd className="text-zinc-800 dark:text-zinc-200">Manual</dd></div>
-            <div className="flex justify-between gap-2"><dt>Scheduling</dt><dd className="text-zinc-800 dark:text-zinc-200">Unavailable in preview</dd></div>
-            <div className="flex justify-between gap-2"><dt>Last sync</dt><dd className="text-zinc-800 dark:text-zinc-200">Never</dd></div>
-            <div className="flex justify-between gap-2"><dt>Next sync</dt><dd className="text-zinc-800 dark:text-zinc-200">Not scheduled</dd></div>
-          </dl>
         </section>
       </div>
 
+      {/* Actions */}
       <section className="space-y-3">
-        <h2 className="text-sm font-medium">Actions</h2>
+        <h3 className={heading}>Actions</h3>
         <div className="flex flex-wrap gap-2">
-          <button type="button" disabled title="Available after preview" aria-describedby={`${c.provider}-sync-note`} className={primary}>Run supervised first sync</button>
+          <button type="button" aria-disabled="true" aria-describedby={`${c.provider}-sync-note`} onClick={(e) => e.preventDefault()} className={firstSyncDisabled}>Run supervised first sync</button>
           {paused ? (
             <button type="button" onClick={() => setDemoConnection(c.provider, { ...demo, status: "connected_preview" })} className={secondary}>Resume connection</button>
           ) : (
@@ -86,7 +104,7 @@ export function ConnectorStatusView({ connector: c }: { connector: CustomerConne
           <button type="button" onClick={() => router.push(`/connectors/${c.provider}/connect`)} className={secondary}>Reconnect</button>
           <button type="button" onClick={() => { clearDemoConnection(c.provider); setDisconnected(true); }} className={secondary}>Disconnect</button>
         </div>
-        <p id={`${c.provider}-sync-note`} className="text-xs text-zinc-500">The first sync isn’t live yet. When it is, it runs once, manually, under supervision — nothing runs automatically and nothing is imported in preview.</p>
+        <p id={`${c.provider}-sync-note`} className="text-xs text-zinc-500">The first sync isn’t available yet. When it is, it runs once, manually, under supervision — nothing runs automatically and nothing is imported during preview.</p>
       </section>
     </div>
   );

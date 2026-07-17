@@ -4,7 +4,30 @@ import { describe, it, expect, vi } from "vitest";
 // internal→customer mapping (nothing live, only Okta connectable, defense-in-depth against a genuinely-ready provider),
 // and the demo store's server-side no-op safety (it must never touch anything when there is no browser).
 
-import { validateOktaOrgHost } from "./okta-content";
+import { validateOktaOrgHost, normalizeOrgInput } from "./okta-content";
+
+describe("normalizeOrgInput (bare-label convenience — no new host shape accepted)", () => {
+  it("appends .okta.com to a bare single label", () => {
+    expect(normalizeOrgInput("acme")).toBe("acme.okta.com");
+    expect(normalizeOrgInput("  ACME  ")).toBe("acme.okta.com");
+    expect(normalizeOrgInput("my-company")).toBe("my-company.okta.com");
+  });
+  it("passes an already-qualified / https / punctuated value through unchanged (validator stays authoritative)", () => {
+    expect(normalizeOrgInput("acme.okta.com")).toBe("acme.okta.com");
+    expect(normalizeOrgInput("acme.oktapreview.com")).toBe("acme.oktapreview.com");
+    expect(normalizeOrgInput("https://acme.okta.com")).toBe("https://acme.okta.com");
+    expect(normalizeOrgInput("evil.com/path")).toBe("evil.com/path");
+  });
+  it("does NOT append in custom-domain (advanced) mode", () => {
+    expect(normalizeOrgInput("acme", { customDomain: true })).toBe("acme");
+  });
+  it("never turns a bare label into a non-okta or unsafe host (still validates strictly)", () => {
+    // a bare label always yields <label>.okta.com, which the strict validator accepts as an okta apex
+    expect(validateOktaOrgHost(normalizeOrgInput("acme"))).toEqual({ ok: true, host: "acme.okta.com" });
+    // anything with a dot passes through and is validated as-is (no silent widening)
+    expect(validateOktaOrgHost(normalizeOrgInput("evil.com")).ok).toBe(false);
+  });
+});
 
 describe("validateOktaOrgHost (SSRF-safe org address)", () => {
   const accept: [string, string][] = [

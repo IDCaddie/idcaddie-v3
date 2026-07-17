@@ -3,13 +3,20 @@
 
 export const OKTA_CONTENT = {
   title: "Connect Okta",
-  valueStatement:
-    "Discover users and account status from your Okta organization so ID Caddie can identify active, suspended, deactivated, and unmanaged accounts.",
-  reads: ["Users", "User status", "Approved profile fields"],
-  doesNotAccess: ["Passwords", "MFA factors", "Password resets", "System logs", "Application changes", "Lifecycle changes", "Write permissions"],
-  initialScope: ["Users only", "Read-only", "No automatic scheduling", "No changes to your accounts"],
+  valueStatement: "Discover users and account status from your Okta organization.",
+  // "What ID Caddie can access" — only fields the current connector model actually reads.
+  accessTitle: "What ID Caddie can access",
+  reads: ["Users", "Account status", "Basic profile information, such as name, username, and email address"],
+  noAccessTitle: "What ID Caddie cannot access",
+  doesNotAccess: ["Passwords", "MFA information", "Password resets", "System logs", "Application changes", "Account lifecycle changes", "Write permissions"],
+  // Initial scope — three concise indicators + one plain-language reassurance line.
+  initialScope: ["Users only", "Read-only", "No automatic sync"],
+  scopeNote: "Nothing is imported until the connection is approved and the first sync is started.",
+  // Permissions step: plain-language read-only requests + the one explicit technical scope + a reassurance line.
+  requestsReadOnly: ["View users", "View account status", "View basic profile information"],
   scopeLabel: "okta.users.read",
-  setupTime: "About 2 minutes",
+  permissionsAssurance: "ID Caddie cannot change users, passwords, MFA settings, or applications.",
+  setupTime: "Setup takes about 2 minutes",
 } as const;
 
 // The organization host validation. Accepts only a bare Okta-shaped hostname; rejects schemes, IPs, localhost, internal/private
@@ -26,6 +33,17 @@ const BARE_HOST = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])
 // entered. (Custom vanity domains are a later, separately-designed concern — not accepted in this preview.)
 const OKTA_APEX = /\.(okta\.com|oktapreview\.com|okta-emea\.com)$/;
 const INTERNAL_SUFFIX = /\.(internal|local|localdomain|lan|intranet|corp|home|test|example|invalid)$/;
+
+// Near-one-click convenience: if the user typed a BARE organization label (a single DNS label — no dot, scheme, space, or other
+// punctuation), assume the standard Okta domain and append ".okta.com". Anything already qualified (has a dot), any https:// form,
+// or the advanced custom-domain mode passes through UNCHANGED — so validateOktaOrgHost below stays exactly as strict and NO new
+// host shape is ever accepted. Pure, no network. `customDomain` (advanced) disables the append so the user supplies the full host.
+export function normalizeOrgInput(raw: string, opts?: { customDomain?: boolean }): string {
+  if (opts?.customDomain) return raw;
+  const v = raw.trim().toLowerCase();
+  if (/^[a-z0-9][a-z0-9-]*$/.test(v)) return `${v}.okta.com`;
+  return raw;
+}
 
 export function validateOktaOrgHost(raw: unknown): OrgHostResult {
   if (typeof raw !== "string") return { ok: false, reason: "empty" };

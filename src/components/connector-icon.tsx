@@ -14,7 +14,7 @@ const TINT: Record<IconTint, string> = {
   cyan: "bg-cyan-100 text-cyan-700 dark:bg-cyan-950 dark:text-cyan-300",
   teal: "bg-teal-100 text-teal-700 dark:bg-teal-950 dark:text-teal-300",
 };
-const SIZE = { sm: "h-8 w-8 text-sm", md: "h-10 w-10 text-base", lg: "h-12 w-12 text-lg" } as const;
+const SIZE = { sm: "h-8 w-8 text-sm", md: "h-11 w-11 text-lg", lg: "h-12 w-12 text-lg", xl: "h-16 w-16 text-2xl" } as const;
 
 export function ConnectorIcon({ initial, tint, size = "md" }: { initial: string; tint: IconTint; size?: keyof typeof SIZE }) {
   return (
