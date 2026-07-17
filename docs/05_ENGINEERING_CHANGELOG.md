@@ -2482,3 +2482,26 @@ packet + a fresh explicit GO. No secret/token/Graph/ECS/pilot-enable/customer-da
 **RISK-007 OPEN, Phase C BLOCKED**; staging only. Evidence: [`docs/evidence/P5E15_FIRST_CUSTOMER_PILOT_PREFLIGHT.md`](./evidence/P5E15_FIRST_CUSTOMER_PILOT_PREFLIGHT.md)
 + connector-runner `docs/evidence/P5E15_ENTRA_FIRST_CUSTOMER_PILOT_PREFLIGHT.md`.
 
+## P5E16 — Okta Workforce Identity connector foundation (certification-only) · 2026-07-17
+
+A provider-neutral, fail-closed **Okta** user-discovery connector FOUNDATION (in `idcaddie-connector-runner`) mirroring how Entra
+began — but NOT copied: documented Okta-specific divergences (private_key_jwt auth vs client_secret; opaque ids; per-tenant
+server-derived org host; bare-array response; RFC 5988 Link-header `after` cursor; string status enum; an Okta-specific strict
+manifest the vendored framework schema can't express). 11 inert `okta-*` contract modules + a synthetic certification harness + 84
+tests. **Okta is `certificationOnly`, disabled/future in the vendored provider-registry, and deliberately NOT registered in the
+runner framework-registry — so `resolveFrameworkProvider("okta")` fails closed (`provider_not_registered`): non-runnable, not
+customer-selectable, no live wiring/entrypoint/composition/deploy artifact, no manifest in the vendored (live) dir.** No DB
+migration (`connectors.provider` + control-plane tables are provider-neutral). Reuses the neutral controls unchanged (http-safety
+SSRF/exact-host guard, live/provider http clients, secret-provider, discovery-facts, db-writer). Auth: OAuth 2.0 service app with
+private_key_jwt (least-privilege `okta.users.read`; SSWS legacy modeled as a secondary type). v1 scope: users only (groups/apps/
+factors/logs deferred). Proven: credential isolation (staging ARN pinned to `/connector/okta/`; metadata-only doc parser — no
+key/token leak; wrong tenant/connector/provider/version/status fail; cross-tenant + cross-provider token-cache bleed defense;
+server-derived host; caller can't inject host/token/issuer/org/secret-ref); data minimization (no factor/MFA/credentials; unexpected
+profile fields excluded; discovery-only facts `review_status=pending`; dedup; no raw payload; no promotion); deterministic
+pagination + bounded retry; dormancy. `tsc` + **817 tests** + `vendor:verify` + `deploy:check` green. **No real Okta tenant/
+credential/token/OAuth-token/API/ECS/schedule/promotion/production — none.** `microsoft_entra` unchanged; **RISK-007 OPEN, Phase C
+BLOCKED**; synthetic-staging + certification only. Docs: [`OKTA_CONNECTOR_MODEL.md`](./OKTA_CONNECTOR_MODEL.md),
+[`OKTA_CREDENTIAL_AND_CONSENT_MODEL.md`](./OKTA_CREDENTIAL_AND_CONSENT_MODEL.md), evidence
+[`evidence/P5E16_OKTA_CONNECTOR_FOUNDATION.md`](./evidence/P5E16_OKTA_CONNECTOR_FOUNDATION.md) + connector-runner
+`docs/OKTA_AUTHENTICATION_DESIGN.md`/`OKTA_CERTIFICATION_PLAN.md`/`OKTA_STAGING_OPERATIONS.md`/`docs/evidence/P5E16_OKTA_CONNECTOR_FOUNDATION.md`.
+
