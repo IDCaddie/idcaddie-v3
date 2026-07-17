@@ -38,7 +38,7 @@ Only these (all NON-secret) — via the approved staging config path (`CONNECTOR
 - the redirect URI as registered (for byte-match confirmation).
 
 ## 10. How the secret material must be entered (never exposed)
-The private signing key / any secret material is entered **directly into AWS Secrets Manager** under `/idcaddie/staging/connector/okta/<segment>` (staging account 833822972703, ca-central-1) by the operator — **never** pasted into chat, Git, a PR, a screenshot, shell history, or a log. See `idcaddie-connector-runner/deploy/OKTA_STAGING_IAM.md` for the least-privilege read-grant spec.
+**P5E18c provisioned the staging secret container + IAM grant (dormant, empty).** The container **`/idcaddie/staging/connector/okta/staging-app-v1`** (staging account 833822972703, ca-central-1) exists with **NO secret material** (tagged `State=dormant`, `SecretMaterial=none`), and the runner task role already has least-privilege `GetSecretValue` on it. The operator enters the private signing key **directly into that existing Secrets Manager secret** (put a new version) — **never** pasted into chat, Git, a PR, a screenshot, shell history, or a log. Do this only under the future GO. See `idcaddie-connector-runner/deploy/OKTA_STAGING_IAM.md`.
 
 ## 11. How to confirm creation without revealing the secret
 - Confirm the secret EXISTS by name/ARN metadata only (`aws secretsmanager describe-secret` — metadata, never `get-secret-value`).
