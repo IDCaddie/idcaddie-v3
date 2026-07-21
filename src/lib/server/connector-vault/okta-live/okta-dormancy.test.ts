@@ -1,26 +1,13 @@
 import { describe, it, expect } from "vitest";
-import { createDormantOktaTokenExchange, OktaTokenExchangeNotAvailableError } from "./okta-token-exchange";
 import { oktaExecutionEligibility, dormantOktaExecutionGates, OKTA_CONNECTION_DISPLAY_STATES } from "./okta-connection-state";
 import { evaluateOktaFirstSync, NO_OKTA_FIRST_SYNC_AUTHORIZATION, OKTA_FIRST_SYNC_DEFAULTS, type OktaFirstSyncAuthorization } from "./okta-first-sync-authorization";
 import { buildOktaAuditEvent, OktaAuditEventError, OKTA_AUDIT_EVENT_CODES } from "./okta-audit-events";
 import { planOktaDisconnect } from "./okta-disconnect";
 
-// P5E18a Phase 8/10/11/13/15/19 — the dormancy proofs: nothing runs, exchanges, or is authorized in this phase.
+// The dormancy proofs for the Okta API Services connector: nothing runs, mints a token, or is authorized in this phase. (The
+// Model-A browser-OAuth token-exchange dormancy proof was removed with that cluster; execution dormancy is proven below.)
 
-describe("token exchange is a dormant, throwing seam (Phase 8)", () => {
-  it("createDormantOktaTokenExchange().exchange throws — no network, no token", async () => {
-    const ex = createDormantOktaTokenExchange();
-    await expect(ex.exchange({ issuerUrl: "https://acme.okta.com", authorizationCode: "x", pkceVerifier: "y", redirectUri: "z", clientCredentialReference: "ref", timeoutMs: 1000, signal: new AbortController().signal, correlationId: "c" }))
-      .rejects.toBeInstanceOf(OktaTokenExchangeNotAvailableError);
-  });
-  it("the success type exposes only a token REFERENCE, never a raw token field", () => {
-    // Compile-time + shape assertion: the module's success shape has accessTokenRef (a branded ref), not access_token/token.
-    const src = OktaTokenExchangeNotAvailableError.toString();
-    expect(src).not.toContain("access_token");
-  });
-});
-
-describe("no Okta connection is runnable in P5E18a (Phase 10)", () => {
+describe("no Okta connection is runnable (execution dormancy)", () => {
   it("the dormant execution gates yield runnable=false with every gate failing", () => {
     const r = oktaExecutionEligibility(dormantOktaExecutionGates());
     expect(r.runnable).toBe(false);
