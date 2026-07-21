@@ -14,6 +14,13 @@ if (typeof (globalThis as { window?: unknown }).window !== "undefined") {
 // (e.g. "okta_oauth") silently fails closed at the DB JOIN; pin it here so every Okta module imports the one constant.
 export const OKTA_PROVIDER_ID = "okta" as const;
 
+// Okta client ids (Web App or API Services) are opaque, prefixed `0oa` + a bounded safe charset (NOT a UUID). Validated by SHAPE
+// only — a NON-SECRET value. (Moved here from the removed Model-A okta-authorize-url so it survives the browser-OAuth cleanup.)
+const OKTA_CLIENT_ID_RE = /^0oa[a-zA-Z0-9]{10,40}$/;
+export function isValidOktaClientId(v: unknown): v is string {
+  return typeof v === "string" && OKTA_CLIENT_ID_RE.test(v);
+}
+
 // Customer-safe, READ-ONLY pilot capabilities. These are the ONLY things a future Okta connection may read.
 export const OKTA_PILOT_CAPABILITIES = Object.freeze(["read_users", "read_account_status", "read_basic_profile"] as const);
 export type OktaPilotCapability = (typeof OKTA_PILOT_CAPABILITIES)[number];
