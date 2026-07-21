@@ -17,8 +17,17 @@ retired. **The secret value was not retrieved or inspected** (metadata only: a f
   new grant; the runner's column-scoped SELECT is NOT widened. Validated: `check-migration-safety` + the RLS harness (all
   migrations on throwaway Postgres) green before hosted apply. Applied to staging (only `0049` pending; ref confirmed).
 - **`okta-config-gate.ts`** — the configuration-only gate. Permits ONLY non-secret config persistence for staging + okta +
-  approved org (A1) + approved issuer + exact `okta.users.read` + admin. `oktaConfigGatePermitsExecution()` is **always false** —
-  it never authorizes token minting, private_key_jwt signing, Okta API calls, sync, scheduling, or first-sync. Tested (15 cases).
+  approved org (A1) + the issuer approved **for that org** (a per-org map, not independent lists) + exact `okta.users.read` +
+  admin. `oktaConfigGatePermitsExecution()` is **always false** — it never authorizes token minting, private_key_jwt signing,
+  Okta API calls, sync, scheduling, or first-sync. Tested (16 cases). **This gate is a reference/validation module**: the rows
+  below were persisted via the privileged `service_role` path (as designed — request/runner roles cannot write these tables). The
+  config-only ceiling is therefore enforced by (i) the DB CHECK from `0050` (below), (ii) RLS deny-all on the write tables, and
+  (iii) operator discipline on the service_role path — with the gate as the codified contract a future wired persistence path uses.
+- **`0050_connector_state_and_okta_ref_hardening.sql`** (adversarial-review defense-in-depth) — (a) narrows the `connection_state`
+  CHECK to `configured|verification_pending` so the DB itself rejects any post-verification ("connected") state this phase; later
+  GO-gated migrations widen it as each state is first written. (b) adds a provider-conditional CHECK pinning any `okta` credential
+  reference to the staging okta Secrets Manager namespace/account, so an errant service_role write cannot aim the runner at an
+  arbitrary ARN. Non-destructive; validated before hosted apply.
 
 ## Hosted config persisted (staging, service_role path; redacted)
 - **Issuer binding** (A1 Procurement): provider `okta`, host `trial-5294016.okta.com`, issuer `https://trial-5294016.okta.com`,
@@ -32,8 +41,9 @@ retired. **The secret value was not retrieved or inspected** (metadata only: a f
 - `connector_credential_references`: RLS on, **0 request-path policies → deny-all** to anon/authenticated; only the runner's
   column-scoped SELECT + service_role can resolve it. The full ARN is never exposed to a request role.
 - `connector_okta_issuer_bindings`: 1 policy — org-managers read only their own org's binding (no cross-org listing).
-- Tenant isolation via composite same-tenant FKs (`(organization_id, tenant_id)`, `(connector_id, tenant_id)`); the secret
-  namespace is pinned (runner ARN regex). No production identifiers.
+- Tenant isolation via composite same-tenant FKs (`(organization_id, tenant_id)`, `(connector_id, tenant_id)`). The secret
+  namespace is pinned in two places: the runner's `okta-secret.ts` ARN regex (separate deployable) AND now a belt-and-suspenders
+  DB CHECK on `connector_credential_references` for `provider='okta'` (migration `0050`). No production identifiers.
 
 ## Blocked (unchanged)
 Token minting · private_key_jwt signing · Okta API calls · connector sync · scheduling · first-sync authorization · Phase C

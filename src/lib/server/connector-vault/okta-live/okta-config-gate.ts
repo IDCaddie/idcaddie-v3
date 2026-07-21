@@ -36,8 +36,9 @@ export type OktaConfigGateInput = {
 };
 
 export type OktaConfigGateDeps = {
-  approvedOrganizationIds: readonly string[]; // the exact staging organization(s) approved for Okta config (e.g. A1 Procurement)
-  approvedIssuerUrls: readonly string[];       // the exact approved issuer(s), e.g. https://trial-5294016.okta.com
+  // org → its EXACTLY-approved issuer (e.g. { "<A1 org id>": "https://trial-5294016.okta.com" }). A per-org map (not two
+  // independent lists) so an approved org can never be paired with a different approved org's issuer.
+  approvedIssuerByOrganizationId: Readonly<Record<string, string>>;
   adminRoles?: readonly string[];              // default owner/admin
   allowedCustomDomains?: readonly string[];
 };
@@ -71,11 +72,15 @@ export function evaluateOktaConfigGate(input: OktaConfigGateInput, deps: OktaCon
   if (input.provider !== OKTA_PROVIDER_ID) return fail("provider_not_okta");
   if (input.environment !== "staging") return fail("environment_not_staging");
   if (typeof input.organizationId !== "string" || input.organizationId.length === 0) return fail("organization_not_approved");
-  if (!deps.approvedOrganizationIds.includes(input.organizationId)) return fail("organization_not_approved");
+  const approvedIssuer = Object.prototype.hasOwnProperty.call(deps.approvedIssuerByOrganizationId, input.organizationId)
+    ? deps.approvedIssuerByOrganizationId[input.organizationId]
+    : undefined;
+  if (approvedIssuer == null) return fail("organization_not_approved");
 
   const org = validateOktaOrganization(input.rawOrganization, { allowedCustomDomains: deps.allowedCustomDomains });
   if (!org.ok) return fail("organization_invalid");
-  if (!deps.approvedIssuerUrls.includes(org.issuerUrl)) return fail("issuer_not_approved");
+  // The resolved issuer must be the one approved FOR THIS organization (not merely some approved issuer).
+  if (org.issuerUrl !== approvedIssuer) return fail("issuer_not_approved");
 
   if (scopesExactlyApproved(input.requestedScopes).ok !== true) return fail("scope_not_exact");
 

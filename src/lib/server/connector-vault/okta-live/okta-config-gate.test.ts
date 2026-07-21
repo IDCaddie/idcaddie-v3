@@ -2,9 +2,12 @@ import { describe, it, expect } from "vitest";
 import { evaluateOktaConfigGate, oktaConfigGatePermitsExecution, type OktaConfigGateInput, type OktaConfigGateDeps } from "./okta-config-gate";
 
 const APPROVED_ORG = "org-a1-approved";
+const OTHER_ORG = "org-b1-approved";
 const DEPS: OktaConfigGateDeps = {
-  approvedOrganizationIds: [APPROVED_ORG],
-  approvedIssuerUrls: ["https://trial-5294016.okta.com"],
+  approvedIssuerByOrganizationId: {
+    [APPROVED_ORG]: "https://trial-5294016.okta.com",
+    [OTHER_ORG]: "https://someone-else.okta.com", // a second approved org, bound to a DIFFERENT issuer
+  },
 };
 const OK_INPUT: OktaConfigGateInput = {
   authenticated: true,
@@ -42,7 +45,9 @@ describe("okta-config-gate", () => {
     ["empty org", { organizationId: "" }, "organization_not_approved"],
     ["invalid org host", { rawOrganization: "not-an-okta-host.example.com" }, "organization_invalid"],
     ["ssrf org host", { rawOrganization: "169.254.169.254" }, "organization_invalid"],
-    ["unapproved issuer", { rawOrganization: "someone-else.okta.com" }, "issuer_not_approved"],
+    ["unapproved issuer", { rawOrganization: "not-approved-at-all.okta.com" }, "issuer_not_approved"],
+    // A1 is approved, and someone-else.okta.com is an approved issuer — but NOT for A1 (it's B1's). Must fail closed.
+    ["approved issuer but wrong org pairing", { rawOrganization: "someone-else.okta.com" }, "issuer_not_approved"],
     ["scope escalation", { requestedScopes: ["okta.users.read", "okta.groups.read"] }, "scope_not_exact"],
     ["empty scope", { requestedScopes: [] }, "scope_not_exact"],
     ["wrong scope", { requestedScopes: ["okta.groups.read"] }, "scope_not_exact"],
