@@ -19,7 +19,7 @@ import { setDemoConnection, getDemoConnection } from "@/lib/customer-connectors/
 
 const okta: CustomerConnector = {
   provider: "okta", displayName: "Okta", category: "Identity", description: "d", availability: "preview",
-  connectionStatus: "not_connected", capabilities: ["Users"], setupTime: "About 2 minutes", isPreview: true,
+  connectionStatus: "not_connected", onboardingMode: "service_application", capabilities: ["Users"], setupTime: "About 2 minutes", isPreview: true,
   canConnect: true, canSync: false, canSchedule: false, icon: { initial: "O", tint: "sky" },
 };
 const connect = () => setDemoConnection("okta", { status: "connected_preview", orgHost: "acme.okta.com", connectedAt: "2026-07-17T00:00:00Z" });

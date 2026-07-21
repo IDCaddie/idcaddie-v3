@@ -10,6 +10,14 @@ const primary = "inline-block rounded-md bg-zinc-900 px-5 py-2.5 text-sm font-se
 // coming-soon → nothing (the header badge carries it).
 export function ConnectorDetailCta({ connector: c }: { connector: CustomerConnector }) {
   const demo = useDemoConnection(c.provider);
+  if (demo?.status === "verification_pending") {
+    return (
+      <div className="flex flex-col items-start gap-1 md:items-end">
+        <Link href={`/connectors/${c.provider}/status`} className={primary}>View configuration</Link>
+        <span className="text-xs text-amber-700 dark:text-amber-400">Verification pending</span>
+      </div>
+    );
+  }
   if (demo?.status === "connected_preview" || demo?.status === "paused_preview") {
     return (
       <div className="flex flex-col items-start gap-1 md:items-end">

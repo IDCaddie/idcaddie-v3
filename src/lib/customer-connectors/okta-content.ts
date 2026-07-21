@@ -19,6 +19,48 @@ export const OKTA_CONTENT = {
   setupTime: "Setup takes about 2 minutes",
 } as const;
 
+// Okta API Services onboarding copy (service application — NO browser OAuth, NO redirect, NO consent, NO refresh token). The
+// customer creates a service app in Okta Admin, registers ID Caddie's approved public key, grants the scope, assigns a
+// least-privileged admin role, then enters the issuer + client id here. The private key stays in the operator's secret store.
+export const OKTA_SETUP = {
+  title: "Set up Okta API Services",
+  intro: "Okta connects as a background service application. Create it in your Okta admin, then enter the issuer and client ID below. There is no browser sign-in step.",
+  adminSteps: [
+    "In Okta Admin, create an API Services app integration (not a Web app).",
+    "Register ID Caddie's approved public key on the app.",
+    "Grant only the okta.users.read scope.",
+    "Assign a least-privileged read-only admin role (scoped to users).",
+  ],
+  scopeStepTitle: "Required scope",
+  scopeStepNote: "Grant only this scope on the app's API Scopes tab.",
+  roleStepTitle: "Required admin role",
+  roleStepNote: "Assign a least-privileged Read-Only Administrator role, scoped to users where possible.",
+  keyStepTitle: "Public-key registration",
+  keyStepNote: "Confirm you registered ID Caddie's approved public key (below) on the app. The private key is never entered here.",
+  issuerLabel: "Okta issuer",
+  clientIdLabel: "API Services client ID",
+  clientIdHint: "The app's client ID (starts with 0oa…). This is non-secret.",
+  clientIdError: "Enter the API Services client ID (starts with 0oa…).",
+  reviewTitle: "Review configuration",
+  savedTitle: "Verification pending",
+  savedMessage: "Your Okta service application configuration has been saved. ID Caddie has not yet verified the connection or imported any data.",
+  declareScope: "I have granted okta.users.read on the app",
+  declareRole: "I have assigned a least-privileged admin role to the app",
+  declareKey: "I have registered the approved public key on the app",
+} as const;
+
+// The approved public signing-key identifier to display (NON-secret; the private key is never here).
+export const OKTA_APPROVED_PUBLIC_KID = "i-Wptr6usN1tpkNp17vHXv_Mar4NPz53rn-bmlTq8j4" as const;
+
+// Client-safe Okta client-id SHAPE check (the server-only okta-live validator can't be imported into the client wizard). Opaque
+// `0oa…` id — a bounded safe-charset string. NON-secret; validates shape only.
+const OKTA_CLIENT_ID = /^0oa[A-Za-z0-9]{10,40}$/;
+export function validateOktaClientId(raw: unknown): { ok: true; value: string } | { ok: false } {
+  if (typeof raw !== "string") return { ok: false };
+  const v = raw.trim();
+  return OKTA_CLIENT_ID.test(v) ? { ok: true, value: v } : { ok: false };
+}
+
 // The organization host validation. Accepts only a bare Okta-shaped hostname; rejects schemes, IPs, localhost, internal/private
 // hosts, paths, query strings, fragments, credentials, and ports. NO network request. Returns the normalized bare host or a
 // reason class (never echoing a crafted value into anything executable). The customer may type either `your-company.okta.com`
