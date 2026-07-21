@@ -13,6 +13,10 @@ export type ConnectorView = {
 };
 
 export function resolveConnectorView(c: CustomerConnector, demo: DemoConnection | null): ConnectorView {
+  if (demo?.status === "verification_pending") {
+    // Configuration saved, NOT verified/connected — never present this as connected/active.
+    return { statusLabel: "Verification pending", statusTone: "attention", statusNote: "Configuration saved", cta: { label: "View configuration", href: `/connectors/${c.provider}/status`, disabled: false } };
+  }
   if (demo?.status === "connected_preview") {
     return { statusLabel: "Connected", statusTone: "success", statusNote: "Preview mode", cta: { label: "Manage", href: `/connectors/${c.provider}/status`, disabled: false } };
   }

@@ -2,9 +2,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, cleanup, fireEvent } from "@testing-library/react";
 
-// P5E17 / P5E17b — the Okta preview connection WIZARD. Proves the SIMULATED 4-step flow, org-address validation surfacing, and
-// the CORE safety properties: NO real OAuth redirect (router.push / window.location never navigate to Okta), NO password/token/
-// secret field, and the ONLY persisted state is the sessionStorage preview connection (written on success, absent on failure).
+// The Okta API Services configuration guide. Okta is a SERVICE APPLICATION — NO browser OAuth, NO /authorize redirect, NO consent,
+// NO callback, NO refresh token. This proves the config-guide flow, that the terminal state is verification_pending (never
+// "connected"), and the safety properties: no browser-OAuth wording, no secret/token/password field, no anchor to a real Okta host.
 const push = vi.fn();
 const replace = vi.fn();
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push, replace }) }));
@@ -17,6 +17,8 @@ vi.mock("next/link", () => ({
 import { OktaConnectWizard } from "./okta-connect-wizard";
 import { getDemoConnection } from "@/lib/customer-connectors/demo-store";
 
+const CLIENT_ID = "0oaTEST12345678abcd"; // synthetic 0oa… shape, non-secret
+
 beforeEach(() => {
   window.sessionStorage.clear();
   push.mockClear();
@@ -25,113 +27,130 @@ beforeEach(() => {
 afterEach(cleanup);
 
 const typeOrg = (v: string) => fireEvent.change(screen.getByLabelText("Okta organization address"), { target: { value: v } });
-const submitOrg = () => fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+const click = (name: string) => fireEvent.click(screen.getByRole("button", { name }));
+function toConfiguration(org = "acme.okta.com") {
+  click("Start setup");
+  typeOrg(org);
+  click("Continue");
+}
+function fillConfiguration(clientId = CLIENT_ID) {
+  fireEvent.change(screen.getByLabelText("API Services client ID"), { target: { value: clientId } });
+  fireEvent.click(screen.getByLabelText("I have registered the approved public key on the app"));
+  fireEvent.click(screen.getByLabelText("I have granted okta.users.read on the app"));
+  fireEvent.click(screen.getByLabelText("I have assigned a least-privileged admin role to the app"));
+}
 
-describe("Okta connect wizard — flow", () => {
-  it("rejects a bad org address, accepts a valid one, then walks the 4-step flow to a successful preview connection", () => {
+describe("Okta connect wizard — API Services configuration flow", () => {
+  it("walks instructions → organization → configuration → review → verification pending", () => {
     render(<OktaConnectWizard provider="okta" />);
-    // exactly ONE preview banner, and it shows the concise Phase-10 copy
     expect(screen.getAllByText(/Preview mode/).length).toBe(1);
-    // step 1 of 4 — Organization, with the guided helper copy
+    // step 1 — instructions (service app, no browser sign-in)
     expect(screen.getByText("Step 1 of 4")).toBeTruthy();
-    expect(screen.getByRole("heading", { name: "Your Okta organization" })).toBeTruthy();
-    expect(screen.getByText("Enter the address your team uses to sign in to Okta.")).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Set up Okta API Services" })).toBeTruthy();
+    expect(screen.getByText(/There is no browser sign-in step\./)).toBeTruthy();
+    click("Start setup");
 
-    // invalid → inline error, stays on org step
-    typeOrg("evil.com");
-    submitOrg();
-    expect(screen.getByText(/ending in .okta.com/)).toBeTruthy();
-    expect(screen.queryByText("Step 2 of 4")).toBeNull();
-
-    // valid → step 2 Permissions (read-only)
-    typeOrg("acme.okta.com");
-    submitOrg();
+    // step 2 — organization; invalid rejected, valid → issuer
     expect(screen.getByText("Step 2 of 4")).toBeTruthy();
-    expect(screen.getByRole("heading", { name: "Permissions" })).toBeTruthy();
-    expect(screen.getByText("ID Caddie requests read-only access to:")).toBeTruthy();
-    expect(screen.getByText(/okta.users.read/)).toBeTruthy();
-    expect(screen.getByText("ID Caddie cannot change users, passwords, MFA settings, or applications.")).toBeTruthy();
+    typeOrg("evil.com");
+    click("Continue");
+    expect(screen.getByText(/ending in .okta.com/)).toBeTruthy();
+    expect(screen.queryByText("Step 3 of 4")).toBeNull();
+    typeOrg("acme.okta.com");
+    click("Continue");
 
-    // step 3 → Authorize PREVIEW (no redirect), Phase-10 copy
-    fireEvent.click(screen.getByRole("button", { name: "Continue to Okta" }));
+    // step 3 — configuration; Review is gated on the 3 declarations + a valid client id
     expect(screen.getByText("Step 3 of 4")).toBeTruthy();
-    expect(screen.getByRole("heading", { name: "Authorize with Okta" })).toBeTruthy();
-    expect(screen.getByText(/redirected securely to Okta to approve read-only access/)).toBeTruthy();
-    expect(push).not.toHaveBeenCalled(); // NO navigation to Okta
+    expect(screen.getByRole("heading", { name: "Service application details" })).toBeTruthy();
+    expect(screen.getByText("https://acme.okta.com")).toBeTruthy();
+    expect((screen.getByRole("button", { name: "Review" }) as HTMLButtonElement).disabled).toBe(true);
+    fillConfiguration("not-a-client-id");
+    click("Review");
+    expect(screen.getByRole("alert").textContent).toMatch(/Enter the API Services client ID/); // invalid id rejected
+    expect(screen.queryByText("Step 4 of 4")).toBeNull(); // stayed on configuration
+    fireEvent.change(screen.getByLabelText("API Services client ID"), { target: { value: CLIENT_ID } });
+    click("Review");
 
-    // simulate approval → concrete connection checks → complete
-    fireEvent.click(screen.getByRole("button", { name: "Simulate approval" }));
-    expect(screen.getByText("Okta organization confirmed")).toBeTruthy();
-    expect(screen.getByText("No data imported yet")).toBeTruthy();
-    expect(screen.getByText("Ready for first sync")).toBeTruthy();
-    expect(screen.queryByText("Connection encrypted")).toBeNull(); // no unverifiable claim
-    fireEvent.click(screen.getByRole("button", { name: "Complete connection" }));
+    // step 4 — review, then save
+    expect(screen.getByText("Step 4 of 4")).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Review configuration" })).toBeTruthy();
+    expect(screen.getByText(CLIENT_ID)).toBeTruthy();
+    click("Save configuration");
 
-    // success + the ONLY state write: the sessionStorage preview connection
-    expect(screen.getByText("Okta connected in preview mode")).toBeTruthy();
+    // terminal — verification pending, NOT connected; the only state write is the sessionStorage preview
+    expect(screen.getByRole("heading", { name: "Verification pending" })).toBeTruthy();
+    expect(screen.getByText(/has not yet verified the connection or imported any data/)).toBeTruthy();
+    expect(screen.queryByText(/connected/i)).toBeNull();
     const demo = getDemoConnection("okta");
-    expect(demo?.status).toBe("connected_preview");
+    expect(demo?.status).toBe("verification_pending");
     expect(demo?.orgHost).toBe("acme.okta.com");
-    expect(push).not.toHaveBeenCalled(); // still no real navigation anywhere in the happy path
+    expect(push).not.toHaveBeenCalled();
   });
 
-  it("normalizes a bare organization label to <label>.okta.com (near one-click)", () => {
+  it("normalizes a bare organization label to <label>.okta.com", () => {
     render(<OktaConnectWizard provider="okta" />);
-    typeOrg("acme"); // bare label, no dot
-    submitOrg();
-    // advances (normalized to acme.okta.com and validated) and records the normalized host on completion
-    expect(screen.getByText("Step 2 of 4")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Continue to Okta" }));
-    fireEvent.click(screen.getByRole("button", { name: "Simulate approval" }));
-    fireEvent.click(screen.getByRole("button", { name: "Complete connection" }));
+    click("Start setup");
+    typeOrg("acme");
+    click("Continue");
+    expect(screen.getByText("https://acme.okta.com")).toBeTruthy();
+    fillConfiguration();
+    click("Review");
+    click("Save configuration");
     expect(getDemoConnection("okta")?.orgHost).toBe("acme.okta.com");
   });
 
-  it("a simulated failed approval writes NO preview state", () => {
+  it("does not advance to review until all three setup declarations are confirmed", () => {
     render(<OktaConnectWizard provider="okta" />);
-    typeOrg("acme.okta.com");
-    submitOrg();
-    fireEvent.click(screen.getByRole("button", { name: "Continue to Okta" }));
-    fireEvent.click(screen.getByRole("button", { name: "Simulate a failed approval" }));
-    expect(screen.getByText("Connection not completed")).toBeTruthy();
-    expect(getDemoConnection("okta")).toBeNull();
-  });
-});
-
-describe("Okta connect wizard — accessibility", () => {
-  it("marks the active progress step with aria-current and does not announce terminal states as a numbered step", () => {
-    const { container } = render(<OktaConnectWizard provider="okta" />);
-    // exactly one active step marker on the progress bar
-    expect(container.querySelectorAll('[aria-current="step"]').length).toBe(1);
-    // drive to the terminal failed state
-    typeOrg("acme.okta.com");
-    submitOrg();
-    fireEvent.click(screen.getByRole("button", { name: "Continue to Okta" }));
-    fireEvent.click(screen.getByRole("button", { name: "Simulate a failed approval" }));
-    // progress bar (and its step numbering) is gone on the terminal state
-    expect(screen.queryByText(/Step \d of 4/)).toBeNull();
-    expect(container.querySelector('[role="status"]')).not.toBeNull(); // result announced via role=status
+    toConfiguration();
+    fireEvent.change(screen.getByLabelText("API Services client ID"), { target: { value: CLIENT_ID } });
+    fireEvent.click(screen.getByLabelText("I have granted okta.users.read on the app")); // only one of three
+    expect((screen.getByRole("button", { name: "Review" }) as HTMLButtonElement).disabled).toBe(true);
   });
 });
 
 describe("Okta connect wizard — safety", () => {
+  it("uses no browser-OAuth wording anywhere in the flow", () => {
+    const { container } = render(<OktaConnectWizard provider="okta" />);
+    const walk = () => (container.textContent ?? "").toLowerCase();
+    let seen = walk();
+    toConfiguration();
+    seen += walk();
+    fillConfiguration();
+    click("Review");
+    seen += walk();
+    click("Save configuration");
+    seen += walk();
+    for (const banned of ["authorize", "redirect", "consent", "sign in to okta", "continue to okta", "refresh token"]) {
+      expect(seen.includes(banned)).toBe(false);
+    }
+  });
+
   it("has no password/token/secret input and links to no real Okta OAuth endpoint", () => {
     const { container } = render(<OktaConnectWizard provider="okta" />);
-    typeOrg("acme.okta.com");
-    submitOrg();
-    fireEvent.click(screen.getByRole("button", { name: "Continue to Okta" }));
-    // walk every rendered step by simulating the whole flow, checking each render
+    toConfiguration();
+    fillConfiguration();
+    click("Review");
     expect(container.querySelector("input[type=password]")).toBeNull();
     for (const input of Array.from(container.querySelectorAll("input"))) {
       const n = `${input.getAttribute("name") ?? ""}${input.id}`.toLowerCase();
-      expect(/token|secret|password|client_id|client_secret/.test(n)).toBe(false);
+      expect(/token|secret|password|client_secret/.test(n)).toBe(false);
     }
-    // no anchor points at a real Okta host / authorize endpoint
     for (const a of Array.from(container.querySelectorAll("a"))) {
       const href = (a.getAttribute("href") ?? "").toLowerCase();
       expect(href.includes("okta.com")).toBe(false);
       expect(href.includes("authorize")).toBe(false);
       expect(href.startsWith("http")).toBe(false);
     }
+  });
+
+  it("marks the active progress step with aria-current and drops step numbering on the terminal state", () => {
+    const { container } = render(<OktaConnectWizard provider="okta" />);
+    expect(container.querySelectorAll('[aria-current="step"]').length).toBe(1);
+    toConfiguration();
+    fillConfiguration();
+    click("Review");
+    click("Save configuration");
+    expect(screen.queryByText(/Step \d of 4/)).toBeNull();
+    expect(container.querySelector('[role="status"]')).not.toBeNull();
   });
 });

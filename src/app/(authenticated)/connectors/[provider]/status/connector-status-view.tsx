@@ -36,6 +36,38 @@ export function ConnectorStatusView({ connector: c }: { connector: CustomerConne
     );
   }
 
+  // Okta API Services onboarding: configuration saved but NOT verified. Never presented as connected/active — no browser OAuth,
+  // no token minted; a real client-credentials verification happens later out of band.
+  if (demo.status === "verification_pending") {
+    return (
+      <div className="max-w-3xl space-y-6" aria-live="polite">
+        <div className="flex items-start gap-4">
+          <ConnectorIcon initial={c.icon.initial} tint={c.icon.tint} size="xl" />
+          <div className="space-y-1">
+            <h2 className="text-xl font-semibold tracking-tight">{c.displayName}</h2>
+            <div className="flex items-center gap-2 text-sm">
+              <Badge tone="attention" variant="solid">Verification pending</Badge>
+              <span className="text-zinc-500 dark:text-zinc-400">· Configuration saved</span>
+            </div>
+            <p className="text-sm text-zinc-600 dark:text-zinc-400">Your Okta service application configuration has been saved. ID Caddie has not yet verified the connection or imported any data.</p>
+          </div>
+        </div>
+        <section className={`${panel} max-w-xl`}>
+          <h3 className={heading}>What happens next</h3>
+          <ul className="mt-2 space-y-1 text-sm text-zinc-600 dark:text-zinc-400">
+            <li>ID Caddie will verify the service application before any data is read.</li>
+            <li>No sync has run. No data has been imported.</li>
+            <li>Scheduling is unavailable until the connection is verified.</li>
+          </ul>
+        </section>
+        <div className="flex flex-wrap gap-2">
+          <button type="button" onClick={() => router.push(`/connectors/${c.provider}/connect`)} className={secondary}>Edit configuration</button>
+          <button type="button" onClick={() => { clearDemoConnection(c.provider); setDisconnected(true); }} className={secondary}>Remove configuration</button>
+        </div>
+      </div>
+    );
+  }
+
   const paused = demo.status === "paused_preview";
 
   return (

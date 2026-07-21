@@ -22,7 +22,7 @@ import { setDemoConnection } from "@/lib/customer-connectors/demo-store";
 
 const oktaConnector: CustomerConnector = {
   provider: "okta", displayName: "Okta", category: "Identity", description: "d", availability: "preview",
-  connectionStatus: "not_connected", capabilities: ["Users"], setupTime: "About 2 minutes", isPreview: true,
+  connectionStatus: "not_connected", onboardingMode: "service_application", capabilities: ["Users"], setupTime: "About 2 minutes", isPreview: true,
   canConnect: true, canSync: false, canSchedule: false, icon: { initial: "O", tint: "sky" },
 };
 

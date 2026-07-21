@@ -3,7 +3,7 @@
 // status + the (non-persisted-server-side) org host the customer typed + a timestamp. Easy to reset (clear the one key). Import-
 // safe on the server (all ops no-op / return null when there is no window). Isolated key so it can never collide with real data.
 
-export type DemoConnectionStatus = "connected_preview" | "paused_preview";
+export type DemoConnectionStatus = "verification_pending" | "connected_preview" | "paused_preview";
 export type DemoConnection = { status: DemoConnectionStatus; orgHost: string | null; connectedAt: string };
 
 const KEY = "idcaddie:demo-connectors:v1";

@@ -5,7 +5,7 @@
 // phase (nothing is live). Cross-checked against the internal registry so a genuinely runnable provider can never be surfaced.
 
 import { getConnectorProvider, isConnectorProviderReady } from "../server/connector-vault/provider-registry";
-import type { CustomerCategory, CustomerAvailability, CustomerConnector, IconTint } from "./catalog-types";
+import type { CustomerCategory, CustomerAvailability, CustomerConnector, IconTint, OnboardingMode } from "./catalog-types";
 
 // Re-export the client-safe types + category constant so server consumers can keep importing them from `catalog`. The definitions
 // live in ./catalog-types (pure, no registry) so client code can use them WITHOUT bundling this server-only module.
@@ -38,6 +38,10 @@ const CATALOG: readonly CatalogSeed[] = [
 
 // Map ONE catalog seed to the customer model. This is the sole internal→customer mapping. `canConnect` is preview-only AND is
 // guarded by the internal readiness gate: a provider that is genuinely ready (never true today) is NOT offered a preview connect.
+// How each provider is connected. Okta is a service application (API Services + signing key — NO browser OAuth). Providers not
+// listed default to oauth_installation. Kept minimal on purpose (no generic wizard engine).
+const ONBOARDING_MODE: Record<string, OnboardingMode> = { okta: "service_application" };
+
 function toCustomerConnector(seed: CatalogSeed): CustomerConnector {
   const availability: CustomerAvailability = PREVIEW.has(seed.provider) ? "preview" : "coming_soon";
   // Defense in depth: the customer preview connect is offered ONLY for a demo-enabled provider that is NOT internally runnable.
@@ -50,6 +54,7 @@ function toCustomerConnector(seed: CatalogSeed): CustomerConnector {
     description: seed.description,
     availability,
     connectionStatus: "not_connected", // server default; the client overlays the sessionStorage demo state
+    onboardingMode: ONBOARDING_MODE[seed.provider] ?? "oauth_installation",
     capabilities: seed.capabilities,
     setupTime: seed.setupTime,
     isPreview: availability === "preview",
