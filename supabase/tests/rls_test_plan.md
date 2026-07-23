@@ -237,3 +237,13 @@ assertion fails the run (non-zero exit); the container is removed even on failur
 Requires Docker. It never touches hosted Supabase and uses no service-role keys.
 
 New test files are picked up automatically as long as they are named `*_test.sql`.
+
+## okta_directory_persistence_test.sql (Phase 4 — migrations 0052/0053)
+Verifies the Okta directory-identity persistence boundary: runner RPC grants
+(EXECUTE only to `connector_runner`; public/anon denied) and no direct table
+access; lifecycle transition allowlist + ownership + optimistic + NULL guard;
+promotion complete+clean-run gate; idempotent replay + immutable `external_id`
+(email change keeps one row); cross-tenant + cross-connection isolation; nullable
+email; first-run-stales-zero; complete-run stales-absent; partial/rejected/cap runs
+stale-zero; mass-staleness circuit breaker; superseded-run refusal; identity_account
+key allowlist; `raw_payload` never populated; no hard delete.
