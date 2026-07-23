@@ -173,6 +173,16 @@ begin
   if p_fact_json ->> 'fact_type' is distinct from p_fact_type then
     raise exception 'fact_json.fact_type must match p_fact_type';
   end if;
+  -- identity_account: POSITIVE top-level key ALLOWLIST (stronger than the denylist). Only approved directory fields may be staged;
+  -- any unknown/unexpected key is rejected so a stray or secret-shaped field can never be persisted into a directory-identity fact.
+  if p_fact_type = 'identity_account' and exists (
+    select 1 from jsonb_object_keys(p_fact_json) k
+     where k not in ('fact_type','external_id','connection_id','login','normalized_login','email','normalized_email',
+                     'first_name','last_name','display_name','status','is_active','department','title','employee_number',
+                     'provider_created_at','provider_activated_at','provider_last_login_at','provider_last_updated_at','provider_status_changed_at')
+  ) then
+    raise exception 'identity_account fact_json contains a non-approved key';
+  end if;
   -- recursive forbidden-key scan (keys only; a value like a display name never trips it).
   if exists (
     with recursive walk(v) as (
@@ -234,19 +244,33 @@ begin
     raise exception 'run % is not eligible for promotion (complete=%, rejected=%, termination=%, review=%)', p_run_id, v_complete, v_rejected, v_termination, v_review;
   end if;
 
-  -- 11-19: upsert identity_accounts from THIS run's identity_account facts. connection_id is server-derived (v_connector_id),
-  -- not read from fact_json. first_seen_at preserved on update; last_seen_at advanced; raw_payload NEVER set; sync_status=current.
+  -- latest-run guard: never (re)promote a SUPERSEDED run. Reject if a DIFFERENT complete run for this connection started later.
+  if exists (
+    select 1 from public.connector_runs r2 join public.connector_run_discovery d2 on d2.run_id = r2.id
+     where r2.connector_id = v_connector_id and r2.tenant_id = p_tenant_id and r2.id <> p_run_id
+       and d2.completeness is true and d2.termination_reason = 'last_page'
+       and r2.started_at > (select started_at from public.connector_runs where id = p_run_id)
+  ) then
+    raise exception 'run % is superseded by a later complete run; refusing to promote', p_run_id;
+  end if;
+
+  -- 11-19: upsert identity_accounts from THIS run's identity_account facts. connection_id is server-derived (v_connector_id), not
+  -- trusted from fact_json; a fact is additionally required to CARRY the matching connection_id (defense vs a cross-connection
+  -- signal_id collision) and DISTINCT-ON external_id (defense vs a duplicate). first_seen preserved; last_seen advanced; raw_payload
+  -- NEVER set; sync_status=current.
   with existing as (
     -- snapshot of external_ids already promoted for THIS connection (evaluated pre-upsert) -> reliable created-vs-updated split.
     select ia.external_id as ext from public.identity_accounts ia
-     where ia.tenant_id = p_tenant_id and ia.connection_id = v_connector_id and ia.provider = 'okta'
+     where ia.tenant_id = p_tenant_id and ia.connection_id = v_connector_id and ia.provider = 'okta' and ia.external_id is not null
   ),
   src as (
-    select f.fact_json as j, f.provenance_json as p
+    select distinct on (f.fact_json ->> 'external_id') f.fact_json as j, f.provenance_json as p
       from public.discovery_facts f
      where f.source_run_id = p_run_id and f.tenant_id = p_tenant_id
        and f.source_provider = 'okta' and f.fact_type = 'identity_account'
        and f.fact_json ->> 'external_id' is not null
+       and (f.fact_json ->> 'connection_id') is not distinct from v_connector_id::text  -- fact must belong to THIS connection
+     order by f.fact_json ->> 'external_id', f.observed_at desc
   ),
   upserted as (
     insert into public.identity_accounts (
@@ -282,8 +306,8 @@ begin
       -- first_seen_at intentionally NOT updated (preserved); raw_payload intentionally NEVER referenced (stays null).
     returning external_id as ext
   )
-  select count(*) filter (where u.ext not in (select ext from existing)),
-         count(*) filter (where u.ext in (select ext from existing))
+  select count(*) filter (where not exists (select 1 from existing e where e.ext = u.ext)),
+         count(*) filter (where exists (select 1 from existing e where e.ext = u.ext))
     into v_created, v_updated
     from upserted u;
 
@@ -299,7 +323,7 @@ create or replace function public.runner_mark_absent_okta_identities_stale(p_run
 as $$
 declare
   v_connector_id uuid;
-  v_complete boolean; v_rejected integer; v_termination text;
+  v_complete boolean; v_rejected integer; v_termination text; v_review boolean;
   v_prior_current integer; v_absent integer; v_absent_pct numeric;
   v_pct_threshold numeric; v_abs_threshold integer; v_marked integer := 0; v_breaker boolean := false;
 begin
@@ -309,12 +333,26 @@ begin
   if not exists (select 1 from public.connectors c where c.id = v_connector_id and c.tenant_id = p_tenant_id and c.provider = 'okta') then
     raise exception 'connector for run % is not an okta connection', p_run_id;
   end if;
+  -- serialize stale/promote on this connection (TOCTOU guard) — lock the connector row (mirrors advance_state's FOR UPDATE).
+  perform 1 from public.connectors c where c.id = v_connector_id and c.tenant_id = p_tenant_id for update;
 
-  -- eligibility: only a complete, clean, last_page run may EVER stale absent rows.
-  select d.completeness, d.records_rejected, d.termination_reason into v_complete, v_rejected, v_termination
+  -- eligibility: only a complete, clean, last_page, non-quarantined run may EVER stale absent rows (stale runs BEFORE the run is
+  -- finalized, so connector_runs.status is still 'running' here — the metrics row is the completeness evidence).
+  select d.completeness, d.records_rejected, d.termination_reason, d.review_required into v_complete, v_rejected, v_termination, v_review
     from public.connector_run_discovery d where d.run_id = p_run_id and d.tenant_id = p_tenant_id;
-  if not found or v_complete is not true or coalesce(v_rejected, 1) <> 0 or v_termination is distinct from 'last_page' then
+  if not found or v_complete is not true or coalesce(v_rejected, 1) <> 0 or v_termination is distinct from 'last_page' or v_review is true then
     return jsonb_build_object('staleMarked', 0, 'absentCount', 0, 'priorCurrent', 0, 'circuitBreakerTriggered', false, 'eligible', false);
+  end if;
+
+  -- LATEST-RUN guard: staling on a SUPERSEDED (older) complete run would treat the whole live directory as absent -> mass stale.
+  -- Only the most-recent complete run for the connection may stale. Reject (stale zero) if a later complete run exists.
+  if exists (
+    select 1 from public.connector_runs r2 join public.connector_run_discovery d2 on d2.run_id = r2.id
+     where r2.connector_id = v_connector_id and r2.tenant_id = p_tenant_id and r2.id <> p_run_id
+       and d2.completeness is true and d2.termination_reason = 'last_page'
+       and r2.started_at > (select started_at from public.connector_runs where id = p_run_id)
+  ) then
+    return jsonb_build_object('staleMarked', 0, 'absentCount', 0, 'priorCurrent', 0, 'circuitBreakerTriggered', false, 'eligible', false, 'superseded', true);
   end if;
 
   -- FIRST RUN rule: if no identity for this connection was last seen by a DIFFERENT (earlier) run, this is the first complete
@@ -356,17 +394,20 @@ begin
 end;
 $$;
 
--- ══ G. least privilege: EXECUTE only to connector_runner; NO direct table grants on the new tables ═════════════════════
-revoke all on function public.runner_record_okta_discovery_metrics(uuid, uuid, integer, integer, integer, integer, integer, text, boolean, text, text, text, text) from public;
-revoke all on function public.runner_promote_okta_directory_users(uuid, uuid) from public;
-revoke all on function public.runner_mark_absent_okta_identities_stale(uuid, uuid) from public;
+-- ══ G. least privilege. On hosted Supabase, ALTER DEFAULT PRIVILEGES grants EXECUTE on every new public function DIRECTLY to
+-- anon/authenticated; `revoke from public` alone leaves those intact (see 0045). Revoke from public + anon + authenticated so
+-- ONLY connector_runner (trusted backend) can invoke these SECURITY DEFINER RPCs — never a PostgREST request role. ═══════════
+revoke execute on function public.runner_record_okta_discovery_metrics(uuid, uuid, integer, integer, integer, integer, integer, text, boolean, text, text, text, text) from public, anon, authenticated;
+revoke execute on function public.runner_promote_okta_directory_users(uuid, uuid) from public, anon, authenticated;
+revoke execute on function public.runner_mark_absent_okta_identities_stale(uuid, uuid) from public, anon, authenticated;
 grant execute on function public.runner_record_okta_discovery_metrics(uuid, uuid, integer, integer, integer, integer, integer, text, boolean, text, text, text, text) to connector_runner;
 grant execute on function public.runner_promote_okta_directory_users(uuid, uuid) to connector_runner;
 grant execute on function public.runner_mark_absent_okta_identities_stale(uuid, uuid) to connector_runner;
 
--- connector_runner reaches the new tables ONLY through the functions above (belt-and-suspenders; it is BYPASSRLS).
-revoke all on public.connector_run_discovery from connector_runner;
-revoke all on public.connector_discovery_policy from connector_runner;
+-- The new tables are runner-internal: reachable ONLY through the SECURITY DEFINER functions. Deny every request role + the runner
+-- direct access (RLS is enabled with no policy; revoke belt-and-suspenders since connector_runner is BYPASSRLS).
+revoke all on public.connector_run_discovery from public, anon, authenticated, connector_runner;
+revoke all on public.connector_discovery_policy from public, anon, authenticated, connector_runner;
 -- identity_accounts: connector_runner gets NO direct grant (promotion/stale run as definer). Authenticated read stays via 0001 RLS.
 revoke all on public.identity_accounts from connector_runner;
 

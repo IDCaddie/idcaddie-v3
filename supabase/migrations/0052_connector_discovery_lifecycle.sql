@@ -36,6 +36,11 @@ as $$
 declare
   v_current text;
 begin
+  -- NULL guard FIRST: `(p_from, p_to) not in (...)` is 3-valued — a NULL endpoint would make it NULL (not true), skipping the
+  -- allowlist raise and permitting an unauthorized/blank transition. Reject null endpoints outright.
+  if p_from is null or p_to is null then
+    raise exception 'connection_state transition endpoints must not be null';
+  end if;
   -- The ONLY transitions executable this phase. Every entry is explicit; anything else (esp. any path to active/sync_authorized/
   -- connected_unsynced/ready/scheduled) is rejected. Failure recovers to partial_failure/error and re-arms via verified.
   if (p_from, p_to) not in (
@@ -73,8 +78,10 @@ begin
 end;
 $$;
 
--- ── 3. least privilege: EXECUTE revoked from PUBLIC, granted ONLY to connector_runner; NO direct connectors write grant ──
-revoke all on function public.runner_advance_connection_state(uuid, uuid, text, text) from public;
+-- ── 3. least privilege. On hosted Supabase, ALTER DEFAULT PRIVILEGES grants EXECUTE on every new public function DIRECTLY to
+-- anon/authenticated, and `revoke from public` alone leaves those intact (see 0045). Revoke from public + anon + authenticated so
+-- ONLY connector_runner (a trusted backend principal) can drive the lifecycle; no direct connectors write grant is added.
+revoke execute on function public.runner_advance_connection_state(uuid, uuid, text, text) from public, anon, authenticated;
 grant execute on function public.runner_advance_connection_state(uuid, uuid, text, text) to connector_runner;
 
 commit;

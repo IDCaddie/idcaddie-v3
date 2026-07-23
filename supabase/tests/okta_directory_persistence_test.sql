@@ -17,10 +17,12 @@ insert into public.connectors (id, tenant_id, provider, status, connection_state
 create or replace function pg_temp.seed_run(p_tenant uuid, p_conn uuid, p_run uuid, p_ext text, p_email text, p_complete boolean, p_rejected integer, p_term text)
   returns void language plpgsql as $$
 begin
-  insert into public.connector_runs (id, tenant_id, connector_id, status, started_at) values (p_run, p_tenant, p_conn, 'running', now());
+  insert into public.connector_runs (id, tenant_id, connector_id, status, started_at) values (p_run, p_tenant, p_conn, 'running', clock_timestamp());
+  -- signal_id is CONNECTION-QUALIFIED (okta:{connection}:users:{ext}) so sibling connections never share a fact row; fact_json
+  -- carries connection_id so promotion can verify the fact belongs to the run's connection.
   perform public.runner_insert_discovery_fact(
-    p_tenant, p_run, 'identity_account', 'identity_provider_discovery', 'okta', 'okta:users:'||p_ext, p_ext, now(), 1.0,
-    jsonb_build_object('fact_type','identity_account','external_id',p_ext,'login',p_ext,'normalized_login',lower(p_ext),
+    p_tenant, p_run, 'identity_account', 'identity_provider_discovery', 'okta', 'okta:'||p_conn||':users:'||p_ext, p_ext, now(), 1.0,
+    jsonb_build_object('fact_type','identity_account','external_id',p_ext,'connection_id',p_conn::text,'login',p_ext,'normalized_login',lower(p_ext),
                        'email',p_email,'normalized_email',lower(p_email),'first_name','F','last_name','L','status','ACTIVE','is_active',true),
     jsonb_build_object('provider','okta','source_endpoint','users','schema_version','1','sanitizer_version','1','normalizer_version','1'));
   perform public.runner_record_okta_discovery_metrics(p_run, p_tenant, 1, 1, 1, 1, p_rejected, p_term, p_complete, '1','1','1', null);
@@ -34,6 +36,11 @@ do $$ begin
   assert not has_function_privilege('public', 'public.runner_advance_connection_state(uuid,uuid,text,text)', 'EXECUTE'), 'G1 PUBLIC denied advance_state';
   assert not has_function_privilege('public', 'public.runner_promote_okta_directory_users(uuid,uuid)', 'EXECUTE'), 'G1 PUBLIC denied promote';
   assert not has_function_privilege('public', 'public.runner_mark_absent_okta_identities_stale(uuid,uuid)', 'EXECUTE'), 'G1 PUBLIC denied stale';
+  -- anon must be explicitly denied (the migration revokes from anon; the harness does NOT re-grant to anon, so this is testable
+  -- here — authenticated is also revoked by the migration but the harness blanket-grants it back, so it can't be asserted here).
+  assert not has_function_privilege('anon', 'public.runner_advance_connection_state(uuid,uuid,text,text)', 'EXECUTE'), 'G1 anon denied advance_state';
+  assert not has_function_privilege('anon', 'public.runner_promote_okta_directory_users(uuid,uuid)', 'EXECUTE'), 'G1 anon denied promote';
+  assert not has_function_privilege('anon', 'public.runner_mark_absent_okta_identities_stale(uuid,uuid)', 'EXECUTE'), 'G1 anon denied stale';
   assert not has_table_privilege('connector_runner', 'public.identity_accounts', 'INSERT'), 'G1 runner NO direct identity_accounts INSERT';
   assert not has_table_privilege('connector_runner', 'public.identity_accounts', 'UPDATE'), 'G1 runner NO direct identity_accounts UPDATE';
   assert not has_table_privilege('connector_runner', 'public.identity_accounts', 'DELETE'), 'G1 runner NO direct identity_accounts DELETE';
@@ -127,8 +134,8 @@ end $$;
 -- ════ G7: email may be NULL (valid user without email) ════════════════════════════════════════════════════════════════
 do $$ begin
   insert into public.connector_runs (id, tenant_id, connector_id, status, started_at) values ('e1e1e1e1-0000-4000-8000-0000000000e1','11111111-0000-4000-8000-000000000001','c1c1c1c1-0000-4000-8000-000000000001','running',now());
-  perform public.runner_insert_discovery_fact('11111111-0000-4000-8000-000000000001','e1e1e1e1-0000-4000-8000-0000000000e1','identity_account','identity_provider_discovery','okta','okta:users:00uNOEMAIL','00uNOEMAIL',now(),1.0,
-    jsonb_build_object('fact_type','identity_account','external_id','00uNOEMAIL','login','svc-account','normalized_login','svc-account','status','ACTIVE','is_active',true), jsonb_build_object('provider','okta','source_endpoint','users'));
+  perform public.runner_insert_discovery_fact('11111111-0000-4000-8000-000000000001','e1e1e1e1-0000-4000-8000-0000000000e1','identity_account','identity_provider_discovery','okta','okta:c1c1c1c1-0000-4000-8000-000000000001:users:00uNOEMAIL','00uNOEMAIL',now(),1.0,
+    jsonb_build_object('fact_type','identity_account','external_id','00uNOEMAIL','connection_id','c1c1c1c1-0000-4000-8000-000000000001','login','svc-account','normalized_login','svc-account','status','ACTIVE','is_active',true), jsonb_build_object('provider','okta','source_endpoint','users'));
   perform public.runner_record_okta_discovery_metrics('e1e1e1e1-0000-4000-8000-0000000000e1','11111111-0000-4000-8000-000000000001',1,1,1,1,0,'last_page',true,'1','1','1',null);
   perform public.runner_promote_okta_directory_users('e1e1e1e1-0000-4000-8000-0000000000e1','11111111-0000-4000-8000-000000000001');
   assert (select email is null and login='svc-account' from public.identity_accounts where external_id='00uNOEMAIL')=true, 'G7 emailless user promoted (login present)';
@@ -172,6 +179,26 @@ do $$ declare r jsonb; begin
   assert (select review_required from public.connector_run_discovery where run_id='f3f3f3f3-0000-4000-8000-0000000000f3')=true, 'G9 run flagged review_required';
   assert (select sync_status='current' from public.identity_accounts where external_id='00uAAA' and connection_id='c1c1c1c1-0000-4000-8000-000000000001')=true, 'G9 nothing staled under breaker';
   update public.connector_discovery_policy set stale_absolute_threshold=100, stale_percent_threshold=30 where provider='okta'; -- restore
+end $$;
+
+-- ════ G10: review-fix guards — key allowlist, superseded-run block, NULL transition endpoint ═════════════════════════
+do $$ declare ok boolean; begin
+  -- identity_account fact_json key ALLOWLIST rejects a non-approved key
+  insert into public.connector_runs (id, tenant_id, connector_id, status, started_at) values ('a0a0a0a0-0000-4000-8000-0000000000a0','11111111-0000-4000-8000-000000000001','c1c1c1c1-0000-4000-8000-000000000001','running',now());
+  ok:=false; begin perform public.runner_insert_discovery_fact('11111111-0000-4000-8000-000000000001','a0a0a0a0-0000-4000-8000-0000000000a0','identity_account','identity_provider_discovery','okta','okta:c1:users:00uKEY','00uKEY',now(),1.0,
+    jsonb_build_object('fact_type','identity_account','external_id','00uKEY','surprise_field','x'), null); exception when others then ok:=true; end;
+  assert ok, 'G10 identity_account non-approved key rejected';
+
+  -- NULL transition endpoint rejected (3-valued-logic bypass guard)
+  ok:=false; begin perform public.runner_advance_connection_state('c1c1c1c1-0000-4000-8000-000000000001','11111111-0000-4000-8000-000000000001', null, 'discovered'); exception when others then ok:=true; end;
+  assert ok, 'G10 null transition endpoint rejected';
+
+  -- SUPERSEDED-run guard: an older complete run cannot promote once a later complete run exists for the connection.
+  -- C1 already has run f3 (G9, latest complete). Re-promoting the older a2 must be refused.
+  ok:=false; begin perform public.runner_promote_okta_directory_users('a2a2a2a2-0000-4000-8000-0000000000a2','11111111-0000-4000-8000-000000000001'); exception when others then ok:=true; end;
+  assert ok, 'G10 superseded (older) run promotion refused';
+  -- and staling on the superseded run marks zero (returns superseded)
+  assert (public.runner_mark_absent_okta_identities_stale('a2a2a2a2-0000-4000-8000-0000000000a2','11111111-0000-4000-8000-000000000001') ->> 'staleMarked')::int = 0, 'G10 superseded run stales zero';
 end $$;
 
 reset role;
