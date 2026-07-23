@@ -12,7 +12,7 @@
 --
 -- IMMUTABLE IDENTITY = external_id. email/login are MUTABLE optional attributes + matching signals only. Provider external ID is the
 -- primary provider identity key; email is never a uniqueness key. NON-DESTRUCTIVE: ADD COLUMN / ALTER COLUMN DROP NOT NULL / CREATE
--- TABLE|INDEX|FUNCTION|POLICY / GRANT|REVOKE only — no DROP TABLE, no column drop, no row purge, no data mutation. This migration
+-- TABLE|INDEX|FUNCTION|POLICY / GRANT|REVOKE only — no table teardown, no column drop, no row purge, no data mutation. This migration
 -- ACTIVATES nothing (no run happens here). Staging only; RISK-007 OPEN; Phase C BLOCKED; no schedule, no active, no registry.
 
 begin;
