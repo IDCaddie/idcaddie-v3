@@ -93,6 +93,11 @@ Then add positive + negative tests to `supabase/tests/org_rls_test.sql`.
    union (read) — never bare `has_org_role` without the tenant binding.
 4. Add tests: related-org read works, non-steward cannot write, foreign-tenant FK is blocked.
 
+## Okta directory-identity persistence (0052 · 0053)
+Phase 4 of the Okta discovery engine. **Additive; activates nothing.**
+- **0052** — provider-neutral connection lifecycle: widens the `connectors.connection_state` CHECK to the discovery vocabulary and adds `runner_advance_connection_state(connector,tenant,from,to)` (SECURITY DEFINER, pinned `search_path`, connector→tenant ownership, an explicit transition allowlist `verified→discovery_pending→discovering→discovered` + failure recovery — **no path to active/sync/scheduled**, NULL-endpoint guarded, optimistic current-state check). EXECUTE granted only to `connector_runner` (revoked from public/anon/authenticated).
+- **0053** — durable persistence: the canonical Okta **directory identity** store is **`identity_accounts`** (extended), **not** `app_users` (a per-app account table). Immutable key = `(tenant_id, connection_id, provider, external_id)`; email/login are mutable optional attributes, never a uniqueness key; `raw_payload` is never populated by this path. Adds `connector_run_discovery` (per-run metrics), `connector_discovery_policy` (configurable stale thresholds), the `identity_account` fact type (positive key allowlist + strengthened forbidden-key scan), `runner_promote_okta_directory_users` (complete+clean-run gate, connection-qualified facts, idempotent upsert, first_seen preserved, superseded-run refusal), and `runner_mark_absent_okta_identities_stale` (evidence-based eligibility, first-run-stales-zero, configurable mass-staleness circuit breaker, latest-run guard, strict connection scope, never hard-deletes/unlinks people). All runner writes go through SECURITY DEFINER functions granted only to `connector_runner`. Tested in `supabase/tests/okta_directory_persistence_test.sql`.
+
 ## Do **not**
 - ❌ a tenant-owned table without `tenant_id` + RLS.
 - ❌ an access-relevant org FK without tenant-binding (in trigger **and** policy).

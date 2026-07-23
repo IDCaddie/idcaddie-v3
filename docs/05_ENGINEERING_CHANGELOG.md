@@ -2342,6 +2342,9 @@ from PRs verified via `git log` / `gh pr list`.
 *Pre-PR history (legacy extraction docs, rebuild starter, `0001` core schema) is in
 `git log` and the `docs/current-*` / `docs/v3-*` design docs.*
 
+## Okta Discovery Phase 4 PR A — directory-identity persistence migrations (v3 #333)
+Migrations `0052`+`0053` + DB tests only (no hosted run, no runner behavior). Canonical Okta directory-identity store is `identity_accounts` (extended), not `app_users`; immutable key `(tenant_id, connection_id, provider, external_id)`. New SECURITY DEFINER runner RPCs for lifecycle transition, per-run metrics, complete-run promotion, and evidence-based stale marking with a configurable mass-staleness circuit breaker (EXECUTE `connector_runner` only; revoked from public/anon/authenticated). 6-lens adversarial review → 1 P0 (privilege-escalation revoke) + 5 P1 fixed. Additive; activates nothing. Per this GO: RISK-007 OPEN, Phase C BLOCKED, staging only, production untouched.
+
 ## Staging verification - connector secret vault grants 0029
 
 Staging verification for `0029_connector_runner_secret_grants.sql` completed on project `ycdpzduxugdsffjqyoai`.
