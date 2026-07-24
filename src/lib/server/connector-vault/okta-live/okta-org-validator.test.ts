@@ -94,17 +94,20 @@ describe("validateOktaOrganization — SSRF + malformed rejection", () => {
 });
 
 describe("okta provider contract — scopes + lifecycle", () => {
-  it("approves exactly okta.users.read; rejects empty/extra/prohibited/duplicate", () => {
-    expect(scopesExactlyApproved(["okta.users.read"])).toEqual({ ok: true });
+  it("approves exactly {okta.users.read, okta.groups.read}; rejects empty/subset/extra/prohibited/duplicate", () => {
+    expect(scopesExactlyApproved(["okta.users.read", "okta.groups.read"])).toEqual({ ok: true }); // the exact approved set (order-free)
+    expect(scopesExactlyApproved(["okta.users.read"])).toEqual({ ok: false, reason: "not_exact_approved_set" }); // subset — missing groups.read
     expect(scopesExactlyApproved([])).toEqual({ ok: false, reason: "empty" });
-    expect(scopesExactlyApproved(["okta.users.read", "okta.groups.read"])).toEqual({ ok: false, reason: "prohibited" });
+    expect(scopesExactlyApproved(["okta.users.read", "okta.groups.read", "okta.apps.read"])).toEqual({ ok: false, reason: "prohibited" }); // superset w/ a prohibited scope
     expect(scopesExactlyApproved(["okta.users.read", "openid"])).toEqual({ ok: false, reason: "not_exact_approved_set" });
     expect(scopesExactlyApproved(["okta.users.read", "okta.users.read"])).toEqual({ ok: false, reason: "duplicate" });
     expect(scopesExactlyApproved(["okta.apps.read"])).toEqual({ ok: false, reason: "prohibited" });
   });
-  it("approved set is exactly the least-privilege read scope; no write/admin scope is approved", () => {
-    expect(OKTA_APPROVED_SCOPES).toEqual(["okta.users.read"]);
+  it("approved set is the least-privilege READ scopes (users + groups); group WRITES + all other scopes stay prohibited", () => {
+    expect(OKTA_APPROVED_SCOPES).toEqual(["okta.users.read", "okta.groups.read"]);
     for (const s of OKTA_APPROVED_SCOPES) expect((OKTA_PROHIBITED_SCOPES as readonly string[]).includes(s)).toBe(false);
+    expect((OKTA_PROHIBITED_SCOPES as readonly string[])).toContain("okta.groups.manage"); // group WRITE stays prohibited
+    expect((OKTA_PROHIBITED_SCOPES as readonly string[])).not.toContain("okta.groups.read"); // group READ is now approved
     expect(OKTA_PROHIBITED_SCOPES.some((s) => s.includes(".manage") || s.includes(".write"))).toBe(true);
   });
   it("lifecycle is certificationOnly and permits neither pilot connection nor execution", () => {

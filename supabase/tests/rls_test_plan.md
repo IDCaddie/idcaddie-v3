@@ -247,3 +247,15 @@ promotion complete+clean-run gate; idempotent replay + immutable `external_id`
 email; first-run-stales-zero; complete-run stales-absent; partial/rejected/cap runs
 stale-zero; mass-staleness circuit breaker; superseded-run refusal; identity_account
 key allowlist; `raw_payload` never populated; no hard delete.
+
+## okta_directory_group_persistence_test.sql (Phase 6 — migration 0054)
+Verifies the Okta directory-**group** persistence boundary (`directory_groups`): runner RPC
+grants (EXECUTE only to `connector_runner`; public/anon denied), no direct table access,
+RLS deny-all, pinned `search_path`, and **no `raw_payload` column**; complete+clean-run
+promotion gate (incomplete/rejected/cap/wrong-tenant blocked); idempotent replay + immutable
+`external_id` with a **rename** updating the mutable `name` in one row; first_seen preserved /
+last_seen advances; cross-tenant + cross-connection isolation; first-run-stales-zero;
+complete-run stales-absent (scoped, non-destructive); partial run stales-zero; mass-staleness
+circuit breaker; superseded-run refusal; `directory_group` key allowlist; **no memberships**
+(`member_count` key + `group_membership` fact_type both rejected); bounded `group_type_category`
+CHECK rejects an out-of-set category at promotion.

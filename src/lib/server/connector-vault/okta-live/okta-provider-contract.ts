@@ -21,19 +21,23 @@ export function isValidOktaClientId(v: unknown): v is string {
   return typeof v === "string" && OKTA_CLIENT_ID_RE.test(v);
 }
 
-// Customer-safe, READ-ONLY pilot capabilities. These are the ONLY things a future Okta connection may read.
-export const OKTA_PILOT_CAPABILITIES = Object.freeze(["read_users", "read_account_status", "read_basic_profile"] as const);
+// Customer-safe, READ-ONLY pilot capabilities. These are the ONLY things a future Okta connection may read. `read_groups` (Phase 6)
+// is directory-group discovery ONLY — group entities, NO memberships, NO applications, NO assignments, NO group-derived access.
+export const OKTA_PILOT_CAPABILITIES = Object.freeze(["read_users", "read_account_status", "read_basic_profile", "read_groups"] as const);
 export type OktaPilotCapability = (typeof OKTA_PILOT_CAPABILITIES)[number];
 
 // The EXACT intended OAuth scope set — least privilege. A live authorize/exchange must request EXACTLY this set (see
-// scopesExactlyApproved); a subset or superset is rejected. Do NOT broaden without a separately-authorized capability phase.
-export const OKTA_APPROVED_SCOPES = Object.freeze(["okta.users.read"] as const);
+// scopesExactlyApproved); a subset or superset is rejected. okta.groups.read was added in Phase 6 (the separately-authorized
+// directory-group capability phase); it is READ-ONLY and covers group ENTITIES only (no memberships). Do NOT broaden further
+// (apps/assignments/memberships/any write scope) without another separately-authorized capability phase.
+export const OKTA_APPROVED_SCOPES = Object.freeze(["okta.users.read", "okta.groups.read"] as const);
 export type OktaApprovedScope = (typeof OKTA_APPROVED_SCOPES)[number];
 
 // Explicitly PROHIBITED scope families — never requested, and asserted-absent by tests. These are capabilities the pilot must
-// never obtain (write, admin, password, MFA, lifecycle, logs, groups, apps).
+// never obtain (write, admin, password, MFA, lifecycle, logs, group WRITES, apps). Note: okta.groups.read is now APPROVED (read-only
+// group entities); okta.groups.manage (group writes) stays prohibited.
 export const OKTA_PROHIBITED_SCOPES = Object.freeze([
-  "okta.users.manage", "okta.users.write", "okta.groups.manage", "okta.groups.read", "okta.apps.manage", "okta.apps.read",
+  "okta.users.manage", "okta.users.write", "okta.groups.manage", "okta.apps.manage", "okta.apps.read",
   "okta.logs.read", "okta.factors.read", "okta.factors.manage", "okta.roles.manage", "okta.schemas.manage",
   "okta.policies.manage", "okta.users.lifecycle.manage", "okta.users.credentials.manage",
 ] as const);
