@@ -285,3 +285,19 @@ first_seen preserved / last_seen advances; cross-tenant + cross-connection isola
 complete-run stales-absent (scoped, non-destructive — stale not deleted); partial run
 stales-zero; mass-staleness circuit breaker; and the `directory_group_membership` key allowlist
 (a member email/name key rejected).
+
+## okta_directory_application_persistence_test.sql (Phase 10 — migration 0057)
+Verifies the Okta directory-**application** boundary (`directory_applications`): runner RPC grants
+(EXECUTE only to `connector_runner`; public/anon denied), no direct table access, RLS deny-all,
+pinned `search_path`, and **no `raw_payload` column**; complete-run promotion stores `label` +
+bounded `status_category`/`sign_on_category`, leaving the **catalog link NULL/unmatched** (no
+matcher run); promotion gate blocks incomplete/rejected/wrong-tenant + superseded; idempotent
+replay updates without duplicating (a **label rename** updates in place), first_seen preserved /
+last_seen advances; cross-tenant + cross-connection + cross-provider isolation of the same
+`external_id`; the **optional catalog link** — a valid same-tenant FK is settable, a cross-tenant
+product is rejected, deleting the catalog product `SET NULL`s only the link (the provider app
+survives + `tenant_id` intact), promotion leaves `catalog_match_status` untouched and **never
+writes `app_products`**; first-run-stales-zero; complete-run stales-absent (non-destructive);
+partial run stales-zero; mass-staleness circuit breaker; the `directory_application` key allowlist
+(a `settings`/url key rejected); and the bounded category CHECK (an out-of-set `status_category`
+rejected).
