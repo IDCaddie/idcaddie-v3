@@ -313,3 +313,21 @@ per connection, empty array when none, and rejects wrong-tenant/non-okta connect
 connection, treats a stale group as matched (known), rejects null input, and enforces the ≤1000
 cardinality guard. (The app-user resolver `runner_resolve_okta_identity_refs` is the 0055 one
 reused.)
+
+## okta_application_assignment_persistence_test.sql (Phase 12 — migrations 0059 + 0060)
+Verifies the two application-assignment EDGE boundaries (`directory_application_user_assignments`
++ `directory_application_group_assignments`): the 0059 prerequisite `directory_applications_id_scope_key`
+constraint exists; runner RPC grants (EXECUTE only to `connector_runner`; public/anon denied) on all
+four promote/stale RPCs; pinned `search_path`; **no `raw_payload` column**; RLS deny-all (no policy)
++ **no direct edge DML** for `connector_runner` on both tables. Promotion: a complete+clean run
+resolves BOTH endpoint kinds and creates one user edge + one group edge, connection-scoped to the
+resolved canonical app+identity / app+group rows. **Dual-endpoint fail-closed**: an unresolved app,
+user, or group aborts the WHOLE promotion (all-or-nothing — no partial/dangling edge). Promotion
+gate blocks incomplete / rejected>0 / wrong-tenant runs. Idempotent replay updates (no duplicate
+edge) with `first_seen` preserved + `last_seen` advanced even after an app label / group name
+rename (external_id is the immutable key). Cross-tenant + cross-connection isolation (same
+(app,user) external ids resolve to separate canonical endpoints → separate edges). Stale: first run
+stales-zero; a complete second run stales an absent edge (never hard-deleted); partial run stales-
+zero; mass-staleness circuit breaker. Fact-key allowlist rejects a non-approved key on BOTH
+assignment fact types (a scope/login/group-name leak). **Separation invariant**: a group-to-app
+assignment creates ONLY a group edge and does NOT fan out to user edges (no effective access).
