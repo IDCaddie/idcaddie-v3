@@ -270,3 +270,18 @@ connection, empty array when none, and rejects wrong-tenant/non-okta connections
 **external_id equality only** (an email value never matches), isolates cross-tenant + cross-
 connection, treats a stale identity as matched (known), rejects null input, and enforces the
 ≤1000 cardinality guard.
+
+## okta_group_membership_persistence_test.sql (Phase 8 — migration 0056)
+Verifies the Okta directory-group **membership** EDGE boundary (`directory_group_memberships`):
+runner RPC grants (EXECUTE only to `connector_runner`; public/anon denied), **no direct table
+access** (not even SELECT), RLS deny-all, pinned `search_path`, and **no `raw_payload` column**;
+complete-run promotion resolves both endpoints and creates one scoped edge binding the canonical
+group + identity rows; the **dual-endpoint fail-closed** guard aborts the WHOLE promotion (no
+partial edge) when a group OR user external_id is unresolved, including a mixed run; the
+promotion gate blocks incomplete/rejected/wrong-tenant; idempotent replay updates without
+duplicating (a group **rename** + identity **email change** still resolve to the same edge),
+first_seen preserved / last_seen advances; cross-tenant + cross-connection isolation of the same
+`(group,user)` pair into separate edges via the composite FKs; first-run-stales-zero;
+complete-run stales-absent (scoped, non-destructive — stale not deleted); partial run
+stales-zero; mass-staleness circuit breaker; and the `directory_group_membership` key allowlist
+(a member email/name key rejected).
