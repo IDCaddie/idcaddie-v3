@@ -259,3 +259,14 @@ complete-run stales-absent (scoped, non-destructive); partial run stales-zero; m
 circuit breaker; superseded-run refusal; `directory_group` key allowlist; **no memberships**
 (`member_count` key + `group_membership` fact_type both rejected); bounded `group_type_category`
 CHECK rejects an out-of-set category at promotion.
+
+## okta_group_membership_read_test.sql (Phase 7 — migration 0055)
+Verifies the two SELECT-only read RPCs for the bounded read-only membership aggregate:
+grants (EXECUTE only to `connector_runner`; public/anon denied), pinned `search_path`, and
+**no direct SELECT** on directory_groups/identity_accounts (the definer RPCs are the only read
+path); `list_group_refs` returns **current** external_ids only (stale excluded), scoped per
+connection, empty array when none, and rejects wrong-tenant/non-okta connections;
+`resolve_identity_refs` returns **counts only** (requested/matched/unmatched), matches on
+**external_id equality only** (an email value never matches), isolates cross-tenant + cross-
+connection, treats a stale identity as matched (known), rejects null input, and enforces the
+≤1000 cardinality guard.
