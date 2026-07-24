@@ -301,3 +301,15 @@ writes `app_products`**; first-run-stales-zero; complete-run stales-absent (non-
 partial run stales-zero; mass-staleness circuit breaker; the `directory_application` key allowlist
 (a `settings`/url key rejected); and the bounded category CHECK (an out-of-set `status_category`
 rejected).
+
+## okta_application_assignment_read_test.sql (Phase 11 — migration 0058)
+Verifies the two SELECT-only read RPCs for the bounded read-only application-assignment aggregate:
+grants (EXECUTE only to `connector_runner`; public/anon denied), pinned `search_path`, and **no
+direct SELECT** on directory_applications/directory_groups (the definer RPCs are the only read
+path); `list_application_refs` returns **current** app external_ids only (stale excluded), scoped
+per connection, empty array when none, and rejects wrong-tenant/non-okta connections;
+`resolve_directory_group_refs` returns **counts only** (requested/matched/unmatched), matches on
+**external_id equality only** (a group name never matches), isolates cross-tenant + cross-
+connection, treats a stale group as matched (known), rejects null input, and enforces the ≤1000
+cardinality guard. (The app-user resolver `runner_resolve_okta_identity_refs` is the 0055 one
+reused.)
