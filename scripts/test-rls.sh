@@ -111,7 +111,15 @@ grant update (upload_status) on public.files to authenticated;
 -- connector_kill_switches — are all Tier-2 deny-all tables (RLS-enabled, ZERO policies, revoke-all from anon/authenticated; all
 -- mutation via SECURITY DEFINER functions only). Revoke them back here so the suite mirrors the real deny-all posture; the
 -- connector_run_control_plane_test exact-zero-privilege arrays are the backstop.
-revoke all on public.connector_secrets, public.connectors, public.connector_runs, public.oauth_pending, public.connector_app_secrets, public.connector_credential_references, public.connector_run_authorizations, public.connector_run_attempts, public.connector_run_locks, public.connector_run_alerts, public.connector_schedule_policies, public.connector_schedule_slots, public.connector_kill_switches, public.connector_pilot_enrollments, public.connector_pilot_consents, public.connector_pilot_incidents, public.connector_pilot_exit_reviews, public.connector_pilot_deletion_jobs, public.connector_okta_issuer_bindings from authenticated, anon;
+-- The canonical directory graph tables (migrations 0053/0054/0056/0057/0059) are Tier-2 deny-all: RLS-enabled, ZERO SELECT policies,
+-- revoke-all from anon/authenticated/connector_runner; the ONLY customer read path is the 0061 authenticated SECURITY DEFINER RPCs
+-- (no direct table grant). The blanket `grant select on all tables` above re-broadens them here (the exact masking gap this line closes),
+-- so re-revoke so the suite mirrors the real deny-all posture. access_product_read_rpcs_test's AR0 exact-zero-privilege check is the backstop.
+revoke all on public.connector_secrets, public.connectors, public.connector_runs, public.oauth_pending, public.connector_app_secrets, public.connector_credential_references, public.connector_run_authorizations, public.connector_run_attempts, public.connector_run_locks, public.connector_run_alerts, public.connector_schedule_policies, public.connector_schedule_slots, public.connector_kill_switches, public.connector_pilot_enrollments, public.connector_pilot_consents, public.connector_pilot_incidents, public.connector_pilot_exit_reviews, public.connector_pilot_deletion_jobs, public.connector_okta_issuer_bindings, public.directory_groups, public.directory_group_memberships, public.directory_applications, public.directory_application_user_assignments, public.directory_application_group_assignments from authenticated, anon;
+-- NOTE: identity_accounts is a SHARED legacy table other suites read as authenticated (RLS returns 0 rows via its no-policy deny-all);
+-- leave the harness grant so those RLS-filtered reads stay 0-rows rather than permission-denied. Its real protection (RLS + zero SELECT
+-- policy) is migration-controlled and asserted directly by access_product_read_rpcs_test AR0; the customer access-graph read path is the
+-- 0061 SECURITY DEFINER RPCs regardless of any direct grant.
 grant select on public.connectors, public.connector_runs to authenticated;
 -- connector_okta_issuer_bindings (0048): hosted posture is SELECT-only for authenticated (org-manager RLS scopes rows), NO write.
 grant select on public.connector_okta_issuer_bindings to authenticated;
