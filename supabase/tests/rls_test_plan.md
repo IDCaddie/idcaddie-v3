@@ -331,3 +331,13 @@ stales-zero; a complete second run stales an absent edge (never hard-deleted); p
 zero; mass-staleness circuit breaker. Fact-key allowlist rejects a non-approved key on BOTH
 assignment fact types (a scope/login/group-name leak). **Separation invariant**: a group-to-app
 assignment creates ONLY a group edge and does NOT fan out to user edges (no effective access).
+
+## access_product_read_rpcs_test.sql (Phase 15 Part 1 PR A — migration 0061)
+Verifies the authenticated SECURITY DEFINER product read RPCs onto the canonical directory graph. AR0: every canonical
+table keeps RLS enabled + ZERO policies (migration-controlled deny-all) and the five new directory_* tables have no
+authenticated SELECT grant; the RPCs are EXECUTE-only to authenticated, anon denied. AR1: owner + admin members read
+counts/list/subgraph. AR2: editor + viewer denied (role gate = owner/admin only) with a not-found-equivalent empty/null.
+AR3: cross-tenant — a member of tenant B passing tenant A's id (verify-not-trust) gets nothing; a tenant-A owner never
+lists a tenant-B row; a foreign id and a missing id both return the same not-found. AR4: non-member denied. AR5: no
+external_id/raw_payload/tenant_id leaks in any RPC output (incl. a recursive jsonb_path check of the subgraph). AR6:
+current-only by default; include_stale surfaces the stale identity; pagination capped at 100.
