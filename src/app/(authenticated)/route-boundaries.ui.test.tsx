@@ -10,6 +10,9 @@ vi.mock("next/link", () => ({
 
 import AppDetailError from "./apps/[id]/error";
 import ContractDetailError from "./contracts/[id]/error";
+import AccessError from "./access/error";
+import IdentityAccessError from "./access/identities/[id]/error";
+import ApplicationAccessError from "./access/applications/[id]/error";
 
 afterEach(cleanup);
 const err = Object.assign(new Error("secret internal stack detail"), { digest: "abc123" });
@@ -29,4 +32,14 @@ describe("route error boundaries", () => {
     expect(screen.getByText("Back to contracts")).toBeTruthy();
     expect(container.textContent).not.toContain("secret internal stack detail");
   });
+
+  for (const [name, Cmp] of [["access overview", AccessError], ["identity access", IdentityAccessError], ["application access", ApplicationAccessError]] as const) {
+    it(`${name} error: safe copy + digest reference + Back to Access, no error.message leak`, () => {
+      const { container } = render(<Cmp error={err} reset={() => {}} />);
+      expect(screen.getByText("Something went wrong")).toBeTruthy();
+      expect(screen.getByText(/Reference: abc123/)).toBeTruthy();
+      expect(screen.getByText("Back to Access")).toBeTruthy();
+      expect(container.textContent).not.toContain("secret internal stack detail");
+    });
+  }
 });

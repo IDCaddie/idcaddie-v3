@@ -9,7 +9,7 @@ export type NavSection = { title: string; items: NavItem[] };
 
 // The real, implemented authenticated routes that may be linked. Keep in sync with the route tree;
 // the test asserts every linked NavItem.href is one of these (so an unbuilt area can never be linked).
-export const IMPLEMENTED_ROUTES = ["/", "/apps", "/contracts", "/people", "/reports", "/audit", "/admin", "/files", "/dashboards", "/connectors", "/needs-attention", "/catalog"] as const;
+export const IMPLEMENTED_ROUTES = ["/", "/apps", "/contracts", "/people", "/reports", "/audit", "/admin", "/files", "/dashboards", "/connectors", "/needs-attention", "/catalog", "/access"] as const;
 
 export const NAV_SECTIONS: NavSection[] = [
   {
@@ -56,6 +56,9 @@ export const NAV_SECTIONS: NavSection[] = [
   {
     title: "Insights",
     items: [
+      // Read-only access governance over the canonical directory graph (owner/admin only, enforced server-side; nav is display-only).
+      // Effective access + governance findings; no mutation, no exports, no usage/license/savings claims.
+      { label: "Access", href: "/access", note: "governance, read-only" },
       // Read-only: summary counts (Reports) + recent audit entries (Audit). Generation/export/scheduling
       // and before/after diff are NOT built — see the pages' "Not built yet" copy.
       { label: "Reports", href: "/reports", note: "summary counts only" },
