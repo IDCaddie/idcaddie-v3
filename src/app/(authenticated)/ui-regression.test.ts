@@ -57,3 +57,30 @@ describe("UI regression — PR #1–#5 pages stay read-only + leak-free", () => 
     }
   });
 });
+
+// The Phase-15 /access pages are held to a STRICTER bar than the shared PAGES set (which intentionally tolerates external_id on the
+// connector-instance apps): the canonical access graph must never surface an external_id / raw payload / tenant id / login / email / secret
+// in page source. (The shared PAGES list deliberately does NOT forbid external_id, so a separate block is used here.)
+const ACCESS_PAGES = ["access/page.tsx", "access/findings/page.tsx", "access/identities/[id]/page.tsx", "access/applications/[id]/page.tsx"];
+describe("UI regression — /access pages never surface external ids / PII / secrets / mutations", () => {
+  it("render no external_id / raw payload / tenant id / login / email / secret field", () => {
+    for (const p of ACCESS_PAGES) {
+      const code = read(p);
+      for (const f of [
+        "external_id", "externalId", "external_user_id", "externalUserId", "raw_payload", "rawPayload",
+        "tenant_id", "tenantId", "connection_id", ".login", ".email", "source_endpoint", "sourceEndpoint", "last_discovery_run_id",
+        "connector_secrets", "discovery_facts", "fact_json", "ciphertext", "getSecretValue", "activeTenant.id", "SERVICE_ROLE",
+      ]) {
+        expect(code, `${p} must not reference ${f}`).not.toContain(f);
+      }
+    }
+  });
+  it("introduce no server action / DB mutation / access-mutation control", () => {
+    for (const p of ACCESS_PAGES) {
+      const code = read(p);
+      for (const f of ['"use server"', ".insert(", ".update(", ".upsert(", ".delete(", "Remove access", "Reclaim", "Deprovision"]) {
+        expect(code, `${p} must not contain ${f}`).not.toContain(f);
+      }
+    }
+  });
+});

@@ -1,0 +1,128 @@
+// Phase 15 Part 1 PR B — browser-safe, immutable view models + pure mappers for the /access surface. React never sees a raw RPC row or a
+// raw engine object: the loaders resolve Phase-13/14 outputs server-side and map them here into DTOs that carry ONLY safe display labels,
+// integer counts, bounded enums, and canonical row-id UUIDs used solely as href params (never visible text). NEVER external_id /
+// raw_payload / normalized_* / sourceEndpoint / lastDiscoveryRunId / credentials / settings / profiles / secret / foreign tenant id.
+// A safe human label for an identity is display_name, else login, else email (docs/72 §"Safe display metadata" — login/email ARE permitted
+// display fallbacks for an owner/admin so a user is identifiable when display_name is absent); a UUID/external_id is NEVER a human label.
+// Truthful copy only (docs/71). Pure module; window sentinel.
+
+import type { IdentityAccess, AppAccess } from "@/lib/server/access-graph/types";
+import type { GovernanceFinding, GovernanceSummary, GovernanceSeverity, GovernanceConfidence, GovernanceSubjectType } from "@/lib/server/governance-analytics/types";
+import type { StatusTone } from "@/components/status-tokens";
+import { ruleProse, severityTone, severityLabel, confidenceLabel } from "./governance-presenter";
+
+if (typeof (globalThis as { window?: unknown }).window !== "undefined") {
+  throw new Error("access-view-models is server-only and must not be imported in client code");
+}
+
+export type EvaluationCompleteness =
+  | { readonly status: "complete" }
+  | { readonly status: "bounded"; readonly reasonKey: string }
+  | { readonly status: "unavailable"; readonly reasonKey: string };
+
+// A label map: canonical ROW id -> safe display label (already fallback-resolved). Loaders build these from the RPC display columns.
+export type LabelMap = ReadonlyMap<string, string>;
+
+export type SafeSubjectLink = { readonly kind: "identity" | "application"; readonly label: string; readonly href: string };
+export type GroupPathView = { readonly groupLabel: string; readonly staleEvidence: boolean };
+
+export type GovernanceFindingView = {
+  readonly id: string;
+  readonly severity: GovernanceSeverity;
+  readonly severityLabel: string;
+  readonly severityTone: StatusTone;
+  readonly confidence: GovernanceConfidence;
+  readonly confidenceLabel: string;
+  readonly title: string;
+  readonly summary: string;
+  readonly guidance: string | null;
+  readonly subject: SafeSubjectLink | null;
+  readonly evidenceRows: readonly { readonly label: string; readonly value: string }[];
+  readonly staleEvidence: boolean;
+};
+
+export type GovernanceSummaryView = {
+  readonly total: number;
+  readonly bySeverity: Readonly<Record<GovernanceSeverity, number>>;
+};
+
+export type ClassificationView = "DIRECT" | "GROUP" | "BOTH";
+export type IdentityApplicationAccessView = {
+  readonly applicationId: string;
+  readonly applicationLabel: string;
+  readonly classification: ClassificationView;
+  readonly classificationLabel: string;
+  readonly explanation: string;
+  readonly groupPaths: readonly GroupPathView[];
+  readonly staleEvidence: boolean;
+};
+
+// ── safe display fallbacks (display_name → login → email → "Unnamed…"; NEVER a UUID / external_id as a human label) ───────────────────
+const clean = (s: string | null | undefined): string | null => { const t = (s ?? "").trim(); return t.length > 0 ? t : null; };
+export const identityLabel = (r: { display_name?: string | null; login?: string | null; email?: string | null }): string =>
+  clean(r.display_name) ?? clean(r.login) ?? clean(r.email) ?? "Unnamed identity";
+export const groupLabel = (r: { name?: string | null }): string => clean(r.name) ?? "Unnamed group";
+export const applicationLabel = (r: { label?: string | null; name?: string | null }): string => clean(r.label) ?? clean(r.name) ?? "Unnamed application";
+
+const HUMAN_COUNT: Record<string, string> = {
+  directAssignmentCount: "Direct assignments", inheritedPathCount: "Group paths", effectiveCount: "Effective applications",
+  currentMembershipCount: "Current group memberships", staleMembershipCount: "Stale group memberships",
+  memberCount: "Members", applicationAssignmentCount: "Application assignments",
+  effectiveIdentityCount: "Effective identities", currentDirectAssignmentCount: "Current direct assignments", currentGroupAssignmentCount: "Current group assignments",
+  distinctGroupPathCount: "Distinct group paths", effectiveApplicationCount: "Effective applications", groupDerivedCount: "Group-derived applications", directCount: "Direct applications",
+  staleDirectPathCount: "Stale direct paths", staleGroupPathCount: "Stale group paths", currentPathCount: "Current paths",
+  edgeCount: "Affected relationships",
+};
+const humanizeCount = (k: string): string => HUMAN_COUNT[k] ?? k;
+
+// classification LABEL + EXPLANATION copy (truthful; counts only). The DIRECT/GROUP/BOTH decision itself is Phase-13's
+// (AppAccess.classification) — this only renders it, never re-derives it (single source of truth = the engine).
+const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+export function classificationView(classification: ClassificationView, groupCount: number): { label: string; explanation: string } {
+  if (classification === "BOTH") return { label: "Direct and through group", explanation: `Access is represented through a direct assignment and ${plural(groupCount, "group", "groups")}.` };
+  if (classification === "DIRECT") return { label: "Direct", explanation: "Access is represented through a direct assignment." };
+  return { label: "Through group", explanation: `Access is represented through ${plural(groupCount, "group", "groups")}.` };
+}
+
+// ── mappers ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+// A finding subject becomes a link ONLY when it resolves to a known identity/application safe label; otherwise no id/link is emitted
+// (structural "graph" findings and unresolved subjects render subject:null — never a bare UUID or a foreign id).
+function subjectLink(subjectType: GovernanceSubjectType, subjectId: string, identities: LabelMap, applications: LabelMap): SafeSubjectLink | null {
+  if ((subjectType === "identity" || subjectType === "effective_access") && identities.has(subjectId)) {
+    return { kind: "identity", label: identities.get(subjectId)!, href: `/access/identities/${subjectId}` };
+  }
+  if (subjectType === "application" && applications.has(subjectId)) {
+    return { kind: "application", label: applications.get(subjectId)!, href: `/access/applications/${subjectId}` };
+  }
+  return null;
+}
+
+export function mapFindingToView(f: GovernanceFinding, identities: LabelMap, applications: LabelMap): GovernanceFindingView {
+  const prose = ruleProse(f.ruleId);
+  const evidenceRows = Object.entries(f.evidence.counts).map(([k, v]) => ({ label: humanizeCount(k), value: String(v) }));
+  return {
+    id: f.id, severity: f.severity, severityLabel: severityLabel(f.severity), severityTone: severityTone(f.severity),
+    confidence: f.confidence, confidenceLabel: confidenceLabel(f.confidence),
+    title: prose.title, summary: prose.summary, guidance: prose.guidance,
+    subject: subjectLink(f.subjectType, f.subjectId, identities, applications),
+    evidenceRows, staleEvidence: f.category === "freshness",
+  };
+}
+
+export function mapSummaryToView(s: GovernanceSummary): GovernanceSummaryView {
+  return { total: s.findingsTotal, bySeverity: s.findingsBySeverity };
+}
+
+// Map one identity's effective access to per-application rows (for the identity detail page). `groupLabelOf` resolves a group row id -> safe label.
+export function mapIdentityApplications(access: IdentityAccess, applications: LabelMap, groupLabelOf: LabelMap): IdentityApplicationAccessView[] {
+  return access.effective.map((app: AppAccess) => {
+    const c = classificationView(app.classification, app.groupPaths.length);
+    return {
+      applicationId: app.applicationId,
+      applicationLabel: applications.get(app.applicationId) ?? "Unnamed application",
+      classification: app.classification, classificationLabel: c.label, explanation: c.explanation,
+      groupPaths: app.groupPaths.map((p) => ({ groupLabel: groupLabelOf.get(p.groupId) ?? "Unnamed group", staleEvidence: p.assignment.syncStatus !== "current" || p.membership.syncStatus !== "current" })),
+      staleEvidence: (app.directProvenance?.syncStatus ?? "current") !== "current" || app.groupPaths.some((p) => p.assignment.syncStatus !== "current" || p.membership.syncStatus !== "current"),
+    };
+  });
+}
