@@ -70,8 +70,10 @@ if (argv.includes("--help") || argv.includes("-h")) {
   Always required (LOCAL only; never printed): STAGING_SUPABASE_URL, STAGING_SUPABASE_ANON_KEY, STAGING_AUTH_TEST_USERS.
   staging mode:     STAGING_APP_URL (production/legacy hosts refused).
   isolated-v3 mode: ACCESS_VERIFY_APP_URL + ACCESS_VERIFY_ALLOWED_HOST (must match + be a reviewed host: ${ISOLATED_V3_ALLOWED_HOSTS.join(", ")}).
-  STAGING_AUTH_TEST_USERS JSON: { "expectedTenantId": "<uuid>", "owner": {"email","password"},
-    "admin"?/"editor"?/"viewer"?/"nonMember"?: {"email","password"}, "foreignId"?: "<uuid>" }.
+  STAGING_AUTH_TEST_USERS JSON: { "expectedTenantId": "<uuid>",   // expectedTenantId is the ONLY required field
+    "owner"?/"admin"?/"editor"?/"viewer"?/"nonMember"?: {"email","password"}, "foreignId"?: "<uuid>" }.
+  The POSITIVE path needs an owner OR admin (the /access surface is owner/admin-only); with neither, that path is SKIPPED (partial run,
+  deny boundary + structure still verified). Any supplied principal is validated for { email, password }.
   Requires the linked ref (or ACCESS_SURFACE_REF_FILE) = staging ${STAGING_REF}; refuses production ${PRODUCTION_REF}.\n`);
   process.exit(0);
 }
@@ -177,10 +179,17 @@ if (dbHost !== `${STAGING_REF}.supabase.co`) die(`STAGING_SUPABASE_URL host must
 const { appUrl: APP_URL, appHost } = resolveAppTarget();
 
 // ── Guard 4: parse synthetic users (role-keyed) ──────────────────────────────────────────────────────
+// ONLY expectedTenantId is required. Every principal (owner/admin/editor/viewer/nonMember) is OPTIONAL and validated ONLY if supplied.
+// The /access surface is owner/admin-only, so the POSITIVE path needs an owner OR admin; with neither, main() SKIPs it (loud PARTIAL) and
+// still verifies the deny boundary + structure — it never invents an owner or counts an absent positive check as passed.
 let USERS;
 try { USERS = JSON.parse(USERS_JSON); } catch { die("STAGING_AUTH_TEST_USERS is not valid JSON."); }
-if (!USERS?.expectedTenantId || !USERS?.owner?.email || !USERS?.owner?.password) {
-  die('STAGING_AUTH_TEST_USERS needs { expectedTenantId, owner: { email, password } } at minimum.');
+if (!USERS?.expectedTenantId) die("STAGING_AUTH_TEST_USERS needs { expectedTenantId } at minimum.");
+for (const role of ["owner", "admin", "editor", "viewer", "nonMember"]) {
+  const p = USERS[role];
+  if (p !== undefined && (typeof p?.email !== "string" || typeof p?.password !== "string" || p.email.length === 0 || p.password.length === 0)) {
+    die(`STAGING_AUTH_TEST_USERS.${role}, if supplied, needs non-empty string { email, password }.`);
+  }
 }
 
 // ── Guard 5: NEVER accept a service-role/secret key — accept ONLY an anon/publishable key (fail closed) ─
@@ -189,8 +198,13 @@ if (!isAnonKey(ANON)) die("STAGING_SUPABASE_ANON_KEY must be an anon/publishable
 // ── Harness (redacted output only) ────────────────────────────────────────────────────────────────────
 const results = [];
 function record(id, name, passed, detail) {
-  results.push({ id, passed });
+  results.push({ id, status: passed ? "PASS" : "FAIL" });
   console.log(`  [${passed ? "PASS" : "FAIL"}] ${id}. ${name}${detail ? ` — ${detail}` : ""}`); // detail carries redacted aggregates only
+}
+// SKIP is a distinct state — an absent optional principal / uncovered check. It is NEVER counted as passed; finish() surfaces it loudly.
+function skip(id, name, detail) {
+  results.push({ id, status: "SKIP" });
+  console.log(`  [SKIP] ${id}. ${name}${detail ? ` — ${detail}` : ""}`);
 }
 const anonClient = () => createClient(URL_, ANON, { auth: { persistSession: false, autoRefreshToken: false } });
 const appUrl = (p) => new global.URL(p, APP_URL).toString();
@@ -222,72 +236,99 @@ async function main() {
   console.log("");
   const tid = USERS.expectedTenantId;
 
-  // ── Unauthenticated route-deny checks (no session) ──────────────────────────────────────────────────
-  for (const [id, path] of [["U1", "/access"], ["U2", "/access/findings"], ["U3", "/access/findings/export"]]) {
+  // ── Unauthenticated route-deny checks (no session) — covers ALL 7 allowlisted routes (auth precedes any id lookup) ──────────────
+  const PH = "00000000-0000-4000-8000-000000000000"; // placeholder id for the :id routes (unauth denial precedes any lookup)
+  const routeDeny = [
+    ["U1", "/access"], ["U2", "/access/findings"], ["U3", `/access/identities/${PH}`], ["U4", `/access/applications/${PH}`],
+    ["U5", "/access/findings/export"], ["U6", `/access/identities/${PH}/export`], ["U7", `/access/applications/${PH}/export`],
+  ];
+  for (const [id, path] of routeDeny) {
     let r; try { r = await fetch(appUrl(path), { method: "GET", redirect: "manual", headers: { cookie: "" } }); }
     catch { die("could not reach the app URL."); } // static message — no error detail echoed
     const loc = r.headers.get("location") || "";
     record(id, `Unauthenticated ${path} is denied (→ /login)`, [301, 302, 303, 307, 308].includes(r.status) && loc.includes("/login"), `status ${r.status}`);
   }
 
-  // ── Owner: allowed + counts + entity + DIRECT + privacy ─────────────────────────────────────────────
-  const owner = await signIn("owner");
-  record("O1", "Owner sign-in succeeds (hosted Auth)", !!owner, owner ? "session issued" : "sign-in failed");
-  if (!owner) return finish();
-  const ownerRole = jwtRole(owner.token);
-  record("O2", "Owner JWT is user-scoped (role=authenticated, not service_role)", ownerRole === "authenticated", `role=${ownerRole ?? "unknown"}`);
+  // ── Positive path: the /access surface is OWNER/ADMIN-ONLY. Use owner ∨ admin as the authorized reader. With NEITHER present the
+  //    positive coverage is SKIPPED (loud PARTIAL) — never counted as passed; the deny + structural checks below still run. ─────────
+  const ownerConfigured = !!(USERS.owner?.email && USERS.owner?.password);
+  const adminConfigured = !!(USERS.admin?.email && USERS.admin?.password);
+  const owner = ownerConfigured ? await signIn("owner") : null;
+  const admin = adminConfigured ? await signIn("admin") : null;
+  if (ownerConfigured && !owner) record("O0", "Configured owner sign-in succeeds", false, "sign-in failed");
+  if (adminConfigured && !admin) record("A0", "Configured admin sign-in succeeds", false, "sign-in failed");
+  const authed = owner ?? admin;
+  const authedRole = owner ? "owner" : "admin";
 
-  const { data: counts } = await rpc(owner.c, "product_directory_access_counts", { p_tenant_id: tid });
-  const countsOk = counts && Object.entries(EXPECTED_COUNTS).every(([k, v]) => Number(counts[k]) === v);
-  record("O3", "Owner is allowed and counts match expected", !!countsOk,
-    counts ? `got ${JSON.stringify(EXPECTED_COUNTS_ACTUAL(counts))} expected ${JSON.stringify(EXPECTED_COUNTS)}` : "no counts returned");
-  record("O3p", "Counts response carries no forbidden keys", !forbiddenKeyIn(counts), forbiddenKeyIn(counts) ? "LEAK" : "clean");
+  if (!authed) {
+    skip("POS", "Positive path (counts parity, entity resolution, DIRECT, authorized privacy scan, authorized export)",
+      ownerConfigured || adminConfigured
+        ? "configured owner/admin sign-in failed — positive checks not run"
+        : "no owner/admin principal — add an owner/admin membership (docs/73 §minimum fixture) to obtain positive coverage");
+  } else {
+    record("O1", `Authorized ${authedRole} sign-in succeeds (hosted Auth)`, true, "session issued");
+    const role = jwtRole(authed.token);
+    record("O2", "Authorized JWT is user-scoped (role=authenticated, not service_role)", role === "authenticated", `role=${role ?? "unknown"}`);
 
-  const { data: idRows } = await rpc(owner.c, "product_list_directory_identities", { p_tenant_id: tid, p_limit: 100 });
-  const { data: appRows } = await rpc(owner.c, "product_list_directory_applications", { p_tenant_id: tid, p_limit: 100 });
-  record("O4", "Identity + application lists resolve at expected cardinality", (idRows?.length ?? 0) === 1 && (appRows?.length ?? 0) === 2, `identities=${idRows?.length ?? 0}, applications=${appRows?.length ?? 0}`);
-  record("O4p", "List responses carry no forbidden keys", !forbiddenKeyIn(idRows) && !forbiddenKeyIn(appRows), (forbiddenKeyIn(idRows) || forbiddenKeyIn(appRows)) ? "LEAK" : "clean");
+    const { data: counts } = await rpc(authed.c, "product_directory_access_counts", { p_tenant_id: tid });
+    const countsOk = counts && Object.entries(EXPECTED_COUNTS).every(([k, v]) => Number(counts[k]) === v);
+    record("O3", "Authorized reader is allowed and counts match expected", !!countsOk,
+      counts ? `got ${JSON.stringify(EXPECTED_COUNTS_ACTUAL(counts))} expected ${JSON.stringify(EXPECTED_COUNTS)}` : "no counts returned");
+    record("O3p", "Counts response carries no forbidden keys", !forbiddenKeyIn(counts), forbiddenKeyIn(counts) ? "LEAK" : "clean");
 
-  // Entity resolution + DIRECT-only shape (structural, at the RPC level — no engine reimplementation):
-  if ((idRows?.length ?? 0) === 1) {
-    const { data: sub } = await rpc(owner.c, "product_identity_access_subgraph", { p_identity_id: idRows[0].id, p_tenant_id: tid });
-    const directOnly = sub && (sub.userAssignments?.length ?? 0) === 1 && (sub.memberships?.length ?? 0) === 0 && (sub.groupAssignments?.length ?? 0) === 0;
-    record("O5", "Known identity resolves as DIRECT-only (1 direct assignment, 0 group paths → no false GROUP/BOTH)", !!directOnly,
-      sub ? `direct=${sub.userAssignments?.length ?? 0}, memberships=${sub.memberships?.length ?? 0}, groupAssignments=${sub.groupAssignments?.length ?? 0}` : "subgraph null");
-    record("O5p", "Identity subgraph carries no forbidden keys", !forbiddenKeyIn(sub), forbiddenKeyIn(sub) ? "LEAK" : "clean");
+    const { data: idRows } = await rpc(authed.c, "product_list_directory_identities", { p_tenant_id: tid, p_limit: 100 });
+    const { data: appRows } = await rpc(authed.c, "product_list_directory_applications", { p_tenant_id: tid, p_limit: 100 });
+    record("O4", "Identity + application lists resolve at expected cardinality", (idRows?.length ?? 0) === 1 && (appRows?.length ?? 0) === 2, `identities=${idRows?.length ?? 0}, applications=${appRows?.length ?? 0}`);
+    record("O4p", "List responses carry no forbidden keys", !forbiddenKeyIn(idRows) && !forbiddenKeyIn(appRows), (forbiddenKeyIn(idRows) || forbiddenKeyIn(appRows)) ? "LEAK" : "clean");
+
+    // Entity resolution + DIRECT-only shape (structural, at the RPC level — no engine reimplementation):
+    if ((idRows?.length ?? 0) === 1) {
+      const { data: sub } = await rpc(authed.c, "product_identity_access_subgraph", { p_identity_id: idRows[0].id, p_tenant_id: tid });
+      const directOnly = sub && (sub.userAssignments?.length ?? 0) === 1 && (sub.memberships?.length ?? 0) === 0 && (sub.groupAssignments?.length ?? 0) === 0;
+      record("O5", "Known identity resolves as DIRECT-only (1 direct assignment, 0 group paths → no false GROUP/BOTH)", !!directOnly,
+        sub ? `direct=${sub.userAssignments?.length ?? 0}, memberships=${sub.memberships?.length ?? 0}, groupAssignments=${sub.groupAssignments?.length ?? 0}` : "subgraph null");
+      record("O5p", "Identity subgraph carries no forbidden keys", !forbiddenKeyIn(sub), forbiddenKeyIn(sub) ? "LEAK" : "clean");
+    } else {
+      skip("O5", "Known-identity DIRECT-only shape", "identity cardinality != 1 (see O4) — not evaluated");
+    }
+    if ((appRows?.length ?? 0) === 2) {
+      let both = true;
+      for (const a of appRows) { const { data: s } = await rpc(authed.c, "product_application_access_subgraph", { p_application_id: a.id, p_tenant_id: tid }); if (!s) both = false; }
+      record("O6", "Both known applications resolve", both, both ? "2/2 resolved" : "an application did not resolve");
+    } else {
+      skip("O6", "Both known applications resolve", "application cardinality != 2 (see O4) — not evaluated");
+    }
+
+    // Indistinguishability: invalid / nonexistent / foreign id → null (not-found-equivalent).
+    const NONEXISTENT = "00000000-0000-4000-8000-000000000000";
+    const { data: bad1 } = await rpc(authed.c, "product_identity_access_subgraph", { p_identity_id: NONEXISTENT, p_tenant_id: tid });
+    const foreignId = USERS.foreignId;
+    let foreignSame = true, foreignNote = "no foreign fixture (skipped)";
+    if (foreignId) { const { data: f } = await rpc(authed.c, "product_identity_access_subgraph", { p_identity_id: foreignId, p_tenant_id: tid }); foreignSame = f == null; foreignNote = `foreign → ${f == null ? "null (same as missing)" : "RESOLVED (LEAK)"}`; }
+    record("O7", "Nonexistent (and foreign, if present) ids return not-found-equivalent null", bad1 == null && foreignSame, `nonexistent → ${bad1 == null ? "null" : "resolved"}; ${foreignNote}`);
+
+    // If BOTH owner and admin are supplied, cross-check that admin is ALSO allowed; else note which single role provided coverage.
+    if (owner && admin) { const { data: c } = await rpc(admin.c, "product_directory_access_counts", { p_tenant_id: tid }); record("A1", "Admin is also allowed", c != null, c != null ? "counts returned" : "denied"); }
+    else skip("A1", "Admin also-allowed cross-check", !adminConfigured ? "no admin principal" : !admin ? "admin supplied but sign-in failed" : "only admin supplied (no owner)");
+
+    await owner?.c.auth.signOut();
+    await admin?.c.auth.signOut();
   }
-  if ((appRows?.length ?? 0) === 2) {
-    let both = true;
-    for (const a of appRows) { const { data: s } = await rpc(owner.c, "product_application_access_subgraph", { p_application_id: a.id, p_tenant_id: tid }); if (!s) both = false; }
-    record("O6", "Both known applications resolve", both, both ? "2/2 resolved" : "an application did not resolve");
-  }
 
-  // Indistinguishability: invalid / nonexistent / foreign id → null (not-found-equivalent).
-  const NONEXISTENT = "00000000-0000-4000-8000-000000000000";
-  const { data: bad1 } = await rpc(owner.c, "product_identity_access_subgraph", { p_identity_id: NONEXISTENT, p_tenant_id: tid });
-  const foreignId = USERS.foreignId;
-  let foreignSame = true, foreignNote = "no foreign fixture (skipped)";
-  if (foreignId) { const { data: f } = await rpc(owner.c, "product_identity_access_subgraph", { p_identity_id: foreignId, p_tenant_id: tid }); foreignSame = f == null; foreignNote = `foreign → ${f == null ? "null (same as missing)" : "RESOLVED (LEAK)"}`; }
-  record("O7", "Nonexistent (and foreign, if present) ids return not-found-equivalent null", bad1 == null && foreignSame, `nonexistent → ${bad1 == null ? "null" : "resolved"}; ${foreignNote}`);
-  await owner.c.auth.signOut();
-
-  // ── Admin (optional): allowed ───────────────────────────────────────────────────────────────────────
-  const admin = await signIn("admin");
-  if (admin) { const { data: c } = await rpc(admin.c, "product_directory_access_counts", { p_tenant_id: tid }); record("A1", "Admin is allowed", c != null, c != null ? "counts returned" : "denied"); await admin.c.auth.signOut(); }
-  else record("A1", "Admin is allowed (skipped — no safe admin principal)", true, "skipped");
-
-  // ── Editor / viewer / non-member (optional): denied (RPC returns null) ──────────────────────────────
+  // ── Editor / viewer / non-member (optional): CLEANLY denied. ALWAYS run. A clean deny = null data AND no RPC error; an RPC error is
+  //    NOT a clean deny (a missing/broken 0061 RPC also returns null) → FAIL, so a globally-broken surface can't masquerade as "denied". ─
   for (const [id, role] of [["D1", "editor"], ["D2", "viewer"], ["D3", "nonMember"]]) {
+    if (typeof USERS[role]?.email !== "string" || typeof USERS[role]?.password !== "string" || !USERS[role].email || !USERS[role].password) { skip(id, `${role} is denied`, "no principal supplied"); continue; }
     const s = await signIn(role);
-    if (!s) { record(id, `${role} is denied (skipped — no principal)`, true, "skipped"); continue; }
-    const { data } = await rpc(s.c, "product_directory_access_counts", { p_tenant_id: tid });
-    record(id, `${role} is denied (RPC returns not-found-equivalent null)`, data == null, data == null ? "denied" : "ALLOWED (LEAK)");
+    if (!s) { record(id, `${role} sign-in (for deny check)`, false, "configured but sign-in failed"); continue; }
+    const { data, error } = await rpc(s.c, "product_directory_access_counts", { p_tenant_id: tid });
+    record(id, `${role} is cleanly denied (null data, no RPC error)`, error == null && data == null, error != null ? "RPC ERRORED — not a clean deny" : data == null ? "denied" : "ALLOWED (LEAK)");
     await s.c.auth.signOut();
   }
 
-  // ── Anonymous: denied ───────────────────────────────────────────────────────────────────────────────
-  const { data: anonCounts } = await rpc(anonClient(), "product_directory_access_counts", { p_tenant_id: tid });
-  record("N1", "Anonymous is denied (RPC returns null)", anonCounts == null, anonCounts == null ? "denied" : "ALLOWED (LEAK)");
+  // ── Anonymous: cleanly denied ─────────────────────────────────────────────────────────────────────────
+  const { data: anonCounts, error: anonErr } = await rpc(anonClient(), "product_directory_access_counts", { p_tenant_id: tid });
+  record("N1", "Anonymous is cleanly denied (null data, no RPC error)", anonErr == null && anonCounts == null, anonErr != null ? "RPC ERRORED — not a clean deny" : anonCounts == null ? "denied" : "ALLOWED (LEAK)");
 
   finish();
 }
@@ -298,12 +339,29 @@ function EXPECTED_COUNTS_ACTUAL(counts) {
 }
 
 function finish() {
-  const failed = results.filter((r) => !r.passed);
-  console.log(`\n  ${results.length - failed.length}/${results.length} automated checks passed (mode=${MODE}).`);
-  console.log("  MANUAL (docs/73 §UI acceptance): owner opens /access; findings/identity/application render; search, filters, pagination,");
-  console.log("  finding drill-down, and CSV export work; export is private/no-store + nosniff; NO mutation/removal/reclaim/savings control.");
-  if (failed.length) { console.log(`  FAILED: ${failed.map((r) => r.id).join(", ")} — do NOT record as passing evidence.\n`); process.exit(1); }
-  console.log("  A green run is staging evidence only. RISK-007 remains OPEN; Phase C remains BLOCKED; production untouched.\n");
+  const failed = results.filter((r) => r.status === "FAIL");
+  const skipped = results.filter((r) => r.status === "SKIP");
+  const passed = results.filter((r) => r.status === "PASS");
+  const posSkipped = skipped.some((r) => r.id === "POS");
+  const denySkipped = ["D1", "D2", "D3"].filter((id) => skipped.some((r) => r.id === id));
+  console.log(`\n  ${passed.length} passed, ${skipped.length} skipped, ${failed.length} failed (mode=${MODE}).`);
+  if (posSkipped) {
+    // The crux: without an authorized (owner/admin) read there is NO positive control. The deny checks cannot tell a correctly-denying
+    // surface from one that denies EVERYONE (e.g. the 0061 RPCs unapplied/broken). So a passing partial run is INCONCLUSIVE, not evidence.
+    console.log("  INCONCLUSIVE (PARTIAL) — no authorized owner/admin read was performed, so there is NO positive control. The deny checks");
+    console.log("  cannot distinguish a correctly-denying surface from one that denies EVERYONE (e.g. the migration-0061 RPCs unapplied or");
+    console.log("  broken). This run is NOT evidence the surface works — it only shows unauthorized callers received null. Add an owner/admin");
+    console.log("  membership (docs/73 §minimum fixture) for conclusive coverage.");
+  }
+  if (denySkipped.length) {
+    console.log(`  Role-based deny boundary NOT fully exercised — missing principal(s): ${denySkipped.join(", ")} (supply editor/viewer/non-member to exercise them).`);
+  }
+  console.log("  MANUAL (docs/73 §UI acceptance): an owner/admin opens /access; findings/identity/application render; search, filters,");
+  console.log("  pagination, drill-down, CSV export work; export is private/no-store + nosniff; NO mutation/removal/reclaim/savings control.");
+  console.log("  RISK-007 remains OPEN; Phase C remains BLOCKED; production untouched.");
+  if (failed.length) { console.log(`  Result: FAILED (exit 1) — ${failed.map((r) => r.id).join(", ")}. Do NOT record as passing evidence.\n`); process.exit(1); }
+  if (posSkipped) { console.log("  Result: PARTIAL / INCONCLUSIVE (exit 3) — not a full verification.\n"); process.exit(3); }
+  console.log("  Result: FULL PASS (exit 0) — staging evidence only.\n");
 }
 
 main().catch((e) => die(e?.message ?? String(e)));

@@ -65,8 +65,27 @@ appear in the run banner; no user/tenant identifier, label, email, provider exte
   "foreignId": "<uuid of a canonical row in ANOTHER tenant>"
 }
 ```
-Only `expectedTenantId` + `owner` are required; `admin`/`editor`/`viewer`/`nonMember`/`foreignId` are optional — the checks that need them
-are reported as *skipped* when absent (never silently passed).
+**Only `expectedTenantId` is required.** Every principal (`owner`/`admin`/`editor`/`viewer`/`nonMember`) is **optional** and validated only
+if supplied; `foreignId` is optional. A check whose principal is absent is reported **`SKIP`** — never silently passed.
+
+### Positive path needs an owner OR admin (and the minimum fixture to add)
+The `/access` surface is **owner/admin-only by design** — the migration-0061 RPCs gate on `has_tenant_role(tenant_id, {owner,admin})` and
+return `null` to everyone else. So the **positive path** (O1–O7 + A1: counts parity, entity resolution, DIRECT classification, the privacy
+scan *of the returned payload*, and authorized export) can only be obtained with an **owner or admin** member of `expectedTenantId`.
+
+With neither present the verifier runs a **PARTIAL / INCONCLUSIVE** run (**exit 3**): it prints `SKIP` for the `POS` line, runs the deny
+checks (U1–U7 unauthenticated route-deny; D1/D2/D3 editor/viewer/non-member; N1 anon) + attempts structure, and **never invents an owner or
+counts the skipped positive path as passed**. Crucially — **without an authorized read there is no positive control**, so the deny checks
+alone **cannot distinguish a correctly-denying surface from one that denies EVERYONE** (e.g. the 0061 RPCs unapplied/broken). A passing
+partial run is therefore **inconclusive** — it only shows unauthorized callers got `null`, not that the surface works. `finish()` says so
+loudly and exits `3`. (To catch the most common broken case, the deny checks require a *clean* deny — `null` data **and** no RPC error; an RPC
+error is a `FAIL`.)
+
+The current staging canonical tenant (`aaaa1111-1111-1111-1111-111111111111`) has **only `editor` + `viewer`** memberships — no owner, no
+admin — so a run against it is PARTIAL by construction. To obtain **full** coverage, add the **minimum** synthetic data (read-only-safe, no
+schema/grant/directory-data change): **one** synthetic Auth user (e.g. `tenant-owner-a@idcaddie-staging.local`, created via the Auth
+dashboard) and **one** `tenant_memberships` row granting it `role='owner'` (or `'admin'`) `status='active'` in that tenant, applied
+deliberately in the staging SQL editor after confirming the project ref. Do **not** weaken the verifier or use a real account instead.
 
 ## 3. Run
 ```bash
@@ -89,22 +108,28 @@ export STAGING_SUPABASE_ANON_KEY="<STAGING_ANON_OR_PUBLISHABLE_KEY>"
 export STAGING_AUTH_TEST_USERS='<SYNTHETIC_TEST_USER_JSON>'
 node scripts/verify-staging-access-surface.mjs
 ```
-Exit codes: `0` all checks passed · `1` a check failed (do not record as passing) · `2` a guard or fatal precondition refused (bad
-ref/URL/host, missing env, service-role/secret key, or an unreachable app URL). Output is check-id + PASS/FAIL + redacted aggregates
-only — never a password, token, cookie, anon-key value, provider external id, raw RPC response, label, email, or canonical/tenant id.
+Exit codes: `0` **FULL PASS** (positive path obtained, nothing failed) · `1` a check **failed** (do not record as passing) · `2` a guard or
+fatal precondition refused (bad ref/URL/host, missing env, service-role/secret key, or an unreachable app URL) · `3` **PARTIAL /
+INCONCLUSIVE** (positive path skipped — no owner/admin reader; deny-only evidence is not conclusive). Output is check-id +
+`PASS`/`FAIL`/`SKIP` + redacted aggregates only — never a password, token, cookie, anon-key value, provider external id, raw RPC response,
+label, email, or canonical/tenant id. The `O0`–`O7`/`A0`/`A1`/`POS` positive checks require an authorized owner/admin reader (else `SKIP`,
+exit 3); `U1`–`U7` (all seven routes) / `D1`–`D3` / `N1` (the deny boundary) run regardless. `O0`/`A0` record a *configured* owner/admin that
+failed to sign in (a `FAIL`).
 
 ### Automated checks (RPC + routing)
 | ID | Check |
 |---|---|
-| U1–U3 | Unauthenticated `/access`, `/access/findings`, `/access/findings/export` redirect to `/login` (denied) |
-| O1–O2 | Owner sign-in succeeds; JWT is user-scoped (never service_role) |
-| O3 | Owner allowed; counts == identities 1 / groups 2 / applications 2 / memberships 1 / direct 1 / group 0 |
+| U1–U7 | Unauthenticated `/access`, `/access/findings`, `/access/identities/:id`, `/access/applications/:id`, and the three `/export` routes all redirect to `/login` (denied) |
+| O0/A0 | *Configured* owner/admin failed to sign in → `FAIL` (only recorded when the principal was supplied but sign-in failed) |
+| O1–O2 | Authorized owner∨admin sign-in succeeds; JWT is user-scoped (never service_role) |
+| O3 | Authorized reader allowed; counts == identities 1 / groups 2 / applications 2 / memberships 1 / direct 1 / group 0 |
 | O4 | Identity list = 1, application list = 2 |
 | O5 | Known identity resolves DIRECT-only (1 direct assignment, 0 group paths → no false GROUP/BOTH) |
 | O6 | Both known applications resolve |
 | O7 | Nonexistent (and foreign, if provided) ids return not-found-equivalent `null` (indistinguishable) |
 | O3p/O4p/O5p | Privacy scan: no `external_id`/`raw_payload`/`normalized_*`/`credential`/`setting`/`profile`/`source_endpoint`/`secret`/`token` in any RPC response |
-| A1 | Admin allowed (if a safe principal exists) |
+| A1 | Admin *also* allowed (only when BOTH owner + admin supplied) |
+| D1–D3/N1 | Editor / viewer / non-member / anon are **cleanly** denied (null data **and** no RPC error; an RPC error is a `FAIL`) |
 | D1–D3 | Editor / viewer / non-member denied (RPC returns `null`) |
 | N1 | Anonymous denied |
 
