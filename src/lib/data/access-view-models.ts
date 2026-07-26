@@ -7,7 +7,7 @@
 // Truthful copy only (docs/71). Pure module; window sentinel.
 
 import type { IdentityAccess, AppAccess } from "@/lib/server/access-graph/types";
-import type { GovernanceFinding, GovernanceSummary, GovernanceSeverity, GovernanceConfidence, GovernanceSubjectType } from "@/lib/server/governance-analytics/types";
+import type { GovernanceFinding, GovernanceSummary, GovernanceSeverity, GovernanceConfidence, GovernanceSubjectType, GovernanceRuleId } from "@/lib/server/governance-analytics/types";
 import type { StatusTone } from "@/components/status-tokens";
 import { ruleProse, severityTone, severityLabel, confidenceLabel } from "./governance-presenter";
 
@@ -28,6 +28,8 @@ export type GroupPathView = { readonly groupLabel: string; readonly staleEvidenc
 
 export type GovernanceFindingView = {
   readonly id: string;
+  readonly ruleId: GovernanceRuleId;          // bounded enum — safe for a rule filter (never a foreign id / PII)
+  readonly subjectType: GovernanceSubjectType; // bounded enum — safe for a subject-type filter
   readonly severity: GovernanceSeverity;
   readonly severityLabel: string;
   readonly severityTone: StatusTone;
@@ -101,7 +103,8 @@ export function mapFindingToView(f: GovernanceFinding, identities: LabelMap, app
   const prose = ruleProse(f.ruleId);
   const evidenceRows = Object.entries(f.evidence.counts).map(([k, v]) => ({ label: humanizeCount(k), value: String(v) }));
   return {
-    id: f.id, severity: f.severity, severityLabel: severityLabel(f.severity), severityTone: severityTone(f.severity),
+    id: f.id, ruleId: f.ruleId, subjectType: f.subjectType,
+    severity: f.severity, severityLabel: severityLabel(f.severity), severityTone: severityTone(f.severity),
     confidence: f.confidence, confidenceLabel: confidenceLabel(f.confidence),
     title: prose.title, summary: prose.summary, guidance: prose.guidance,
     subject: subjectLink(f.subjectType, f.subjectId, identities, applications),
