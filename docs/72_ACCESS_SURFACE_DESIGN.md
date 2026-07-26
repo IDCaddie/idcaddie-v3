@@ -100,7 +100,34 @@ unbounded DOM. The overview adds severity filter-links and a findings search sho
 **Accessibility.** GET forms with native labelled controls (no JS required for core function), `aria-current="page"` on pagination,
 `role="status"` on completeness/bounded banners, `<details>` for disclosure. Asserted via testing-library role/name queries (no axe dep).
 
+## Part 2 — bounded CSV export (PR D)
+
+**Routes.** Three authenticated GET route handlers, one per exportable list: `/access/findings/export`, `/access/identities/[id]/export`,
+`/access/applications/[id]/export`. Each is `dynamic = "force-dynamic"` and returns a CSV attachment; no POST, no side effects, no storage
+bucket, no persisted file, no background job, no email.
+
+**Authorization = page authorization.** Each route calls the SAME server-only loader as its page (`loadAccessOverview` /
+`loadIdentityAccessDetail` / `loadApplicationAccessDetail`) — owner/admin gate via `accessGate` → the 0061 RPCs; canonical tables stay
+deny-all; never a service-role client; no browser RPC. `forbidden → 403`; a foreign/missing/unauthorized entity id → the SAME `404` as the
+page (no existence disclosure). Filters are parsed with the SAME `parseAccessFilters` and applied with the SAME `filterFindings` /
+`filterIdentityApplications` / `filterApplicationIdentities`, so an export always matches what the page shows.
+
+**Complete-only + bounded.** Findings export requires overview `status === "complete"` (else `409` — never a partial export claiming
+completeness); detail exports refuse when the subgraph is `bounded` (`409`). Above **`EXPORT_ROW_CAP = 10,000`** data rows the route returns
+a truthful `413` asking the user to narrow filters — it NEVER silently truncates.
+
+**CSV safety.** `access-export.ts` projects the safe view models onto an EXPLICIT column allowlist and runs every cell (and header) through
+`sanitizeCsvCell` (to-csv.ts), which prefixes a single quote when a cell begins — after optional whitespace — with a formula/command trigger
+(`= + - @`) or a control char (TAB/CR/LF), neutralizing spreadsheet formula/DDE injection; `toCsv` then quotes commas/quotes/newlines
+(RFC-4180). Columns — findings: `finding_id, severity, confidence, finding_type, title, summary, subject_type, subject_label,
+stale_evidence, evidence_summary, review_guidance`; identity-access: `identity_label, application_label, provider, classification,
+direct_assignment_count, inherited_group_count, inherited_group_labels, stale_evidence`; application-access: `application_label,
+identity_label, provider, classification, direct_assignment_count, stale_evidence`. NEVER emitted: tenant/canonical/external id, raw payload,
+credentials, settings, profiles, source endpoint, secret, raw JSON evidence, or a separate login/email column (labels are the same resolved
+display strings shown on-screen). Responses are `text/csv; charset=utf-8` + `Content-Disposition: attachment` + `X-Content-Type-Options:
+nosniff` + `Cache-Control: no-store, private`; filenames are a fixed prefix + date only (`access-findings-YYYY-MM-DD.csv`), no names/ids.
+The pages surface an "Export CSV" link (carrying the current filters) only when there are rows to export.
+
 ## Future (Part 2, later PRs)
-Bounded CSV export with formula-injection protection (PR D); a guarded staging verification script + runbook, responsive/accessibility
-hardening, and operational diagnostics (PR E) — still excluding remediation, access deletion, license/usage/savings claims, and production
-rollout.
+A guarded staging verification script + runbook, responsive/accessibility hardening, and operational diagnostics (PR E) — still excluding
+remediation, access deletion, license/usage/savings claims, and production rollout.
