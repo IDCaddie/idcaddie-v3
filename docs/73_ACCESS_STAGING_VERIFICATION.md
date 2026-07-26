@@ -1,10 +1,27 @@
-# 73 — /access Staging Verification Runbook (Phase 15 Part 2 PR E)
+# 73 — /access Verification Runbook (Phase 15 Part 2, PR E + PR F)
 
-Read-only, staging-only acceptance for the `/access` product surface (Part 1 + Part 2). A HUMAN runs the verifier + the manual UI checklist
-in an approved staging window; the agent runs only `node --check` + the mock-only guard tests (`verify-staging-access-surface.test.ts`).
+Read-only acceptance for the `/access` product surface (Part 1 + Part 2). A HUMAN runs the verifier + the manual UI checklist in an approved
+window; the agent runs only `node --check` + the mock-only guard tests (`verify-staging-access-surface.test.ts`).
 
-> STATUS BANNER (do not remove): the verifier is READ-ONLY and USER-SCOPED. It records no secrets. A green run is staging evidence only —
-> it does NOT close RISK-007 and does NOT unblock Phase C. Production is never touched.
+> STATUS BANNER (do not remove): the verifier is READ-ONLY and USER-SCOPED. It records no secrets. **The database target is STAGING Supabase
+> in every mode.** A green run is staging evidence only — it does NOT close RISK-007 and does NOT unblock Phase C. Production is never touched.
+
+## 0. Verification modes (explicit opt-in via `ACCESS_VERIFY_MODE`; never inferred from the host)
+- **`staging` (default)** — the app target is `STAGING_APP_URL`; production/legacy hosts (`idcaddie.com`/`www`/`app`) are refused. Existing
+  behavior, unchanged.
+- **`isolated-v3`** — the app target is an explicitly reviewed, **isolated V3 web deployment** (`ACCESS_VERIFY_APP_URL`) whose host must
+  EXACTLY match the statically reviewed allowlist (`idcaddie-v3.vercel.app`) and the operator-supplied `ACCESS_VERIFY_ALLOWED_HOST`.
+
+**Why `isolated-v3` exists:** the V3 deployment is currently an inactive, isolated validation environment — not the legacy live IDCaddie
+site, not customer-facing, real connector sync disabled. Vercel's **"Production" channel label refers to the deployment channel, not
+authorization to use production data.** `isolated-v3` mode allows validating that one reviewed deployment as a read-only target **while the
+database target stays STAGING Supabase** and every other fail-closed safeguard is preserved. It is a strict allowlist (exact host), not a
+relaxation of the production-host denylist. To target a different/preview host, add it explicitly to `ISOLATED_V3_ALLOWED_HOSTS` in the
+script (a reviewed change) — no wildcard/suffix/substring matching is permitted.
+
+### Sunset condition (must be removed or re-reviewed)
+`isolated-v3` mode must be **removed or re-reviewed before any** of: V3 becomes customer-facing; V3 is connected to production Supabase; real
+customer data is introduced; live connectors are enabled; Phase C is unblocked; RISK-007 is closed; or provider mutation is authorized.
 
 ## 1. What this proves
 Owner/admin can read the `/access` surface via the migration-0061 RPCs on real hosted staging; editor/viewer/non-member/anonymous are
@@ -22,10 +39,16 @@ and bounded CSV export behave and stay read-only.
 ### Required local-only env vars (never committed; secret values never printed)
 | Var | What |
 |---|---|
-| `STAGING_SUPABASE_URL` | staging project URL; host must be exactly `ycdpzduxugdsffjqyoai.supabase.co` (exact-host match, not a substring) |
+| `ACCESS_VERIFY_MODE` | `staging` (default) or `isolated-v3`. Unknown/other values are refused; never inferred from the host. |
+| `STAGING_SUPABASE_URL` | staging project URL; host must be exactly `ycdpzduxugdsffjqyoai.supabase.co` (exact-host match, not a substring) — **both modes** |
 | `STAGING_SUPABASE_ANON_KEY` | staging **anon/publishable** key — a legacy service-role JWT or a current-gen `sb_secret_*` key is REFUSED |
-| `STAGING_APP_URL` | the deployed staging app `https://…` URL; production hosts (`idcaddie.com`/`www`/`app`) are REFUSED |
 | `STAGING_AUTH_TEST_USERS` | JSON (below) |
+| `STAGING_APP_URL` | **staging mode only** — the deployed staging app `https://…` URL; production hosts (`idcaddie.com`/`www`/`app`) refused |
+| `ACCESS_VERIFY_APP_URL` | **isolated-v3 mode only** — the reviewed V3 deployment `https://…` bare origin (no creds/path/query/fragment) |
+| `ACCESS_VERIFY_ALLOWED_HOST` | **isolated-v3 mode only** — must equal the `ACCESS_VERIFY_APP_URL` host and be a reviewed host (`idcaddie-v3.vercel.app`) |
+
+Setting a **conflicting** `ACCESS_VERIFY_APP_URL` in `staging` mode (one that differs from `STAGING_APP_URL`), or a conflicting
+`STAGING_APP_URL` in `isolated-v3` mode, is **refused** as ambiguous. (A matching value is allowed.)
 
 The anon-key value + synthetic passwords + tokens + cookies are never printed. The staging **app URL** (a non-secret deployment URL) does
 appear in the run banner; no user/tenant identifier, label, email, provider external id, or raw RPC response is ever printed.
@@ -47,14 +70,27 @@ are reported as *skipped* when absent (never silently passed).
 
 ## 3. Run
 ```bash
-# Preflight — guards + check plan only; NO network, NO creds required:
+# Preflight — guards + check plan only; NO network, NO creds required (works in either mode):
 node scripts/verify-staging-access-surface.mjs --preflight
 
-# Live staging run (human, approved window), env exported locally:
+# Live STAGING run (default mode), env exported locally:
+export STAGING_SUPABASE_URL="https://ycdpzduxugdsffjqyoai.supabase.co"
+export STAGING_SUPABASE_ANON_KEY="<STAGING_ANON_OR_PUBLISHABLE_KEY>"
+export STAGING_APP_URL="https://<staging-app-host>"
+export STAGING_AUTH_TEST_USERS='<SYNTHETIC_TEST_USER_JSON>'
+node scripts/verify-staging-access-surface.mjs
+
+# Live ISOLATED-V3 run — reviewed V3 deployment as the app target; STAGING Supabase as the database target:
+export ACCESS_VERIFY_MODE="isolated-v3"
+export ACCESS_VERIFY_APP_URL="https://idcaddie-v3.vercel.app"
+export ACCESS_VERIFY_ALLOWED_HOST="idcaddie-v3.vercel.app"
+export STAGING_SUPABASE_URL="https://ycdpzduxugdsffjqyoai.supabase.co"
+export STAGING_SUPABASE_ANON_KEY="<STAGING_ANON_OR_PUBLISHABLE_KEY>"
+export STAGING_AUTH_TEST_USERS='<SYNTHETIC_TEST_USER_JSON>'
 node scripts/verify-staging-access-surface.mjs
 ```
 Exit codes: `0` all checks passed · `1` a check failed (do not record as passing) · `2` a guard or fatal precondition refused (bad
-ref/URL/host, missing env, service-role/secret key, or an unreachable staging app URL). Output is check-id + PASS/FAIL + redacted aggregates
+ref/URL/host, missing env, service-role/secret key, or an unreachable app URL). Output is check-id + PASS/FAIL + redacted aggregates
 only — never a password, token, cookie, anon-key value, provider external id, raw RPC response, label, email, or canonical/tenant id.
 
 ### Automated checks (RPC + routing)

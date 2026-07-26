@@ -1,29 +1,41 @@
 #!/usr/bin/env node
 // verify-staging-access-surface.mjs
 //
-// STAGING-ONLY, READ-ONLY verifier for the /access product surface (Phase 15 Part 2 PR E; docs/73). It exercises the REAL hosted staging
-// Supabase (the migration-0061 authenticated read RPCs) + the deployed staging app's routing, with USER-SCOPED anon-key + synthetic-user
-// sign-ins only. A human runs it in an approved staging window; the agent runs only `node --check` + the mock-only guard tests (below).
+// READ-ONLY verifier for the /access product surface (Phase 15 Part 2; docs/73). It exercises the REAL hosted STAGING Supabase (the
+// migration-0061 authenticated read RPCs) + a deployed app's routing, with USER-SCOPED anon-key + synthetic-user sign-ins only. A human runs
+// it in an approved window; the agent runs only `node --check` + the mock-only guard tests.
 //
-// SAFETY (enforced here):
-//   * Refuses unless the linked ref (supabase/.temp/project-ref, or ACCESS_SURFACE_REF_FILE) is STAGING (ycdpzduxugdsffjqyoai); refuses the
-//     PRODUCTION ref (dzbfxulvxchdemcettrx) and any production URL.
+// VERIFICATION MODE (explicit opt-in; NEVER inferred from the host):
+//   * staging (default): the app target is STAGING_APP_URL; production-style/legacy hosts are refused.
+//   * isolated-v3: the app target is an explicitly reviewed, isolated V3 web deployment (ACCESS_VERIFY_APP_URL) whose host must EXACTLY
+//     match a statically reviewed allowlist. Vercel's "Production" channel label is NOT authorization to use production data — the database
+//     target stays STAGING Supabase in every mode. See docs/73 for the sunset condition.
+//
+// SAFETY (enforced in BOTH modes):
+//   * Linked ref (supabase/.temp/project-ref, or ACCESS_SURFACE_REF_FILE) must be STAGING (ycdpzduxugdsffjqyoai); PRODUCTION ref
+//     (dzbfxulvxchdemcettrx) is refused. STAGING_SUPABASE_URL host must be EXACTLY ycdpzduxugdsffjqyoai.supabase.co.
 //   * READ-ONLY: calls ONLY the 0061 read RPCs (RPC_ALLOWLIST) via .rpc(); NEVER .insert/.update/.delete, no mutation, no hosted task, no
 //     AWS, no connector-runner. Fetches the app routes (ROUTE_ALLOWLIST) with GET only.
-//   * USER-SCOPED ONLY: anon key + synthetic-user sign-in. NEVER a service-role key — the provided anon key is decoded and REFUSED if its
-//     role claim is service_role. No *SERVICE_ROLE* env is ever read.
-//   * Reads secrets (anon key, synthetic passwords, URLs) from LOCAL env only. Prints NO passwords, tokens, cookies, anon-key values,
-//     provider external ids, raw RPC responses, labels, emails, or canonical/tenant ids — only check ids + PASS/FAIL + redacted aggregates.
+//   * USER-SCOPED ONLY: anon/publishable key + synthetic-user sign-in. A legacy service-role JWT or a current-gen sb_secret_* key is REFUSED.
+//   * Reads secrets from LOCAL env only. Prints NO passwords, tokens, cookies, anon/publishable-key values, provider external ids, raw RPC
+//     responses, labels, emails, or canonical/tenant ids — only mode + check ids + PASS/FAIL + redacted aggregates.
 //
-// A green run is staging evidence only. It does NOT close RISK-007 and does NOT unblock Phase C. The authenticated-UI acceptance
-// (search/filter/pagination/drill-down/CSV, no-mutation) is the MANUAL browser checklist in docs/73 (a script cannot hold the app session).
+// A green run is staging evidence only. It does NOT close RISK-007 and does NOT unblock Phase C. The authenticated-UI acceptance is the
+// MANUAL browser checklist in docs/73 (a script cannot hold the app session).
 
 import { readFileSync } from "node:fs";
 import { createClient } from "@supabase/supabase-js";
 
-const STAGING_REF = "ycdpzduxugdsffjqyoai";    // the only permitted ref
+const STAGING_REF = "ycdpzduxugdsffjqyoai";    // the only permitted Supabase project ref (database target in EVERY mode)
 const PRODUCTION_REF = "dzbfxulvxchdemcettrx"; // must NEVER be touched
 const REF_FILE = process.env.ACCESS_SURFACE_REF_FILE || "supabase/.temp/project-ref";
+
+const VALID_MODES = ["staging", "isolated-v3"];
+const RAW_MODE = process.env.ACCESS_VERIFY_MODE;
+const MODE = RAW_MODE === undefined || RAW_MODE.trim() === "" ? "staging" : RAW_MODE.trim(); // default staging; empty/unset → staging
+// Statically reviewed isolated-v3 web hosts. Add a host ONLY via a reviewed edit here — no wildcard, no suffix/substring, exact match only.
+const ISOLATED_V3_ALLOWED_HOSTS = ["idcaddie-v3.vercel.app"];
+const PRODUCTION_APP_HOSTS = ["idcaddie.com", "www.idcaddie.com", "app.idcaddie.com"]; // legacy live app — never targeted
 
 // Explicit allowlist of the migration-0061 READ RPCs this verifier may call (read-only). Nothing else is ever invoked.
 const RPC_ALLOWLIST = [
@@ -32,7 +44,7 @@ const RPC_ALLOWLIST = [
   "product_list_group_memberships", "product_list_user_assignments", "product_list_group_assignments",
   "product_identity_access_subgraph", "product_application_access_subgraph",
 ];
-// Explicit allowlist of approved staging app routes (GET only).
+// Explicit allowlist of approved app routes (GET only).
 const ROUTE_ALLOWLIST = [
   "/access", "/access/findings", "/access/identities/:id", "/access/applications/:id",
   "/access/findings/export", "/access/identities/:id/export", "/access/applications/:id/export",
@@ -49,36 +61,44 @@ function die(msg, code = 2) {
 const argv = process.argv.slice(2);
 const PREFLIGHT = argv.includes("--preflight") || argv.includes("--dry-run");
 if (argv.includes("--help") || argv.includes("-h")) {
-  console.log(`\n  verify-staging-access-surface — STAGING-ONLY, READ-ONLY /access verifier (docs/73).\n
-  Read-only: calls only the 0061 read RPCs + GETs the /access routes. Never a service-role key; never a mutation; never production.\n
+  console.log(`\n  verify-staging-access-surface — READ-ONLY /access verifier (docs/73). Database target is STAGING Supabase in every mode.\n
+  Modes (ACCESS_VERIFY_MODE; explicit opt-in, never inferred): staging (default) | isolated-v3.\n
   Usage:
     node scripts/verify-staging-access-surface.mjs --preflight    # guards + check plan only; NO network, NO creds required
-    node scripts/verify-staging-access-surface.mjs                # live staging run (requires the env below); human-run
+    node scripts/verify-staging-access-surface.mjs                # live run (requires the env below); human-run
     node scripts/verify-staging-access-surface.mjs --help\n
-  Required env (LOCAL only; never printed): STAGING_SUPABASE_URL, STAGING_SUPABASE_ANON_KEY, STAGING_APP_URL, STAGING_AUTH_TEST_USERS.
+  Always required (LOCAL only; never printed): STAGING_SUPABASE_URL, STAGING_SUPABASE_ANON_KEY, STAGING_AUTH_TEST_USERS.
+  staging mode:     STAGING_APP_URL (production/legacy hosts refused).
+  isolated-v3 mode: ACCESS_VERIFY_APP_URL + ACCESS_VERIFY_ALLOWED_HOST (must match + be a reviewed host: ${ISOLATED_V3_ALLOWED_HOSTS.join(", ")}).
   STAGING_AUTH_TEST_USERS JSON: { "expectedTenantId": "<uuid>", "owner": {"email","password"},
     "admin"?/"editor"?/"viewer"?/"nonMember"?: {"email","password"}, "foreignId"?: "<uuid>" }.
   Requires the linked ref (or ACCESS_SURFACE_REF_FILE) = staging ${STAGING_REF}; refuses production ${PRODUCTION_REF}.\n`);
   process.exit(0);
 }
 
+if (!VALID_MODES.includes(MODE)) die(`ACCESS_VERIFY_MODE is not recognized. Use one of: ${VALID_MODES.join(", ")}.`); // does not echo the env value
+
 // ── Guard 1: linked ref must be staging; refuse production ────────────────────────────────────────────
 let ref = "";
 try { ref = readFileSync(REF_FILE, "utf8").trim(); }
 catch { die(`no ${REF_FILE}. Link STAGING first (supabase link --project-ref ${STAGING_REF}).`); }
 if (ref === PRODUCTION_REF) die(`linked ref is PRODUCTION (${PRODUCTION_REF}). REFUSED — production must not be touched.`);
-if (ref !== STAGING_REF) die(`linked ref is "${ref}", refusing. This verifier runs ONLY against staging (${STAGING_REF}).`);
+if (ref !== STAGING_REF) die(`linked ref is not the staging project (${STAGING_REF}), refusing.`); // does not echo the file-derived ref value
 
 // A JWT role decoder (decodes ONLY the role claim; the token is never printed/stored).
 function jwtRole(token) {
   try { return JSON.parse(Buffer.from(String(token).split(".")[1], "base64url").toString("utf8")).role ?? null; }
   catch { return null; }
 }
-// Parse an https URL and return its lowercased host (dies on a non-https or malformed URL — no substring trust).
-function httpsHost(raw, label) {
+// Parse + strictly validate a BARE https origin, returning its lowercased host. No substring trust; no credentials/path/query/fragment.
+function httpsBaseHost(raw, label) {
   let u; try { u = new global.URL(raw); } catch { die(`${label} must be a valid https:// URL.`); }
   if (u.protocol !== "https:") die(`${label} must be an https:// URL.`);
-  return u.host.toLowerCase();
+  if (u.username || u.password) die(`${label} must not contain URL credentials.`);
+  if (u.search || u.hash) die(`${label} must not contain a query or fragment.`);
+  if (u.pathname && u.pathname !== "/") die(`${label} must be a bare origin (no path).`);
+  if (u.port) die(`${label} must not specify a port.`); // WHATWG normalizes :443 away; any explicit non-default port is refused
+  return u.hostname.toLowerCase();
 }
 // Accept ONLY an anon/publishable key; refuse a service-role/secret key or any unrecognized format (fail closed). Covers BOTH the legacy
 // JWT keys (role claim) and the current-generation opaque sb_publishable_/sb_secret_ keys.
@@ -88,14 +108,52 @@ function isAnonKey(key) {
   if (key.startsWith("sb_secret_")) return false;       // current-gen secret (service-role-equivalent) — refuse
   return jwtRole(key) === "anon";                        // legacy JWT: only the anon role
 }
-const PRODUCTION_APP_HOSTS = ["idcaddie.com", "www.idcaddie.com", "app.idcaddie.com"]; // never GET the production frontend
+// Resolve the app target per MODE, with strict host allowlisting. Returns { appUrl, appHost }. Dies fail-closed on any ambiguity.
+function resolveAppTarget() {
+  const accessAppUrl = process.env.ACCESS_VERIFY_APP_URL;
+  const allowedHost = process.env.ACCESS_VERIFY_ALLOWED_HOST;
+  const stagingAppUrl = process.env.STAGING_APP_URL;
+  if (MODE === "isolated-v3") {
+    if (!accessAppUrl) die("isolated-v3 mode requires ACCESS_VERIFY_APP_URL.");
+    if (!allowedHost) die("isolated-v3 mode requires ACCESS_VERIFY_ALLOWED_HOST (explicit reviewed host).");
+    if (stagingAppUrl && stagingAppUrl !== accessAppUrl) die("ambiguous config: STAGING_APP_URL and ACCESS_VERIFY_APP_URL conflict. Refusing.");
+    const host = httpsBaseHost(accessAppUrl, "ACCESS_VERIFY_APP_URL");
+    if (allowedHost.trim().toLowerCase() !== host) die("ACCESS_VERIFY_ALLOWED_HOST does not match the ACCESS_VERIFY_APP_URL host. Refusing.");
+    if (!ISOLATED_V3_ALLOWED_HOSTS.includes(host)) die(`host "${host}" is not a reviewed isolated-v3 host (${ISOLATED_V3_ALLOWED_HOSTS.join(", ")}). Refusing.`);
+    if (host.includes(PRODUCTION_REF) || PRODUCTION_APP_HOSTS.includes(host)) die("isolated-v3 host resolves to a production host. Refusing.");
+    return { appUrl: accessAppUrl, appHost: host };
+  }
+  // staging mode (default)
+  if (!stagingAppUrl) die("staging mode requires STAGING_APP_URL (or set ACCESS_VERIFY_MODE=isolated-v3).");
+  if (accessAppUrl && accessAppUrl !== stagingAppUrl) die("ambiguous config: ACCESS_VERIFY_APP_URL is set but mode is staging. Refusing.");
+  const host = httpsBaseHost(stagingAppUrl, "STAGING_APP_URL");
+  if (host.includes(PRODUCTION_REF)) die(`STAGING_APP_URL points at the PRODUCTION project (${PRODUCTION_REF}). Refusing.`);
+  if (PRODUCTION_APP_HOSTS.includes(host)) die(`STAGING_APP_URL host "${host}" is a PRODUCTION host. Refusing.`);
+  return { appUrl: stagingAppUrl, appHost: host };
+}
+const TARGET_LABEL = MODE === "isolated-v3" ? "isolated V3 web deployment" : "staging app deployment";
 
 // ── Preflight (dry-run): guards + plan only. No network, no creds required. ───────────────────────────
 if (PREFLIGHT) {
-  console.log(`\n  [PREFLIGHT] /access staging verifier — ref ${STAGING_REF} OK (production ${PRODUCTION_REF} refused). No network performed.\n`);
+  console.log(`\n  [PREFLIGHT] /access verifier — mode=${MODE}; target=${TARGET_LABEL}; database=staging Supabase (${STAGING_REF}); read-only.`);
+  console.log(`  Ref ${STAGING_REF} OK (production ${PRODUCTION_REF} refused). No network performed.\n`);
+  if (MODE === "isolated-v3") {
+    const appUrl = process.env.ACCESS_VERIFY_APP_URL, allowedHost = process.env.ACCESS_VERIFY_ALLOWED_HOST;
+    if (appUrl && allowedHost) {
+      const host = httpsBaseHost(appUrl, "ACCESS_VERIFY_APP_URL");
+      if (allowedHost.trim().toLowerCase() !== host) die("ACCESS_VERIFY_ALLOWED_HOST does not match the ACCESS_VERIFY_APP_URL host.");
+      if (!ISOLATED_V3_ALLOWED_HOSTS.includes(host)) die(`host "${host}" is not a reviewed isolated-v3 host.`);
+      console.log(`  Normalized allowed host: ${host} (reviewed). Production database rejected; legacy live application not targeted.`);
+    } else {
+      console.log(`  ACCESS_VERIFY_APP_URL / ACCESS_VERIFY_ALLOWED_HOST: UNSET (required for the live run).`);
+      console.log(`  Reviewed isolated-v3 hosts: ${ISOLATED_V3_ALLOWED_HOSTS.join(", ")}.`);
+    }
+  } else {
+    console.log(`  Staging app host: from STAGING_APP_URL (production/legacy hosts refused: ${PRODUCTION_APP_HOSTS.join(", ")}).`);
+  }
   const present = (k) => (process.env[k] ? "set" : "UNSET");
-  console.log("  Required env (names + set/unset only; values never read here):");
-  for (const k of ["STAGING_SUPABASE_URL", "STAGING_SUPABASE_ANON_KEY", "STAGING_APP_URL", "STAGING_AUTH_TEST_USERS"]) console.log(`    - ${k}: ${present(k)}`);
+  console.log("\n  Required env (names + set/unset only; values never read here):");
+  for (const k of ["STAGING_SUPABASE_URL", "STAGING_SUPABASE_ANON_KEY", "STAGING_AUTH_TEST_USERS"]) console.log(`    - ${k}: ${present(k)}`);
   console.log("\n  Read-only RPC allowlist:"); for (const r of RPC_ALLOWLIST) console.log(`    - ${r}`);
   console.log("\n  Approved GET route allowlist:"); for (const r of ROUTE_ALLOWLIST) console.log(`    - ${r}`);
   console.log(`\n  Expected canonical counts: ${JSON.stringify(EXPECTED_COUNTS)}.`);
@@ -105,21 +163,18 @@ if (PREFLIGHT) {
   process.exit(0);
 }
 
-// ── Guard 2: required env present (live mode) ─────────────────────────────────────────────────────────
+// ── Guard 2: always-required env present (live mode) ───────────────────────────────────────────────────
 const URL_ = process.env.STAGING_SUPABASE_URL;
 const ANON = process.env.STAGING_SUPABASE_ANON_KEY;
-const APP_URL = process.env.STAGING_APP_URL;
 const USERS_JSON = process.env.STAGING_AUTH_TEST_USERS;
-for (const [k, v] of [["STAGING_SUPABASE_URL", URL_], ["STAGING_SUPABASE_ANON_KEY", ANON], ["STAGING_APP_URL", APP_URL], ["STAGING_AUTH_TEST_USERS", USERS_JSON]]) {
+for (const [k, v] of [["STAGING_SUPABASE_URL", URL_], ["STAGING_SUPABASE_ANON_KEY", ANON], ["STAGING_AUTH_TEST_USERS", USERS_JSON]]) {
   if (!v) die(`missing env ${k} (LOCAL only, never printed). Run --preflight to see the plan without creds.`);
 }
 
-// ── Guard 3: URLs must be staging, never production — EXACT host match (no substring trust) ────────────
-const dbHost = httpsHost(URL_, "STAGING_SUPABASE_URL");
+// ── Guard 3: Supabase host must be EXACTLY staging (both modes); app target resolved + host-allowlisted per mode ─
+const dbHost = httpsBaseHost(URL_, "STAGING_SUPABASE_URL");
 if (dbHost !== `${STAGING_REF}.supabase.co`) die(`STAGING_SUPABASE_URL host must be exactly ${STAGING_REF}.supabase.co. Refusing.`);
-const appHost = httpsHost(APP_URL, "STAGING_APP_URL");
-if (appHost.includes(PRODUCTION_REF)) die(`STAGING_APP_URL points at the PRODUCTION project (${PRODUCTION_REF}). Refusing.`);
-if (PRODUCTION_APP_HOSTS.includes(appHost)) die(`STAGING_APP_URL host "${appHost}" is a PRODUCTION host. Refusing.`);
+const { appUrl: APP_URL, appHost } = resolveAppTarget();
 
 // ── Guard 4: parse synthetic users (role-keyed) ──────────────────────────────────────────────────────
 let USERS;
@@ -159,13 +214,18 @@ async function signIn(role) {
 }
 
 async function main() {
-  console.log(`\n  STAGING /access verifier — ref ${STAGING_REF}; app ${APP_URL.replace(/\/+$/, "")} (READ-ONLY; production not touched)\n`);
+  console.log(`\n  /access verifier — Verification target: ${TARGET_LABEL}; database: staging Supabase (${STAGING_REF}); operation mode: read-only. App host ${appHost}.`);
+  if (MODE === "isolated-v3") {
+    console.log("  target type: isolated V3 web deployment · database target: staging Supabase · operation mode: read-only");
+    console.log("  connector mutation: disabled/not invoked · production database: rejected · legacy live application: not targeted");
+  }
+  console.log("");
   const tid = USERS.expectedTenantId;
 
   // ── Unauthenticated route-deny checks (no session) ──────────────────────────────────────────────────
   for (const [id, path] of [["U1", "/access"], ["U2", "/access/findings"], ["U3", "/access/findings/export"]]) {
-    let r; try { r = await fetch(appUrl(path), { redirect: "manual", headers: { cookie: "" } }); }
-    catch (e) { die(`could not reach STAGING_APP_URL (${e?.message}).`); }
+    let r; try { r = await fetch(appUrl(path), { method: "GET", redirect: "manual", headers: { cookie: "" } }); }
+    catch { die("could not reach the app URL."); } // static message — no error detail echoed
     const loc = r.headers.get("location") || "";
     record(id, `Unauthenticated ${path} is denied (→ /login)`, [301, 302, 303, 307, 308].includes(r.status) && loc.includes("/login"), `status ${r.status}`);
   }
@@ -213,16 +273,16 @@ async function main() {
 
   // ── Admin (optional): allowed ───────────────────────────────────────────────────────────────────────
   const admin = await signIn("admin");
-  if (admin) { const { data: c } = await rpc(admin, "product_directory_access_counts", { p_tenant_id: tid }); record("A1", "Admin is allowed", c != null, c != null ? "counts returned" : "denied"); await admin.auth.signOut(); }
+  if (admin) { const { data: c } = await rpc(admin.c, "product_directory_access_counts", { p_tenant_id: tid }); record("A1", "Admin is allowed", c != null, c != null ? "counts returned" : "denied"); await admin.c.auth.signOut(); }
   else record("A1", "Admin is allowed (skipped — no safe admin principal)", true, "skipped");
 
   // ── Editor / viewer / non-member (optional): denied (RPC returns null) ──────────────────────────────
   for (const [id, role] of [["D1", "editor"], ["D2", "viewer"], ["D3", "nonMember"]]) {
-    const c = await signIn(role);
-    if (!c) { record(id, `${role} is denied (skipped — no principal)`, true, "skipped"); continue; }
-    const { data } = await rpc(c, "product_directory_access_counts", { p_tenant_id: tid });
+    const s = await signIn(role);
+    if (!s) { record(id, `${role} is denied (skipped — no principal)`, true, "skipped"); continue; }
+    const { data } = await rpc(s.c, "product_directory_access_counts", { p_tenant_id: tid });
     record(id, `${role} is denied (RPC returns not-found-equivalent null)`, data == null, data == null ? "denied" : "ALLOWED (LEAK)");
-    await c.auth.signOut();
+    await s.c.auth.signOut();
   }
 
   // ── Anonymous: denied ───────────────────────────────────────────────────────────────────────────────
@@ -239,7 +299,7 @@ function EXPECTED_COUNTS_ACTUAL(counts) {
 
 function finish() {
   const failed = results.filter((r) => !r.passed);
-  console.log(`\n  ${results.length - failed.length}/${results.length} automated checks passed.`);
+  console.log(`\n  ${results.length - failed.length}/${results.length} automated checks passed (mode=${MODE}).`);
   console.log("  MANUAL (docs/73 §UI acceptance): owner opens /access; findings/identity/application render; search, filters, pagination,");
   console.log("  finding drill-down, and CSV export work; export is private/no-store + nosniff; NO mutation/removal/reclaim/savings control.");
   if (failed.length) { console.log(`  FAILED: ${failed.map((r) => r.id).join(", ")} — do NOT record as passing evidence.\n`); process.exit(1); }
