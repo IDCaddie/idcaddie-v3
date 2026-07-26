@@ -231,6 +231,43 @@ describe("verify-staging-access-surface — staging mode ambiguity", () => {
   });
 });
 
+describe("verify-staging-access-surface — owner/admin optional (editor/viewer-only fixture)", () => {
+  // Guards 1–3 + 5 satisfied; STAGING_APP_URL is an unreachable host so the run dies at the first live fetch (past all guards).
+  const base = () => ({ ...writeRef(STAGING_REF), STAGING_SUPABASE_URL: `https://${STAGING_REF}.supabase.co`, STAGING_SUPABASE_ANON_KEY: jwt("anon"), STAGING_APP_URL: "https://staging.invalid" });
+  const TID = "aaaa1111-1111-1111-1111-111111111111";
+  it("expectedTenantId is the ONLY required field — an editor/viewer-only fixture passes the guards and reaches the live run (owner optional)", () => {
+    const env = { ...base(), STAGING_AUTH_TEST_USERS: JSON.stringify({ expectedTenantId: TID, editor: { email: "e@x.test", password: "p" }, viewer: { email: "v@x.test", password: "p" } }) };
+    const { status, out } = run([], env);
+    expect(status).toBe(2);                                  // dies at the network layer (unreachable host), NOT at a guard
+    expect(out).toContain("could not reach the app URL");    // → reached main(): owner is optional
+    expect(out).not.toContain("owner: { email, password }"); // the old owner-required guard message is gone
+  });
+  it("a supplied-but-malformed owner is rejected (validated only if supplied)", () => {
+    const env = { ...base(), STAGING_AUTH_TEST_USERS: JSON.stringify({ expectedTenantId: TID, owner: { email: "o@x.test" } }) }; // no password
+    const { status, out } = run([], env);
+    expect(status).toBe(2);
+    expect(out).toContain("owner, if supplied, needs");
+  });
+  it("a supplied-but-malformed editor is rejected too", () => {
+    const env = { ...base(), STAGING_AUTH_TEST_USERS: JSON.stringify({ expectedTenantId: TID, editor: { password: "p" } }) }; // no email
+    const { status, out } = run([], env);
+    expect(status).toBe(2);
+    expect(out).toContain("editor, if supplied, needs");
+  });
+  it("a principal with a non-string email/password is rejected (type-checked, not just truthy)", () => {
+    const env = { ...base(), STAGING_AUTH_TEST_USERS: JSON.stringify({ expectedTenantId: TID, owner: { email: 123, password: "p" } }) };
+    const { status, out } = run([], env);
+    expect(status).toBe(2);
+    expect(out).toContain("owner, if supplied, needs non-empty string");
+  });
+  it("expectedTenantId is still required (fail closed)", () => {
+    const env = { ...base(), STAGING_AUTH_TEST_USERS: JSON.stringify({ owner: { email: "o@x.test", password: "p" } }) };
+    const { status, out } = run([], env);
+    expect(status).toBe(2);
+    expect(out).toContain("expectedTenantId");
+  });
+});
+
 describe("verify-staging-access-surface — source safety (static)", () => {
   const src = () => readFileSync(SCRIPT, "utf8");
   it("imports only node:fs + @supabase/supabase-js (no pg / aws-sdk / service-role client)", () => {
