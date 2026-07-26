@@ -62,6 +62,45 @@ flagged for review, never as "safe to remove".
 No write, no server action, no access-removal control, no export, no finding persistence, no connector-runner change, no hosted task, no
 schedule. Findings are computed per request. RISK-007 remains OPEN; Phase C remains BLOCKED; production untouched.
 
-## Future (Part 2)
-Richer search/filtering, findings drill-down, bounded CSV export, broader accessibility/UAT — still excluding remediation, access
-deletion, license/usage/savings claims, and production rollout.
+## Part 2 — search, filtering, pagination, drill-down, evidence (PR C)
+
+**Filter contract (`access-filters.ts`).** One strict, pure, server-side (also browser-safe) normalizer parses ONLY allowlisted values off
+`searchParams`: `query` (NFKC + lowercased + whitespace-collapsed + ≤200 chars), `severity`/`confidence`/`classification`/`subjectType`/
+`catalogMatch`/`ruleId` (allowlist guards; invalid → null), `provider` (`^[a-z0-9_]{1,40}$`), `connectionId` (UUID), `includeStale`,
+`staleEvidence` (tri-state), `page` (≥1), `pageSize` (clamped [1,100], default 50). A repeated param takes the first value; unknown params
+are ignored — neither widens scope. `accessQueryString`/`accessHref` serialize a **canonical** URL (fixed key order, defaults omitted);
+changing any filter resets to page 1. (`provider`/`connection`/`catalogMatch` are parsed + URL-preserved but their controls are deferred
+until multi-provider/connection data exists — single provider/connection today.)
+
+**Filtering semantics.** Filters/search run **server-side over the already-evaluated safe view models** — after Phase 13/14, never over
+raw canonical rows and never before resolution, so a filter can never change effective-access or finding meaning. The overview still
+evaluates the whole graph within the node/edge caps; the findings list filters `data.findings` and shows a filtered total ONLY when
+`status: complete` (bounded/`too_large` keeps the truthful banner — never a false "no findings"). Detail pages filter the already-computed
+per-entity relationships.
+
+**Pagination.** Deterministic **offset** pagination (`paginate`) over the already-bounded, deterministically-sorted lists (the overview cap
+bounds total findings; `SUBGRAPH_MAX_ROWS` bounds detail rows) — documented per docs/72. Findings keep the engine's severity-first order;
+detail lists sort by display label then canonical id (stable tie-break). No cursor: the data is fully materialized and bounded, so a cursor
+would add no safety. Page size default 50, max 100.
+
+**Finding drill-down.** Each finding is an expandable native `<details>/<summary>` (zero client JS, natively accessible) revealing summary,
+guidance, scope, structured evidence rows, the subject link, and the truthfulness disclaimer. No finding-detail route and no persistence —
+findings are recomputed per request, so there is no finding-id enumeration surface.
+
+**Return context (no open redirect).** Navigation context is an **allowlisted** contract, never a caller-supplied URL: `from` ∈
+{overview, findings, identity, application}; `fromId` must be a UUID; `ret` is a bounded querystring **re-parsed through the same allowlist
+parser** and re-serialized. `backLink` only ever emits a fixed `/access/...` path — a hostile `from`/`ret`/`fromId` (absolute URL,
+protocol-relative, `javascript:`, traversal, oversized) falls back to the static "← Back to Access". Matches the existing fixed-target
+`safeRedirect` posture; open redirect is structurally impossible.
+
+**Evidence UX + bounds.** Identity/application detail show classification, per-app/-identity access-path evidence, group paths, and
+current-vs-stale state. Group-path and assigned-group lists are bounded in the browser (`+N more`) so a fan-in-heavy entity can't render an
+unbounded DOM. The overview adds severity filter-links and a findings search shortcut (counts only — never a risk/savings/utilization score).
+
+**Accessibility.** GET forms with native labelled controls (no JS required for core function), `aria-current="page"` on pagination,
+`role="status"` on completeness/bounded banners, `<details>` for disclosure. Asserted via testing-library role/name queries (no axe dep).
+
+## Future (Part 2, later PRs)
+Bounded CSV export with formula-injection protection (PR D); a guarded staging verification script + runbook, responsive/accessibility
+hardening, and operational diagnostics (PR E) — still excluding remediation, access deletion, license/usage/savings claims, and production
+rollout.

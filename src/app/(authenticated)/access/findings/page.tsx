@@ -1,39 +1,27 @@
 import Link from "next/link";
 import { loadAccessOverview } from "@/lib/data/access-loaders";
 import { Badge } from "@/components/badge";
-import type { GovernanceSeverity } from "@/lib/server/governance-analytics/types";
+import {
+  parseAccessFilters, filterFindings, paginate, accessHref, findingsActiveFilters, returnParams,
+  SEVERITY_OPTIONS, CONFIDENCE_OPTIONS, SUBJECT_TYPE_OPTIONS, RULE_OPTIONS,
+} from "@/lib/data/access-filters";
 
 export const metadata = { title: "Access findings · ID Caddie" };
 
-const SEVERITIES: readonly GovernanceSeverity[] = ["high", "medium", "low", "info"];
-const isSeverity = (v: string): v is GovernanceSeverity => (SEVERITIES as readonly string[]).includes(v);
-
-// Read-only governance findings list (Phase 15 Part 1). Owner/admin only (loader-gated). Findings come from the Phase-14 engine over the
-// current directory scope. Server-side severity filter (strict allowlist). No mutation/resolve/remove/export actions — "View access
-// details" only. Never claims usage/license/savings/safe-removal. Server-rendered, dynamic, uncached.
-export default async function AccessFindingsPage({ searchParams }: { searchParams: Promise<{ stale?: string; severity?: string }> }) {
+// Read-only governance findings list (Phase 15 Part 2). Owner/admin only (loader-gated). Findings come from the Phase-14 engine over the
+// complete evaluated graph; filtering/search/pagination happen server-side over the ALREADY-EVALUATED safe view models (never raw rows,
+// never before Phase 13/14 — filters cannot change graph meaning). No mutation/resolve/remove/export actions here. Never claims
+// usage/license/savings/safe-removal. Server-rendered, dynamic, uncached. Filtered totals are shown ONLY when evaluation is complete.
+export default async function AccessFindingsPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const sp = await searchParams;
-  const includeStale = sp.stale === "1";
-  const severity = typeof sp.severity === "string" && isSeverity(sp.severity) ? sp.severity : null;
-  const result = await loadAccessOverview(includeStale);
-
-  const hrefWith = (over: { severity?: GovernanceSeverity | null }) => {
-    const params = new URLSearchParams();
-    if (includeStale) params.set("stale", "1");
-    const nextSev = over.severity === undefined ? severity : over.severity;
-    if (nextSev) params.set("severity", nextSev);
-    const qs = params.toString();
-    return `/access/findings${qs ? `?${qs}` : ""}`;
-  };
-  const pill = (active: boolean) =>
-    `rounded-full border px-2 py-0.5 text-xs ${active ? "border-amber-500 text-amber-700 dark:text-amber-400" : "border-zinc-300 text-zinc-500 dark:border-zinc-700"}`;
+  const filters = parseAccessFilters(sp);
+  const result = await loadAccessOverview(filters.includeStale);
+  const base = "/access/findings";
 
   return (
     <main className="flex flex-1 flex-col gap-6 p-8">
       <header className="space-y-1">
-        <div className="text-sm">
-          <Link href="/access" className="text-zinc-500 hover:underline">← Back to Access</Link>
-        </div>
+        <div className="text-sm"><Link href="/access" className="text-zinc-500 hover:underline">← Back to Access</Link></div>
         <h1 className="text-xl font-semibold">Governance findings</h1>
         <p className="text-sm text-zinc-600 dark:text-zinc-400">
           Findings represent access topology in your connected directory. They do not indicate application usage, license state, or savings.
@@ -46,7 +34,7 @@ export default async function AccessFindingsPage({ searchParams }: { searchParam
           <p className="mt-1 text-zinc-600 dark:text-zinc-400">You don’t have access to this area.</p>
         </div>
       ) : !result.ok ? (
-        <p className="text-sm text-red-600">Access data could not be loaded. Please try again later.</p>
+        <p className="text-sm text-red-600" role="alert">Access data could not be loaded. Please try again later.</p>
       ) : result.data.status === "too_large" ? (
         <div className="rounded border border-amber-400 bg-amber-50 p-4 text-sm dark:border-amber-700 dark:bg-amber-950/30" role="status">
           <div className="font-medium">Findings unavailable for this directory size</div>
@@ -56,58 +44,125 @@ export default async function AccessFindingsPage({ searchParams }: { searchParam
           </p>
         </div>
       ) : (() => {
-        const allFindings = result.data.findings;
-        const findings = severity ? allFindings.filter((f) => f.severity === severity) : allFindings;
+        const filtered = filterFindings(result.data.findings, filters);
+        const paged = paginate(filtered, filters.page, filters.pageSize);
         const total = result.data.governanceFindingsTotal;
+        const active = findingsActiveFilters(filters);
+        const ret = returnParams("findings", filters).toString();
         return (
         <>
-          <nav aria-label="Filter by severity" className="flex flex-wrap items-center gap-2 text-sm">
-            <Link href={hrefWith({ severity: null })} aria-current={severity === null ? "page" : undefined} className={pill(severity === null)}>All</Link>
-            {SEVERITIES.map((s) => (
-              <Link key={s} href={hrefWith({ severity: s })} aria-current={severity === s ? "page" : undefined} className={pill(severity === s)}>
-                {s[0].toUpperCase() + s.slice(1)}
-              </Link>
-            ))}
-          </nav>
+          {/* GET filter form: native controls, no JS required, resets to page 1 on submit (page omitted). */}
+          <form method="get" action={base} className="flex flex-wrap items-end gap-3 text-sm" aria-label="Filter findings">
+            {filters.includeStale ? <input type="hidden" name="stale" value="1" /> : null}
+            <label className="flex flex-col gap-1">
+              <span className="text-zinc-500">Search</span>
+              <input type="search" name="q" defaultValue={filters.query ?? ""} placeholder="Title, summary, or subject"
+                className="rounded border border-zinc-300 px-2 py-1 dark:border-zinc-700 dark:bg-zinc-900" />
+            </label>
+            <label className="flex flex-col gap-1">
+              <span className="text-zinc-500">Severity</span>
+              <select name="severity" defaultValue={filters.severity ?? ""} className="rounded border border-zinc-300 px-2 py-1 dark:border-zinc-700 dark:bg-zinc-900">
+                <option value="">All</option>
+                {SEVERITY_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+              </select>
+            </label>
+            <label className="flex flex-col gap-1">
+              <span className="text-zinc-500">Confidence</span>
+              <select name="confidence" defaultValue={filters.confidence ?? ""} className="rounded border border-zinc-300 px-2 py-1 dark:border-zinc-700 dark:bg-zinc-900">
+                <option value="">All</option>
+                {CONFIDENCE_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+              </select>
+            </label>
+            <label className="flex flex-col gap-1">
+              <span className="text-zinc-500">Finding type</span>
+              <select name="rule" defaultValue={filters.ruleId ?? ""} className="rounded border border-zinc-300 px-2 py-1 dark:border-zinc-700 dark:bg-zinc-900">
+                <option value="">All</option>
+                {RULE_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+              </select>
+            </label>
+            <label className="flex flex-col gap-1">
+              <span className="text-zinc-500">Subject</span>
+              <select name="subjectType" defaultValue={filters.subjectType ?? ""} className="rounded border border-zinc-300 px-2 py-1 dark:border-zinc-700 dark:bg-zinc-900">
+                <option value="">All</option>
+                {SUBJECT_TYPE_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+              </select>
+            </label>
+            <label className="flex flex-col gap-1">
+              <span className="text-zinc-500">Evidence</span>
+              <select name="staleEvidence" defaultValue={filters.staleEvidence === null ? "" : filters.staleEvidence ? "1" : "0"} className="rounded border border-zinc-300 px-2 py-1 dark:border-zinc-700 dark:bg-zinc-900">
+                <option value="">All</option>
+                <option value="1">Stale evidence</option>
+                <option value="0">Current evidence</option>
+              </select>
+            </label>
+            <button type="submit" className="rounded border border-zinc-400 px-3 py-1.5 font-medium dark:border-zinc-600">Apply filters</button>
+            {active > 0 ? <Link href={base} className="px-1 py-1.5 text-zinc-500 underline">Clear {active} filter{active === 1 ? "" : "s"}</Link> : null}
+          </form>
 
-          {findings.length === 0 ? (
+          {/* Completeness diagnostic + truthful filtered total. */}
+          <p className="text-sm text-zinc-500" role="status">
+            The full represented access graph was evaluated for this scope.{" "}
+            {active > 0
+              ? <>Showing {filtered.length} of {total} finding{total === 1 ? "" : "s"} matching your filters.</>
+              : <>{total} finding{total === 1 ? "" : "s"} total.</>}
+          </p>
+
+          {paged.total === 0 ? (
             <div className="rounded border border-zinc-300 p-4 text-sm dark:border-zinc-700">
-              <div className="font-medium">{severity ? "No findings match this filter" : "No findings"}</div>
+              <div className="font-medium">{active > 0 ? "No findings match the selected filters" : "No findings"}</div>
               <p className="mt-1 text-zinc-600 dark:text-zinc-400">
-                {severity ? (
-                  <>No {severity} findings for the selected scope — <Link href={hrefWith({ severity: null })} className="underline">clear the filter</Link>.</>
-                ) : (
-                  "No governance findings were produced for the selected scope."
-                )}
+                {active > 0
+                  ? <>No findings match the selected filters — <Link href={base} className="underline">clear filters</Link>.</>
+                  : "No governance findings were produced for the selected scope."}
               </p>
             </div>
           ) : (
             <section className="space-y-2 text-sm">
-              <div className="text-zinc-500">{findings.length} finding{findings.length === 1 ? "" : "s"}{severity ? "" : ` across ${total} total`}</div>
               <ul className="space-y-2">
-                {findings.map((f) => (
-                  <li key={f.id} className="rounded border border-zinc-200 p-3 dark:border-zinc-800">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Badge tone={f.severityTone}>{f.severityLabel}</Badge>
-                      <span className="text-zinc-500">{f.confidenceLabel}</span>
-                      {f.staleEvidence ? <Badge tone="neutral">Stale evidence</Badge> : null}
-                      <span className="font-medium">{f.title}</span>
-                    </div>
-                    <p className="mt-1 text-zinc-600 dark:text-zinc-400">{f.summary}</p>
-                    {f.guidance ? <p className="mt-1 text-xs text-zinc-500">{f.guidance}</p> : null}
-                    {f.evidenceRows.length > 0 ? (
-                      <dl className="mt-2 flex flex-wrap gap-x-6 gap-y-1 text-xs text-zinc-500">
-                        {f.evidenceRows.map((e) => (
-                          <div key={e.label} className="flex gap-1"><dt>{e.label}:</dt><dd className="tabular-nums text-zinc-700 dark:text-zinc-300">{e.value}</dd></div>
-                        ))}
-                      </dl>
-                    ) : null}
-                    {f.subject ? (
-                      <Link href={f.subject.href} className="mt-2 inline-block text-xs underline">View access details: {f.subject.label}</Link>
-                    ) : null}
+                {paged.rows.map((f) => (
+                  <li key={f.id} className="rounded border border-zinc-200 dark:border-zinc-800">
+                    <details className="group">
+                      <summary className="flex cursor-pointer flex-wrap items-center gap-2 p-3">
+                        <Badge tone={f.severityTone}>{f.severityLabel}</Badge>
+                        <span className="text-zinc-500">{f.confidenceLabel}</span>
+                        {f.staleEvidence ? <Badge tone="neutral">Stale evidence</Badge> : null}
+                        <span className="font-medium">{f.title}</span>
+                      </summary>
+                      <div className="space-y-2 border-t border-zinc-100 p-3 dark:border-zinc-800">
+                        <p className="text-zinc-600 dark:text-zinc-400">{f.summary}</p>
+                        {f.guidance ? <p className="text-xs text-zinc-500">{f.guidance}</p> : null}
+                        <p className="text-xs text-zinc-500">Scope: access represented in your connected directory{f.staleEvidence ? ", including stale evidence" : ""}.</p>
+                        {f.evidenceRows.length > 0 ? (
+                          <dl className="flex flex-wrap gap-x-6 gap-y-1 text-xs text-zinc-500">
+                            {f.evidenceRows.map((e) => (
+                              <div key={e.label} className="flex gap-1"><dt>{e.label}:</dt><dd className="tabular-nums text-zinc-700 dark:text-zinc-300">{e.value}</dd></div>
+                            ))}
+                          </dl>
+                        ) : null}
+                        {f.subject ? (
+                          <Link href={`${f.subject.href}?${ret}`} className="inline-block text-xs underline">View access details: {f.subject.label}</Link>
+                        ) : null}
+                        <p className="text-xs text-zinc-400">
+                          This reflects access topology represented in your connected directory. It does not indicate application usage,
+                          license state, or that access is safe to remove.
+                        </p>
+                      </div>
+                    </details>
                   </li>
                 ))}
               </ul>
+
+              {paged.totalPages > 1 ? (
+                <nav aria-label="Findings pagination" className="flex flex-wrap items-center justify-between gap-2 pt-2 text-sm">
+                  {paged.hasPrev
+                    ? <Link href={accessHref(base, filters, { page: paged.page - 1 })} className="rounded border border-zinc-300 px-2 py-1 dark:border-zinc-700">← Previous</Link>
+                    : <span className="rounded border border-zinc-200 px-2 py-1 text-zinc-400 dark:border-zinc-800">← Previous</span>}
+                  <span className="text-zinc-500" aria-current="page">Page {paged.page} of {paged.totalPages} ({paged.startIndex}–{paged.endIndex} of {paged.total})</span>
+                  {paged.hasNext
+                    ? <Link href={accessHref(base, filters, { page: paged.page + 1 })} className="rounded border border-zinc-300 px-2 py-1 dark:border-zinc-700">Next →</Link>
+                    : <span className="rounded border border-zinc-200 px-2 py-1 text-zinc-400 dark:border-zinc-800">Next →</span>}
+                </nav>
+              ) : null}
             </section>
           )}
         </>

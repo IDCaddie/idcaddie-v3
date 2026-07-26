@@ -34,7 +34,7 @@ export type IdentityAccessDetailData = {
   id: string; displayName: string; providerLabel: string; syncState: "current" | "stale"; staleSince: string | null; bounded: boolean;
   effectiveApplicationCount: number; applications: readonly IdentityApplicationAccessView[]; findings: readonly GovernanceFindingView[];
 };
-export type ApplicationIdentityAccessView = { identityId: string; identityLabel: string; classification: ClassificationView; classificationLabel: string };
+export type ApplicationIdentityAccessView = { identityId: string; identityLabel: string; classification: ClassificationView; classificationLabel: string; staleEvidence: boolean };
 export type ApplicationAssignedGroupView = { groupLabel: string; staleEvidence: boolean };
 export type ApplicationAccessDetailData = {
   id: string; displayName: string; providerLabel: string; syncState: "current" | "stale"; staleSince: string | null; catalogMatchStatus: string | null; bounded: boolean;
@@ -150,7 +150,9 @@ export async function loadApplicationAccessDetail(applicationId: string, include
     if (!app) continue;
     const cls = app.classification; // DIRECT/GROUP/BOTH is Phase-13's decision (single source of truth)
     if (cls === "DIRECT") directOnly++; else if (cls === "GROUP") groupOnly++; else both++;
-    identities.push({ identityId: ia.identityId, identityLabel: identityLabels.get(ia.identityId) ?? "Unnamed identity", classification: cls, classificationLabel: classificationView(cls, app.groupPaths.length).label });
+    // Same freshness rule as the identity page: this (identity, app) relationship is stale-derived if its direct edge or any group path is non-current.
+    const staleEvidence = (app.directProvenance?.syncStatus ?? "current") !== "current" || app.groupPaths.some((p) => p.assignment.syncStatus !== "current" || p.membership.syncStatus !== "current");
+    identities.push({ identityId: ia.identityId, identityLabel: identityLabels.get(ia.identityId) ?? "Unnamed identity", classification: cls, classificationLabel: classificationView(cls, app.groupPaths.length).label, staleEvidence });
   }
   identities.sort((a, b) => a.identityLabel.localeCompare(b.identityLabel) || a.identityId.localeCompare(b.identityId));
   const assignedGroups: ApplicationAssignedGroupView[] = s.groupAssignments

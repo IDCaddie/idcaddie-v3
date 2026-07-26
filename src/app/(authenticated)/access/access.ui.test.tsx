@@ -41,7 +41,7 @@ const noLeak = (text: string) => {
   expect(text).not.toMatch(UUID_RE);
   for (const w of FORBIDDEN_FIELDS) expect(text.toLowerCase()).not.toContain(w);
 };
-const finding = (over: Partial<GovernanceFindingView> = {}): GovernanceFindingView => ({ id: "fid", severity: "medium", severityLabel: "Medium", severityTone: "attention", confidence: "high", confidenceLabel: "High confidence", title: "Direct and group-based access overlap", summary: "This identity has a direct assignment and access through groups.", guidance: "Review whether both paths are intentional.", subject: { kind: "identity", label: "Ada", href: `/access/identities/${SEED_UUID}` }, evidenceRows: [{ label: "Direct assignments", value: "1" }], staleEvidence: false, ...over });
+const finding = (over: Partial<GovernanceFindingView> = {}): GovernanceFindingView => ({ id: "fid", ruleId: "redundant_direct_access", subjectType: "identity", severity: "medium", severityLabel: "Medium", severityTone: "attention", confidence: "high", confidenceLabel: "High confidence", title: "Direct and group-based access overlap", summary: "This identity has a direct assignment and access through groups.", guidance: "Review whether both paths are intentional.", subject: { kind: "identity", label: "Ada", href: `/access/identities/${SEED_UUID}` }, evidenceRows: [{ label: "Direct assignments", value: "1" }], staleEvidence: false, ...over });
 
 describe("access overview page", () => {
   it("forbidden → 'Not available', no data, no mutation controls", async () => {
@@ -58,7 +58,7 @@ describe("access overview page", () => {
     const text = container.textContent ?? "";
     expect(text).toContain("Direct and group-based access overlap");
     expect(text).toContain("does not show application usage"); // truthfulness disclaimer
-    expect(container.querySelector(`a[href="/access/identities/${SEED_UUID}"]`)).toBeTruthy(); // uuid in href
+    expect(container.querySelector(`a[href^="/access/identities/${SEED_UUID}"]`)).toBeTruthy(); // uuid in href (may carry return context)
     noLeak(text);
   });
 
@@ -73,26 +73,82 @@ describe("access overview page", () => {
 });
 
 describe("access findings page", () => {
-  it("complete → lists findings; forbidden → not available", async () => {
-    loaders.loadAccessOverview.mockResolvedValue({ ok: true, data: { status: "complete", counts: { identities: 1, groups: 0, applications: 1, memberships: 0, directAssignments: 1, groupAssignments: 0 }, breakdown: { directOnly: 1, groupOnly: 0, both: 0 }, effectiveRelationships: 1, governanceFindingsTotal: 1, summary: { total: 1, bySeverity: { info: 0, low: 0, medium: 1, high: 0 } }, findings: [finding()] } });
+  const overview = (findings: GovernanceFindingView[]) => ({ ok: true as const, data: { status: "complete" as const, counts: { identities: 1, groups: 0, applications: 1, memberships: 0, directAssignments: 1, groupAssignments: 0 }, breakdown: { directOnly: 1, groupOnly: 0, both: 0 }, effectiveRelationships: 1, governanceFindingsTotal: findings.length, summary: { total: findings.length, bySeverity: { info: 0, low: 0, medium: findings.length, high: 0 } }, findings } });
+
+  it("complete → renders filter form + finding in an expandable <details>; no resolve/fix controls", async () => {
+    loaders.loadAccessOverview.mockResolvedValue(overview([finding()]));
     const { container } = render(await AccessFindingsPage({ searchParams: Promise.resolve({}) }));
     const text = container.textContent ?? "";
-    expect(text).toContain("Governance findings");
+    expect(container.querySelector("form[method='get']")).toBeTruthy();
+    expect(container.querySelector("select[name='severity']")).toBeTruthy();
+    expect(container.querySelector("details")).toBeTruthy();
     expect(text).toContain("Direct and group-based access overlap");
+    expect(text).toContain("Direct assignments"); // evidence row inside the details panel
     expect(text.toLowerCase()).not.toContain("resolve"); expect(text.toLowerCase()).not.toContain("fix");
+    expect(container.querySelector("button[type='submit']")?.textContent).toBe("Apply filters"); // filter submit, not a mutation
     noLeak(text);
   });
+
+  it("severity filter narrows results and pre-selects the active value", async () => {
+    loaders.loadAccessOverview.mockResolvedValue(overview([finding({ id: "hi", severity: "high", title: "High overlap" }), finding({ id: "lo", severity: "low", title: "Low overlap" })]));
+    const { container } = render(await AccessFindingsPage({ searchParams: Promise.resolve({ severity: "high" }) }));
+    const text = container.textContent ?? "";
+    expect(text).toContain("High overlap");
+    expect(text).not.toContain("Low overlap");
+    expect((container.querySelector("select[name='severity']") as HTMLSelectElement).value).toBe("high");
+    expect(text).toContain("Showing 1 of 2"); // truthful filtered total
+  });
+
+  it("search filter matches title/summary", async () => {
+    loaders.loadAccessOverview.mockResolvedValue(overview([finding({ id: "a", title: "Alpha access" }), finding({ id: "b", title: "Beta access" })]));
+    const { container } = render(await AccessFindingsPage({ searchParams: Promise.resolve({ q: "beta" }) }));
+    const text = container.textContent ?? "";
+    expect(text).toContain("Beta access");
+    expect(text).not.toContain("Alpha access");
+  });
+
+  it("paginates deterministically with preserved pageSize", async () => {
+    const many = Array.from({ length: 3 }, (_, i) => finding({ id: `f${i}`, title: `Finding ${i}` }));
+    loaders.loadAccessOverview.mockResolvedValue(overview(many));
+    const p1 = render(await AccessFindingsPage({ searchParams: Promise.resolve({ pageSize: "2" }) }));
+    expect(p1.container.textContent).toContain("Page 1 of 2");
+    expect(p1.container.querySelector("a[href*='page=2']")).toBeTruthy();
+    cleanup();
+    const p2 = render(await AccessFindingsPage({ searchParams: Promise.resolve({ pageSize: "2", page: "2" }) }));
+    expect(p2.container.textContent).toContain("Finding 2");
+    expect(p2.container.textContent).toContain("Page 2 of 2");
+  });
+
+  it("distinguishes complete-no-findings from filters-yield-none", async () => {
+    loaders.loadAccessOverview.mockResolvedValue(overview([]));
+    const none = render(await AccessFindingsPage({ searchParams: Promise.resolve({}) }));
+    expect(none.container.textContent).toContain("No governance findings were produced for the selected scope");
+    cleanup();
+    loaders.loadAccessOverview.mockResolvedValue(overview([finding({ severity: "medium" })]));
+    const filtered = render(await AccessFindingsPage({ searchParams: Promise.resolve({ severity: "high" }) }));
+    expect(filtered.container.textContent).toContain("No findings match the selected filters");
+    expect(filtered.container.textContent).not.toContain("No governance findings were produced");
+  });
+
+  it("subject links carry allowlisted return context (from=findings)", async () => {
+    loaders.loadAccessOverview.mockResolvedValue(overview([finding()]));
+    const { container } = render(await AccessFindingsPage({ searchParams: Promise.resolve({ severity: "medium" }) }));
+    const link = container.querySelector(`a[href^="/access/identities/${SEED_UUID}"]`) as HTMLAnchorElement;
+    expect(link).toBeTruthy();
+    expect(link.getAttribute("href")).toContain("from=findings");
+  });
+
+  it("too_large → bounded banner, never a false 'no findings'", async () => {
+    loaders.loadAccessOverview.mockResolvedValue({ ok: true, data: { status: "too_large", counts: { identities: 99999, groups: 1, applications: 1, memberships: 1, directAssignments: 1, groupAssignments: 0 } } });
+    const { container } = render(await AccessFindingsPage({ searchParams: Promise.resolve({}) }));
+    expect(container.textContent).toContain("not evaluated within the current safety limits");
+    expect(container.textContent).not.toContain("No governance findings were produced");
+  });
+
   it("forbidden → not available", async () => {
     loaders.loadAccessOverview.mockResolvedValue({ ok: false, error: "forbidden" });
     const { container } = render(await AccessFindingsPage({ searchParams: Promise.resolve({}) }));
     expect(container.textContent).toContain("Not available");
-  });
-  it("active severity filter is marked aria-current='page' (a11y: not color-only)", async () => {
-    loaders.loadAccessOverview.mockResolvedValue({ ok: true, data: { status: "complete", counts: { identities: 1, groups: 0, applications: 1, memberships: 0, directAssignments: 1, groupAssignments: 0 }, breakdown: { directOnly: 1, groupOnly: 0, both: 0 }, effectiveRelationships: 1, governanceFindingsTotal: 1, summary: { total: 1, bySeverity: { info: 0, low: 0, medium: 1, high: 0 } }, findings: [finding()] } });
-    const { container } = render(await AccessFindingsPage({ searchParams: Promise.resolve({ severity: "medium" }) }));
-    const current = container.querySelectorAll('[aria-current="page"]');
-    expect(current).toHaveLength(1);
-    expect(current[0].textContent).toBe("Medium");
   });
 });
 
@@ -140,11 +196,101 @@ describe("identity + application detail — not-found indistinguishability + no 
     const nf = render(await ApplicationAccessPage({ params: Promise.resolve({ id: SEED_UUID }), searchParams: Promise.resolve({}) }));
     expect(nf.container.textContent).toContain("Not found");
     cleanup();
-    loaders.loadApplicationAccessDetail.mockResolvedValue({ ok: true, data: { id: SEED_UUID, displayName: "Salesforce", providerLabel: "okta", syncState: "current", staleSince: null, catalogMatchStatus: "unmatched", bounded: false, effectiveIdentityCount: 1, directOnlyCount: 1, groupOnlyCount: 0, bothCount: 0, identities: [{ identityId: SEED_UUID, identityLabel: "Ada", classification: "DIRECT", classificationLabel: "Direct" }], assignedGroups: [], findings: [] } });
+    loaders.loadApplicationAccessDetail.mockResolvedValue({ ok: true, data: { id: SEED_UUID, displayName: "Salesforce", providerLabel: "okta", syncState: "current", staleSince: null, catalogMatchStatus: "unmatched", bounded: false, effectiveIdentityCount: 1, directOnlyCount: 1, groupOnlyCount: 0, bothCount: 0, identities: [{ identityId: SEED_UUID, identityLabel: "Ada", classification: "DIRECT", classificationLabel: "Direct", staleEvidence: false }], assignedGroups: [], findings: [] } });
     const { container } = render(await ApplicationAccessPage({ params: Promise.resolve({ id: SEED_UUID }), searchParams: Promise.resolve({}) }));
     const text = container.textContent ?? "";
     expect(text).toContain("Salesforce");
     expect(text).toContain("Catalog match unavailable");
     noLeak(text);
+  });
+});
+
+const UUID_A = "22222222-3333-4444-8555-666666666666";
+const UUID_B = "33333333-4444-4555-8666-777777777777";
+
+describe("detail-page filters, pagination + return-context", () => {
+  const identityDetail = (apps: { applicationId: string; applicationLabel: string; classification: "DIRECT" | "GROUP" | "BOTH"; classificationLabel: string; explanation: string; groupPaths: { groupLabel: string; staleEvidence: boolean }[]; staleEvidence: boolean }[]) =>
+    ({ ok: true as const, data: { id: SEED_UUID, displayName: "Ada Lovelace", providerLabel: "okta", syncState: "current" as const, staleSince: null, bounded: false, effectiveApplicationCount: apps.length, applications: apps, findings: [] } });
+  const app = (over: Partial<{ applicationId: string; applicationLabel: string; classification: "DIRECT" | "GROUP" | "BOTH"; classificationLabel: string; explanation: string; groupPaths: { groupLabel: string; staleEvidence: boolean }[]; staleEvidence: boolean }> = {}) =>
+    ({ applicationId: UUID_A, applicationLabel: "Salesforce", classification: "DIRECT" as const, classificationLabel: "Direct", explanation: "Access is represented through a direct assignment.", groupPaths: [], staleEvidence: false, ...over });
+
+  it("identity detail: classification filter narrows applications + pre-selects", async () => {
+    loaders.loadIdentityAccessDetail.mockResolvedValue(identityDetail([app({ applicationId: UUID_A, applicationLabel: "Salesforce", classification: "DIRECT" }), app({ applicationId: UUID_B, applicationLabel: "Slack", classification: "GROUP", classificationLabel: "Through group" })]));
+    const { container } = render(await IdentityAccessPage({ params: Promise.resolve({ id: SEED_UUID }), searchParams: Promise.resolve({ classification: "GROUP" }) }));
+    const text = container.textContent ?? "";
+    expect(text).toContain("Slack");
+    expect(text).not.toContain("Salesforce");
+    expect((container.querySelector("select[name='classification']") as HTMLSelectElement).value).toBe("GROUP");
+  });
+
+  it("identity detail: search narrows + paginates with preserved pageSize", async () => {
+    loaders.loadIdentityAccessDetail.mockResolvedValue(identityDetail([app({ applicationId: UUID_A, applicationLabel: "Alpha" }), app({ applicationId: UUID_B, applicationLabel: "Beta" })]));
+    const s = render(await IdentityAccessPage({ params: Promise.resolve({ id: SEED_UUID }), searchParams: Promise.resolve({ q: "beta" }) }));
+    expect(s.container.textContent).toContain("Beta");
+    expect(s.container.textContent).not.toContain("Alpha");
+    cleanup();
+    loaders.loadIdentityAccessDetail.mockResolvedValue(identityDetail([app({ applicationId: UUID_A, applicationLabel: "Alpha" }), app({ applicationId: UUID_B, applicationLabel: "Beta" })]));
+    const p = render(await IdentityAccessPage({ params: Promise.resolve({ id: SEED_UUID }), searchParams: Promise.resolve({ pageSize: "1" }) }));
+    expect(p.container.textContent).toContain("Page 1 of 2");
+  });
+
+  it("identity detail: outgoing application links carry return context (from=identity + fromId)", async () => {
+    loaders.loadIdentityAccessDetail.mockResolvedValue(identityDetail([app({ applicationId: UUID_A })]));
+    const { container } = render(await IdentityAccessPage({ params: Promise.resolve({ id: SEED_UUID }), searchParams: Promise.resolve({}) }));
+    const link = container.querySelector(`a[href^="/access/applications/${UUID_A}"]`) as HTMLAnchorElement;
+    expect(link.getAttribute("href")).toContain("from=identity");
+    expect(link.getAttribute("href")).toContain(`fromId=${SEED_UUID}`);
+  });
+
+  it("return context: from=findings renders a 'Back to findings' link; a hostile 'from' falls back to the static link", async () => {
+    loaders.loadIdentityAccessDetail.mockResolvedValue(identityDetail([app()]));
+    const good = render(await IdentityAccessPage({ params: Promise.resolve({ id: SEED_UUID }), searchParams: Promise.resolve({ from: "findings", ret: "severity=high" }) }));
+    const backGood = good.container.querySelector("a[href^='/access/findings']") as HTMLAnchorElement;
+    expect(backGood.textContent).toContain("Back to findings");
+    expect(backGood.getAttribute("href")).toBe("/access/findings?severity=high");
+    cleanup();
+    loaders.loadIdentityAccessDetail.mockResolvedValue(identityDetail([app()]));
+    const evil = render(await IdentityAccessPage({ params: Promise.resolve({ id: SEED_UUID }), searchParams: Promise.resolve({ from: "https://evil.example.com" }) }));
+    const backEvil = evil.container.querySelector("main > div.text-sm a") as HTMLAnchorElement;
+    expect(backEvil.getAttribute("href")).toBe("/access"); // never honors the caller-supplied URL
+    expect(evil.container.textContent).not.toContain("evil.example.com");
+  });
+
+  it("application detail: classification filter narrows effective identities", async () => {
+    loaders.loadApplicationAccessDetail.mockResolvedValue({ ok: true, data: { id: SEED_UUID, displayName: "Salesforce", providerLabel: "okta", syncState: "current", staleSince: null, catalogMatchStatus: "matched", bounded: false, effectiveIdentityCount: 2, directOnlyCount: 1, groupOnlyCount: 1, bothCount: 0, identities: [{ identityId: UUID_A, identityLabel: "Ada", classification: "DIRECT", classificationLabel: "Direct", staleEvidence: false }, { identityId: UUID_B, identityLabel: "Grace", classification: "GROUP", classificationLabel: "Through group", staleEvidence: false }], assignedGroups: [], findings: [] } });
+    const { container } = render(await ApplicationAccessPage({ params: Promise.resolve({ id: SEED_UUID }), searchParams: Promise.resolve({ classification: "DIRECT" }) }));
+    const text = container.textContent ?? "";
+    expect(text).toContain("Ada");
+    expect(text).not.toContain("Grace");
+    expect(text).toContain("Effective identities (2)"); // the true count stays; the table is what's filtered
+  });
+
+  it("application detail: a stale-derived identity row shows a 'Stale evidence' marker (truthfulness, symmetric with the identity page)", async () => {
+    loaders.loadApplicationAccessDetail.mockResolvedValue({ ok: true, data: { id: SEED_UUID, displayName: "Salesforce", providerLabel: "okta", syncState: "current", staleSince: null, catalogMatchStatus: "matched", bounded: false, effectiveIdentityCount: 1, directOnlyCount: 0, groupOnlyCount: 1, bothCount: 0, identities: [{ identityId: UUID_A, identityLabel: "Ada", classification: "GROUP", classificationLabel: "Through group", staleEvidence: true }], assignedGroups: [], findings: [] } });
+    const { container } = render(await ApplicationAccessPage({ params: Promise.resolve({ id: SEED_UUID }), searchParams: Promise.resolve({ stale: "1" }) }));
+    const row = container.querySelector("tbody tr");
+    expect(row?.textContent).toContain("Stale evidence");
+  });
+});
+
+describe("regression: complete-empty vs filtered-empty is keyed on APPLIED filters only", () => {
+  const overview = (findings: GovernanceFindingView[]) => ({ ok: true as const, data: { status: "complete" as const, counts: { identities: 1, groups: 0, applications: 1, memberships: 0, directAssignments: 1, groupAssignments: 0 }, breakdown: { directOnly: 1, groupOnly: 0, both: 0 }, effectiveRelationships: 1, governanceFindingsTotal: findings.length, summary: { total: findings.length, bySeverity: { info: 0, low: 0, medium: findings.length, high: 0 } }, findings } });
+
+  it("complete + zero findings + an UNAPPLIED param (classification) still shows the truthful complete-empty message", async () => {
+    loaders.loadAccessOverview.mockResolvedValue(overview([]));
+    const { container } = render(await AccessFindingsPage({ searchParams: Promise.resolve({ classification: "DIRECT" }) }));
+    const text = container.textContent ?? "";
+    expect(text).toContain("No governance findings were produced for the selected scope");
+    expect(text).not.toContain("No findings match the selected filters");
+  });
+
+  it("identity detail findings list is capped with a truthful overflow note", async () => {
+    const many = Array.from({ length: 55 }, (_, i) => finding({ id: `g${i}`, title: `Finding ${i}` }));
+    loaders.loadIdentityAccessDetail.mockResolvedValue({ ok: true, data: { id: SEED_UUID, displayName: "Ada", providerLabel: "okta", syncState: "current", staleSince: null, bounded: false, effectiveApplicationCount: 0, applications: [], findings: many } });
+    const { container } = render(await IdentityAccessPage({ params: Promise.resolve({ id: SEED_UUID }), searchParams: Promise.resolve({}) }));
+    const text = container.textContent ?? "";
+    expect(text).toContain("Showing the first 50 of 55 findings");
+    expect(text).toContain("Finding 49"); // index 49 = the 50th, rendered
+    expect(text).not.toContain("Finding 50"); // 51st+ capped out
   });
 });
