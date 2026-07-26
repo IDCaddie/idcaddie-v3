@@ -10,3 +10,12 @@ function quoteField(value: string): string {
 export function toCsv(headers: string[], rows: string[][]): string {
   return [headers, ...rows].map((row) => row.map(quoteField).join(",")).join("\r\n");
 }
+
+// Neutralize spreadsheet formula/DDE injection: a cell whose FIRST char (or first non-space char) is a formula/command
+// trigger (= + - @) or a control char (TAB/CR/LF) is prefixed with a single quote so Excel/Sheets treat it as text.
+// Additive helper — callers opt in (toCsv itself is unchanged, so existing client exports keep their behavior).
+const FORMULA_TRIGGER = /^[=+\-@\t\r\n]/;      // first char is a formula/command/control trigger
+const LEADING_WS_TRIGGER = /^\s+[=+\-@]/;      // a formula trigger hidden behind leading whitespace
+export function sanitizeCsvCell(value: string): string {
+  return FORMULA_TRIGGER.test(value) || LEADING_WS_TRIGGER.test(value) ? `'${value}` : value;
+}

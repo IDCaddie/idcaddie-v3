@@ -130,6 +130,18 @@ describe("access findings page", () => {
     expect(filtered.container.textContent).not.toContain("No governance findings were produced");
   });
 
+  it("renders an Export CSV link to the export route carrying the active filters (only when there are rows)", async () => {
+    loaders.loadAccessOverview.mockResolvedValue(overview([finding()]));
+    const withRows = render(await AccessFindingsPage({ searchParams: Promise.resolve({ severity: "medium" }) }));
+    const link = withRows.container.querySelector('a[href^="/access/findings/export"]') as HTMLAnchorElement;
+    expect(link).toBeTruthy();
+    expect(link.getAttribute("href")).toContain("severity=medium");
+    cleanup();
+    loaders.loadAccessOverview.mockResolvedValue(overview([]));
+    const noRows = render(await AccessFindingsPage({ searchParams: Promise.resolve({}) }));
+    expect(noRows.container.querySelector('a[href^="/access/findings/export"]')).toBeNull(); // nothing to export
+  });
+
   it("subject links carry allowlisted return context (from=findings)", async () => {
     loaders.loadAccessOverview.mockResolvedValue(overview([finding()]));
     const { container } = render(await AccessFindingsPage({ searchParams: Promise.resolve({ severity: "medium" }) }));

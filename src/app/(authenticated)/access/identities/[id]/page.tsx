@@ -2,7 +2,7 @@ import Link from "next/link";
 import { loadIdentityAccessDetail } from "@/lib/data/access-loaders";
 import { Badge } from "@/components/badge";
 import {
-  parseAccessFilters, filterIdentityApplications, paginate, accessHref, detailActiveFilters, backLink, returnParams,
+  parseAccessFilters, filterIdentityApplications, paginate, accessHref, accessQueryString, detailActiveFilters, backLink, returnParams,
   CLASSIFICATION_OPTIONS,
 } from "@/lib/data/access-filters";
 
@@ -69,7 +69,12 @@ export default async function IdentityAccessPage({ params, searchParams }: { par
           </header>
 
           <section className="space-y-3">
-            <h2 className="text-sm font-medium">Effective application access ({result.data.effectiveApplicationCount})</h2>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h2 className="text-sm font-medium">Effective application access ({result.data.effectiveApplicationCount})</h2>
+              {paged.total > 0 ? (
+                <a href={`${base}/export${accessQueryString(filters) ? `?${accessQueryString(filters)}` : ""}`} className="text-sm underline" rel="nofollow">Export CSV</a>
+              ) : null}
+            </div>
 
             <form method="get" action={base} className="flex flex-wrap items-end gap-3 text-sm" aria-label="Filter applications">
               <label className="flex flex-col gap-1">

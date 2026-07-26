@@ -2,7 +2,7 @@ import Link from "next/link";
 import { loadAccessOverview } from "@/lib/data/access-loaders";
 import { Badge } from "@/components/badge";
 import {
-  parseAccessFilters, filterFindings, paginate, accessHref, findingsActiveFilters, returnParams,
+  parseAccessFilters, filterFindings, paginate, accessHref, accessQueryString, findingsActiveFilters, returnParams,
   SEVERITY_OPTIONS, CONFIDENCE_OPTIONS, SUBJECT_TYPE_OPTIONS, RULE_OPTIONS,
 } from "@/lib/data/access-filters";
 
@@ -99,13 +99,18 @@ export default async function AccessFindingsPage({ searchParams }: { searchParam
             {active > 0 ? <Link href={base} className="px-1 py-1.5 text-zinc-500 underline">Clear {active} filter{active === 1 ? "" : "s"}</Link> : null}
           </form>
 
-          {/* Completeness diagnostic + truthful filtered total. */}
-          <p className="text-sm text-zinc-500" role="status">
-            The full represented access graph was evaluated for this scope.{" "}
-            {active > 0
-              ? <>Showing {filtered.length} of {total} finding{total === 1 ? "" : "s"} matching your filters.</>
-              : <>{total} finding{total === 1 ? "" : "s"} total.</>}
-          </p>
+          {/* Completeness diagnostic + truthful filtered total + bounded CSV export of the current (filtered) findings. */}
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-sm text-zinc-500" role="status">
+              The full represented access graph was evaluated for this scope.{" "}
+              {active > 0
+                ? <>Showing {filtered.length} of {total} finding{total === 1 ? "" : "s"} matching your filters.</>
+                : <>{total} finding{total === 1 ? "" : "s"} total.</>}
+            </p>
+            {filtered.length > 0 ? (
+              <a href={`${base}/export${accessQueryString(filters) ? `?${accessQueryString(filters)}` : ""}`} className="text-sm underline" rel="nofollow">Export CSV</a>
+            ) : null}
+          </div>
 
           {paged.total === 0 ? (
             <div className="rounded border border-zinc-300 p-4 text-sm dark:border-zinc-700">

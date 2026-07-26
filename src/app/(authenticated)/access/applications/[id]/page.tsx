@@ -3,7 +3,7 @@ import { loadApplicationAccessDetail } from "@/lib/data/access-loaders";
 import { StatCard, StatGrid } from "@/components/stat-card";
 import { Badge } from "@/components/badge";
 import {
-  parseAccessFilters, filterApplicationIdentities, paginate, accessHref, detailActiveFilters, backLink, returnParams,
+  parseAccessFilters, filterApplicationIdentities, paginate, accessHref, accessQueryString, detailActiveFilters, backLink, returnParams,
   CLASSIFICATION_OPTIONS,
 } from "@/lib/data/access-filters";
 
@@ -94,7 +94,12 @@ export default async function ApplicationAccessPage({ params, searchParams }: { 
           </section>
 
           <section className="space-y-3">
-            <h2 className="text-sm font-medium">Effective identities ({result.data.effectiveIdentityCount})</h2>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h2 className="text-sm font-medium">Effective identities ({result.data.effectiveIdentityCount})</h2>
+              {paged.total > 0 ? (
+                <a href={`${base}/export${accessQueryString(filters) ? `?${accessQueryString(filters)}` : ""}`} className="text-sm underline" rel="nofollow">Export CSV</a>
+              ) : null}
+            </div>
 
             <form method="get" action={base} className="flex flex-wrap items-end gap-3 text-sm" aria-label="Filter identities">
               <label className="flex flex-col gap-1">
