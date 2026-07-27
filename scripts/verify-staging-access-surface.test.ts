@@ -270,9 +270,14 @@ describe("verify-staging-access-surface — owner/admin optional (editor/viewer-
 
 describe("verify-staging-access-surface — source safety (static)", () => {
   const src = () => readFileSync(SCRIPT, "utf8");
-  it("imports only node:fs + @supabase/supabase-js (no pg / aws-sdk / service-role client)", () => {
+  it("imports only node:fs + @supabase/supabase-js + the pure local lib (no pg / aws-sdk / service-role client)", () => {
     const imports = [...src().matchAll(/^import\s.+from\s+["']([^"']+)["']/gm)].map((m) => m[1]).sort();
-    expect(imports).toEqual(["@supabase/supabase-js", "node:fs"]);
+    expect(imports).toEqual(["./access-verify-lib.mjs", "@supabase/supabase-js", "node:fs"]);
+  });
+  it("the local lib is PURE — it imports nothing (no I/O / network / db)", () => {
+    const lib = readFileSync(fileURLToPath(new URL("./access-verify-lib.mjs", import.meta.url)), "utf8");
+    expect([...lib.matchAll(/^import\s.+from/gm)]).toHaveLength(0);
+    for (const bad of ["createClient", "fetch(", "readFile", "process.env", ".rpc(", ".from("]) expect(lib).not.toContain(bad);
   });
   it("performs no mutation and reads no service-role env", () => {
     const s = src();
