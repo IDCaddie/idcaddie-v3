@@ -47,9 +47,10 @@ async function callRpc(name: string, args: Record<string, unknown>): Promise<{ o
 const clampLimit = (n: number | undefined): number => Math.min(Math.max(Math.trunc(n ?? DEFAULT_PAGE), 1), MAX_PAGE);
 const listArgs = (tenantId: string, o: ListOptions) => ({ p_tenant_id: tenantId, p_include_stale: o.includeStale === true, p_after_id: o.afterId ?? null, p_limit: clampLimit(o.limit) });
 
-// tenantId MUST come from accessGate(); the RPC re-verifies via has_tenant_role.
-export async function getAccessCounts(tenantId: string, includeStale = false): Promise<ListResult<Counts>> {
-  const r = await callRpc("product_directory_access_counts", { p_tenant_id: tenantId, p_include_stale: includeStale });
+// tenantId MUST come from accessGate(); the RPC re-verifies via has_tenant_role. The counts function is stale-AGNOSTIC (it declares no
+// p_include_stale and counts all rows — the correct conservative bound for the overview's too-large gate), so no stale arg is passed.
+export async function getAccessCounts(tenantId: string): Promise<ListResult<Counts>> {
+  const r = await callRpc("product_directory_access_counts", { p_tenant_id: tenantId });
   if (!r.ok) return r;
   const p = countsSchema.safeParse(r.data);
   return p.success ? { ok: true, data: p.data } : { ok: false, error: "query_failed" };

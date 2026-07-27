@@ -63,7 +63,7 @@ async function pageAll<T extends { id?: string }>(fetch: (afterId: string | null
 export async function loadAccessOverview(includeStale = false): Promise<AccessOverviewResult> {
   const g = await accessGate();
   if (!g.ok) return { ok: false, error: "forbidden" };
-  const counts = await getAccessCounts(g.tenantId, includeStale);
+  const counts = await getAccessCounts(g.tenantId); // counts are stale-agnostic (total rows) — the conservative bound for the too-large gate
   if (!counts.ok) return { ok: false, error: "query_failed" };
   const c = counts.data;
   const countsView: CountsView = { identities: c.identities, groups: c.groups, applications: c.applications, memberships: c.memberships, directAssignments: c.userAssignments, groupAssignments: c.groupAssignments };
@@ -77,6 +77,9 @@ export async function loadAccessOverview(includeStale = false): Promise<AccessOv
   ]);
   if (!ids.ok || !grps.ok || !apps.ok || !mem.ok || !ua.ok || !ga.ok) return { ok: false, error: "query_failed" };
   const rows: AccessGraphRows = { identities: ids.rows, groups: grps.rows, applications: apps.rows, memberships: mem.rows, userAssignments: ua.rows, groupAssignments: ga.rows };
+  // Displayed complete-view counts come from the PAGED rows (which honor includeStale), so the StatCards match the evaluated graph exactly —
+  // not the stale-agnostic RPC total (used only for the too-large pre-gate above, where no current-only body is shown).
+  const shownCounts: CountsView = { identities: ids.rows.length, groups: grps.rows.length, applications: apps.rows.length, memberships: mem.rows.length, directAssignments: ua.rows.length, groupAssignments: ga.rows.length };
   const graph = assembleGovernanceGraph(g.tenantId, rows);
   const detectedAt = new Date().toISOString();
   const evaluation = evaluateGovernance(graph, { includeStale }, { detectedAt });
@@ -89,7 +92,7 @@ export async function loadAccessOverview(includeStale = false): Promise<AccessOv
   return {
     ok: true,
     data: {
-      status: "complete", counts: countsView, breakdown: { directOnly, groupOnly, both },
+      status: "complete", counts: shownCounts, breakdown: { directOnly, groupOnly, both },
       effectiveRelationships: evaluation.summary.effectiveAccessRelationships, governanceFindingsTotal: evaluation.summary.findingsTotal,
       summary: mapSummaryToView(evaluation.summary), findings,
     },

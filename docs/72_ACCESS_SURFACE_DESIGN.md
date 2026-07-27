@@ -38,6 +38,13 @@ Otherwise it pages every list RPC (deterministic id cursor, page cap 100) under 
 once → `status: "complete"`. It NEVER shows "No findings" when evaluation did not complete. Entity detail pages use the single-call
 subgraph RPCs (always complete for that entity's neighborhood).
 
+The counts RPC (`product_directory_access_counts`) is **stale-agnostic** — it counts all rows (it declares no `p_include_stale`), so the
+too-large pre-gate uses the **total** count (a safe, conservative upper bound: total ≥ the paged current-only graph, so the gate can only
+fail-closed, never render an over-large graph). Two consequences, both intentional: (1) the **displayed** complete-view StatCard counts come
+from the **paged rows** (which honor `includeStale`), not the RPC total, so the header matches the evaluated body; (2) a tenant with a large
+number of **stale** rows can trip `too_large` in the default current-only view even if its current-only graph is small — fail-closed and
+safe, but conservative. A stale-aware pre-count (to avoid that over-block) would require a migration and is deferred.
+
 ## Routes
 - `/access` — overview: counts, effective-access breakdown, governance summary, top-10 findings preview, truthfulness disclaimer.
 - `/access/findings` — full findings list with server-side severity filter (strict allowlist); "View access details" only, no mutation.
