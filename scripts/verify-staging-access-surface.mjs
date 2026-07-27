@@ -25,6 +25,7 @@
 
 import { readFileSync } from "node:fs";
 import { createClient } from "@supabase/supabase-js";
+import { classifyIdentitySubgraph, recognizedAnonDeny } from "./access-verify-lib.mjs";
 
 const STAGING_REF = "ycdpzduxugdsffjqyoai";    // the only permitted Supabase project ref (database target in EVERY mode)
 const PRODUCTION_REF = "dzbfxulvxchdemcettrx"; // must NEVER be touched
@@ -281,12 +282,14 @@ async function main() {
     record("O4", "Identity + application lists resolve at expected cardinality", (idRows?.length ?? 0) === 1 && (appRows?.length ?? 0) === 2, `identities=${idRows?.length ?? 0}, applications=${appRows?.length ?? 0}`);
     record("O4p", "List responses carry no forbidden keys", !forbiddenKeyIn(idRows) && !forbiddenKeyIn(appRows), (forbiddenKeyIn(idRows) || forbiddenKeyIn(appRows)) ? "LEAK" : "clean");
 
-    // Entity resolution + DIRECT-only shape (structural, at the RPC level — no engine reimplementation):
+    // Entity resolution + DIRECT-only shape. Classification uses effective-access semantics (direct assignment count + INHERITED group-path
+    // count), NOT raw membership rows — a group membership with no group→app assignment is not an inherited application path.
     if ((idRows?.length ?? 0) === 1) {
       const { data: sub } = await rpc(authed.c, "product_identity_access_subgraph", { p_identity_id: idRows[0].id, p_tenant_id: tid });
-      const directOnly = sub && (sub.userAssignments?.length ?? 0) === 1 && (sub.memberships?.length ?? 0) === 0 && (sub.groupAssignments?.length ?? 0) === 0;
-      record("O5", "Known identity resolves as DIRECT-only (1 direct assignment, 0 group paths → no false GROUP/BOTH)", !!directOnly,
-        sub ? `direct=${sub.userAssignments?.length ?? 0}, memberships=${sub.memberships?.length ?? 0}, groupAssignments=${sub.groupAssignments?.length ?? 0}` : "subgraph null");
+      const c = classifyIdentitySubgraph(sub);
+      record("O5", "Known identity is DIRECT-only (1 direct assignment, 0 inherited group paths → no false GROUP/BOTH)",
+        !!sub && c.classification === "DIRECT" && c.directCount === 1 && c.inheritedPathCount === 0,
+        sub ? `classification=${c.classification}, direct=${c.directCount}, inheritedPaths=${c.inheritedPathCount}` : "subgraph null");
       record("O5p", "Identity subgraph carries no forbidden keys", !forbiddenKeyIn(sub), forbiddenKeyIn(sub) ? "LEAK" : "clean");
     } else {
       skip("O5", "Known-identity DIRECT-only shape", "identity cardinality != 1 (see O4) — not evaluated");
@@ -326,9 +329,25 @@ async function main() {
     await s.c.auth.signOut();
   }
 
-  // ── Anonymous: cleanly denied ─────────────────────────────────────────────────────────────────────────
-  const { data: anonCounts, error: anonErr } = await rpc(anonClient(), "product_directory_access_counts", { p_tenant_id: tid });
-  record("N1", "Anonymous is cleanly denied (null data, no RPC error)", anonErr == null && anonCounts == null, anonErr != null ? "RPC ERRORED — not a clean deny" : anonCounts == null ? "denied" : "ALLOWED (LEAK)");
+  // ── Anonymous: denied on ALL NINE 0061 RPCs (not just counts) — a per-function anon mis-grant must not slip through. anon lacks EXECUTE
+  //    (0061 revoke), so each legitimate denial is a permission-denied (SQLSTATE 42501, allowlisted) OR a clean null; data or any other
+  //    error FAILs. Correct per-RPC args so PostgREST RESOLVES the function first (then hits the EXECUTE-deny), not a false not-found. ────
+  const anonC = anonClient();
+  const anonProbes = [
+    ["product_directory_access_counts", { p_tenant_id: tid }],
+    ["product_list_directory_identities", { p_tenant_id: tid }], ["product_list_directory_groups", { p_tenant_id: tid }],
+    ["product_list_directory_applications", { p_tenant_id: tid }], ["product_list_group_memberships", { p_tenant_id: tid }],
+    ["product_list_user_assignments", { p_tenant_id: tid }], ["product_list_group_assignments", { p_tenant_id: tid }],
+    ["product_identity_access_subgraph", { p_tenant_id: tid, p_identity_id: PH }],
+    ["product_application_access_subgraph", { p_tenant_id: tid, p_application_id: PH }],
+  ];
+  let anonDenied = 0; const anonFailures = [];
+  for (const [name, args] of anonProbes) {
+    const { data, error } = await rpc(anonC, name, args);
+    if (recognizedAnonDeny(data, error).ok) anonDenied++; else anonFailures.push(name);
+  }
+  record("N1", "Anonymous is denied on ALL 9 read RPCs (null or allowlisted 42501; never data/other error)",
+    anonFailures.length === 0, `${anonDenied}/${anonProbes.length} denied${anonFailures.length ? ` — FAILED: ${anonFailures.join(", ")}` : ""}`);
 
   finish();
 }

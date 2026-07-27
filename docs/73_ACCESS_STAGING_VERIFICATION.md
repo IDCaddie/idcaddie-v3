@@ -124,18 +124,24 @@ failed to sign in (a `FAIL`).
 | O1–O2 | Authorized owner∨admin sign-in succeeds; JWT is user-scoped (never service_role) |
 | O3 | Authorized reader allowed; counts == identities 1 / groups 2 / applications 2 / memberships 1 / direct 1 / group 0 |
 | O4 | Identity list = 1, application list = 2 |
-| O5 | Known identity resolves DIRECT-only (1 direct assignment, 0 group paths → no false GROUP/BOTH) |
+| O5 | Known identity is DIRECT-only via **effective-access classification** (direct assignment count = 1, **inherited group-path** count = 0). The inherited-path count is the identity-scoped `groupAssignments` (group→app), so a bare group membership with no group→app assignment is NOT a path — no false GROUP/BOTH. |
 | O6 | Both known applications resolve |
 | O7 | Nonexistent (and foreign, if provided) ids return not-found-equivalent `null` (indistinguishable) |
 | O3p/O4p/O5p | Privacy scan: no `external_id`/`raw_payload`/`normalized_*`/`credential`/`setting`/`profile`/`source_endpoint`/`secret`/`token` in any RPC response |
 | A1 | Admin *also* allowed (only when BOTH owner + admin supplied) |
-| D1–D3/N1 | Editor / viewer / non-member / anon are **cleanly** denied (null data **and** no RPC error; an RPC error is a `FAIL`) |
-| D1–D3 | Editor / viewer / non-member denied (RPC returns `null`) |
-| N1 | Anonymous denied |
+| D1–D3 | Editor / viewer / non-member (`authenticated` → **have** EXECUTE per 0061) are denied *inside* the function: null data **and** no error. An RPC error here is a `FAIL`. |
+| N1 | Anonymous is denied on **all nine** 0061 read RPCs (**no** EXECUTE per 0061 `revoke … from anon`): null data with **no error OR the allowlisted permission-denied `42501`** (Postgres insufficient_privilege). Returned data, or any other error (function-not-found, schema-cache, malformed, server, timeout), is a `FAIL`. Only the SQLSTATE code is logged — never the error message. |
+
+> **O5 live-coverage bound:** against the current fixture (0 group→app assignments) O5 can only exercise the **DIRECT** branch live — a false
+> `GROUP`/`BOTH` requires an actual group→app assignment, of which the tenant has none, and an over-broad subgraph-scoping bug would be
+> invisible here. The `GROUP`/`BOTH` classification is covered by the unit tests (`access-verify-lib.test.ts`) and by the manual UI badge
+> check below; O5 is an RPC-level structural oracle, not the product's Phase-13 classifier or the rendered badge.
 
 ### Manual UI acceptance (a script cannot hold the app session)
 Signed in as **owner** (then **admin**), in the staging app:
 - `/access` loads; findings, identity detail, application detail load.
+- The known identity's application access shows the **"Direct"** badge (NOT "Through group" / "Direct and through group") — this is the
+  rendered end-to-end check of the DIRECT classification that O5 verifies only at the RPC layer.
 - Search + each filter (severity/confidence/rule/subject/stale on findings; search/classification/stale on detail) narrow results; "Clear
   filters" resets; the active-filter count is correct.
 - Pagination works and is deterministic (Previous/Next, "Page X of N").
