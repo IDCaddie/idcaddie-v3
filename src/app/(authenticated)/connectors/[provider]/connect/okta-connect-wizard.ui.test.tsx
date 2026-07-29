@@ -16,6 +16,8 @@ vi.mock("next/link", () => ({
 
 import { OktaConnectWizard } from "./okta-connect-wizard";
 import { getDemoConnection } from "@/lib/customer-connectors/demo-store";
+// O1B: reference the copy constants, not literals — a hardcoded scope label is exactly what drifted before.
+import { OKTA_SETUP } from "@/lib/customer-connectors/okta-content";
 
 const CLIENT_ID = "0oaTEST12345678abcd"; // synthetic 0oa… shape, non-secret
 
@@ -35,9 +37,9 @@ function toConfiguration(org = "acme.okta.com") {
 }
 function fillConfiguration(clientId = CLIENT_ID) {
   fireEvent.change(screen.getByLabelText("API Services client ID"), { target: { value: clientId } });
-  fireEvent.click(screen.getByLabelText("I have registered the approved public key on the app"));
-  fireEvent.click(screen.getByLabelText("I have granted okta.users.read on the app"));
-  fireEvent.click(screen.getByLabelText("I have assigned a least-privileged admin role to the app"));
+  fireEvent.click(screen.getByLabelText(OKTA_SETUP.declareKey));
+  fireEvent.click(screen.getByLabelText(OKTA_SETUP.declareScope));
+  fireEvent.click(screen.getByLabelText(OKTA_SETUP.declareRole));
 }
 
 describe("Okta connect wizard — API Services configuration flow", () => {
@@ -103,7 +105,7 @@ describe("Okta connect wizard — API Services configuration flow", () => {
     render(<OktaConnectWizard provider="okta" />);
     toConfiguration();
     fireEvent.change(screen.getByLabelText("API Services client ID"), { target: { value: CLIENT_ID } });
-    fireEvent.click(screen.getByLabelText("I have granted okta.users.read on the app")); // only one of three
+    fireEvent.click(screen.getByLabelText(OKTA_SETUP.declareScope)); // only one of three
     expect((screen.getByRole("button", { name: "Review" }) as HTMLButtonElement).disabled).toBe(true);
   });
 });

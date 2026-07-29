@@ -11,8 +11,8 @@
 > unblocked for execution. Engineering created NO Okta app, configured NO client id, and created/read NO signing key.
 
 ## 0. Why this model
-The product is an unattended background connector that periodically reads users with `okta.users.read`, must run without the
-connecting admin being logged in, and must not depend on that admin's continued employment. Only **API Services + Client
+The product is an unattended background connector that periodically reads users, groups and applications with the three read-only
+scopes in §6, must run without the connecting admin being logged in, and must not depend on that admin's continued employment. Only **API Services + Client
 Credentials + private_key_jwt** satisfies that (service context, no user, no refresh token). The Authorization-Code/Web-App model
 would make the durable credential an admin-tied refresh token — which breaks when the admin leaves.
 
@@ -33,18 +33,54 @@ The private key stays in AWS Secrets Manager and is never pasted here or anywher
 ## 5. Confirm the KID
 The registered public key's **KID must equal**:
 ```
-i-Wptr6usN1tpkNp17vHXv_Mar4NPz53rn-bmlTq8j4
+VDkZAQoJl_prLRU83WiPreOBGoP6Fib3qC0CG880wz0
 ```
 (if reusing the existing keypair). If a new keypair is generated, record the new KID and hand it to engineering (non-secret).
 
-## 6. Grant the scope — **`okta.users.read` only**
-In the app's **Okta API Scopes** tab, grant **only** `okta.users.read`. Do NOT grant `okta.groups.read`, `okta.apps.read`,
-`okta.logs.read`, `okta.users.manage`, or any write/admin/lifecycle scope.
+> **Corrected in O1B.** This step previously published `i-Wptr…q8j4`, while all 12 connector-runner task definitions already
+> expected the value above. Anyone who followed the earlier instruction registered a public key whose private half ID Caddie does
+> not hold, and every token request would have failed `invalid_client`. The authoritative value lives in
+> `contracts/okta-provider-contract.v1.json` and is asserted by `okta-contract-consistency.test.ts` in both repositories.
+>
+> **Repository consistency is not proof of registration.** Confirming the KID against the real Okta application is a LIVE
+> verification step that remains **outstanding**.
 
-## 7. Assign a least-privileged admin role
-API Services apps need an **admin role** to actually reach the Users API. Assign the **least-privileged** applicable role — a
-**Read-Only Administrator**, ideally **constrained by a resource set** scoped to users only (a custom admin role + resource set is
-preferred over the broad built-in). This role is assigned to the **application**, not to a person.
+## 6. Grant the scopes — **exactly these three, all read-only**
+In the app's **Okta API Scopes** tab, grant **exactly**:
+
+| Scope | Permits |
+|---|---|
+| `okta.users.read` | Read directory identities and account status |
+| `okta.groups.read` | Read group entities and their members |
+| `okta.apps.read` | Read application entities and their user/group assignments |
+
+Do NOT grant `okta.logs.read`, `okta.factors.read`, `okta.users.manage`, `okta.groups.manage`, `okta.apps.manage`, or any other
+write/admin/lifecycle scope. The set is enforced as an **exact set** — a missing scope and an extra scope both fail closed.
+
+> **Corrected in O1B.** This step previously said *"grant **only** `okta.users.read`. Do NOT grant `okta.groups.read`,
+> `okta.apps.read`…"* — the opposite of what the connector-runner requires. Group and application discovery (Phases 5–12) read
+> those endpoints, so a customer following the old instruction would have produced `403`s on every group and application read.
+> V3's validator additionally listed `okta.apps.read` as **prohibited**, so the correct grant would have been *rejected* at the
+> configuration gate.
+
+## 7. Assign a least-privileged admin role — **exact role UNRESOLVED**
+
+API Services apps need an **admin role** to actually reach the API in addition to the granted scopes. This role is assigned to the
+**application**, not to a person.
+
+**What is known:** the role must be **read-only** and as narrow as possible. Never assign a role that can make changes, and do not
+assign Super Admin — the OAuth scopes above are read-only and a write-capable role would defeat that.
+
+**What is NOT yet established:** the exact role or resource set that covers reading users, groups **and** applications.
+
+> **Unresolved setup requirement (O1B).** This step previously specified a **Read-Only Administrator constrained by a resource set
+> scoped to users only**. That cannot be correct now that `okta.groups.read` and `okta.apps.read` are required — a users-only
+> resource set would not permit reading applications. Rather than guess a role and send an operator to configure the wrong thing,
+> this is recorded as **unresolved**: determine the minimum role empirically against the dedicated Okta test organisation, then
+> document the finding here.
+>
+> Note that OAuth **scopes** and Okta **admin-role** assignment are separate mechanisms. Read-only scopes do not imply any
+> particular role, and a role must never be broadened merely because a scope was added.
 
 ## 8–11. Do NOT
 - **No redirect URI** (API Services apps have none).

@@ -1,0 +1,14 @@
+{
+  "contract_version": "1.0.0",
+  "provider": "okta",
+  "auth_mode": "oauth_private_key_jwt",
+  "approved_scopes": [
+    "okta.apps.read",
+    "okta.groups.read",
+    "okta.users.read"
+  ],
+  "staging_public_key_kid": "VDkZAQoJl_prLRU83WiPreOBGoP6Fib3qC0CG880wz0",
+  "lifecycle_status": "certificationOnly",
+  "read_only": true,
+  "live_kid_verification": "outstanding"
+}

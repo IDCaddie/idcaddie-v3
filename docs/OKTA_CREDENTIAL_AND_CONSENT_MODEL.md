@@ -36,6 +36,6 @@ cross-provider bleed.
 A future Okta customer pilot reuses the P5E14/P5E15 provider-neutral customer-pilot control plane (migration `0047`) — the SAME
 enrollment/consent/incident/exit/deletion tables, approval-before-enable, kill switches, discovery-only, and per-run authorization,
 with `provider = okta`. Consent evidence stays an OPAQUE reference (no PII, no signed document in the DB). The customer explicitly
-agrees to: staging-only processing; read-only user discovery; the exact approved scope (`okta.users.read`); no promotion; no
+agrees to: staging-only processing; read-only user discovery; the exact approved scope set (`okta.users.read`, `okta.groups.read`, `okta.apps.read` — all read-only); no promotion; no
 scheduling; bounded runs/records; a retention period + deletion process; incident notification; immediate withdrawal + pause; no
 production. **No Okta customer, credential, or consent exists this phase.** Enabling one is a separate explicit GO.

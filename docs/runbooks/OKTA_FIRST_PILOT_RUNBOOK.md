@@ -25,8 +25,14 @@ Record: customer legal entity, authorizing contact, scope agreed (read-only user
 ## 3. Okta application requirements
 Customer creates an Okta OAuth **service app** (authorization-code + PKCE; or private_key_jwt per the auth design). Least privilege. **We do not create the Okta app or its secret** — the customer does, in their tenant. **Blocked.**
 
-## 4. Exact scope
-`okta.users.read` **only**. Any other scope (groups/apps/logs/factors/write) is out of scope and must be rejected. Verify no extra scope was granted. **Blocked.**
+## 4. Exact scope set
+Exactly `okta.users.read`, `okta.groups.read`, `okta.apps.read` — all READ-ONLY, enforced as a SET (order-irrelevant, no
+duplicates, no extras, no omissions). Any other scope (logs/factors/any `.manage` or `.write`) is out of scope and must be
+rejected. Verify no extra scope was granted, and that none of the three is missing. **Blocked.**
+
+> **Superseded (O1B):** this step previously required `okta.users.read` **only** and listed groups/apps as out of scope. Group and
+> application discovery are separately authorized capabilities that read those endpoints; the users-only requirement is retained
+> here only to record the old contract.
 
 ## 5. Redirect URI verification
 The Okta app's redirect URI must byte-match the server-trusted callback (`https://<staging-host>/connectors/oauth/callback`, no trailing slash). Verify verbatim. **Blocked.**
@@ -41,7 +47,7 @@ Provision the Okta client credential into the external secret store (out-of-band
 Create the connector row (provider `okta`) for the customer org; it starts non-`active`/unsynced. Bind the issuer. **Blocked.**
 
 ## 9. First-sync authorization
-Sign an `OktaFirstSyncAuthorization`: named operator, org, exact connection, approved issuer, exact scope `okta.users.read`, bounded `maxUserCount`, expiry, `maxRuns=1`, rollback owner, evidence ref, `environment=staging`, manual trigger required. **Blocked.**
+Sign an `OktaFirstSyncAuthorization`: named operator, org, exact connection, approved issuer, the exact three-scope read-only set (O1B; previously `okta.users.read` alone), bounded `maxUserCount`, expiry, `maxRuns=1`, rollback owner, evidence ref, `environment=staging`, manual trigger required. **Blocked.**
 
 ## 10. Preflight
 Dry-run the gates (connect gate, dispatch guard, first-sync) — confirm they PASS only with the signed authorization + unblocked governance, and FAIL closed otherwise. No network. **Blocked.**
