@@ -17,15 +17,15 @@ insert into public.tenants (id, name, slug) values
 on conflict (id) do nothing;
 
 insert into auth.users (id, email) values
-  ('d0a70000-0000-4000-8000-0000000000a1', 'owner-a@example.test'),
-  ('d0a70000-0000-4000-8000-0000000000a2', 'editor-a@example.test'),
-  ('d0a70000-0000-4000-8000-0000000000a3', 'viewer-a@example.test')
+  ('d0a70000-0000-4000-8000-0000000000a1', 'v-owner-a@example.test'),
+  ('d0a70000-0000-4000-8000-0000000000a2', 'v-editor-a@example.test'),
+  ('d0a70000-0000-4000-8000-0000000000a3', 'v-viewer-a@example.test')
 on conflict (id) do nothing;
 
 insert into public.profiles (id, email) values
-  ('d0a70000-0000-4000-8000-0000000000a1', 'owner-a@example.test'),
-  ('d0a70000-0000-4000-8000-0000000000a2', 'editor-a@example.test'),
-  ('d0a70000-0000-4000-8000-0000000000a3', 'viewer-a@example.test')
+  ('d0a70000-0000-4000-8000-0000000000a1', 'v-owner-a@example.test'),
+  ('d0a70000-0000-4000-8000-0000000000a2', 'v-editor-a@example.test'),
+  ('d0a70000-0000-4000-8000-0000000000a3', 'v-viewer-a@example.test')
 on conflict (id) do nothing;
 
 insert into public.tenant_memberships (tenant_id, user_id, role) values

@@ -118,9 +118,13 @@ begin
   -- ALLOWLIST, not pattern-matching: the projection is an explicit jsonb_build_object, so asserting its EXACT key set proves no
   -- unexpected value can ever appear. (A blob-shaped scan would flag the 64-hex fingerprint, which is deliberately included and
   -- non-secret.)
+  -- 0064 widened the projection with the validation-result evidence. Every added key is bounded and non-secret: two pinned
+  -- constants (the KID and the contract version it was verified under), a server-generated run id, a schema version, and the
+  -- bounded error category from 0063's CHECK. None can carry a token, an assertion or free text.
   assert (select array_agg(k order by k) from jsonb_object_keys(a.after_json) k) = array[
-    'authentication_mode','certification_only','connector_id','contract_version','normalized_org_host','production_enabled',
-    'proposed_organization_fingerprint','provider','public_key_delivery_mode','validation_status','verified'
+    'authentication_mode','certification_only','connector_id','contract_version','fingerprint_version','normalized_org_host',
+    'production_enabled','proposed_organization_fingerprint','provider','public_key_delivery_mode','validation_error_category',
+    'validation_run_id','validation_status','verified','verified_contract_version','verified_kid'
   ]::text[], 'C2 audit projection is exactly the allowlisted key set';
   -- the only value mentioning "private" is the non-secret auth-mode label
   assert a.after_json->>'authentication_mode' = 'private_key_jwt', 'C2 auth mode label present and non-secret';
@@ -262,15 +266,25 @@ begin
 
   -- …and the positive direction: WITH a successful validation recorded, the same write is accepted. This proves the constraint
   -- gates on validation state rather than forbidding the column outright.
+  --
+  -- The COMPLETE evidence package is supplied because 0064 added the converse constraint: a `succeeded` row may not carry partial
+  -- evidence. Setting only a fingerprint and a timestamp would construct a row the system can no longer produce, so this now
+  -- mirrors what `runner_record_okta_connector_validation` actually writes — including the pinned KID, which 0064 also CHECKs.
   update public.okta_connector_configs
     set validation_status = 'succeeded', last_validated_at = now(),
-        verified_organization_fingerprint = 'cccc9999dddd8888eeee7777ffff6666aaaa5555bbbb4444cccc3333dddd2222'
+        verified_organization_fingerprint = 'cccc9999dddd8888eeee7777ffff6666aaaa5555bbbb4444cccc3333dddd2222',
+        verified_service_app_fingerprint = '2222dddd3333cccc4444bbbb5555aaaa6666ffff7777eeee8888dddd9999cccc',
+        signing_key_id = 'p7AyvDK0yI95_HdQBxdhBSOTt9mMYPczGL-4USxaMto',
+        verified_contract_version = '1.1.0',
+        validation_run_id = gen_random_uuid()
     where id = cfg_id;
   assert (select verified_organization_fingerprint is not null from public.okta_connector_configs where id = cfg_id),
     'C5 verified fingerprint accepted once validation succeeded';
   -- restore the fixture to its unverified state for later assertions
   update public.okta_connector_configs
-    set verified_organization_fingerprint = null, validation_status = 'never_validated', last_validated_at = null
+    set verified_organization_fingerprint = null, validation_status = 'never_validated', last_validated_at = null,
+        verified_service_app_fingerprint = null, signing_key_id = null, verified_contract_version = null,
+        validation_run_id = null
     where id = cfg_id;
 
   -- invalid host shapes

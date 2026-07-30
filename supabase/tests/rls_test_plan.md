@@ -341,3 +341,18 @@ AR3: cross-tenant — a member of tenant B passing tenant A's id (verify-not-tru
 lists a tenant-B row; a foreign id and a missing id both return the same not-found. AR4: non-member denied. AR5: no
 external_id/raw_payload/tenant_id leaks in any RPC output (incl. a recursive jsonb_path check of the subgraph). AR6:
 current-only by default; include_stale surfaces the stale identity; pagination capped at 100.
+
+
+## okta_connector_validation_result_test.sql (0064)
+
+V0 grant shape: `connector_runner` holds EXECUTE; `authenticated`, `anon` and `service_role` do NOT. V1 owner, editor and anon
+each CALL the function and must receive a privilege error — the negative property is proven by execution, not by reading a grant
+table. V2 a well-formed result is recorded and the connector becomes `verified` and nothing more (`status` stays `pending`,
+governance flags preserved). V3 audit exactly once with the precise action and no credential material. V4 idempotent replay emits
+no second audit and does not move `last_validated_at`. V5 a stale failure cannot demote an established success. V6 superseded KID,
+superseded contract version, malformed fingerprint, out-of-vocabulary outcome, forged run id and cross-tenant result are each
+refused. V7 the pinned-KID CHECK holds against a direct owner UPDATE. V8 a succeeded row cannot survive losing its evidence.
+V9 a request role still cannot UPDATE or DELETE the table directly.
+
+The runner's own execution is asserted by grant shape rather than by SET ROLE: `postgres` holds its `connector_runner` membership
+with `set_option = false`, so the harness cannot assume that role and claiming otherwise would be untrue.

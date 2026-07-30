@@ -2341,6 +2341,21 @@ from PRs verified via `git log` / `gh pr list`.
 
 *Pre-PR history (legacy extraction docs, rebuild starter, `0001` core schema) is in
 `git log` and the `docs/current-*` / `docs/v3-*` design docs.*
+## O2C.2 — Okta validation-result write path, migration 0064 (v3 #359)
+
+**2026-07-30.** Closes the first of two gaps left by the O2C.2 live verification: the authentication succeeded against Okta but
+the connector still read `never_validated`, because 0063 deliberately had no path capable of recording verification.
+
+`runner_record_okta_connector_validation(...)` is granted to `connector_runner` only. Validation success is observed solely by the
+runner, so no browser role can assert it.
+
+**Security finding.** `revoke ... from public` does not achieve runner-only on Supabase — ALTER DEFAULT PRIVILEGES grants EXECUTE
+on new public functions to `anon`/`authenticated`/`service_role` as explicit grantees. The first run of the new suite showed an
+OWNER recording a validation result. Each role is now revoked by name. **The pre-existing `runner_*` functions share the pattern**
+and warrant their own pass; they are SECURITY DEFINER with internal tenant checks, so exposure is bounded.
+
+Additive only; no new lifecycle vocabulary. `signing_key_id` reused as the verified KID. Expected KID pinned as a table CHECK so
+not even a superuser can record another. Success evidence is all-or-nothing. Six mutations verified to break the suite.
 
 ## Okta Discovery Phase 4 PR A — directory-identity persistence migrations (v3 #333)
 Migrations `0052`+`0053` + DB tests only (no hosted run, no runner behavior). Canonical Okta directory-identity store is `identity_accounts` (extended), not `app_users`; immutable key `(tenant_id, connection_id, provider, external_id)`. New SECURITY DEFINER runner RPCs for lifecycle transition, per-run metrics, complete-run promotion, and evidence-based stale marking with a configurable mass-staleness circuit breaker (EXECUTE `connector_runner` only; revoked from public/anon/authenticated). 6-lens adversarial review → 1 P0 (privilege-escalation revoke) + 5 P1 fixed. Additive; activates nothing. Per this GO: RISK-007 OPEN, Phase C BLOCKED, staging only, production untouched.

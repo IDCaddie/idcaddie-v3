@@ -113,3 +113,28 @@ Phase 4–11 of the Okta discovery engine. **Additive; activates nothing.**
 - ❌ frontend filtering used as a security boundary.
 - ❌ a service-role workaround to "get around" a too-strict RLS policy — fix the policy + test it.
 - ❌ editing any merged migration (`0001`–`0013`) — fix forward with a new `000N_*.sql`.
+
+---
+
+## 0064 — Okta connector validation result (O2C.2)
+
+The authorized write path for a LIVE validation outcome. 0063 built the creation path and made it structurally incapable of
+claiming verification, which left no way to record a validation that actually happened.
+
+**Trusted producer.** `runner_record_okta_connector_validation(...)` is granted to `connector_runner` **only**. Validation success
+is a fact about the outside world that only the runner observes, so no browser role can assert it — that is an absent grant, not a
+policy decision.
+
+**`revoke ... from public` is NOT sufficient on Supabase.** ALTER DEFAULT PRIVILEGES grants EXECUTE on new public functions to
+`anon`, `authenticated` and `service_role` as EXPLICIT grantees, which a PUBLIC revoke leaves in place. Each role must be named.
+The first run of the 0064 suite caught an OWNER successfully recording a result because of this. The same pattern exists on the
+older `runner_*` functions — they are SECURITY DEFINER with internal tenant checks, so the exposure is bounded, but their
+"runner-only" claim is weaker than written.
+
+**Additive only, no new vocabulary.** `succeeded`/`failed` already existed in 0063; `verified` already existed in 0052.
+`signing_key_id` is reused as the verified KID — 0063 reserved it for exactly that.
+
+**Pinned KID.** The expected KID is a CHECK on the table, so not even a superuser UPDATE can record a different one. Key rotation
+is therefore a deliberate migration.
+
+**Evidence is all-or-nothing.** A `succeeded` row must carry fingerprints, KID, contract version, run id and timestamp together.
