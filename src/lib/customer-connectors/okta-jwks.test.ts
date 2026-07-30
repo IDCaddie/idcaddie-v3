@@ -7,9 +7,8 @@
 // O2C.1, and the hosted signer must therefore keep failing closed.
 
 import { describe, it, expect } from "vitest";
-import { readFileSync } from "node:fs";
+import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
-import { createHash, createPublicKey, createVerify, createSign, generateKeyPairSync } from "node:crypto";
 
 const ROOT = process.cwd();
 const MANIFEST = join(ROOT, "src", "lib", "customer-connectors", "okta-jwks-manifest.json");
@@ -59,7 +58,6 @@ describe("publication manifest — published_not_active is REAL", () => {
   });
 
   it("V3 does not host a competing JWKS artifact", () => {
-    const { existsSync } = require("node:fs") as typeof import("node:fs");
     expect(existsSync(join(ROOT, "public", ".well-known", "idcaddie-okta-jwks.json"))).toBe(false);
   });
 });
