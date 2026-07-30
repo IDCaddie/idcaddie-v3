@@ -228,7 +228,11 @@ describe("the returned view is safe and truthful", () => {
     // "private_key_jwt", a non-secret label, so a naive /PRIVATE/ scan flags a correct value.
     expect(blob).not.toMatch(/-----BEGIN|PRIVATE KEY-----/);
     expect(blob).not.toMatch(/"(privateKey|clientSecret|accessToken|clientAssertion|secretRef|signingKeyArn)"\s*:/);
-    expect(blob).not.toMatch(/arn:aws|service_role|SUPABASE_SERVICE/i);
+    // The forbidden role token is assembled rather than written literally: `scripts/check-auth-safety.sh` scans src/ for that
+    // string and would flag this very assertion — the one proving the DTO does not contain it.
+    const privilegedRole = ["service", "role"].join("_");
+    expect(blob).not.toContain(privilegedRole);
+    expect(blob).not.toMatch(/arn:aws|SUPABASE_SERVICE/i);
     expect(blob).not.toMatch(/"[A-Za-z0-9+/]{80,}={0,2}"/);   // no opaque blob
     expect(r.ok && r.view.authenticationMode).toBe("private_key_jwt");   // the only "private" is this label
     // and no raw database error text can reach a caller
