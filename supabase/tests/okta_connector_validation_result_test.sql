@@ -125,11 +125,11 @@ begin
   v_run2 := public.runner_open_connector_run(TA, v_connector);
 
   -- V2: a well-formed result is recorded.
-  v_res := public.runner_record_okta_connector_validation(TA, v_connector, v_run, 'succeeded', KID, '1.1.0', FPO, FPS, null);
+  v_res := public.runner_record_okta_connector_validation(TA, v_connector, v_run, 'succeeded', KID, '1.2.0', FPO, FPS, null);
   assert v_res->>'outcome' = 'recorded', 'V2 expected recorded, got ' || (v_res->>'outcome');
   assert v_res->>'validation_status' = 'succeeded', 'V2 status';
   assert v_res->>'verified_kid' = KID, 'V2 kid';
-  assert v_res->>'verified_contract_version' = '1.1.0', 'V2 contract version';
+  assert v_res->>'verified_contract_version' = '1.2.0', 'V2 contract version';
 
   select connection_state into v_status from public.connectors where id = v_connector;
   assert v_status = 'verified', 'V2 connector must become verified, saw ' || v_status;
@@ -151,7 +151,7 @@ begin
 
   -- V4: idempotent replay — no second transition, no second audit, no timestamp drift.
   select last_validated_at into v_ts from public.okta_connector_configs where connector_id = v_connector;
-  v_res := public.runner_record_okta_connector_validation(TA, v_connector, v_run, 'succeeded', KID, '1.1.0', FPO, FPS, null);
+  v_res := public.runner_record_okta_connector_validation(TA, v_connector, v_run, 'succeeded', KID, '1.2.0', FPO, FPS, null);
   assert v_res->>'outcome' = 'idempotent_replay', 'V4 expected idempotent_replay, got ' || (v_res->>'outcome');
   select count(*) into v_n from public.audit_logs
     where tenant_id = TA and action = 'okta_connector_validation_succeeded';
@@ -162,7 +162,7 @@ begin
 
   -- V5: a stale/late failure cannot demote an established success.
   begin
-    perform public.runner_record_okta_connector_validation(TA, v_connector, v_run2, 'failed', KID, '1.1.0', null, null, 'invalid_client');
+    perform public.runner_record_okta_connector_validation(TA, v_connector, v_run2, 'failed', KID, '1.2.0', null, null, 'invalid_client');
     raise exception 'V5 a failed result must not demote a succeeded validation';
   exception when sqlstate '22023' then null;
   end;
@@ -172,32 +172,33 @@ begin
   -- V6: pinned and bounded inputs are refused.
   begin
     perform public.runner_record_okta_connector_validation(TA, v_connector, v_run2, 'succeeded',
-      'VDkZAQoJl_prLRU83WiPreOBGoP6Fib3qC0CG880wz0', '1.1.0', FPO, FPS, null);
+      'VDkZAQoJl_prLRU83WiPreOBGoP6Fib3qC0CG880wz0', '1.2.0', FPO, FPS, null);
     raise exception 'V6 a superseded KID must be refused';
   exception when sqlstate '22023' then null; end;
 
   begin
-    perform public.runner_record_okta_connector_validation(TA, v_connector, v_run2, 'succeeded', KID, '1.0.0', FPO, FPS, null);
+    -- 1.1.0 is now the SUPERSEDED version: 0065 moved the pin to 1.2.0 alongside the contract artifact.
+    perform public.runner_record_okta_connector_validation(TA, v_connector, v_run2, 'succeeded', KID, '1.1.0', FPO, FPS, null);
     raise exception 'V6 a superseded contract version must be refused';
   exception when sqlstate '22023' then null; end;
 
   begin
-    perform public.runner_record_okta_connector_validation(TA, v_connector, v_run2, 'succeeded', KID, '1.1.0', 'not-a-fingerprint', FPS, null);
+    perform public.runner_record_okta_connector_validation(TA, v_connector, v_run2, 'succeeded', KID, '1.2.0', 'not-a-fingerprint', FPS, null);
     raise exception 'V6 a malformed fingerprint must be refused';
   exception when sqlstate '22023' then null; end;
 
   begin
-    perform public.runner_record_okta_connector_validation(TA, v_connector, v_run2, 'healthy', KID, '1.1.0', FPO, FPS, null);
+    perform public.runner_record_okta_connector_validation(TA, v_connector, v_run2, 'healthy', KID, '1.2.0', FPO, FPS, null);
     raise exception 'V6 an out-of-vocabulary outcome must be refused';
   exception when sqlstate '22023' then null; end;
 
   begin
-    perform public.runner_record_okta_connector_validation(TA, v_connector, gen_random_uuid(), 'succeeded', KID, '1.1.0', FPO, FPS, null);
+    perform public.runner_record_okta_connector_validation(TA, v_connector, gen_random_uuid(), 'succeeded', KID, '1.2.0', FPO, FPS, null);
     raise exception 'V6 a forged run id must be refused';
   exception when insufficient_privilege then null; end;
 
   begin
-    perform public.runner_record_okta_connector_validation(TB, v_connector, v_run2, 'succeeded', KID, '1.1.0', FPO, FPS, null);
+    perform public.runner_record_okta_connector_validation(TB, v_connector, v_run2, 'succeeded', KID, '1.2.0', FPO, FPS, null);
     raise exception 'V6 a cross-tenant result must be refused';
   exception when insufficient_privilege then null; end;
 
