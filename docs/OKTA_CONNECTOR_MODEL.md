@@ -45,7 +45,7 @@ contracts + synthetic certification. It **does not** connect, authenticate, call
 **Users only.** Read `/api/v1/users`: stable Okta id, lifecycle status, and an EXPLICITLY approved profile projection (login,
 email, first/last/display name). **No** writes, lifecycle mutations, password ops, factor/MFA data, system logs, group data, or app
 assignments. Groups + group-membership + app-assignments + factors + logs are **deferred** — each a separately-designed,
-separately-authorized capability. Scope: `okta.users.read` only.
+separately-authorized capability. Scope: `okta.users.read` only. **[SUPERSEDED O1B — the authoritative set is the three read scopes `okta.users.read`, `okta.groups.read`, `okta.apps.read`; see `contracts/okta-provider-contract.v1.json`.]**
 
 ## Discovery + isolation (all inert this phase)
 

@@ -110,8 +110,24 @@ export function OktaConnectWizard({ provider }: { provider: string }) {
               {OKTA_SETUP.adminSteps.map((s) => <li key={s}>{s}</li>)}
             </ol>
             <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/60">
-              <div className="text-[11px] uppercase tracking-wide text-zinc-400 dark:text-zinc-500">Required scope</div>
-              <code className="text-sm text-zinc-700 dark:text-zinc-300">{OKTA_CONTENT.scopeLabel}</code>
+              <div className="text-[11px] uppercase tracking-wide text-zinc-400 dark:text-zinc-500">{OKTA_SETUP.scopeStepTitle}</div>
+              <p className="mt-0.5 text-xs text-zinc-500">{OKTA_SETUP.scopeStepNote}</p>
+              <dl className="mt-2 space-y-1.5">
+                {OKTA_CONTENT.scopeExplanations.map((s) => (
+                  <div key={s.scope}>
+                    <dt><code className="text-sm text-zinc-700 dark:text-zinc-300">{s.scope}</code></dt>
+                    <dd className="text-xs text-zinc-500 dark:text-zinc-400">{s.permits}</dd>
+                  </div>
+                ))}
+              </dl>
+            </div>
+            <div className="rounded-lg border border-zinc-200 p-3 dark:border-zinc-800">
+              <div className="text-[11px] uppercase tracking-wide text-zinc-400 dark:text-zinc-500">{OKTA_CONTENT.notRequestedTitle}</div>
+              <ul className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-zinc-600 dark:text-zinc-400">
+                {OKTA_CONTENT.notRequested.map((n) => <li key={n}>{n}</li>)}
+              </ul>
+              <p className="mt-2 text-xs text-zinc-500">{OKTA_CONTENT.readOnlyStatement}</p>
+              <p className="mt-1 text-xs text-zinc-500">{OKTA_SETUP.noTokenNote}</p>
             </div>
             <div className="flex gap-2">
               <button type="button" onClick={() => setStep("organization")} className={primary}>Start setup</button>
@@ -199,10 +215,13 @@ export function OktaConnectWizard({ provider }: { provider: string }) {
             <dl className="divide-y divide-zinc-200 rounded-lg border border-zinc-200 text-sm dark:divide-zinc-800 dark:border-zinc-800">
               <div className="flex justify-between gap-3 px-3 py-2"><dt className="text-zinc-500">{OKTA_SETUP.issuerLabel}</dt><dd className="text-right"><code className="text-zinc-700 dark:text-zinc-300">{issuer}</code></dd></div>
               <div className="flex justify-between gap-3 px-3 py-2"><dt className="text-zinc-500">{OKTA_SETUP.clientIdLabel}</dt><dd className="text-right"><code className="break-all text-zinc-700 dark:text-zinc-300">{clientId}</code></dd></div>
-              <div className="flex justify-between gap-3 px-3 py-2"><dt className="text-zinc-500">Scope</dt><dd className="text-right"><code className="text-zinc-700 dark:text-zinc-300">{OKTA_CONTENT.scopeLabel}</code></dd></div>
+              <div className="flex justify-between gap-3 px-3 py-2"><dt className="text-zinc-500">Scopes</dt><dd className="text-right">{OKTA_CONTENT.scopeLabels.map((s) => <code key={s} className="block text-zinc-700 dark:text-zinc-300">{s}</code>)}</dd></div>
               <div className="flex justify-between gap-3 px-3 py-2"><dt className="text-zinc-500">Public key</dt><dd className="text-right break-all text-zinc-700 dark:text-zinc-300">KID {OKTA_APPROVED_PUBLIC_KID}</dd></div>
-              <div className="flex justify-between gap-3 px-3 py-2"><dt className="text-zinc-500">Admin role</dt><dd className="text-right text-zinc-700 dark:text-zinc-300">Least-privileged, assigned</dd></div>
+              <div className="flex justify-between gap-3 px-3 py-2"><dt className="text-zinc-500">Admin role</dt><dd className="text-right text-zinc-700 dark:text-zinc-300">Read-only, assigned</dd></div>
+              <div className="flex justify-between gap-3 px-3 py-2"><dt className="text-zinc-500">Access</dt><dd className="text-right text-zinc-700 dark:text-zinc-300">Read-only</dd></div>
+              <div className="flex justify-between gap-3 px-3 py-2"><dt className="text-zinc-500">Status</dt><dd className="text-right text-zinc-700 dark:text-zinc-300">{OKTA_SETUP.statusLabel}</dd></div>
             </dl>
+            <p className="text-xs text-zinc-500">{OKTA_SETUP.serverValidatedNote} {OKTA_SETUP.statusNote}</p>
             <div className="flex gap-2">
               <button type="button" onClick={save} className={primary}>Save configuration</button>
               <button type="button" onClick={() => setStep("configuration")} className={secondary}>Back</button>

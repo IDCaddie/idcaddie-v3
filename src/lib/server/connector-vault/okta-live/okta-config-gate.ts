@@ -54,7 +54,9 @@ function customerMessageFor(reason: OktaConfigBlockedReason): string {
   switch (reason) {
     case "not_authenticated": return "Please sign in to configure this connection.";
     case "not_admin": return "You need to be an organization administrator to configure this connection.";
-    case "scope_not_exact": return "Only read-only user access can be configured for this connection.";
+    // O1B: the approved set is three READ scopes (users, groups, applications), so a users-only message was both wrong and
+    // unhelpful — a customer seeing it after granting the correct three scopes would have no idea what to change.
+    case "scope_not_exact": return "This connection needs read-only access to users, groups, and applications — and nothing more. Please check the scopes granted on the Okta app.";
     default: return "This connection isn’t available to configure yet.";
   }
 }

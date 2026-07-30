@@ -94,20 +94,27 @@ describe("validateOktaOrganization — SSRF + malformed rejection", () => {
 });
 
 describe("okta provider contract — scopes + lifecycle", () => {
-  it("approves exactly {okta.users.read, okta.groups.read}; rejects empty/subset/extra/prohibited/duplicate", () => {
-    expect(scopesExactlyApproved(["okta.users.read", "okta.groups.read"])).toEqual({ ok: true }); // the exact approved set (order-free)
-    expect(scopesExactlyApproved(["okta.users.read"])).toEqual({ ok: false, reason: "not_exact_approved_set" }); // subset — missing groups.read
+  // O1B — the approved set is now the THREE read scopes. This test previously asserted the two-scope set AND that okta.apps.read
+  // was `prohibited`, which is the exact drift O1B removes: the runner required apps.read for application/assignment discovery
+  // while this validator rejected it. Full matrix lives in okta-contract-consistency.test.ts.
+  it("approves exactly {okta.users.read, okta.groups.read, okta.apps.read}; rejects empty/subset/extra/prohibited/duplicate", () => {
+    expect(scopesExactlyApproved(["okta.users.read", "okta.groups.read", "okta.apps.read"])).toEqual({ ok: true }); // the exact approved set (order-free)
+    expect(scopesExactlyApproved(["okta.apps.read", "okta.users.read", "okta.groups.read"])).toEqual({ ok: true }); // ordering is irrelevant
+    expect(scopesExactlyApproved(["okta.users.read", "okta.groups.read"])).toEqual({ ok: false, reason: "missing_required_scope", missing: ["okta.apps.read"] }); // the SUPERSEDED two-scope set
+    expect(scopesExactlyApproved(["okta.users.read"])).toEqual({ ok: false, reason: "missing_required_scope", missing: ["okta.groups.read", "okta.apps.read"] });
     expect(scopesExactlyApproved([])).toEqual({ ok: false, reason: "empty" });
-    expect(scopesExactlyApproved(["okta.users.read", "okta.groups.read", "okta.apps.read"])).toEqual({ ok: false, reason: "prohibited" }); // superset w/ a prohibited scope
-    expect(scopesExactlyApproved(["okta.users.read", "openid"])).toEqual({ ok: false, reason: "not_exact_approved_set" });
+    expect(scopesExactlyApproved(["okta.users.read", "okta.groups.read", "okta.apps.read", "okta.users.manage"])).toEqual({ ok: false, reason: "prohibited" }); // a WRITE scope
+    expect(scopesExactlyApproved(["okta.users.read", "openid"])).toEqual({ ok: false, reason: "unknown_scope", extra: ["openid"] });
     expect(scopesExactlyApproved(["okta.users.read", "okta.users.read"])).toEqual({ ok: false, reason: "duplicate" });
-    expect(scopesExactlyApproved(["okta.apps.read"])).toEqual({ ok: false, reason: "prohibited" });
+    expect(scopesExactlyApproved(["okta.apps.read"])).toEqual({ ok: false, reason: "missing_required_scope", missing: ["okta.users.read", "okta.groups.read"] }); // approved, but incomplete alone
   });
-  it("approved set is the least-privilege READ scopes (users + groups); group WRITES + all other scopes stay prohibited", () => {
-    expect(OKTA_APPROVED_SCOPES).toEqual(["okta.users.read", "okta.groups.read"]);
+  it("approved set is the least-privilege READ scopes (users + groups + apps); all WRITES stay prohibited", () => {
+    expect(OKTA_APPROVED_SCOPES).toEqual(["okta.users.read", "okta.groups.read", "okta.apps.read"]);
     for (const s of OKTA_APPROVED_SCOPES) expect((OKTA_PROHIBITED_SCOPES as readonly string[]).includes(s)).toBe(false);
     expect((OKTA_PROHIBITED_SCOPES as readonly string[])).toContain("okta.groups.manage"); // group WRITE stays prohibited
-    expect((OKTA_PROHIBITED_SCOPES as readonly string[])).not.toContain("okta.groups.read"); // group READ is now approved
+    expect((OKTA_PROHIBITED_SCOPES as readonly string[])).toContain("okta.apps.manage"); // application WRITE stays prohibited
+    expect((OKTA_PROHIBITED_SCOPES as readonly string[])).not.toContain("okta.groups.read"); // group READ is approved
+    expect((OKTA_PROHIBITED_SCOPES as readonly string[])).not.toContain("okta.apps.read"); // application READ is approved (O1B)
     expect(OKTA_PROHIBITED_SCOPES.some((s) => s.includes(".manage") || s.includes(".write"))).toBe(true);
   });
   it("lifecycle is certificationOnly and permits neither pilot connection nor execution", () => {

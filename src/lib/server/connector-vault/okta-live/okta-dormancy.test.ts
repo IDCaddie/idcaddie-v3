@@ -44,7 +44,7 @@ describe("first-sync authorization is absent + denied (Phase 11)", () => {
   it("even a fully-formed authorization is denied while certificationOnly, and a schedule trigger is denied", () => {
     const auth: OktaFirstSyncAuthorization = {
       provider: "okta", operator: "sam", organizationId: "o", connectorId: "c", approvedIssuerUrl: "https://acme.okta.com",
-      approvedScopes: ["okta.users.read", "okta.groups.read"], maxUserCount: 50, approvedAt: 1, expiresAt: 10_000, maxRuns: 1, runsUsed: 0,
+      approvedScopes: ["okta.users.read", "okta.groups.read", "okta.apps.read"], maxUserCount: 50, approvedAt: 1, expiresAt: 10_000, maxRuns: 1, runsUsed: 0,
       rollbackOwner: "sam", evidenceRef: "ev-1", environment: "staging", manualTriggerRequired: true,
     };
     const ctx = { connectorId: "c", organizationId: "o", issuerUrl: "https://acme.okta.com", manuallyTriggered: true, now: 5 };

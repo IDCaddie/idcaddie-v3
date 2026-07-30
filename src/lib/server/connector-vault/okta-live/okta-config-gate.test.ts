@@ -15,7 +15,7 @@ const OK_INPUT: OktaConfigGateInput = {
   provider: "okta",
   organizationId: APPROVED_ORG,
   rawOrganization: "trial-5294016.okta.com",
-  requestedScopes: ["okta.users.read", "okta.groups.read"],
+  requestedScopes: ["okta.users.read", "okta.groups.read", "okta.apps.read"],
   environment: "staging",
 };
 
@@ -27,7 +27,7 @@ describe("okta-config-gate", () => {
       expect(r.organizationId).toBe(APPROVED_ORG);
       expect(r.issuerUrl).toBe("https://trial-5294016.okta.com");
       expect(r.hostname).toBe("trial-5294016.okta.com");
-      expect(r.scopes).toEqual(["okta.users.read", "okta.groups.read"]);
+      expect(r.scopes).toEqual(["okta.users.read", "okta.groups.read", "okta.apps.read"]);
     }
   });
 
@@ -48,9 +48,12 @@ describe("okta-config-gate", () => {
     ["unapproved issuer", { rawOrganization: "not-approved-at-all.okta.com" }, "issuer_not_approved"],
     // A1 is approved, and someone-else.okta.com is an approved issuer — but NOT for A1 (it's B1's). Must fail closed.
     ["approved issuer but wrong org pairing", { rawOrganization: "someone-else.okta.com" }, "issuer_not_approved"],
-    ["scope escalation (prohibited apps.read added)", { requestedScopes: ["okta.users.read", "okta.groups.read", "okta.apps.read"] }, "scope_not_exact"],
+    // O1B: apps.read is APPROVED now, so escalation must be demonstrated with a real WRITE scope. The superseded two-scope set
+    // becomes an INCOMPLETE case rather than the happy path.
+    ["scope escalation (a write scope added)", { requestedScopes: ["okta.users.read", "okta.groups.read", "okta.apps.read", "okta.users.manage"] }, "scope_not_exact"],
     ["empty scope", { requestedScopes: [] }, "scope_not_exact"],
-    ["incomplete scope (groups.read alone, missing users.read)", { requestedScopes: ["okta.groups.read"] }, "scope_not_exact"],
+    ["incomplete scope (groups.read alone)", { requestedScopes: ["okta.groups.read"] }, "scope_not_exact"],
+    ["the superseded two-scope set (missing apps.read)", { requestedScopes: ["okta.users.read", "okta.groups.read"] }, "scope_not_exact"],
   ];
   for (const [name, patch, reason] of cases) {
     it(`blocks: ${name} -> ${reason}`, () => {

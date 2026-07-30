@@ -34,7 +34,7 @@ bar. Four customer-facing steps:
    that so a full address can be entered). Validated by `validateOktaOrgHost` (below, UNCHANGED and strict). Invalid input shows a
    plain-language, `role="alert"` error and stays on this step.
 2. **Permissions** — "ID Caddie requests read-only access to:" View users · View account status · View basic profile information,
-   plus the one technical scope `okta.users.read` and the reassurance "ID Caddie cannot change users, passwords, MFA settings, or
+   plus the three technical read scopes `okta.users.read`, `okta.groups.read`, `okta.apps.read` and the reassurance "ID Caddie cannot change users, passwords, MFA settings, groups, applications, or anyone's access" (O1B; this line previously named a single users-only scope). Older text: "ID Caddie cannot change users, passwords, MFA settings, or
    applications."
 3. **Authorize** — a neutral **"Authorize with Okta"** preview panel: "In the live version, you'll be redirected securely to Okta
    to approve read-only access." (No Okta-branding mimicry.) Buttons: *Simulate approval* / *Simulate a failed approval* / Cancel.

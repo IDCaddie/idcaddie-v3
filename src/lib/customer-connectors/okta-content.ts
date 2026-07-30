@@ -3,19 +3,37 @@
 
 export const OKTA_CONTENT = {
   title: "Connect Okta",
-  valueStatement: "Discover users and account status from your Okta organization.",
-  // "What ID Caddie can access" — only fields the current connector model actually reads.
+  valueStatement: "Discover users, groups, and applications from your Okta organization.",
+  // "What ID Caddie can access" — only what the current connector model actually reads.
   accessTitle: "What ID Caddie can access",
-  reads: ["Users", "Account status", "Basic profile information, such as name, username, and email address"],
+  reads: [
+    "Users",
+    "Account status",
+    "Basic profile information, such as name, username, and email address",
+    "Groups, and who belongs to them",
+    "Applications, and who is assigned to them",
+  ],
   noAccessTitle: "What ID Caddie cannot access",
-  doesNotAccess: ["Passwords", "MFA information", "Password resets", "System logs", "Application changes", "Account lifecycle changes", "Write permissions"],
+  doesNotAccess: ["Passwords", "MFA information", "Password resets", "System logs", "Application changes", "Group changes", "Access changes", "Account lifecycle changes", "Write permissions"],
   // Initial scope — three concise indicators + one plain-language reassurance line.
-  initialScope: ["Users only", "Read-only", "No automatic sync"],
+  initialScope: ["Read-only", "No changes to access", "No automatic sync"],
   scopeNote: "Nothing is imported until the connection is approved and the first sync is started.",
-  // Permissions step: plain-language read-only requests + the one explicit technical scope + a reassurance line.
-  requestsReadOnly: ["View users", "View account status", "View basic profile information"],
-  scopeLabel: "okta.users.read",
-  permissionsAssurance: "ID Caddie cannot change users, passwords, MFA settings, or applications.",
+  // Permissions step: plain-language read-only requests + the explicit technical scopes + a reassurance line.
+  requestsReadOnly: ["View users", "View account status", "View basic profile information", "View groups and their members", "View applications and their assignments"],
+  // The three approved technical scopes. Mirrors OKTA_APPROVED_SCOPES in the server-only okta-live contract, which the client
+  // wizard cannot import; okta-contract-consistency.test.ts asserts they agree.
+  scopeLabels: ["okta.users.read", "okta.groups.read", "okta.apps.read"],
+  // What each scope permits, in plain language — one entry per scope, same order.
+  scopeExplanations: [
+    { scope: "okta.users.read", permits: "Read the people in your directory and whether their accounts are active." },
+    { scope: "okta.groups.read", permits: "Read your groups and who belongs to each one." },
+    { scope: "okta.apps.read", permits: "Read your applications and who is assigned to each one, directly or through a group." },
+  ],
+  permissionsAssurance: "ID Caddie cannot change users, passwords, MFA settings, groups, applications, or anyone's access.",
+  // Explicit statement of what is NOT requested — the read-only claim stated as refused capabilities, not just absent ones.
+  notRequestedTitle: "ID Caddie does not request",
+  notRequested: ["User management", "Group management", "Application management", "Access changes", "Remediation"],
+  readOnlyStatement: "This connection is read-only. ID Caddie can see who has access to what; it cannot grant, change, or remove access.",
   setupTime: "Setup takes about 2 minutes",
 } as const;
 
@@ -28,15 +46,23 @@ export const OKTA_SETUP = {
   adminSteps: [
     "In Okta Admin, create an API Services app integration (not a Web app).",
     "Register ID Caddie's approved public key on the app.",
-    "Grant only the okta.users.read scope.",
-    "Assign a least-privileged read-only admin role (scoped to users).",
+    "Grant these three read-only scopes: okta.users.read, okta.groups.read, okta.apps.read.",
+    "Assign a read-only admin role to the app.",
   ],
-  scopeStepTitle: "Required scope",
-  scopeStepNote: "Grant only this scope on the app's API Scopes tab.",
+  scopeStepTitle: "Required scopes",
+  scopeStepNote: "Grant exactly these three scopes on the app's API Scopes tab — no more, no fewer. All three are read-only.",
   roleStepTitle: "Required admin role",
-  roleStepNote: "Assign a least-privileged Read-Only Administrator role, scoped to users where possible.",
+  // The admin-role requirement is deliberately NOT stated as a specific named role. Okta may require an admin role on an API
+  // Services app in addition to the granted scopes, and the users-scoped read-only role this step previously named cannot be
+  // correct for reading applications. Guessing would send customers to configure the wrong thing, so the step states what IS
+  // known (read-only, least privilege) and defers the exact role. See docs/runbooks/OKTA_STAGING_APP_SETUP.md §6.
+  roleStepNote: "Assign a read-only administrator role. Use the least-privileged role that still allows reading users, groups, and applications — ID Caddie will confirm the exact role with you during setup. Never assign a role that can make changes.",
   keyStepTitle: "Public-key registration",
-  keyStepNote: "Confirm you registered ID Caddie's approved public key (below) on the app. The private key is never entered here.",
+  keyStepNote: "Confirm you registered ID Caddie's approved public key (below) on the app. The private key stays in ID Caddie's secure key store and is never entered here.",
+  // Where the key id is actually used, and the one thing a customer must NOT paste.
+  keyStepWhere: "You paste ID Caddie's public key into the app's Public Keys tab in Okta. The key ID below is what Okta displays once it is registered — use it to confirm you registered the right key.",
+  noTokenNote: "Do not paste an Okta API token. This connection uses a service application with a registered key, so no token is needed and ID Caddie will never ask you for one.",
+  serverValidatedNote: "The issuer and client ID you enter are validated on ID Caddie's servers before anything is saved.",
   issuerLabel: "Okta issuer",
   clientIdLabel: "API Services client ID",
   clientIdHint: "The app's client ID (starts with 0oa…). This is non-secret.",
@@ -44,13 +70,24 @@ export const OKTA_SETUP = {
   reviewTitle: "Review configuration",
   savedTitle: "Verification pending",
   savedMessage: "Your Okta service application configuration has been saved. ID Caddie has not yet verified the connection or imported any data.",
-  declareScope: "I have granted okta.users.read on the app",
-  declareRole: "I have assigned a least-privileged admin role to the app",
+  declareScope: "I have granted okta.users.read, okta.groups.read, and okta.apps.read on the app",
+  declareRole: "I have assigned a read-only admin role to the app",
   declareKey: "I have registered the approved public key on the app",
+  // Truthful connection status. Okta is `certificationOnly` in the authoritative governance contract, so the wizard must NOT imply
+  // the connection is production-enabled. Plain-language equivalent — no internal governance vocabulary.
+  statusLabel: "Certification-only pilot",
+  statusNote: "Okta is available for certification and staging use while ID Caddie completes its verification. Configuring this connection does not enable production data collection.",
 } as const;
 
-// The approved public signing-key identifier to display (NON-secret; the private key is never here).
-export const OKTA_APPROVED_PUBLIC_KID = "i-Wptr6usN1tpkNp17vHXv_Mar4NPz53rn-bmlTq8j4" as const;
+// The approved public signing-key identifier to display (NON-secret; the private key is never here and never in this repository).
+//
+// O1B — this is the authoritative staging key id, mirroring `staging_public_key_kid` in
+// `contracts/okta-provider-contract.v1.json` and the OKTA_VERIFY_KID in all 12 connector-runner task definitions.
+//
+// SUPERSEDED: `i-Wptr…q8j4` was published here before O1B while the runner had already moved to the value below. A customer who
+// followed the shipped instructions would have registered a public key whose private half ID Caddie does not hold, and every token
+// request would have failed `invalid_client`. That stale value is asserted ABSENT by okta-contract-consistency.test.ts.
+export const OKTA_APPROVED_PUBLIC_KID = "VDkZAQoJl_prLRU83WiPreOBGoP6Fib3qC0CG880wz0" as const;
 
 // Client-safe Okta client-id SHAPE check (the server-only okta-live validator can't be imported into the client wizard). Opaque
 // `0oa…` id — a bounded safe-charset string. NON-secret; validates shape only.
