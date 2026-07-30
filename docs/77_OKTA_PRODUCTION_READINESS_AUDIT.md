@@ -238,6 +238,41 @@ not replace the existing credential on mismatch; a different organization must n
 
 **Live KID verification and production enablement remain OUTSTANDING.**
 
+#### 3.3.4 — O2A: connector persistence and security foundation (2026-07-30)
+
+Migration **`0063`** adds `okta_connector_configs`: a narrow, typed, tenant-scoped record holding **metadata only**. There is no
+secret column, no key material, and **no credential reference** — the approved architecture (docs/78) gives an Okta connector no
+per-connector secret at all, which is what dissolved the O2 secret-write blocker.
+
+**Placement.** A new table rather than columns on `connectors` (which carries a table-wide `authenticated` SELECT grant, so any
+Okta column added there becomes readable by every tenant member) and rather than `connector_okta_issuer_bindings` (an
+operator-approved **issuer allowlist**: organization-scoped, `has_org_role` manager read, service_role-only writes — a different
+concept, owner and lifecycle).
+
+**The database refuses to represent an untruthful configuration.** `certification_only` is pinned true and `production_enabled`
+pinned false by CHECK, so no write path can flip them. Scopes are an exact, order-independent, duplicate- and NULL-rejecting set.
+Contract version and authentication mode are pinned. Most importantly, **a verified organization fingerprint cannot exist without a
+successful validation** — and `verified_organization_fingerprint` is not a parameter of the write RPC at all, so O2A is structurally
+incapable of producing one.
+
+**Proposed vs verified identity.** The O1C derivation needs only host + client id, so it *can* be computed at configuration time —
+but its trustworthiness comes from a verified token endpoint, and O2A verifies nothing. It is therefore stored as **proposed**, with
+the verified column NULL until O2B/O2D performs a real token exchange.
+
+**Cross-repository fingerprint agreement.** The derivation is implemented in both repositories (they share no package) and pinned by
+**known-answer vectors** asserted in V3, generated from the runner. A silent divergence would make a legitimate reconnect read as
+`different_organization`. *Recommended follow-up: a one-file reciprocal test in the runner, so drift in **either** direction fails.*
+
+**Deletion stays unavailable.** `connectors` is the parent of **19 `on delete cascade` FKs across 12 tables**, so a delete would
+silently destroy the tenant's canonical directory graph. Disconnect is a future lifecycle transition (O6), never a row deletion.
+
+**Two findings worth recording:** the authoritative state vocabulary lives in `0052`, not `0050`, and already contains the state O2A
+needs (`configured`) — so no state was added; and **RLS, not table grants, is the enforcement boundary**, because the platform
+blanket-grants DML on public tables to `authenticated`.
+
+**Still outstanding:** live KID verification, custom-admin-role viability, the KMS key (O2B), JWKS publication (O2C), and production
+enablement.
+
 #### 3.3.3 — O1C.1 CLOSED: truthful manifest model + admin role resolved (2026-07-30)
 
 The two items O1C left open are closed.

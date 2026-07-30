@@ -633,6 +633,918 @@ export type Database = {
           },
         ]
       }
+      connector_discovery_policy: {
+        Row: {
+          provider: string
+          stale_absolute_threshold: number
+          stale_percent_threshold: number
+          updated_at: string
+        }
+        Insert: {
+          provider: string
+          stale_absolute_threshold?: number
+          stale_percent_threshold?: number
+          updated_at?: string
+        }
+        Update: {
+          provider?: string
+          stale_absolute_threshold?: number
+          stale_percent_threshold?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      connector_kill_switches: {
+        Row: {
+          created_at: string
+          enabled: boolean
+          id: string
+          reason: string | null
+          scope: string
+          scope_key: string
+          updated_at: string
+          updated_by: string | null
+        }
+        Insert: {
+          created_at?: string
+          enabled?: boolean
+          id?: string
+          reason?: string | null
+          scope: string
+          scope_key?: string
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Update: {
+          created_at?: string
+          enabled?: boolean
+          id?: string
+          reason?: string | null
+          scope?: string
+          scope_key?: string
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Relationships: []
+      }
+      connector_okta_issuer_bindings: {
+        Row: {
+          approved_by: string | null
+          approved_scopes: string[]
+          connector_id: string | null
+          correlation_ref: string | null
+          created_at: string
+          created_by: string
+          disabled_at: string | null
+          environment: string
+          id: string
+          issuer_url: string
+          lifecycle_status: string
+          okta_hostname: string
+          organization_id: string
+          provider: string
+          tenant_id: string
+          updated_at: string
+        }
+        Insert: {
+          approved_by?: string | null
+          approved_scopes: string[]
+          connector_id?: string | null
+          correlation_ref?: string | null
+          created_at?: string
+          created_by: string
+          disabled_at?: string | null
+          environment: string
+          id?: string
+          issuer_url: string
+          lifecycle_status?: string
+          okta_hostname: string
+          organization_id: string
+          provider: string
+          tenant_id: string
+          updated_at?: string
+        }
+        Update: {
+          approved_by?: string | null
+          approved_scopes?: string[]
+          connector_id?: string | null
+          correlation_ref?: string | null
+          created_at?: string
+          created_by?: string
+          disabled_at?: string | null
+          environment?: string
+          id?: string
+          issuer_url?: string
+          lifecycle_status?: string
+          okta_hostname?: string
+          organization_id?: string
+          provider?: string
+          tenant_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "connector_okta_issuer_bindings_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "okta_issuer_org_same_tenant"
+            columns: ["organization_id", "tenant_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id", "tenant_id"]
+          },
+        ]
+      }
+      connector_pilot_consents: {
+        Row: {
+          approved_permissions: string
+          consent_purpose: string
+          consent_scope: string
+          consent_version: string
+          consented_at: string
+          consented_by: string
+          created_at: string
+          data_retention_agreement: boolean
+          deletion_agreement: boolean
+          evidence_reference: string
+          expiry_at: string
+          id: string
+          incident_contact_ack: boolean
+          pilot_enrollment_id: string
+          tenant_id: string
+          updated_at: string
+          withdrawal_at: string | null
+        }
+        Insert: {
+          approved_permissions: string
+          consent_purpose: string
+          consent_scope: string
+          consent_version: string
+          consented_at?: string
+          consented_by: string
+          created_at?: string
+          data_retention_agreement?: boolean
+          deletion_agreement?: boolean
+          evidence_reference: string
+          expiry_at: string
+          id?: string
+          incident_contact_ack?: boolean
+          pilot_enrollment_id: string
+          tenant_id: string
+          updated_at?: string
+          withdrawal_at?: string | null
+        }
+        Update: {
+          approved_permissions?: string
+          consent_purpose?: string
+          consent_scope?: string
+          consent_version?: string
+          consented_at?: string
+          consented_by?: string
+          created_at?: string
+          data_retention_agreement?: boolean
+          deletion_agreement?: boolean
+          evidence_reference?: string
+          expiry_at?: string
+          id?: string
+          incident_contact_ack?: boolean
+          pilot_enrollment_id?: string
+          tenant_id?: string
+          updated_at?: string
+          withdrawal_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "connector_pilot_consents_pilot_enrollment_id_fkey"
+            columns: ["pilot_enrollment_id"]
+            isOneToOne: false
+            referencedRelation: "connector_pilot_enrollments"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "connector_pilot_consents_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      connector_pilot_deletion_jobs: {
+        Row: {
+          approved_at: string | null
+          approved_by: string | null
+          created_at: string
+          id: string
+          job_status: string
+          pilot_enrollment_id: string
+          requested_by: string
+          sanitized_summary: string | null
+          scope: string
+          tenant_id: string
+          updated_at: string
+        }
+        Insert: {
+          approved_at?: string | null
+          approved_by?: string | null
+          created_at?: string
+          id?: string
+          job_status?: string
+          pilot_enrollment_id: string
+          requested_by: string
+          sanitized_summary?: string | null
+          scope: string
+          tenant_id: string
+          updated_at?: string
+        }
+        Update: {
+          approved_at?: string | null
+          approved_by?: string | null
+          created_at?: string
+          id?: string
+          job_status?: string
+          pilot_enrollment_id?: string
+          requested_by?: string
+          sanitized_summary?: string | null
+          scope?: string
+          tenant_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "connector_pilot_deletion_jobs_pilot_enrollment_id_fkey"
+            columns: ["pilot_enrollment_id"]
+            isOneToOne: false
+            referencedRelation: "connector_pilot_enrollments"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "connector_pilot_deletion_jobs_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      connector_pilot_enrollments: {
+        Row: {
+          approval_reason: string | null
+          approved_at: string | null
+          approved_by: string | null
+          approved_permissions: string | null
+          connector_id: string
+          created_at: string
+          credential_version: string | null
+          customer_account_reference: string | null
+          customer_kill_switch_required: boolean
+          data_processing_purpose: string | null
+          discovery_only: boolean
+          environment: string
+          id: string
+          incident_owner: string | null
+          is_synthetic: boolean
+          manual_only: boolean
+          maximum_records_per_run: number
+          maximum_runs: number
+          pilot_end_at: string | null
+          pilot_start_at: string | null
+          pilot_status: string
+          promotion_disabled: boolean
+          provider: string
+          requested_by: string
+          retention_days: number | null
+          runs_used: number
+          schedule_allowed: boolean
+          schema_version: string | null
+          support_owner: string | null
+          tenant_id: string
+          updated_at: string
+        }
+        Insert: {
+          approval_reason?: string | null
+          approved_at?: string | null
+          approved_by?: string | null
+          approved_permissions?: string | null
+          connector_id: string
+          created_at?: string
+          credential_version?: string | null
+          customer_account_reference?: string | null
+          customer_kill_switch_required?: boolean
+          data_processing_purpose?: string | null
+          discovery_only?: boolean
+          environment?: string
+          id?: string
+          incident_owner?: string | null
+          is_synthetic?: boolean
+          manual_only?: boolean
+          maximum_records_per_run?: number
+          maximum_runs?: number
+          pilot_end_at?: string | null
+          pilot_start_at?: string | null
+          pilot_status?: string
+          promotion_disabled?: boolean
+          provider: string
+          requested_by: string
+          retention_days?: number | null
+          runs_used?: number
+          schedule_allowed?: boolean
+          schema_version?: string | null
+          support_owner?: string | null
+          tenant_id: string
+          updated_at?: string
+        }
+        Update: {
+          approval_reason?: string | null
+          approved_at?: string | null
+          approved_by?: string | null
+          approved_permissions?: string | null
+          connector_id?: string
+          created_at?: string
+          credential_version?: string | null
+          customer_account_reference?: string | null
+          customer_kill_switch_required?: boolean
+          data_processing_purpose?: string | null
+          discovery_only?: boolean
+          environment?: string
+          id?: string
+          incident_owner?: string | null
+          is_synthetic?: boolean
+          manual_only?: boolean
+          maximum_records_per_run?: number
+          maximum_runs?: number
+          pilot_end_at?: string | null
+          pilot_start_at?: string | null
+          pilot_status?: string
+          promotion_disabled?: boolean
+          provider?: string
+          requested_by?: string
+          retention_days?: number | null
+          runs_used?: number
+          schedule_allowed?: boolean
+          schema_version?: string | null
+          support_owner?: string | null
+          tenant_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "connector_pilot_enrollments_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cpe_same_tenant_connector"
+            columns: ["connector_id", "tenant_id"]
+            isOneToOne: false
+            referencedRelation: "connectors"
+            referencedColumns: ["id", "tenant_id"]
+          },
+        ]
+      }
+      connector_pilot_exit_reviews: {
+        Row: {
+          created_at: string
+          id: string
+          outcome: string
+          pilot_enrollment_id: string
+          reviewed_at: string
+          reviewed_by: string
+          sanitized_summary: string
+          tenant_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          outcome: string
+          pilot_enrollment_id: string
+          reviewed_at?: string
+          reviewed_by: string
+          sanitized_summary: string
+          tenant_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          outcome?: string
+          pilot_enrollment_id?: string
+          reviewed_at?: string
+          reviewed_by?: string
+          sanitized_summary?: string
+          tenant_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "connector_pilot_exit_reviews_pilot_enrollment_id_fkey"
+            columns: ["pilot_enrollment_id"]
+            isOneToOne: false
+            referencedRelation: "connector_pilot_enrollments"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "connector_pilot_exit_reviews_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      connector_pilot_incidents: {
+        Row: {
+          category: string
+          created_at: string
+          id: string
+          opened_at: string
+          opened_by: string
+          pilot_enrollment_id: string
+          places_hold: boolean
+          resolved_at: string | null
+          sanitized_summary: string
+          severity: string
+          tenant_id: string
+        }
+        Insert: {
+          category: string
+          created_at?: string
+          id?: string
+          opened_at?: string
+          opened_by: string
+          pilot_enrollment_id: string
+          places_hold?: boolean
+          resolved_at?: string | null
+          sanitized_summary: string
+          severity: string
+          tenant_id: string
+        }
+        Update: {
+          category?: string
+          created_at?: string
+          id?: string
+          opened_at?: string
+          opened_by?: string
+          pilot_enrollment_id?: string
+          places_hold?: boolean
+          resolved_at?: string | null
+          sanitized_summary?: string
+          severity?: string
+          tenant_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "connector_pilot_incidents_pilot_enrollment_id_fkey"
+            columns: ["pilot_enrollment_id"]
+            isOneToOne: false
+            referencedRelation: "connector_pilot_enrollments"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "connector_pilot_incidents_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      connector_run_alerts: {
+        Row: {
+          acknowledged_at: string | null
+          attempt_id: string | null
+          authorization_id: string | null
+          category: string
+          connector_id: string
+          created_at: string
+          id: string
+          provider: string
+          sanitized_summary: string
+          severity: string
+          tenant_id: string
+        }
+        Insert: {
+          acknowledged_at?: string | null
+          attempt_id?: string | null
+          authorization_id?: string | null
+          category: string
+          connector_id: string
+          created_at?: string
+          id?: string
+          provider: string
+          sanitized_summary: string
+          severity: string
+          tenant_id: string
+        }
+        Update: {
+          acknowledged_at?: string | null
+          attempt_id?: string | null
+          authorization_id?: string | null
+          category?: string
+          connector_id?: string
+          created_at?: string
+          id?: string
+          provider?: string
+          sanitized_summary?: string
+          severity?: string
+          tenant_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "connector_run_alerts_attempt_id_fkey"
+            columns: ["attempt_id"]
+            isOneToOne: false
+            referencedRelation: "connector_run_attempts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "connector_run_alerts_authorization_id_fkey"
+            columns: ["authorization_id"]
+            isOneToOne: false
+            referencedRelation: "connector_run_authorizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "connector_run_alerts_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "crn_same_tenant_connector"
+            columns: ["connector_id", "tenant_id"]
+            isOneToOne: false
+            referencedRelation: "connectors"
+            referencedColumns: ["id", "tenant_id"]
+          },
+        ]
+      }
+      connector_run_attempts: {
+        Row: {
+          attempt_number: number
+          authorization_id: string
+          claim_token_hash: string | null
+          claimed_at: string | null
+          connector_id: string
+          created_at: string
+          duration_ms: number | null
+          facts_written: number | null
+          failure_category: string | null
+          fencing_generation: number | null
+          finished_at: string | null
+          id: string
+          launch_attempted_at: string | null
+          pages_seen: number | null
+          provider: string
+          records_seen: number | null
+          result_code: string | null
+          result_status: string | null
+          retry_count: number
+          sanitized_task_id: string | null
+          started_at: string | null
+          tenant_id: string
+          throttle_count: number
+          updated_at: string
+        }
+        Insert: {
+          attempt_number?: number
+          authorization_id: string
+          claim_token_hash?: string | null
+          claimed_at?: string | null
+          connector_id: string
+          created_at?: string
+          duration_ms?: number | null
+          facts_written?: number | null
+          failure_category?: string | null
+          fencing_generation?: number | null
+          finished_at?: string | null
+          id?: string
+          launch_attempted_at?: string | null
+          pages_seen?: number | null
+          provider: string
+          records_seen?: number | null
+          result_code?: string | null
+          result_status?: string | null
+          retry_count?: number
+          sanitized_task_id?: string | null
+          started_at?: string | null
+          tenant_id: string
+          throttle_count?: number
+          updated_at?: string
+        }
+        Update: {
+          attempt_number?: number
+          authorization_id?: string
+          claim_token_hash?: string | null
+          claimed_at?: string | null
+          connector_id?: string
+          created_at?: string
+          duration_ms?: number | null
+          facts_written?: number | null
+          failure_category?: string | null
+          fencing_generation?: number | null
+          finished_at?: string | null
+          id?: string
+          launch_attempted_at?: string | null
+          pages_seen?: number | null
+          provider?: string
+          records_seen?: number | null
+          result_code?: string | null
+          result_status?: string | null
+          retry_count?: number
+          sanitized_task_id?: string | null
+          started_at?: string | null
+          tenant_id?: string
+          throttle_count?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "connector_run_attempts_authorization_id_fkey"
+            columns: ["authorization_id"]
+            isOneToOne: false
+            referencedRelation: "connector_run_authorizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "connector_run_attempts_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "crat_same_tenant_connector"
+            columns: ["connector_id", "tenant_id"]
+            isOneToOne: false
+            referencedRelation: "connectors"
+            referencedColumns: ["id", "tenant_id"]
+          },
+        ]
+      }
+      connector_run_authorizations: {
+        Row: {
+          approval_reason: string | null
+          approved_at: string | null
+          approved_by: string | null
+          connector_id: string
+          created_at: string
+          credential_version: string
+          discovery_only: boolean
+          expires_at: string
+          id: string
+          idempotency_key: string
+          image_digest: string
+          one_shot: boolean
+          plan_hash: string
+          promotion_disabled: boolean
+          provider: string
+          requested_by: string
+          run_mode: string
+          schema_version: string
+          status: string
+          task_definition_family: string
+          task_definition_revision: number
+          tenant_id: string
+          updated_at: string
+        }
+        Insert: {
+          approval_reason?: string | null
+          approved_at?: string | null
+          approved_by?: string | null
+          connector_id: string
+          created_at?: string
+          credential_version: string
+          discovery_only: boolean
+          expires_at: string
+          id?: string
+          idempotency_key: string
+          image_digest: string
+          one_shot: boolean
+          plan_hash: string
+          promotion_disabled: boolean
+          provider: string
+          requested_by: string
+          run_mode: string
+          schema_version: string
+          status?: string
+          task_definition_family: string
+          task_definition_revision: number
+          tenant_id: string
+          updated_at?: string
+        }
+        Update: {
+          approval_reason?: string | null
+          approved_at?: string | null
+          approved_by?: string | null
+          connector_id?: string
+          created_at?: string
+          credential_version?: string
+          discovery_only?: boolean
+          expires_at?: string
+          id?: string
+          idempotency_key?: string
+          image_digest?: string
+          one_shot?: boolean
+          plan_hash?: string
+          promotion_disabled?: boolean
+          provider?: string
+          requested_by?: string
+          run_mode?: string
+          schema_version?: string
+          status?: string
+          task_definition_family?: string
+          task_definition_revision?: number
+          tenant_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "connector_run_authorizations_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cra_same_tenant_connector"
+            columns: ["connector_id", "tenant_id"]
+            isOneToOne: false
+            referencedRelation: "connectors"
+            referencedColumns: ["id", "tenant_id"]
+          },
+        ]
+      }
+      connector_run_discovery: {
+        Row: {
+          completeness: boolean
+          connection_id: string
+          created_at: string
+          facts_inserted: number | null
+          facts_updated: number | null
+          normalizer_version: string | null
+          pages_fetched: number | null
+          provider: string
+          records_distinct: number | null
+          records_rejected: number | null
+          records_seen: number | null
+          records_valid: number | null
+          review_required: boolean
+          run_id: string
+          safe_error_category: string | null
+          sanitizer_version: string | null
+          schema_version: string | null
+          tenant_id: string
+          termination_reason: string | null
+        }
+        Insert: {
+          completeness?: boolean
+          connection_id: string
+          created_at?: string
+          facts_inserted?: number | null
+          facts_updated?: number | null
+          normalizer_version?: string | null
+          pages_fetched?: number | null
+          provider: string
+          records_distinct?: number | null
+          records_rejected?: number | null
+          records_seen?: number | null
+          records_valid?: number | null
+          review_required?: boolean
+          run_id: string
+          safe_error_category?: string | null
+          sanitizer_version?: string | null
+          schema_version?: string | null
+          tenant_id: string
+          termination_reason?: string | null
+        }
+        Update: {
+          completeness?: boolean
+          connection_id?: string
+          created_at?: string
+          facts_inserted?: number | null
+          facts_updated?: number | null
+          normalizer_version?: string | null
+          pages_fetched?: number | null
+          provider?: string
+          records_distinct?: number | null
+          records_rejected?: number | null
+          records_seen?: number | null
+          records_valid?: number | null
+          review_required?: boolean
+          run_id?: string
+          safe_error_category?: string | null
+          sanitizer_version?: string | null
+          schema_version?: string | null
+          tenant_id?: string
+          termination_reason?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "connector_run_discovery_conn_same_tenant"
+            columns: ["connection_id", "tenant_id"]
+            isOneToOne: false
+            referencedRelation: "connectors"
+            referencedColumns: ["id", "tenant_id"]
+          },
+          {
+            foreignKeyName: "connector_run_discovery_run_id_fkey"
+            columns: ["run_id"]
+            isOneToOne: true
+            referencedRelation: "connector_runs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "connector_run_discovery_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      connector_run_locks: {
+        Row: {
+          acquired_at: string | null
+          connector_id: string
+          created_at: string
+          generation: number
+          holder_attempt_id: string | null
+          holder_authorization_id: string | null
+          id: string
+          lease_expires_at: string | null
+          provider: string
+          released_at: string | null
+          status: string
+          tenant_id: string
+          updated_at: string
+        }
+        Insert: {
+          acquired_at?: string | null
+          connector_id: string
+          created_at?: string
+          generation?: number
+          holder_attempt_id?: string | null
+          holder_authorization_id?: string | null
+          id?: string
+          lease_expires_at?: string | null
+          provider: string
+          released_at?: string | null
+          status?: string
+          tenant_id: string
+          updated_at?: string
+        }
+        Update: {
+          acquired_at?: string | null
+          connector_id?: string
+          created_at?: string
+          generation?: number
+          holder_attempt_id?: string | null
+          holder_authorization_id?: string | null
+          id?: string
+          lease_expires_at?: string | null
+          provider?: string
+          released_at?: string | null
+          status?: string
+          tenant_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "connector_run_locks_holder_attempt_id_fkey"
+            columns: ["holder_attempt_id"]
+            isOneToOne: false
+            referencedRelation: "connector_run_attempts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "connector_run_locks_holder_authorization_id_fkey"
+            columns: ["holder_authorization_id"]
+            isOneToOne: false
+            referencedRelation: "connector_run_authorizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "connector_run_locks_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "crl_same_tenant_connector"
+            columns: ["connector_id", "tenant_id"]
+            isOneToOne: false
+            referencedRelation: "connectors"
+            referencedColumns: ["id", "tenant_id"]
+          },
+        ]
+      }
       connector_runs: {
         Row: {
           completed_at: string | null
@@ -690,6 +1602,246 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "tenants"
             referencedColumns: ["id"]
+          },
+        ]
+      }
+      connector_schedule_policies: {
+        Row: {
+          approved_at: string | null
+          approved_by: string | null
+          cadence_seconds: number | null
+          campaign_end_at: string | null
+          campaign_start_at: string | null
+          connector_id: string
+          created_at: string
+          credential_version: string | null
+          discovery_only: boolean
+          enabled: boolean
+          environment: string
+          id: string
+          image_digest: string | null
+          kill_switch_required: boolean
+          max_cadence_seconds: number
+          max_concurrent_runs: number
+          max_pages: number
+          max_records: number
+          max_runtime_seconds: number
+          max_slots: number
+          max_successful: number
+          min_cadence_seconds: number
+          one_shot_per_slot: boolean
+          promotion_disabled: boolean
+          provider: string
+          requested_by: string | null
+          retry_budget: number
+          schema_version: string | null
+          slots_materialized: number
+          slots_succeeded: number
+          status: string
+          synthetic_only: boolean
+          task_definition_family: string | null
+          task_definition_revision: number | null
+          tenant_id: string
+          updated_at: string
+          window_end: string | null
+          window_start: string | null
+        }
+        Insert: {
+          approved_at?: string | null
+          approved_by?: string | null
+          cadence_seconds?: number | null
+          campaign_end_at?: string | null
+          campaign_start_at?: string | null
+          connector_id: string
+          created_at?: string
+          credential_version?: string | null
+          discovery_only?: boolean
+          enabled?: boolean
+          environment?: string
+          id?: string
+          image_digest?: string | null
+          kill_switch_required?: boolean
+          max_cadence_seconds?: number
+          max_concurrent_runs?: number
+          max_pages?: number
+          max_records?: number
+          max_runtime_seconds?: number
+          max_slots?: number
+          max_successful?: number
+          min_cadence_seconds?: number
+          one_shot_per_slot?: boolean
+          promotion_disabled?: boolean
+          provider: string
+          requested_by?: string | null
+          retry_budget?: number
+          schema_version?: string | null
+          slots_materialized?: number
+          slots_succeeded?: number
+          status?: string
+          synthetic_only?: boolean
+          task_definition_family?: string | null
+          task_definition_revision?: number | null
+          tenant_id: string
+          updated_at?: string
+          window_end?: string | null
+          window_start?: string | null
+        }
+        Update: {
+          approved_at?: string | null
+          approved_by?: string | null
+          cadence_seconds?: number | null
+          campaign_end_at?: string | null
+          campaign_start_at?: string | null
+          connector_id?: string
+          created_at?: string
+          credential_version?: string | null
+          discovery_only?: boolean
+          enabled?: boolean
+          environment?: string
+          id?: string
+          image_digest?: string | null
+          kill_switch_required?: boolean
+          max_cadence_seconds?: number
+          max_concurrent_runs?: number
+          max_pages?: number
+          max_records?: number
+          max_runtime_seconds?: number
+          max_slots?: number
+          max_successful?: number
+          min_cadence_seconds?: number
+          one_shot_per_slot?: boolean
+          promotion_disabled?: boolean
+          provider?: string
+          requested_by?: string | null
+          retry_budget?: number
+          schema_version?: string | null
+          slots_materialized?: number
+          slots_succeeded?: number
+          status?: string
+          synthetic_only?: boolean
+          task_definition_family?: string | null
+          task_definition_revision?: number | null
+          tenant_id?: string
+          updated_at?: string
+          window_end?: string | null
+          window_start?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "connector_schedule_policies_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "csp_same_tenant_connector"
+            columns: ["connector_id", "tenant_id"]
+            isOneToOne: false
+            referencedRelation: "connectors"
+            referencedColumns: ["id", "tenant_id"]
+          },
+        ]
+      }
+      connector_schedule_slots: {
+        Row: {
+          attempt_id: string | null
+          authorization_id: string | null
+          connector_id: string
+          created_at: string
+          facts_written: number | null
+          id: string
+          idempotency_key: string
+          pages_seen: number | null
+          policy_id: string
+          provider: string
+          records_seen: number | null
+          retry_count: number
+          sanitized_summary: string | null
+          scheduled_at: string
+          slot_number: number
+          status: string
+          tenant_id: string
+          throttle_count: number
+          updated_at: string
+        }
+        Insert: {
+          attempt_id?: string | null
+          authorization_id?: string | null
+          connector_id: string
+          created_at?: string
+          facts_written?: number | null
+          id?: string
+          idempotency_key: string
+          pages_seen?: number | null
+          policy_id: string
+          provider: string
+          records_seen?: number | null
+          retry_count?: number
+          sanitized_summary?: string | null
+          scheduled_at: string
+          slot_number: number
+          status?: string
+          tenant_id: string
+          throttle_count?: number
+          updated_at?: string
+        }
+        Update: {
+          attempt_id?: string | null
+          authorization_id?: string | null
+          connector_id?: string
+          created_at?: string
+          facts_written?: number | null
+          id?: string
+          idempotency_key?: string
+          pages_seen?: number | null
+          policy_id?: string
+          provider?: string
+          records_seen?: number | null
+          retry_count?: number
+          sanitized_summary?: string | null
+          scheduled_at?: string
+          slot_number?: number
+          status?: string
+          tenant_id?: string
+          throttle_count?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "connector_schedule_slots_attempt_id_fkey"
+            columns: ["attempt_id"]
+            isOneToOne: false
+            referencedRelation: "connector_run_attempts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "connector_schedule_slots_authorization_id_fkey"
+            columns: ["authorization_id"]
+            isOneToOne: false
+            referencedRelation: "connector_run_authorizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "connector_schedule_slots_policy_id_fkey"
+            columns: ["policy_id"]
+            isOneToOne: false
+            referencedRelation: "connector_schedule_policies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "connector_schedule_slots_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "css_same_tenant_connector"
+            columns: ["connector_id", "tenant_id"]
+            isOneToOne: false
+            referencedRelation: "connectors"
+            referencedColumns: ["id", "tenant_id"]
           },
         ]
       }
@@ -838,6 +1990,7 @@ export type Database = {
       connectors: {
         Row: {
           connected_by: string | null
+          connection_state: string | null
           created_at: string
           display_name: string | null
           granted_scopes_safe: string[] | null
@@ -852,6 +2005,7 @@ export type Database = {
         }
         Insert: {
           connected_by?: string | null
+          connection_state?: string | null
           created_at?: string
           display_name?: string | null
           granted_scopes_safe?: string[] | null
@@ -866,6 +2020,7 @@ export type Database = {
         }
         Update: {
           connected_by?: string | null
+          connection_state?: string | null
           created_at?: string
           display_name?: string | null
           granted_scopes_safe?: string[] | null
@@ -1005,6 +2160,499 @@ export type Database = {
           },
           {
             foreignKeyName: "contracts_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      directory_application_group_assignments: {
+        Row: {
+          connection_id: string
+          created_at: string
+          directory_application_id: string
+          directory_group_id: string
+          first_seen_at: string | null
+          id: string
+          last_discovery_run_id: string | null
+          last_seen_at: string | null
+          normalizer_version: string | null
+          provider: string
+          sanitizer_version: string | null
+          schema_version: string | null
+          source_endpoint: string | null
+          stale_since: string | null
+          sync_status: string
+          tenant_id: string
+          updated_at: string
+        }
+        Insert: {
+          connection_id: string
+          created_at?: string
+          directory_application_id: string
+          directory_group_id: string
+          first_seen_at?: string | null
+          id?: string
+          last_discovery_run_id?: string | null
+          last_seen_at?: string | null
+          normalizer_version?: string | null
+          provider: string
+          sanitizer_version?: string | null
+          schema_version?: string | null
+          source_endpoint?: string | null
+          stale_since?: string | null
+          sync_status?: string
+          tenant_id: string
+          updated_at?: string
+        }
+        Update: {
+          connection_id?: string
+          created_at?: string
+          directory_application_id?: string
+          directory_group_id?: string
+          first_seen_at?: string | null
+          id?: string
+          last_discovery_run_id?: string | null
+          last_seen_at?: string | null
+          normalizer_version?: string | null
+          provider?: string
+          sanitizer_version?: string | null
+          schema_version?: string | null
+          source_endpoint?: string | null
+          stale_since?: string | null
+          sync_status?: string
+          tenant_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "daga_application_fk"
+            columns: [
+              "directory_application_id",
+              "tenant_id",
+              "connection_id",
+              "provider",
+            ]
+            isOneToOne: false
+            referencedRelation: "directory_applications"
+            referencedColumns: ["id", "tenant_id", "connection_id", "provider"]
+          },
+          {
+            foreignKeyName: "daga_connection_same_tenant"
+            columns: ["connection_id", "tenant_id"]
+            isOneToOne: false
+            referencedRelation: "connectors"
+            referencedColumns: ["id", "tenant_id"]
+          },
+          {
+            foreignKeyName: "daga_group_fk"
+            columns: [
+              "directory_group_id",
+              "tenant_id",
+              "connection_id",
+              "provider",
+            ]
+            isOneToOne: false
+            referencedRelation: "directory_groups"
+            referencedColumns: ["id", "tenant_id", "connection_id", "provider"]
+          },
+          {
+            foreignKeyName: "directory_application_group_assignments_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      directory_application_user_assignments: {
+        Row: {
+          connection_id: string
+          created_at: string
+          directory_application_id: string
+          first_seen_at: string | null
+          id: string
+          identity_account_id: string
+          last_discovery_run_id: string | null
+          last_seen_at: string | null
+          normalizer_version: string | null
+          provider: string
+          sanitizer_version: string | null
+          schema_version: string | null
+          source_endpoint: string | null
+          stale_since: string | null
+          sync_status: string
+          tenant_id: string
+          updated_at: string
+        }
+        Insert: {
+          connection_id: string
+          created_at?: string
+          directory_application_id: string
+          first_seen_at?: string | null
+          id?: string
+          identity_account_id: string
+          last_discovery_run_id?: string | null
+          last_seen_at?: string | null
+          normalizer_version?: string | null
+          provider: string
+          sanitizer_version?: string | null
+          schema_version?: string | null
+          source_endpoint?: string | null
+          stale_since?: string | null
+          sync_status?: string
+          tenant_id: string
+          updated_at?: string
+        }
+        Update: {
+          connection_id?: string
+          created_at?: string
+          directory_application_id?: string
+          first_seen_at?: string | null
+          id?: string
+          identity_account_id?: string
+          last_discovery_run_id?: string | null
+          last_seen_at?: string | null
+          normalizer_version?: string | null
+          provider?: string
+          sanitizer_version?: string | null
+          schema_version?: string | null
+          source_endpoint?: string | null
+          stale_since?: string | null
+          sync_status?: string
+          tenant_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "daua_application_fk"
+            columns: [
+              "directory_application_id",
+              "tenant_id",
+              "connection_id",
+              "provider",
+            ]
+            isOneToOne: false
+            referencedRelation: "directory_applications"
+            referencedColumns: ["id", "tenant_id", "connection_id", "provider"]
+          },
+          {
+            foreignKeyName: "daua_connection_same_tenant"
+            columns: ["connection_id", "tenant_id"]
+            isOneToOne: false
+            referencedRelation: "connectors"
+            referencedColumns: ["id", "tenant_id"]
+          },
+          {
+            foreignKeyName: "daua_identity_fk"
+            columns: [
+              "identity_account_id",
+              "tenant_id",
+              "connection_id",
+              "provider",
+            ]
+            isOneToOne: false
+            referencedRelation: "identity_accounts"
+            referencedColumns: ["id", "tenant_id", "connection_id", "provider"]
+          },
+          {
+            foreignKeyName: "directory_application_user_assignments_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      directory_applications: {
+        Row: {
+          catalog_match_status: string
+          catalog_product_id: string | null
+          connection_id: string
+          created_at: string
+          external_id: string
+          first_seen_at: string | null
+          id: string
+          label: string | null
+          last_discovery_run_id: string | null
+          last_seen_at: string | null
+          name: string | null
+          normalized_name: string | null
+          normalizer_version: string | null
+          provider: string
+          provider_created_at: string | null
+          provider_last_updated_at: string | null
+          sanitizer_version: string | null
+          schema_version: string | null
+          sign_on_category: string | null
+          source_endpoint: string | null
+          stale_since: string | null
+          status_category: string | null
+          sync_status: string
+          tenant_id: string
+          updated_at: string
+        }
+        Insert: {
+          catalog_match_status?: string
+          catalog_product_id?: string | null
+          connection_id: string
+          created_at?: string
+          external_id: string
+          first_seen_at?: string | null
+          id?: string
+          label?: string | null
+          last_discovery_run_id?: string | null
+          last_seen_at?: string | null
+          name?: string | null
+          normalized_name?: string | null
+          normalizer_version?: string | null
+          provider: string
+          provider_created_at?: string | null
+          provider_last_updated_at?: string | null
+          sanitizer_version?: string | null
+          schema_version?: string | null
+          sign_on_category?: string | null
+          source_endpoint?: string | null
+          stale_since?: string | null
+          status_category?: string | null
+          sync_status?: string
+          tenant_id: string
+          updated_at?: string
+        }
+        Update: {
+          catalog_match_status?: string
+          catalog_product_id?: string | null
+          connection_id?: string
+          created_at?: string
+          external_id?: string
+          first_seen_at?: string | null
+          id?: string
+          label?: string | null
+          last_discovery_run_id?: string | null
+          last_seen_at?: string | null
+          name?: string | null
+          normalized_name?: string | null
+          normalizer_version?: string | null
+          provider?: string
+          provider_created_at?: string | null
+          provider_last_updated_at?: string | null
+          sanitizer_version?: string | null
+          schema_version?: string | null
+          sign_on_category?: string | null
+          source_endpoint?: string | null
+          stale_since?: string | null
+          status_category?: string | null
+          sync_status?: string
+          tenant_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "directory_applications_catalog_product_same_tenant"
+            columns: ["catalog_product_id", "tenant_id"]
+            isOneToOne: false
+            referencedRelation: "app_products"
+            referencedColumns: ["id", "tenant_id"]
+          },
+          {
+            foreignKeyName: "directory_applications_connection_same_tenant"
+            columns: ["connection_id", "tenant_id"]
+            isOneToOne: false
+            referencedRelation: "connectors"
+            referencedColumns: ["id", "tenant_id"]
+          },
+          {
+            foreignKeyName: "directory_applications_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      directory_group_memberships: {
+        Row: {
+          connection_id: string
+          created_at: string
+          directory_group_id: string
+          first_seen_at: string | null
+          id: string
+          identity_account_id: string
+          last_discovery_run_id: string | null
+          last_seen_at: string | null
+          normalizer_version: string | null
+          provider: string
+          sanitizer_version: string | null
+          schema_version: string | null
+          source_endpoint: string | null
+          stale_since: string | null
+          sync_status: string
+          tenant_id: string
+          updated_at: string
+        }
+        Insert: {
+          connection_id: string
+          created_at?: string
+          directory_group_id: string
+          first_seen_at?: string | null
+          id?: string
+          identity_account_id: string
+          last_discovery_run_id?: string | null
+          last_seen_at?: string | null
+          normalizer_version?: string | null
+          provider: string
+          sanitizer_version?: string | null
+          schema_version?: string | null
+          source_endpoint?: string | null
+          stale_since?: string | null
+          sync_status?: string
+          tenant_id: string
+          updated_at?: string
+        }
+        Update: {
+          connection_id?: string
+          created_at?: string
+          directory_group_id?: string
+          first_seen_at?: string | null
+          id?: string
+          identity_account_id?: string
+          last_discovery_run_id?: string | null
+          last_seen_at?: string | null
+          normalizer_version?: string | null
+          provider?: string
+          sanitizer_version?: string | null
+          schema_version?: string | null
+          source_endpoint?: string | null
+          stale_since?: string | null
+          sync_status?: string
+          tenant_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "dgm_connection_same_tenant"
+            columns: ["connection_id", "tenant_id"]
+            isOneToOne: false
+            referencedRelation: "connectors"
+            referencedColumns: ["id", "tenant_id"]
+          },
+          {
+            foreignKeyName: "dgm_group_fk"
+            columns: [
+              "directory_group_id",
+              "tenant_id",
+              "connection_id",
+              "provider",
+            ]
+            isOneToOne: false
+            referencedRelation: "directory_groups"
+            referencedColumns: ["id", "tenant_id", "connection_id", "provider"]
+          },
+          {
+            foreignKeyName: "dgm_identity_fk"
+            columns: [
+              "identity_account_id",
+              "tenant_id",
+              "connection_id",
+              "provider",
+            ]
+            isOneToOne: false
+            referencedRelation: "identity_accounts"
+            referencedColumns: ["id", "tenant_id", "connection_id", "provider"]
+          },
+          {
+            foreignKeyName: "directory_group_memberships_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      directory_groups: {
+        Row: {
+          connection_id: string
+          created_at: string
+          description: string | null
+          external_id: string
+          first_seen_at: string | null
+          group_type_category: string | null
+          id: string
+          last_discovery_run_id: string | null
+          last_seen_at: string | null
+          name: string | null
+          normalized_name: string | null
+          normalizer_version: string | null
+          provider: string
+          provider_created_at: string | null
+          provider_last_updated_at: string | null
+          sanitizer_version: string | null
+          schema_version: string | null
+          source_endpoint: string | null
+          stale_since: string | null
+          sync_status: string
+          tenant_id: string
+          updated_at: string
+        }
+        Insert: {
+          connection_id: string
+          created_at?: string
+          description?: string | null
+          external_id: string
+          first_seen_at?: string | null
+          group_type_category?: string | null
+          id?: string
+          last_discovery_run_id?: string | null
+          last_seen_at?: string | null
+          name?: string | null
+          normalized_name?: string | null
+          normalizer_version?: string | null
+          provider: string
+          provider_created_at?: string | null
+          provider_last_updated_at?: string | null
+          sanitizer_version?: string | null
+          schema_version?: string | null
+          source_endpoint?: string | null
+          stale_since?: string | null
+          sync_status?: string
+          tenant_id: string
+          updated_at?: string
+        }
+        Update: {
+          connection_id?: string
+          created_at?: string
+          description?: string | null
+          external_id?: string
+          first_seen_at?: string | null
+          group_type_category?: string | null
+          id?: string
+          last_discovery_run_id?: string | null
+          last_seen_at?: string | null
+          name?: string | null
+          normalized_name?: string | null
+          normalizer_version?: string | null
+          provider?: string
+          provider_created_at?: string | null
+          provider_last_updated_at?: string | null
+          sanitizer_version?: string | null
+          schema_version?: string | null
+          source_endpoint?: string | null
+          stale_since?: string | null
+          sync_status?: string
+          tenant_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "directory_groups_connection_same_tenant"
+            columns: ["connection_id", "tenant_id"]
+            isOneToOne: false
+            referencedRelation: "connectors"
+            referencedColumns: ["id", "tenant_id"]
+          },
+          {
+            foreignKeyName: "directory_groups_tenant_id_fkey"
             columns: ["tenant_id"]
             isOneToOne: false
             referencedRelation: "tenants"
@@ -1189,42 +2837,124 @@ export type Database = {
       }
       identity_accounts: {
         Row: {
+          connection_id: string | null
           created_at: string
-          email: string
+          department: string | null
+          display_name: string | null
+          email: string | null
+          employee_number: string | null
           external_id: string | null
+          first_name: string | null
+          first_seen_at: string | null
           id: string
+          is_active: boolean | null
+          last_discovery_run_id: string | null
+          last_name: string | null
+          last_seen_at: string | null
+          login: string | null
+          normalized_email: string | null
+          normalized_login: string | null
+          normalizer_version: string | null
           person_id: string | null
           provider: string
+          provider_activated_at: string | null
+          provider_created_at: string | null
+          provider_last_login_at: string | null
+          provider_last_updated_at: string | null
+          provider_status_changed_at: string | null
           raw_payload: Json | null
+          sanitizer_version: string | null
+          schema_version: string | null
+          source_endpoint: string | null
+          stale_since: string | null
           status: string | null
+          sync_status: string
           tenant_id: string
+          title: string | null
           updated_at: string
         }
         Insert: {
+          connection_id?: string | null
           created_at?: string
-          email: string
+          department?: string | null
+          display_name?: string | null
+          email?: string | null
+          employee_number?: string | null
           external_id?: string | null
+          first_name?: string | null
+          first_seen_at?: string | null
           id?: string
+          is_active?: boolean | null
+          last_discovery_run_id?: string | null
+          last_name?: string | null
+          last_seen_at?: string | null
+          login?: string | null
+          normalized_email?: string | null
+          normalized_login?: string | null
+          normalizer_version?: string | null
           person_id?: string | null
           provider: string
+          provider_activated_at?: string | null
+          provider_created_at?: string | null
+          provider_last_login_at?: string | null
+          provider_last_updated_at?: string | null
+          provider_status_changed_at?: string | null
           raw_payload?: Json | null
+          sanitizer_version?: string | null
+          schema_version?: string | null
+          source_endpoint?: string | null
+          stale_since?: string | null
           status?: string | null
+          sync_status?: string
           tenant_id: string
+          title?: string | null
           updated_at?: string
         }
         Update: {
+          connection_id?: string | null
           created_at?: string
-          email?: string
+          department?: string | null
+          display_name?: string | null
+          email?: string | null
+          employee_number?: string | null
           external_id?: string | null
+          first_name?: string | null
+          first_seen_at?: string | null
           id?: string
+          is_active?: boolean | null
+          last_discovery_run_id?: string | null
+          last_name?: string | null
+          last_seen_at?: string | null
+          login?: string | null
+          normalized_email?: string | null
+          normalized_login?: string | null
+          normalizer_version?: string | null
           person_id?: string | null
           provider?: string
+          provider_activated_at?: string | null
+          provider_created_at?: string | null
+          provider_last_login_at?: string | null
+          provider_last_updated_at?: string | null
+          provider_status_changed_at?: string | null
           raw_payload?: Json | null
+          sanitizer_version?: string | null
+          schema_version?: string | null
+          source_endpoint?: string | null
+          stale_since?: string | null
           status?: string | null
+          sync_status?: string
           tenant_id?: string
+          title?: string | null
           updated_at?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "identity_accounts_connection_same_tenant"
+            columns: ["connection_id", "tenant_id"]
+            isOneToOne: false
+            referencedRelation: "connectors"
+            referencedColumns: ["id", "tenant_id"]
+          },
           {
             foreignKeyName: "identity_accounts_person_id_fkey"
             columns: ["person_id"]
@@ -1634,6 +3364,115 @@ export type Database = {
           },
         ]
       }
+      okta_connector_configs: {
+        Row: {
+          approved_scopes: string[]
+          authentication_mode: string
+          certification_only: boolean
+          client_id: string
+          connector_id: string
+          contract_version: string
+          created_at: string
+          created_by: string | null
+          disabled_at: string | null
+          fingerprint_version: number
+          id: string
+          idempotency_key: string
+          last_validated_at: string | null
+          normalized_org_host: string
+          production_enabled: boolean
+          proposed_organization_fingerprint: string
+          provider: string
+          public_key_delivery_mode: string
+          service_app_fingerprint: string
+          signing_key_id: string | null
+          signing_key_version: string | null
+          tenant_id: string
+          updated_at: string
+          validation_error_category: string | null
+          validation_status: string
+          verified_organization_fingerprint: string | null
+        }
+        Insert: {
+          approved_scopes: string[]
+          authentication_mode?: string
+          certification_only?: boolean
+          client_id: string
+          connector_id: string
+          contract_version?: string
+          created_at?: string
+          created_by?: string | null
+          disabled_at?: string | null
+          fingerprint_version?: number
+          id?: string
+          idempotency_key: string
+          last_validated_at?: string | null
+          normalized_org_host: string
+          production_enabled?: boolean
+          proposed_organization_fingerprint: string
+          provider?: string
+          public_key_delivery_mode?: string
+          service_app_fingerprint: string
+          signing_key_id?: string | null
+          signing_key_version?: string | null
+          tenant_id: string
+          updated_at?: string
+          validation_error_category?: string | null
+          validation_status?: string
+          verified_organization_fingerprint?: string | null
+        }
+        Update: {
+          approved_scopes?: string[]
+          authentication_mode?: string
+          certification_only?: boolean
+          client_id?: string
+          connector_id?: string
+          contract_version?: string
+          created_at?: string
+          created_by?: string | null
+          disabled_at?: string | null
+          fingerprint_version?: number
+          id?: string
+          idempotency_key?: string
+          last_validated_at?: string | null
+          normalized_org_host?: string
+          production_enabled?: boolean
+          proposed_organization_fingerprint?: string
+          provider?: string
+          public_key_delivery_mode?: string
+          service_app_fingerprint?: string
+          signing_key_id?: string | null
+          signing_key_version?: string | null
+          tenant_id?: string
+          updated_at?: string
+          validation_error_category?: string | null
+          validation_status?: string
+          verified_organization_fingerprint?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "okta_config_connector_same_tenant"
+            columns: ["connector_id", "tenant_id"]
+            isOneToOne: false
+            referencedRelation: "connectors"
+            referencedColumns: ["id", "tenant_id"]
+          },
+          {
+            foreignKeyName: "okta_connector_configs_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "okta_connector_configs_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       organization_memberships: {
         Row: {
           created_at: string
@@ -1917,6 +3756,184 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      admin_approve_pilot_deletion_job: {
+        Args: { p_by: string; p_job_id: string }
+        Returns: undefined
+      }
+      admin_approve_pilot_enrollment: {
+        Args: { p_approved_by: string; p_pilot_id: string; p_reason: string }
+        Returns: undefined
+      }
+      admin_approve_run_authorization: {
+        Args: { p_approved_by: string; p_id: string; p_reason: string }
+        Returns: undefined
+      }
+      admin_approve_schedule_policy: {
+        Args: { p_approved_by: string; p_id: string }
+        Returns: undefined
+      }
+      admin_cancel_run_authorization: {
+        Args: { p_by: string; p_id: string; p_reason: string }
+        Returns: undefined
+      }
+      admin_create_pilot_deletion_job: {
+        Args: {
+          p_by: string
+          p_pilot_id: string
+          p_scope: string
+          p_summary: string
+        }
+        Returns: string
+      }
+      admin_create_pilot_enrollment: {
+        Args: {
+          p_approved_permissions: string
+          p_connector_id: string
+          p_credential_version: string
+          p_customer_account_reference: string
+          p_data_processing_purpose: string
+          p_environment: string
+          p_incident_owner: string
+          p_is_synthetic: boolean
+          p_maximum_records_per_run: number
+          p_maximum_runs: number
+          p_pilot_end_at: string
+          p_pilot_start_at: string
+          p_provider: string
+          p_requested_by: string
+          p_retention_days: number
+          p_schema_version: string
+          p_support_owner: string
+          p_tenant_id: string
+        }
+        Returns: string
+      }
+      admin_create_run_authorization: {
+        Args: {
+          p_connector_id: string
+          p_credential_version: string
+          p_expires_at: string
+          p_idempotency_key: string
+          p_image_digest: string
+          p_plan_hash: string
+          p_provider: string
+          p_requested_by: string
+          p_schema_version: string
+          p_task_family: string
+          p_task_revision: number
+          p_tenant_id: string
+        }
+        Returns: string
+      }
+      admin_create_schedule_policy: {
+        Args: {
+          p_cadence_seconds: number
+          p_campaign_end_at: string
+          p_campaign_start_at: string
+          p_connector_id: string
+          p_credential_version: string
+          p_environment: string
+          p_image_digest: string
+          p_max_slots: number
+          p_max_successful: number
+          p_provider: string
+          p_requested_by: string
+          p_schema_version: string
+          p_task_family: string
+          p_task_revision: number
+          p_tenant_id: string
+        }
+        Returns: string
+      }
+      admin_disable_schedule_policy: {
+        Args: { p_by: string; p_id: string; p_new_status: string }
+        Returns: undefined
+      }
+      admin_enable_pilot_enrollment: {
+        Args: { p_by: string; p_pilot_id: string }
+        Returns: undefined
+      }
+      admin_enable_schedule_policy: {
+        Args: { p_by: string; p_id: string }
+        Returns: undefined
+      }
+      admin_expire_stale_authorizations: { Args: never; Returns: number }
+      admin_expire_stale_pilots: { Args: never; Returns: number }
+      admin_pilot_incident_hold: {
+        Args: {
+          p_by: string
+          p_category: string
+          p_pilot_id: string
+          p_severity: string
+          p_summary: string
+        }
+        Returns: string
+      }
+      admin_reconcile_stuck_run: {
+        Args: { p_authorization_id: string; p_by: string; p_reason: string }
+        Returns: string
+      }
+      admin_reconcile_stuck_slot: {
+        Args: { p_by: string; p_reason: string; p_slot_id: string }
+        Returns: string
+      }
+      admin_record_pilot_consent: {
+        Args: {
+          p_approved_permissions: string
+          p_consent_purpose: string
+          p_consent_scope: string
+          p_consent_version: string
+          p_consented_by: string
+          p_deletion_agreement: boolean
+          p_evidence_reference: string
+          p_expiry_at: string
+          p_incident_contact_ack: boolean
+          p_pilot_id: string
+          p_retention_agreement: boolean
+        }
+        Returns: string
+      }
+      admin_record_pilot_exit_review: {
+        Args: {
+          p_by: string
+          p_outcome: string
+          p_pilot_id: string
+          p_summary: string
+        }
+        Returns: string
+      }
+      admin_set_pilot_status: {
+        Args: {
+          p_by: string
+          p_new_status: string
+          p_pilot_id: string
+          p_reason: string
+        }
+        Returns: undefined
+      }
+      admin_upsert_kill_switch: {
+        Args: {
+          p_by: string
+          p_enabled: boolean
+          p_reason: string
+          p_scope: string
+          p_scope_key: string
+        }
+        Returns: string
+      }
+      admin_upsert_schedule_policy: {
+        Args: {
+          p_connector_id: string
+          p_enabled: boolean
+          p_provider: string
+          p_tenant_id: string
+        }
+        Returns: string
+      }
+      admin_withdraw_pilot_consent: {
+        Args: { p_by: string; p_pilot_id: string; p_reason: string }
+        Returns: undefined
+      }
       can_read_contract_file: {
         Args: { target_file_id: string; target_tenant_id: string }
         Returns: boolean
@@ -1928,6 +3945,31 @@ export type Database = {
       can_write_contract_file: {
         Args: { target_file_id: string; target_tenant_id: string }
         Returns: boolean
+      }
+      connector_execution_permitted: {
+        Args: {
+          p_connector_id: string
+          p_environment: string
+          p_provider: string
+          p_tenant_id: string
+        }
+        Returns: boolean
+      }
+      connector_pilot_ref_is_sensitive: {
+        Args: { p_ref: string }
+        Returns: boolean
+      }
+      create_okta_connector_configuration: {
+        Args: {
+          p_client_id: string
+          p_display_name?: string
+          p_idempotency_key: string
+          p_normalized_org_host: string
+          p_proposed_organization_fingerprint: string
+          p_service_app_fingerprint: string
+          p_tenant_id: string
+        }
+        Returns: Json
       }
       dearmor: { Args: { "": string }; Returns: string }
       gen_random_uuid: { Args: never; Returns: string }
@@ -1958,6 +4000,219 @@ export type Database = {
         Args: { "": string }
         Returns: Record<string, unknown>[]
       }
+      product_application_access_subgraph: {
+        Args: {
+          p_application_id: string
+          p_include_stale?: boolean
+          p_tenant_id: string
+        }
+        Returns: Json
+      }
+      product_directory_access_counts: {
+        Args: {
+          p_connection_id?: string
+          p_provider?: string
+          p_tenant_id: string
+        }
+        Returns: Json
+      }
+      product_identity_access_subgraph: {
+        Args: {
+          p_identity_id: string
+          p_include_stale?: boolean
+          p_tenant_id: string
+        }
+        Returns: Json
+      }
+      product_list_directory_applications: {
+        Args: {
+          p_after_id?: string
+          p_connection_id?: string
+          p_include_stale?: boolean
+          p_limit?: number
+          p_provider?: string
+          p_tenant_id: string
+        }
+        Returns: {
+          catalog_match_status: string
+          connection_id: string
+          id: string
+          label: string
+          name: string
+          provider: string
+          sign_on_category: string
+          stale_since: string
+          status_category: string
+          sync_status: string
+        }[]
+      }
+      product_list_directory_groups: {
+        Args: {
+          p_after_id?: string
+          p_connection_id?: string
+          p_include_stale?: boolean
+          p_limit?: number
+          p_provider?: string
+          p_tenant_id: string
+        }
+        Returns: {
+          connection_id: string
+          group_type_category: string
+          id: string
+          name: string
+          provider: string
+          stale_since: string
+          sync_status: string
+        }[]
+      }
+      product_list_directory_identities: {
+        Args: {
+          p_after_id?: string
+          p_connection_id?: string
+          p_include_stale?: boolean
+          p_limit?: number
+          p_provider?: string
+          p_tenant_id: string
+        }
+        Returns: {
+          connection_id: string
+          display_name: string
+          email: string
+          id: string
+          is_active: boolean
+          login: string
+          provider: string
+          stale_since: string
+          status: string
+          sync_status: string
+        }[]
+      }
+      product_list_group_assignments: {
+        Args: {
+          p_after_id?: string
+          p_connection_id?: string
+          p_include_stale?: boolean
+          p_limit?: number
+          p_provider?: string
+          p_tenant_id: string
+        }
+        Returns: {
+          connection_id: string
+          directory_application_id: string
+          directory_group_id: string
+          id: string
+          provider: string
+          stale_since: string
+          sync_status: string
+        }[]
+      }
+      product_list_group_memberships: {
+        Args: {
+          p_after_id?: string
+          p_connection_id?: string
+          p_include_stale?: boolean
+          p_limit?: number
+          p_provider?: string
+          p_tenant_id: string
+        }
+        Returns: {
+          connection_id: string
+          directory_group_id: string
+          id: string
+          identity_account_id: string
+          provider: string
+          stale_since: string
+          sync_status: string
+        }[]
+      }
+      product_list_user_assignments: {
+        Args: {
+          p_after_id?: string
+          p_connection_id?: string
+          p_include_stale?: boolean
+          p_limit?: number
+          p_provider?: string
+          p_tenant_id: string
+        }
+        Returns: {
+          connection_id: string
+          directory_application_id: string
+          id: string
+          identity_account_id: string
+          provider: string
+          stale_since: string
+          sync_status: string
+        }[]
+      }
+      runner_acquire_lock: {
+        Args: {
+          p_attempt_id: string
+          p_authorization_id: string
+          p_connector_id: string
+          p_lease_seconds: number
+          p_provider: string
+          p_tenant_id: string
+        }
+        Returns: number
+      }
+      runner_advance_connection_state: {
+        Args: {
+          p_connector_id: string
+          p_from: string
+          p_tenant_id: string
+          p_to: string
+        }
+        Returns: undefined
+      }
+      runner_assert_fencing: {
+        Args: { p_attempt_id: string; p_generation: number }
+        Returns: undefined
+      }
+      runner_assert_no_active_run: {
+        Args: {
+          p_connector_id: string
+          p_provider: string
+          p_tenant_id: string
+        }
+        Returns: undefined
+      }
+      runner_assert_not_pilot_governed: {
+        Args: {
+          p_connector_id: string
+          p_provider: string
+          p_tenant_id: string
+        }
+        Returns: undefined
+      }
+      runner_assert_pilot_authorized: {
+        Args: {
+          p_approved_permissions: string
+          p_connector_id: string
+          p_credential_version: string
+          p_pilot_id: string
+          p_provider: string
+          p_tenant_id: string
+          p_wants_schedule: boolean
+        }
+        Returns: string
+      }
+      runner_claim_authorization: {
+        Args: {
+          p_claim_token_hash: string
+          p_connector_id: string
+          p_credential_version: string
+          p_id: string
+          p_idempotency_key: string
+          p_image_digest: string
+          p_plan_hash: string
+          p_provider: string
+          p_schema_version: string
+          p_task_family: string
+          p_task_revision: number
+          p_tenant_id: string
+        }
+        Returns: string
+      }
       runner_finish_connector_run: {
         Args: {
           p_error_class: string
@@ -1984,10 +4239,257 @@ export type Database = {
         }
         Returns: undefined
       }
+      runner_latest_run_state: {
+        Args: {
+          p_connector_id: string
+          p_provider: string
+          p_tenant_id: string
+        }
+        Returns: string
+      }
+      runner_list_okta_directory_application_refs: {
+        Args: { p_connector_id: string; p_tenant_id: string }
+        Returns: Json
+      }
+      runner_list_okta_directory_group_refs: {
+        Args: { p_connector_id: string; p_tenant_id: string }
+        Returns: Json
+      }
+      runner_mark_absent_okta_application_group_assignments_stale: {
+        Args: { p_run_id: string; p_tenant_id: string }
+        Returns: Json
+      }
+      runner_mark_absent_okta_application_user_assignments_stale: {
+        Args: { p_run_id: string; p_tenant_id: string }
+        Returns: Json
+      }
+      runner_mark_absent_okta_directory_applications_stale: {
+        Args: { p_run_id: string; p_tenant_id: string }
+        Returns: Json
+      }
+      runner_mark_absent_okta_directory_group_memberships_stale: {
+        Args: { p_run_id: string; p_tenant_id: string }
+        Returns: Json
+      }
+      runner_mark_absent_okta_directory_groups_stale: {
+        Args: { p_run_id: string; p_tenant_id: string }
+        Returns: Json
+      }
+      runner_mark_absent_okta_identities_stale: {
+        Args: { p_run_id: string; p_tenant_id: string }
+        Returns: Json
+      }
+      runner_mark_launch_attempted: {
+        Args: { p_attempt_id: string; p_generation: number }
+        Returns: undefined
+      }
       runner_open_connector_run: {
         Args: { p_connector_id: string; p_tenant_id: string }
         Returns: string
       }
+      runner_promote_okta_application_group_assignments: {
+        Args: { p_run_id: string; p_tenant_id: string }
+        Returns: Json
+      }
+      runner_promote_okta_application_user_assignments: {
+        Args: { p_run_id: string; p_tenant_id: string }
+        Returns: Json
+      }
+      runner_promote_okta_directory_applications: {
+        Args: { p_run_id: string; p_tenant_id: string }
+        Returns: Json
+      }
+      runner_promote_okta_directory_group_memberships: {
+        Args: { p_run_id: string; p_tenant_id: string }
+        Returns: Json
+      }
+      runner_promote_okta_directory_groups: {
+        Args: { p_run_id: string; p_tenant_id: string }
+        Returns: Json
+      }
+      runner_promote_okta_directory_users: {
+        Args: { p_run_id: string; p_tenant_id: string }
+        Returns: Json
+      }
+      runner_read_authorization: {
+        Args: {
+          p_connector_id: string
+          p_credential_version: string
+          p_id: string
+          p_idempotency_key: string
+          p_image_digest: string
+          p_plan_hash: string
+          p_provider: string
+          p_schema_version: string
+          p_task_family: string
+          p_task_revision: number
+          p_tenant_id: string
+        }
+        Returns: string
+      }
+      runner_read_pilot: {
+        Args: {
+          p_connector_id: string
+          p_pilot_id: string
+          p_provider: string
+          p_tenant_id: string
+        }
+        Returns: string
+      }
+      runner_reconcile_result: {
+        Args: {
+          p_attempt_id: string
+          p_facts_written: number
+          p_pages_seen: number
+          p_records_seen: number
+          p_retry_count: number
+          p_throttle_count: number
+        }
+        Returns: undefined
+      }
+      runner_record_alert: {
+        Args: {
+          p_attempt_id: string
+          p_authorization_id: string
+          p_category: string
+          p_connector_id: string
+          p_provider: string
+          p_severity: string
+          p_summary: string
+          p_tenant_id: string
+        }
+        Returns: string
+      }
+      runner_record_ambiguous: {
+        Args: {
+          p_attempt_id: string
+          p_generation: number
+          p_result_code: string
+        }
+        Returns: undefined
+      }
+      runner_record_failure: {
+        Args: {
+          p_attempt_id: string
+          p_duration_ms: number
+          p_failure_category: string
+          p_generation: number
+          p_result_code: string
+        }
+        Returns: undefined
+      }
+      runner_record_okta_discovery_metrics: {
+        Args: {
+          p_completeness: boolean
+          p_normalizer_version: string
+          p_pages_fetched: number
+          p_records_distinct: number
+          p_records_rejected: number
+          p_records_seen: number
+          p_records_valid: number
+          p_run_id: string
+          p_safe_error_category: string
+          p_sanitizer_version: string
+          p_schema_version: string
+          p_tenant_id: string
+          p_termination_reason: string
+        }
+        Returns: undefined
+      }
+      runner_record_pilot_run: { Args: { p_pilot_id: string }; Returns: number }
+      runner_record_start: {
+        Args: { p_attempt_id: string; p_generation: number }
+        Returns: undefined
+      }
+      runner_record_success: {
+        Args: {
+          p_attempt_id: string
+          p_duration_ms: number
+          p_facts_written: number
+          p_generation: number
+          p_pages_seen: number
+          p_records_seen: number
+        }
+        Returns: undefined
+      }
+      runner_record_task_identity: {
+        Args: {
+          p_attempt_id: string
+          p_generation: number
+          p_sanitized_task_id: string
+        }
+        Returns: undefined
+      }
+      runner_record_timeout: {
+        Args: {
+          p_attempt_id: string
+          p_duration_ms: number
+          p_generation: number
+        }
+        Returns: undefined
+      }
+      runner_release_lock: {
+        Args: { p_attempt_id: string; p_generation: number }
+        Returns: undefined
+      }
+      runner_renew_lock: {
+        Args: {
+          p_attempt_id: string
+          p_generation: number
+          p_lease_seconds: number
+        }
+        Returns: undefined
+      }
+      runner_resolve_okta_directory_group_refs: {
+        Args: {
+          p_connector_id: string
+          p_external_ids: string[]
+          p_tenant_id: string
+        }
+        Returns: Json
+      }
+      runner_resolve_okta_identity_refs: {
+        Args: {
+          p_connector_id: string
+          p_external_ids: string[]
+          p_tenant_id: string
+        }
+        Returns: Json
+      }
+      scheduler_begin_slot: {
+        Args: { p_lease_seconds: number; p_slot_id: string }
+        Returns: {
+          attempt_id: string
+          cfg_connector: string
+          cfg_credential_version: string
+          cfg_provider: string
+          cfg_tenant: string
+          fencing_generation: number
+        }[]
+      }
+      scheduler_finalize_slot: {
+        Args: {
+          p_facts_written: number
+          p_generation: number
+          p_pages_seen: number
+          p_records_seen: number
+          p_retry_count: number
+          p_slot_id: string
+          p_status: string
+          p_summary: string
+          p_throttle_count: number
+        }
+        Returns: string
+      }
+      scheduler_materialize_slot: {
+        Args: { p_policy_id: string; p_scheduled_at: string }
+        Returns: {
+          authorization_id: string
+          slot_id: string
+          slot_number: number
+        }[]
+      }
+      scheduler_policy_state: { Args: { p_policy_id: string }; Returns: string }
     }
     Enums: {
       [_ in never]: never

@@ -6,9 +6,17 @@ import {
   validateOktaOrgHost, normalizeOrgInput, ORG_HOST_MESSAGE, validateOktaClientId,
   OKTA_CONTENT, OKTA_SETUP, OKTA_APPROVED_PUBLIC_KID, type OrgHostReason,
 } from "@/lib/customer-connectors/okta-content";
-import { setDemoConnection } from "@/lib/customer-connectors/demo-store";
+import { saveOktaConfigurationAction } from "./actions";
 
 type Step = "instructions" | "organization" | "configuration" | "review" | "saved";
+
+// What the customer must do next, keyed to what the platform ACTUALLY has. O2A cannot say "connected": the platform signing key
+// does not exist yet (O2B) and nothing has been validated against Okta (O2D/O2E).
+const NEXT_ACTION_COPY: Record<string, string> = {
+  platform_signing_key_pending: "ID Caddie is finishing its signing-key setup. We'll validate this connection once that's ready — no action needed from you.",
+  public_key_publication_pending: "ID Caddie is publishing the public key you'll trust in Okta. We'll validate this connection once that's ready.",
+  live_validation_required: "This configuration still needs to be validated against your Okta organization before any data is read.",
+};
 const STEPS = ["Instructions", "Organization", "Configuration", "Review"] as const;
 function stepIndex(s: Step): number {
   switch (s) {
@@ -34,6 +42,11 @@ export function OktaConnectWizard({ provider }: { provider: string }) {
   const [orgInput, setOrgInput] = useState("");
   const [orgHost, setOrgHost] = useState<string | null>(null);
   const [customDomain, setCustomDomain] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [nextAction, setNextAction] = useState<string | null>(null);
+  // One key per wizard mount, so a double-click or a network retry resolves to the SAME connector rather than a second one.
+  const [idempotencyKey] = useState(() => crypto.randomUUID());
   const [orgError, setOrgError] = useState<OrgHostReason | null>(null);
   const [clientId, setClientId] = useState("");
   const [clientIdError, setClientIdError] = useState(false);
@@ -66,11 +79,21 @@ export function OktaConnectWizard({ provider }: { provider: string }) {
     setStep("review");
   }
 
-  function save() {
-    // The ONLY state write: the isolated sessionStorage preview state, marked verification_pending (NOT connected). No server/DB,
-    // no credential/token/OAuth/ECS action. The client id is non-secret and not retained in the demo store.
-    setDemoConnection(provider, { status: "verification_pending", orgHost, connectedAt: new Date().toISOString() });
-    setStep("saved");
+  // O2A — the REAL write path. This replaces the sessionStorage demo store: configuration is now persisted server-side by an
+  // owner/admin through a SECURITY DEFINER RPC. Still NO secret and NO provider contact — the customer supplies only the
+  // non-secret org host and client id, and nothing is verified against Okta here.
+  async function save() {
+    if (saving || orgHost === null) return;
+    setSaving(true);                       // duplicate-submit guard; the idempotency key below is the durable one
+    setSaveError(null);
+    const fd = new FormData();
+    fd.set("orgHost", orgHost);
+    fd.set("clientId", clientId);
+    fd.set("idempotencyKey", idempotencyKey);
+    const result = await saveOktaConfigurationAction({ status: "idle" }, fd);
+    setSaving(false);
+    if (result.status === "error") { setSaveError(result.message); return; }
+    if (result.status === "saved") { setNextAction(result.nextAction); setStep("saved"); }
   }
 
   return (
@@ -242,18 +265,28 @@ export function OktaConnectWizard({ provider }: { provider: string }) {
               <div className="flex justify-between gap-3 px-3 py-2"><dt className="text-zinc-500">Status</dt><dd className="text-right text-zinc-700 dark:text-zinc-300">{OKTA_SETUP.statusLabel}</dd></div>
             </dl>
             <p className="text-xs text-zinc-500">{OKTA_SETUP.serverValidatedNote} {OKTA_SETUP.statusNote}</p>
+            {saveError && <p role="alert" className="text-sm text-red-600 dark:text-red-400">{saveError}</p>}
             <div className="flex gap-2">
-              <button type="button" onClick={save} className={primary}>Save configuration</button>
-              <button type="button" onClick={() => setStep("configuration")} className={secondary}>Back</button>
+              <button type="button" onClick={save} disabled={saving} className={primary}>
+                {saving ? "Saving…" : "Save configuration"}
+              </button>
+              <button type="button" onClick={() => setStep("configuration")} disabled={saving} className={secondary}>Back</button>
             </div>
           </div>
         )}
 
         {step === "saved" && (
           <div className="space-y-4" role="status">
+            {/* O2A is truthful about what just happened: the configuration is SAVED, nothing is connected or verified. The next
+                step is derived from what the platform actually has — it is not a guess and not a promise. */}
             <div className="rounded-lg border border-amber-300 bg-amber-50 p-4 dark:border-amber-800 dark:bg-amber-950">
               <h2 className="text-lg font-semibold text-amber-800 dark:text-amber-300">{OKTA_SETUP.savedTitle}</h2>
               <p className="mt-1 text-sm text-amber-800 dark:text-amber-300">{OKTA_SETUP.savedMessage}</p>
+              {nextAction && (
+                <p className="mt-2 text-sm text-amber-800 dark:text-amber-300">
+                  <span className="font-medium">Next: </span>{NEXT_ACTION_COPY[nextAction] ?? NEXT_ACTION_COPY.live_validation_required}
+                </p>
+              )}
             </div>
             <div className="flex flex-wrap gap-2">
               <Link href={`/connectors/${provider}/status`} className={primary}>View configuration</Link>
