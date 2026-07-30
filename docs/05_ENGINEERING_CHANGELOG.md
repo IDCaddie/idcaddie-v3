@@ -2359,6 +2359,16 @@ disabled.
 
 **Known stale:** the contract artifact still reads `live_kid_verification: "outstanding"`. Correcting it costs a contract version
 bump to 1.2.0 plus a migration to re-pin 0064's expected contract version — deliberately not done inside this phase.
+## O2C.3 — per-capability evidence, contract 1.2.0 (v3 #361, runner #109)
+
+**2026-07-30.** Contract moves to **1.2.0** recording `live_kid_verification: verified`, and migration 0065 adds
+`okta_connector_capability_evidence` so each read scope carries its own proof rather than sharing one status field.
+
+The version bump and the database pin move together by necessity: 0064 pins the accepted contract version, so bumping the
+artifact without moving the pin would silently reject every future submission.
+
+Existing users_read evidence is backfilled from the O2C.2 run — same run id, KID and timestamp, contract version left at 1.1.0
+because that is what it was proven under.
 
 ## O2C.2 — Okta validation-result write path, migration 0064 (v3 #359)
 

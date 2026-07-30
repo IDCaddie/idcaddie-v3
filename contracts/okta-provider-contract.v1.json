@@ -1,5 +1,5 @@
 {
-  "contract_version": "1.1.0",
+  "contract_version": "1.2.0",
   "provider": "okta",
   "auth_mode": "oauth_private_key_jwt",
   "approved_scopes": [
@@ -10,5 +10,5 @@
   "staging_public_key_kid": "p7AyvDK0yI95_HdQBxdhBSOTt9mMYPczGL-4USxaMto",
   "lifecycle_status": "certificationOnly",
   "read_only": true,
-  "live_kid_verification": "outstanding"
+  "live_kid_verification": "verified"
 }
