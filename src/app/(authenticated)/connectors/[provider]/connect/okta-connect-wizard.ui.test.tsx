@@ -15,13 +15,22 @@ vi.mock("next/link", () => ({
 }));
 
 import { OktaConnectWizard } from "./okta-connect-wizard";
-import { getDemoConnection } from "@/lib/customer-connectors/demo-store";
+// O2A — the wizard now persists through a SERVER ACTION, not sessionStorage. The action is mocked so the UI can be exercised
+// without a database, and so the test can assert exactly what the browser sent.
+const actionCalls: FormData[] = [];
+let actionResult: unknown = { status: "saved", connectorId: "c-1", orgHost: "acme.okta.com", nextAction: "platform_signing_key_pending", replay: false };
+vi.mock("./actions", () => ({
+  saveOktaConfigurationAction: async (_prev: unknown, fd: FormData) => { actionCalls.push(fd); return actionResult; },
+}));
 // O1B: reference the copy constants, not literals — a hardcoded scope label is exactly what drifted before.
 import { OKTA_SETUP } from "@/lib/customer-connectors/okta-content";
 
 const CLIENT_ID = "0oaTEST12345678abcd"; // synthetic 0oa… shape, non-secret
 
 beforeEach(() => {
+  // Reset the mocked server action so one failing test cannot leak its result into the next.
+  actionCalls.length = 0;
+  actionResult = { status: "saved", connectorId: "c-1", orgHost: "acme.okta.com", nextAction: "platform_signing_key_pending", replay: false };
   window.sessionStorage.clear();
   push.mockClear();
   replace.mockClear();
@@ -43,7 +52,7 @@ function fillConfiguration(clientId = CLIENT_ID) {
 }
 
 describe("Okta connect wizard — API Services configuration flow", () => {
-  it("walks instructions → organization → configuration → review → verification pending", () => {
+  it("walks instructions → organization → configuration → review → verification pending", async () => {
     render(<OktaConnectWizard provider="okta" />);
     expect(screen.getAllByText(/Preview mode/).length).toBe(1);
     // step 1 — instructions (service app, no browser sign-in)
@@ -79,14 +88,62 @@ describe("Okta connect wizard — API Services configuration flow", () => {
     expect(screen.getByText(CLIENT_ID)).toBeTruthy();
     click("Save configuration");
 
-    // terminal — verification pending, NOT connected; the only state write is the sessionStorage preview
-    expect(screen.getByRole("heading", { name: "Verification pending" })).toBeTruthy();
+    // terminal — verification pending, NOT connected. The save is now a SERVER ACTION, so the transition is async.
+    expect(await screen.findByRole("heading", { name: "Verification pending" })).toBeTruthy();
     expect(screen.getByText(/has not yet verified the connection or imported any data/)).toBeTruthy();
-    expect(screen.queryByText(/connected/i)).toBeNull();
-    const demo = getDemoConnection("okta");
-    expect(demo?.status).toBe("verification_pending");
-    expect(demo?.orgHost).toBe("acme.okta.com");
+    expect(screen.queryByText(/\bconnected\b/i)).toBeNull();
+    expect(screen.queryByText(/\bhealthy\b/i)).toBeNull();
+    // "verified" DOES appear — in the negation "has not yet verified the connection", which is the truthful copy. What must not
+    // appear is an AFFIRMATIVE claim, so assert the negated form is present rather than banning the word.
+    expect(screen.getByText(/has not yet verified/i)).toBeTruthy();
+
+    // The browser sent ONLY the three non-secret inputs — no tenant, role, state, scopes or fingerprint.
+    const sent = actionCalls.at(-1)!;
+    expect(sent.get("orgHost")).toBe("acme.okta.com");
+    expect(sent.get("clientId")).toBe(CLIENT_ID);
+    expect(sent.get("idempotencyKey")).toMatch(/^[0-9a-f-]{36}$/i);
+    expect([...sent.keys()].sort()).toEqual(["clientId", "idempotencyKey", "orgHost"]);
+
+    // The truthful next step is shown, derived from what the platform actually has.
+    expect(screen.getByText(/signing-key setup/i)).toBeTruthy();
     expect(push).not.toHaveBeenCalled();
+  });
+
+  it("shows a safe error and stays on review when the server rejects the configuration", async () => {
+    actionResult = { status: "error", message: "You need to be an owner or admin to add a connection." };
+    render(<OktaConnectWizard provider="okta" />);
+    click("Start setup");
+    typeOrg("acme.okta.com");
+    click("Continue");
+    fillConfiguration();
+    click("Review");
+    click("Save configuration");
+
+    expect((await screen.findByRole("alert")).textContent).toMatch(/owner or admin/i);
+    // still on review — no false success
+    expect(screen.getByRole("heading", { name: "Review configuration" })).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "Verification pending" })).toBeNull();
+  });
+
+  it("a double-click submits once, and the idempotency key is stable across attempts", async () => {
+    render(<OktaConnectWizard provider="okta" />);
+    click("Start setup");
+    typeOrg("acme.okta.com");
+    click("Continue");
+    fillConfiguration();
+    click("Review");
+
+    const before = actionCalls.length;
+    const btn = screen.getByRole("button", { name: "Save configuration" });
+    fireEvent.click(btn);
+    fireEvent.click(btn);   // immediate second click, before the first resolves
+    await screen.findByRole("heading", { name: "Verification pending" });
+
+    // The in-flight guard prevents the second submit; and even if a retry DID reach the server, the key is per-mount and stable,
+    // so the RPC would return the same connector rather than create a second one.
+    const sentKeys = actionCalls.slice(before).map((fd) => fd.get("idempotencyKey"));
+    expect(actionCalls.length - before).toBe(1);
+    expect(new Set(sentKeys).size).toBe(1);
   });
 
   it("normalizes a bare organization label to <label>.okta.com", () => {
@@ -98,7 +155,7 @@ describe("Okta connect wizard — API Services configuration flow", () => {
     fillConfiguration();
     click("Review");
     click("Save configuration");
-    expect(getDemoConnection("okta")?.orgHost).toBe("acme.okta.com");
+    expect(actionCalls.at(-1)?.get("orgHost")).toBe("acme.okta.com");
   });
 
   it("does not advance to review until all three setup declarations are confirmed", () => {
@@ -145,13 +202,15 @@ describe("Okta connect wizard — safety", () => {
     }
   });
 
-  it("marks the active progress step with aria-current and drops step numbering on the terminal state", () => {
+  it("marks the active progress step with aria-current and drops step numbering on the terminal state", async () => {
     const { container } = render(<OktaConnectWizard provider="okta" />);
     expect(container.querySelectorAll('[aria-current="step"]').length).toBe(1);
     toConfiguration();
     fillConfiguration();
     click("Review");
     click("Save configuration");
+    // The save is a SERVER ACTION now, so the terminal state arrives asynchronously — assert after it lands, not before.
+    await screen.findByRole("heading", { name: "Verification pending" });
     expect(screen.queryByText(/Step \d of 4/)).toBeNull();
     expect(container.querySelector('[role="status"]')).not.toBeNull();
   });
