@@ -44,3 +44,8 @@ next-env.d.ts
 
 # Supabase CLI local link metadata
 supabase/.temp/
+
+# Northstar demo fixture work — deliberately untracked pending human review (restored after an accidental `git add -A`).
+src/lib/data/northstar-fixture.test.ts
+supabase/fixtures/northstar_demo.sql
+scripts/seed-northstar-demo.sh
