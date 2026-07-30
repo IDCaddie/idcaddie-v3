@@ -14,7 +14,9 @@ const ROOT = process.cwd();
 const MANIFEST = join(ROOT, "src", "lib", "customer-connectors", "okta-jwks-manifest.json");
 
 const EXPECTED_KID = "p7AyvDK0yI95_HdQBxdhBSOTt9mMYPczGL-4USxaMto";
-const ACTIVE_CONTRACT_KID = "VDkZAQoJl_prLRU83WiPreOBGoP6Fib3qC0CG880wz0";
+// O2C.2 cut the contract over to the published key, so these are now the SAME value. The retired one must not reappear.
+const ACTIVE_CONTRACT_KID = EXPECTED_KID;
+const RETIRED_KID = "VDkZAQoJl_prLRU83WiPreOBGoP6Fib3qC0CG880wz0";
 
 // V3 does NOT host the JWKS — a dedicated static project does, so there is exactly one authoritative URL. What V3 owns is the
 // MANIFEST (which URL is authoritative, which KID is published, which is active) and the proxy exclusion. The artifact's own
@@ -22,18 +24,21 @@ const ACTIVE_CONTRACT_KID = "VDkZAQoJl_prLRU83WiPreOBGoP6Fib3qC0CG880wz0";
 const manifest = JSON.parse(readFileSync(MANIFEST, "utf8")) as Record<string, unknown>;
 
 // ── published_not_active ────────────────────────────────────────────────────────────────────────────────────────
-describe("publication manifest — published_not_active is REAL", () => {
-  it("declares the published-not-active state", () => {
-    expect(manifest.publication_status).toBe("published_not_active");
+describe("publication manifest — the O2C.2 cutover is REAL", () => {
+  it("declares the post-cutover, pre-live-verification state", () => {
+    expect(manifest.publication_status).toBe("active_pending_live_verification");
     expect(manifest.environment).toBe("staging");
-    expect(manifest.contract_version).toBe("1.0.0");
+    expect(manifest.contract_version).toBe("1.1.0");
     expect(manifest.thumbprint_method).toBe("RFC7638");
   });
 
-  it("the PUBLISHED kid is NOT the active contract kid — the signer must keep failing closed", () => {
+  it("the PUBLISHED kid IS now the active contract kid — the signer no longer fails closed", () => {
+    // The inverse of the O2C.1 assertion, and deliberately so: while these differed the signer refused to sign, which was the
+    // whole meaning of published_not_active. They match only because the cutover really happened in both repositories.
     expect(manifest.active_contract_kid).toBe(ACTIVE_CONTRACT_KID);
     expect(manifest.signing_kid).toBe(EXPECTED_KID);
-    expect(manifest.active_contract_kid).not.toBe(manifest.signing_kid);
+    expect(manifest.active_contract_kid).toBe(manifest.signing_kid);
+    expect(manifest.active_contract_kid).not.toBe(RETIRED_KID);
   });
 
   it("declares exactly the one published kid", () => {

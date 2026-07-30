@@ -17,11 +17,15 @@ import { OKTA_CONTENT, OKTA_SETUP, OKTA_APPROVED_PUBLIC_KID, validateOktaOrgHost
 // ── The pinned cross-repository contract ────────────────────────────────────────────────────────────────────────
 // This exact literal also appears in the connector-runner's mirror of this test. Changing the contract REQUIRES bumping
 // contract_version and updating this literal in BOTH repositories.
-const PINNED_CONTRACT_VERSION = "1.0.0";
-const PINNED_CONTRACT_HASH = "46e627f840017fe39930ee751212cb6cd1f065004758ab961f09af8d395c4aa0";
+const PINNED_CONTRACT_VERSION = "1.1.0";
+const PINNED_CONTRACT_HASH = "3a6c870f95c38e636fa182ec6e72763cfffca139201a16429f6f059555ca4870";
 
 // Superseded values live HERE, in the test — never in the artifact or in shipped copy, where a consumer could read one by mistake.
 const STALE_KID = "i-Wptr6usN1tpkNp17vHXv_Mar4NPz53rn-bmlTq8j4";
+// Retired by the O2C.2 cutover. Like STALE_KID it must never appear in the artifact or in customer-facing copy; unlike it, prose
+// in docs/ may still record it as superseded, so it is applied to active declarations rather than to a repo-wide text scan.
+const RETIRED_KID = "VDkZAQoJl_prLRU83WiPreOBGoP6Fib3qC0CG880wz0";
+const SUPERSEDED_KIDS: readonly string[] = [STALE_KID, RETIRED_KID];
 const SUPERSEDED_SCOPE_SETS: readonly (readonly string[])[] = [
   ["okta.users.read"],
   ["okta.users.read", "okta.groups.read"],
@@ -48,7 +52,7 @@ describe("okta contract artifact — identical to the connector-runner's", () =>
   });
 
   it("declares the authoritative staging KID, read-only, private_key_jwt, certificationOnly", () => {
-    expect(contract.staging_public_key_kid).toBe("VDkZAQoJl_prLRU83WiPreOBGoP6Fib3qC0CG880wz0");
+    expect(contract.staging_public_key_kid).toBe("p7AyvDK0yI95_HdQBxdhBSOTt9mMYPczGL-4USxaMto");
     expect(contract.read_only).toBe(true);
     expect(contract.auth_mode).toBe("oauth_private_key_jwt");
     expect(contract.lifecycle_status).toBe("certificationOnly");
@@ -58,7 +62,7 @@ describe("okta contract artifact — identical to the connector-runner's", () =>
 
   it("carries no stale KID and no write scope", () => {
     const text = readFileSync(CONTRACT_PATH, "utf8");
-    expect(text).not.toContain(STALE_KID);
+    for (const k of SUPERSEDED_KIDS) expect(text).not.toContain(k);
     expect(text).not.toMatch(/okta\.[a-z.]+\.(manage|write)/);
     expect(text).not.toMatch(/BEGIN|PRIVATE KEY/);
   });
@@ -269,12 +273,12 @@ describe("okta setup copy", () => {
 
   it("publishes the authoritative KID and never the stale one", () => {
     expect(OKTA_APPROVED_PUBLIC_KID).toBe(contract.staging_public_key_kid);
-    expect(OKTA_APPROVED_PUBLIC_KID).not.toBe(STALE_KID);
+    for (const k of SUPERSEDED_KIDS) expect(OKTA_APPROVED_PUBLIC_KID).not.toBe(k);
   });
 
   it("no shipped copy anywhere contains the stale KID or a users-only scope instruction", () => {
     const blob = JSON.stringify({ OKTA_CONTENT, OKTA_SETUP, OKTA_APPROVED_PUBLIC_KID });
-    expect(blob).not.toContain(STALE_KID);
+    for (const k of SUPERSEDED_KIDS) expect(blob).not.toContain(k);
     expect(blob).not.toMatch(/only the okta\.users\.read scope/i);
     expect(blob).not.toMatch(/\bUsers only\b/);
     // every scope named in customer copy must be an approved scope

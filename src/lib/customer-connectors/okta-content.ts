@@ -102,7 +102,7 @@ export const OKTA_SETUP = {
 // SUPERSEDED: `i-Wptr…q8j4` was published here before O1B while the runner had already moved to the value below. A customer who
 // followed the shipped instructions would have registered a public key whose private half ID Caddie does not hold, and every token
 // request would have failed `invalid_client`. That stale value is asserted ABSENT by okta-contract-consistency.test.ts.
-export const OKTA_APPROVED_PUBLIC_KID = "VDkZAQoJl_prLRU83WiPreOBGoP6Fib3qC0CG880wz0" as const;
+export const OKTA_APPROVED_PUBLIC_KID = "p7AyvDK0yI95_HdQBxdhBSOTt9mMYPczGL-4USxaMto" as const;
 
 // Client-safe Okta client-id SHAPE check (the server-only okta-live validator can't be imported into the client wizard). Opaque
 // `0oa…` id — a bounded safe-charset string. NON-secret; validates shape only.

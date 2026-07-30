@@ -375,17 +375,24 @@ do $$ declare n int; begin
     assert false, 'C7 direct INSERT must be denied';
   exception when insufficient_privilege then null; end;
 
-  -- UPDATE/DELETE: the ENFORCEMENT BOUNDARY IS RLS, NOT TABLE GRANTS. Both this harness and hosted Supabase blanket-grant DML on
-  -- public tables to `authenticated`, so the migration's REVOKE is defence-in-depth that the platform re-grants. With RLS enabled
-  -- and NO update/delete policy, the correct and provable property is that a request role can modify ZERO ROWS — silently, without
-  -- an error. Asserting "must raise" would have been testing the wrong mechanism.
-  update public.okta_connector_configs set client_id = '0oaTAMPERED000001';
-  get diagnostics n = row_count;
-  assert n = 0, 'C7 direct UPDATE must affect zero rows, affected ' || n;
+  -- UPDATE/DELETE: this table is hardened by BOTH mechanisms, so either outcome proves the property. 0063 grants `authenticated`
+  -- SELECT only, so a write normally raises 42501; and RLS is enabled with no write policy, so a write that somehow got past
+  -- grants would still touch zero rows. The property under test is "a request role cannot modify this table" — accept either
+  -- signal and fail only if a row actually changes. (Asserting zero-rows ALONE was wrong: it assumed a blanket DML grant that
+  -- this table does not have, which is why the INSERT case immediately above expects a privilege error.)
+  begin
+    update public.okta_connector_configs set client_id = '0oaTAMPERED000001';
+    get diagnostics n = row_count;
+    assert n = 0, 'C7 direct UPDATE must affect zero rows, affected ' || n;
+  exception when insufficient_privilege then null;
+  end;
 
-  delete from public.okta_connector_configs;
-  get diagnostics n = row_count;
-  assert n = 0, 'C7 direct DELETE must affect zero rows, affected ' || n;
+  begin
+    delete from public.okta_connector_configs;
+    get diagnostics n = row_count;
+    assert n = 0, 'C7 direct DELETE must affect zero rows, affected ' || n;
+  exception when insufficient_privilege then null;
+  end;
 
   -- Connector deletion is likewise unavailable: `connectors` is the parent of 19 `on delete cascade` FKs across 12 tables, so a
   -- successful delete would silently destroy the tenant's canonical directory graph.
