@@ -2340,7 +2340,26 @@ from PRs verified via `git log` / `gh pr list`.
 ---
 
 *Pre-PR history (legacy extraction docs, rebuild starter, `0001` core schema) is in
-`git log` and the `docs/current-*` / `docs/v3-*` design docs.*
+`git log` and the `docs/current-*` / `docs/v3-*` design docs.*## O2C.2 COMPLETE — live authentication, API access and connector validation (v3 #360, runner #108)
+
+**2026-07-30.** One controlled staging run authenticated to Okta with the KMS-backed key, took a token scoped exactly
+`okta.users.read`, and completed one bounded `GET /api/v1/users?limit=1` returning **200 with one user**. The outcome was recorded
+through the runner-only 0064 path: connector `cdf19b61…` is now `verified`, `validation_status=succeeded`, with the verified KID,
+contract version, fingerprints and a server-generated run id.
+
+Evidence: exactly **one** CloudTrail `Sign` by `assumed-role/idcaddie-staging-slack-taskread/<taskId>` on
+`alias/idcaddie-staging-okta-signing`, `RSASSA_PKCS1_V1_5_SHA_256`, `DIGEST`, no digest/signature recorded. Legacy secret
+`LastAccessed` unchanged at 2026-07-23 — never read. Sign-volume alarm OK. One success audit, no credential material in it.
+Zero user data persisted (newest identity/fact predate the run by six days).
+
+**Proves:** JWKS trust, KMS authentication, the `okta.users.read` grant, and that the assigned Read Only Administrator role is
+sufficient for the users endpoint. **Does not prove:** groups read, apps read, memberships, assignments, discovery, or production
+readiness. The connector is `verified` and nothing more — `status` stays `pending`, no scheduler, no discovery, production
+disabled.
+
+**Known stale:** the contract artifact still reads `live_kid_verification: "outstanding"`. Correcting it costs a contract version
+bump to 1.2.0 plus a migration to re-pin 0064's expected contract version — deliberately not done inside this phase.
+
 ## O2C.2 — Okta validation-result write path, migration 0064 (v3 #359)
 
 **2026-07-30.** Closes the first of two gaps left by the O2C.2 live verification: the authentication succeeded against Okta but

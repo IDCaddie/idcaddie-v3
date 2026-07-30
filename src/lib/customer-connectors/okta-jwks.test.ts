@@ -24,9 +24,12 @@ const RETIRED_KID = "VDkZAQoJl_prLRU83WiPreOBGoP6Fib3qC0CG880wz0";
 const manifest = JSON.parse(readFileSync(MANIFEST, "utf8")) as Record<string, unknown>;
 
 // ── published_not_active ────────────────────────────────────────────────────────────────────────────────────────
-describe("publication manifest — the O2C.2 cutover is REAL", () => {
-  it("declares the post-cutover, pre-live-verification state", () => {
-    expect(manifest.publication_status).toBe("active_pending_live_verification");
+describe("publication manifest — the O2C.2 live verification is REAL", () => {
+  it("declares the live-verified state and the scope it is limited to", () => {
+    expect(manifest.publication_status).toBe("live_verified");
+    // The scope note is load-bearing: one users read proves the users grant and the admin role, and nothing about groups or apps.
+    expect(String(manifest.live_verification_scope)).toMatch(/okta\.users\.read only/);
+    expect(String(manifest.live_verification_scope)).toMatch(/unproven/);
     expect(manifest.environment).toBe("staging");
     expect(manifest.contract_version).toBe("1.1.0");
     expect(manifest.thumbprint_method).toBe("RFC7638");
