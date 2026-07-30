@@ -310,14 +310,49 @@ describe("okta setup copy", () => {
     expect(blob).not.toMatch(/production[- ]enabled|fully enabled|live connection is active/i);
   });
 
-  it("introduces no Super Admin wording, and names no specific admin role", () => {
+  // O1C.1 — the admin-role requirement is now RESOLVED from official Okta documentation, so the copy must NAME the role. It was
+  // previously asserted to name none, which was correct while the requirement was unverified.
+  it("names Read Only Administrator, requires it IN ADDITION to scopes, and never asks for Super Admin", () => {
     const blob = JSON.stringify({ OKTA_CONTENT, OKTA_SETUP });
-    expect(blob).not.toMatch(/super\s*admin/i);
-    // The exact role requirement is UNRESOLVED pending live verification — the copy must not guess one, and must not repeat the
-    // pre-O1B "scoped to users" guess, which cannot be correct for okta.apps.read.
+    // Super Admin is not required by any official source and must never be REQUESTED. The copy is allowed to PROHIBIT it, so the
+    // check removes that one prohibition and then asserts no other mention survives.
+    expect(OKTA_SETUP.roleStepNote).toMatch(/do not assign super admin/i);
+    const withoutProhibition = blob.replace(/Do not assign Super Admin\.?/gi, "");
+    expect(withoutProhibition).not.toMatch(/super\s*admin/i);
+    expect(OKTA_SETUP.roleStepNote).toMatch(/read only administrator/i);
+    // The role is ADDITIONAL to the scopes — conflating them is the most likely setup mistake.
+    expect(OKTA_SETUP.roleStepNote).toMatch(/in addition to the scopes/i);
+    // The superseded pre-O1B guess must not return: a users-scoped role cannot cover okta.apps.read.
     expect(blob).not.toMatch(/scoped to users/i);
     expect(blob).not.toMatch(/Read-Only Administrator role, scoped/i);
-    expect(OKTA_SETUP.roleStepNote).toMatch(/read-only/i);
+  });
+
+  it("states scopes and admin role as SEPARATE mechanisms", () => {
+    expect(OKTA_SETUP.scopeVsRoleNote).toMatch(/both/i);
+    expect(OKTA_SETUP.scopeVsRoleNote).toMatch(/scopes?/i);
+    expect(OKTA_SETUP.scopeVsRoleNote).toMatch(/role/i);
+    // One admin step must name the role AND that it is additional to the scopes. (The copy says "Read Only Administrator role",
+    // not the generic phrase "admin role" — match the role name, not a phrase the copy never uses.)
+    expect(OKTA_SETUP.adminSteps.some((s) => /read only administrator/i.test(s) && /in addition to the scopes/i.test(s))).toBe(true);
+  });
+
+  it("troubleshooting distinguishes a scope failure from a role failure", () => {
+    const t = OKTA_SETUP.troubleshooting;
+    expect(t.length).toBeGreaterThanOrEqual(3);
+    // A scope problem fails when the token is requested; a role problem fails later, on the API call. That distinction is what tells
+    // a customer which step they missed, so it must survive a copy edit.
+    const scopeCase = t.find((x) => /scope/i.test(x.symptom) || /scope/i.test(x.cause));
+    const roleCase = t.find((x) => /admin role/i.test(x.cause));
+    expect(scopeCase, "no scope-failure guidance").toBeDefined();
+    expect(roleCase, "no role-failure guidance").toBeDefined();
+    expect(roleCase?.cause).toMatch(/scopes alone do not grant data access/i);
+    expect(roleCase?.fix).toMatch(/read only administrator/i);
+    // Every entry must be actionable.
+    for (const x of t) { expect(x.symptom.length).toBeGreaterThan(10); expect(x.fix.length).toBeGreaterThan(10); }
+  });
+
+  it("troubleshooting names no secret value", () => {
+    expect(JSON.stringify(OKTA_SETUP.troubleshooting)).not.toMatch(/BEGIN|PRIVATE|client_secret|access_token|SSWS/i);
   });
 
   it("carries no secret, token, or key material", () => {
