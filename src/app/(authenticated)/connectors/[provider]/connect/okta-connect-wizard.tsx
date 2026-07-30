@@ -154,7 +154,10 @@ export function OktaConnectWizard({ provider }: { provider: string }) {
               )}
               <label className="flex items-center gap-2 pt-1 text-xs text-zinc-500 dark:text-zinc-400">
                 <input type="checkbox" checked={customDomain} onChange={(e) => { setCustomDomain(e.target.checked); setOrgError(null); }} className="rounded border-zinc-300 dark:border-zinc-600" />
-                Use a custom Okta domain
+                {/* O1C: this only disables the convenience `.okta.com` append so a preview/EMEA address can be typed in full. It has
+                    never enabled vanity/custom domains — those are unsupported (the runner requires the issuer to be derivable from
+                    the org host). The old label "Use a custom Okta domain" promised something the product does not do. */}
+                My address ends in .oktapreview.com or .okta-emea.com
               </label>
             </div>
             <div className="flex gap-2">

@@ -84,6 +84,45 @@ Format per threat: **Attack → Impact → Prevention → Detection → Residual
 - **Prevention**: `scopesExactlyApproved` enforces the EXACT set `["okta.users.read", "okta.groups.read", "okta.apps.read"]` — all three READ-ONLY — as a SET: ordering is irrelevant, and a missing scope, an extra scope, a duplicate, a malformed name and any `.manage`/`.write` scope each fail closed with their own diagnostic. Prohibited families are enumerated AND backed by a write-verb suffix rule so an unenumerated write scope cannot slip through. The connect gate enforces it, and the DB enforces it independently via the `okta_issuer_scope_chk` CHECK (migration `0062`).
 - **SUPERSEDED (O1B)**: this entry previously claimed the exact set was `["okta.users.read"]`. That was false in two ways — the connector-runner had already been authorized for `okta.groups.read` (Phase 5) and `okta.apps.read` (Phases 9–12), and V3 additionally listed `okta.apps.read` as **prohibited**, so a customer granting the correct scopes would have been *rejected*. The users-only claim is retained here only to record why the old contract was wrong.
 - **Detection**: `scope_not_exact` / `scope_not_approved`.
+
+### O1C — organization identity, host substitution, and registry gating
+
+**What is cryptographically proven, and what is not.** The Okta API Services access token is **opaque** — not a JWT — so there is no
+issuer claim to read and no signature IDCaddie verifies. Identity is established from **verified request context**, not from token
+claims, and the derived value is named accordingly (an IDCaddie **fingerprint**, never an "Okta org ID").
+
+- *Proven by us:* the token request went to `https://<allowlisted-host>/oauth2/v1/token` (exact host + path, re-validated after
+  assembly); redirects are refused (`token_redirect_rejected`); the host is re-checked against an exact allowlist immediately before
+  the call; the secret document's own `okta_domain` and `client_id` must match the approved binding.
+- *Proven by Okta, relied upon:* the client assertion's `aud` names the organization's token endpoint, so a different organization's
+  endpoint rejects it.
+- *Not proven:* that the host is the organization the customer believes it is, or that they own it.
+
+| Threat | Mitigation | Evidence |
+|---|---|---|
+| Attacker supplies a **lookalike** Okta host | Boundary-anchored apex allowlist (`okta.com`, `oktapreview.com`, `okta-emea.com`). `notokta.com`, `okta.com.evil.com`, `okta.co`, `0kta.com`, `xn--` punycode all fail | host-policy matrix, both repositories |
+| **Subdomain confusion** (`a.b.okta.com`) | The organization part must be **exactly one label**. **O1C fixed a real divergence here:** V3's wizard accepted multi-label hosts the runner rejects, so a customer could complete setup and then have every sync fail | host-policy matrix |
+| Attacker **redirects** the token endpoint | Redirect refused before parsing; `tokenEndpoint` cross-check yields `token_endpoint_mismatch` | ✓ |
+| Valid credential for the **wrong Okta org** | `organizationFingerprint` differs → `different_organization` | rotation-mismatch cases |
+| **Credential rotation switches organization** | Rotation requires an organization-fingerprint match and must **not** replace the existing credential on mismatch | rule defined in O1C, enforced in O2 |
+| **Custom-domain ambiguity** | Unsupported in v1 and structurally unusable (the signer requires the issuer to be derivable from the org host). The misleading "Use a custom Okta domain" wizard label was removed | ✓ |
+| **Host normalization collision** | Every accepted spelling collapses to one canonical host **and** one fingerprint | ✓ |
+| **Fingerprint mismatch** | Typed comparison result; an existing connector is never silently repointed | ✓ |
+| **Browser spoofs organization identity** | Only the server-validated org host and client id are fingerprint inputs; an injected `organizationId`/`displayName`/`organizationFingerprint` is ignored | ✓ |
+| **Registry declaration accidentally enables production execution** | Capability is separate from authorization. Okta is registered `certificationOnly` behind four independent blocks; the entry is frozen so `certificationOnly` cannot be flipped; `declarationAuthorizesExecution()` returns `false` unconditionally | ✓ |
+
+**Fingerprint composition.** `organizationFingerprint` deliberately **excludes** the client id, so recreating a service app reads as
+credential replacement rather than a new organization. `serviceAppFingerprint` includes it. Neither includes key material, so both
+survive key rotation. No secret, token, assertion, private key or customer display label is ever an input.
+
+**Registry gating (O1C).** Okta was previously **absent** from the runner's framework registry, which returned
+`provider_not_registered` — reading as "not implemented" while twelve Fargate entrypoints executed six resource flows. It is now
+registered as `certificationOnly`. This reversed a prior judgement that absence was a stronger posture; the block count did not
+decrease and was verified empirically, not assumed.
+
+**Still outstanding:** live KID verification against the real Okta application, the unresolved Okta admin-role requirement (O1B), and
+production enablement — all gated.
+
 - **Residual**: broadening scope is a separate authorized capability phase.
 - **Evidence**: `okta-org-validator.test.ts` (scope table), `okta-authorize-url.test.ts`, runner `okta-provider-scaffold.test.ts`.
 

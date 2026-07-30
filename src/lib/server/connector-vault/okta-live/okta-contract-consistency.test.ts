@@ -12,7 +12,7 @@ import { readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { OKTA_APPROVED_SCOPES, OKTA_PROHIBITED_SCOPES, scopesExactlyApproved, OKTA_LIFECYCLE } from "./okta-provider-contract";
-import { OKTA_CONTENT, OKTA_SETUP, OKTA_APPROVED_PUBLIC_KID } from "@/lib/customer-connectors/okta-content";
+import { OKTA_CONTENT, OKTA_SETUP, OKTA_APPROVED_PUBLIC_KID, validateOktaOrgHost, normalizeOrgInput } from "@/lib/customer-connectors/okta-content";
 
 // ── The pinned cross-repository contract ────────────────────────────────────────────────────────────────────────
 // This exact literal also appears in the connector-runner's mirror of this test. Changing the contract REQUIRES bumping
@@ -197,6 +197,61 @@ describe("scopesExactlyApproved", () => {
       if (r.ok === false && "extra" in r) for (const s of r.extra) expect(s).toMatch(/^[a-z0-9._]+$/);
       if (r.ok === false && "missing" in r) for (const s of r.missing) expect(s).toMatch(/^okta\.[a-z.]+\.read$/);
     }
+  });
+});
+
+// ── O1C: host policy must agree with the connector-runner ────────────────────────────────────────────────────────
+// A host this wizard ACCEPTS but the runner REJECTS produces a connection that validates and then never syncs. These cases mirror
+// canonicalizeOktaOrgHost in idcaddie-connector-runner/src/connector-sync/okta-organization-identity.ts.
+describe("okta host policy agrees with the runner's identity rule", () => {
+  const accepted = ["acme.okta.com", "acme.oktapreview.com", "acme.okta-emea.com", "trial-5294016.okta.com", "https://acme.okta.com", "ACME.OKTA.COM"];
+  const rejected = [
+    "okta.com", "oktapreview.com",                        // apex with no organization label
+    "a.b.okta.com", "acme.internal.okta.com",             // subdomain confusion — the org part must be ONE label
+    "acme.notokta.com", "acme.myokta.com", "acme.okta.co", "acme.okta.net", "acme.oktaa.com",
+    "acme.okta.com.evil.com", "okta.com.evil.com",        // real apex appears mid-host
+    "acme.0kta.com", "acme.xn--okta-nsa.com",             // homoglyph / punycode lookalikes
+    "id.acme.com", "sso.acme.io",                         // custom/vanity domains — unsupported in v1
+    "http://acme.okta.com", "user:pass@acme.okta.com", "acme.okta.com:8443",
+    "acme.okta.com/api/v1/users", "acme.okta.com?x=1", "acme.okta.com#f",
+    "169.254.169.254", "10.0.0.1", "okta.internal",
+  ];
+
+  it.each(accepted)("accepts %s", (host) => {
+    expect(validateOktaOrgHost(normalizeOrgInput(host)).ok, `${host} was rejected`).toBe(true);
+  });
+
+  it.each(rejected)("rejects %s", (host) => {
+    expect(validateOktaOrgHost(normalizeOrgInput(host)).ok, `${host} was ACCEPTED — the runner would refuse it`).toBe(false);
+  });
+
+  it("normalizes every accepted spelling of one org to the same host the runner would fingerprint", () => {
+    const hosts = new Set(["acme.okta.com", "https://acme.okta.com", "ACME.OKTA.COM", "  Acme.Okta.Com  "]
+      .map((f) => { const r = validateOktaOrgHost(normalizeOrgInput(f)); return r.ok ? r.host : `REJECTED:${f}`; }));
+    expect([...hosts]).toEqual(["acme.okta.com"]);
+  });
+
+  it("a bare label that LOOKS internal is still just an org label after the append", () => {
+    // `localhost` is a single DNS label, so the convenience append makes it `localhost.okta.com` — a legitimate Okta org host that
+    // resolves to Okta, not to a local address. The runner accepts the same normalized value, so this is agreement, not a hole.
+    // Qualified internal names have a dot, so they pass through unchanged and ARE rejected (see `okta.internal` above).
+    const r = validateOktaOrgHost(normalizeOrgInput("localhost"));
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.host).toBe("localhost.okta.com");
+    expect(validateOktaOrgHost("localhost")).toEqual({ ok: false, reason: "localhost_or_internal" });
+  });
+
+  it("the bare-label convenience append only ever produces a .okta.com host", () => {
+    expect(normalizeOrgInput("acme")).toBe("acme.okta.com");
+    // With the advanced flag the input passes through UNCHANGED — it never widens what the validator accepts.
+    expect(normalizeOrgInput("acme", { customDomain: true })).toBe("acme");
+    expect(validateOktaOrgHost(normalizeOrgInput("acme", { customDomain: true })).ok).toBe(false);
+  });
+
+  it("custom/vanity domains are not claimed anywhere in the wizard copy", () => {
+    const blob = JSON.stringify({ OKTA_CONTENT, OKTA_SETUP });
+    expect(blob).not.toMatch(/custom (okta )?domain/i);
+    expect(blob).not.toMatch(/vanity/i);
   });
 });
 
