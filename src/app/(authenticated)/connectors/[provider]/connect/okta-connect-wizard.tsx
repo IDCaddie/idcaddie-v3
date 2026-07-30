@@ -121,6 +121,12 @@ export function OktaConnectWizard({ provider }: { provider: string }) {
                 ))}
               </dl>
             </div>
+            <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/60">
+              <div className="text-[11px] uppercase tracking-wide text-zinc-400 dark:text-zinc-500">{OKTA_SETUP.roleStepTitle}</div>
+              <p className="mt-0.5 text-xs text-zinc-600 dark:text-zinc-400">{OKTA_SETUP.roleStepNote}</p>
+              <div className="mt-2 text-[11px] uppercase tracking-wide text-zinc-400 dark:text-zinc-500">{OKTA_SETUP.scopeVsRoleTitle}</div>
+              <p className="mt-0.5 text-xs text-zinc-500">{OKTA_SETUP.scopeVsRoleNote}</p>
+            </div>
             <div className="rounded-lg border border-zinc-200 p-3 dark:border-zinc-800">
               <div className="text-[11px] uppercase tracking-wide text-zinc-400 dark:text-zinc-500">{OKTA_CONTENT.notRequestedTitle}</div>
               <ul className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-zinc-600 dark:text-zinc-400">
@@ -129,6 +135,17 @@ export function OktaConnectWizard({ provider }: { provider: string }) {
               <p className="mt-2 text-xs text-zinc-500">{OKTA_CONTENT.readOnlyStatement}</p>
               <p className="mt-1 text-xs text-zinc-500">{OKTA_SETUP.noTokenNote}</p>
             </div>
+            <details className="rounded-lg border border-zinc-200 p-3 dark:border-zinc-800">
+              <summary className="cursor-pointer text-sm font-medium">{OKTA_SETUP.troubleshootingTitle}</summary>
+              <dl className="mt-2 space-y-2">
+                {OKTA_SETUP.troubleshooting.map((t) => (
+                  <div key={t.symptom}>
+                    <dt className="text-xs font-medium text-zinc-700 dark:text-zinc-300">{t.symptom}</dt>
+                    <dd className="text-xs text-zinc-500 dark:text-zinc-400">{t.cause} {t.fix}</dd>
+                  </div>
+                ))}
+              </dl>
+            </details>
             <div className="flex gap-2">
               <button type="button" onClick={() => setStep("organization")} className={primary}>Start setup</button>
               <Link href={`/connectors/${provider}`} className={secondary}>Cancel</Link>

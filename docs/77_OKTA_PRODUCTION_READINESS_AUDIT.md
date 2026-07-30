@@ -238,6 +238,54 @@ not replace the existing credential on mismatch; a different organization must n
 
 **Live KID verification and production enablement remain OUTSTANDING.**
 
+#### 3.3.3 — O1C.1 CLOSED: truthful manifest model + admin role resolved (2026-07-30)
+
+The two items O1C left open are closed.
+
+**1. The manifest contradiction is resolved in the schema, not in prose.**
+
+`manifests/okta.v1.json` could not be made truthful because the **neutral vendored manifest schema is an executor program**:
+`base_url` + `endpoints` + `field_map` + `pagination` tell the generic executor how to fetch and map. Three structural blocks made
+Okta unrepresentable:
+
+| Block | Why |
+|---|---|
+| `base_url` is one constant host, allowlisted by exact hostname | Okta's base URL is **per-tenant** (`https://<org>.okta.com`), server-derived from the connection. No constant host can exist. |
+| `field_map` is mandatory for a fact-emitting endpoint | Okta normalizes in reviewed TypeScript with its own response schemas. A declared `field_map` would claim to drive an executor that never reads it — a **new** fiction. |
+| `EMIT_FACT_TYPES` has no member for application assignments | Two of the six resources could not declare an emit type at all. |
+
+So the neutral schema was **extended generically** (`src/lib/server/connectors/manifest-schema.ts`) with a provider-agnostic
+lifecycle envelope and a second manifest kind, `native_connector`, for providers implemented by reviewed native code. Any future
+native provider uses it; the neutral schema stays authoritative, so there is no provider-specific format that only one provider's code
+understands. **Backward compatibility is the load-bearing property:** `manifest_kind` defaults to `executor_program`, so
+`slack.v1.json` validates **byte-unchanged** with no field added — asserted by test.
+
+**Execution safety is enforced by the schema itself.** A `certification_only` provider **cannot** declare
+`production_enabled: true` or waive `explicit_hosted_authorization_required` — the refinement rejects the combination, so no manifest
+input can express it. The capability enum contains **no** mutate/write/grant/revoke verb, so a write capability is not declarable. The
+constraint keys off `status`, not off a provider name, so it is generic policy rather than an Okta special case (proved by a test
+showing an `enabled` provider *may* declare production).
+
+**2. The Okta admin-role requirement is RESOLVED from official documentation** — not guessed, and not Super Admin.
+
+| Question | Answer | Source |
+|---|---|---|
+| Is an admin role required in addition to scopes? | **Yes.** Okta does not assign one to a service app automatically; without it every call returns **403** even with all three scopes granted. | [service-app guide](https://developer.okta.com/docs/guides/implement-oauth-for-okta-serviceapp/main/), [support article](https://support.okta.com/help/s/article/how-to-assign-the-correct-admin-role-to-a-service-application?language=en_US) |
+| Minimum standard role | **`Read Only Administrator`** — views users, groups, apps and app instances | [read-only administrators](https://help.okta.com/en-us/content/topics/security/administrators-read-only-admin.htm) |
+| Is Super Admin required? | **No.** No official source requires it; the support article's own read-only example uses Read Only Admin. | as above |
+| Custom role with a resource set? | **Not recommended in v1.** Okta exposes **no read-only permission for application *user* assignments** — only *"Edit app's user assignments"*, a **write** permission we must never request. A least-privilege custom role may 403 on `/apps/{id}/users`. **UNVERIFIED**; needs test-org confirmation. | [role permissions](https://help.okta.com/en-us/content/topics/security/custom-admin-role/about-role-permissions.htm) |
+
+**Accepted trade-off, stated plainly:** `Read Only Administrator` has **no optional resource targets**, so it cannot be narrowed to a
+subset of the org — it grants org-wide *read*. Accepted because the alternatives are a write permission or an unverified
+configuration.
+
+**A diagnostic falls out of the distinction, and is now in the setup copy:** an insufficient **scope** fails at *token request*
+(`invalid_scope`); an insufficient **admin role** fails at the *API call* (`403 Forbidden`). That tells a customer which of the two
+steps they missed.
+
+**Still outstanding after O1C.1:** live KID verification, custom-admin-role viability, and production enablement. **No fourth scope
+was added; the scope/KID contract remains 1.0.0.**
+
 ### 3.4 Self-service UI — the wizard exists but its last step is a demo store
 
 `src/app/(authenticated)/connectors/[provider]/connect/okta-connect-wizard.tsx` is a real 4-step flow

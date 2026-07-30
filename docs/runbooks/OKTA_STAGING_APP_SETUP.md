@@ -63,24 +63,47 @@ write/admin/lifecycle scope. The set is enforced as an **exact set** — a missi
 > V3's validator additionally listed `okta.apps.read` as **prohibited**, so the correct grant would have been *rejected* at the
 > configuration gate.
 
-## 7. Assign a least-privileged admin role — **exact role UNRESOLVED**
+## 7. Assign the admin role — **`Read Only Administrator`**
 
-API Services apps need an **admin role** to actually reach the API in addition to the granted scopes. This role is assigned to the
-**application**, not to a person.
+**An admin role is REQUIRED in addition to the scopes.** Okta does not assign one to a service app automatically, so without it every
+API call returns **403** even when all three scopes are granted. The role is assigned to the **application**, not to a person.
 
-**What is known:** the role must be **read-only** and as narrow as possible. Never assign a role that can make changes, and do not
-assign Super Admin — the OAuth scopes above are read-only and a write-capable role would defeat that.
+Assign **`Read Only Administrator`**. It is the minimum *standard* role that covers users, groups, applications and their
+assignments, and it cannot change anything in the org.
 
-**What is NOT yet established:** the exact role or resource set that covers reading users, groups **and** applications.
+**Do NOT assign Super Admin.** No official Okta documentation requires it for this integration.
 
-> **Unresolved setup requirement (O1B).** This step previously specified a **Read-Only Administrator constrained by a resource set
-> scoped to users only**. That cannot be correct now that `okta.groups.read` and `okta.apps.read` are required — a users-only
-> resource set would not permit reading applications. Rather than guess a role and send an operator to configure the wrong thing,
-> this is recorded as **unresolved**: determine the minimum role empirically against the dedicated Okta test organisation, then
-> document the finding here.
->
-> Note that OAuth **scopes** and Okta **admin-role** assignment are separate mechanisms. Read-only scopes do not imply any
-> particular role, and a role must never be broadened merely because a scope was added.
+### Scopes and admin role are two different mechanisms
+
+| | Says | Fails when wrong |
+|---|---|---|
+| **OAuth scopes** (§6) | which Okta APIs ID Caddie may call | at **token request** — the token is refused (`invalid_scope`) |
+| **Admin role** (this step) | which data those APIs return | at the **API call** — `403 Forbidden` |
+
+Granting the scopes without the role, or the role without the scopes, does not work. This is the single most common setup mistake,
+and the two failure modes above are how to tell which step was missed.
+
+### Why not a custom admin role with a resource set?
+
+A custom role would be narrower, and it is the preferred product position **in principle**. It is **not recommended in v1** because
+Okta exposes no read-only permission for application **user** assignments — the available permission is *"Edit app's user
+assignments"*, a **write** permission ID Caddie must never request. A least-privilege custom role may therefore return 403 on
+`/apps/{id}/users`.
+
+**Status: UNVERIFIED.** Whether a custom role can cover all six read surfaces must be confirmed against the dedicated Okta test
+organisation before it is recommended. Until then `Read Only Administrator` is the documented requirement.
+
+**Known trade-off, stated plainly:** `Read Only Administrator` has **no optional resource targets**, so it cannot be narrowed to a
+subset of the org — it grants org-wide *read*. That is a real least-privilege compromise, accepted because the alternative is either
+a write permission or an unverified configuration.
+
+### Sources
+
+- [Implement OAuth for Okta with a service app](https://developer.okta.com/docs/guides/implement-oauth-for-okta-serviceapp/main/) — an admin role must be assigned; roles are not automatic for apps
+- [How to Assign the Correct Admin Role to a Service Application](https://support.okta.com/help/s/article/how-to-assign-the-correct-admin-role-to-a-service-application?language=en_US) — *"An Admin Role must be assigned to the application"*; 403 when absent
+- [Roles in Okta](https://developer.okta.com/docs/api/openapi/okta-management/guides/roles) — standard role identifiers; `READ_ONLY_ADMIN` has no optional targets
+- [Read-only administrators](https://help.okta.com/en-us/content/topics/security/administrators-read-only-admin.htm) — views users, groups, apps and app instances
+- [Role permissions](https://help.okta.com/en-us/content/topics/security/custom-admin-role/about-role-permissions.htm) — custom-role read permissions; no standalone app-assignment read
 
 ## 8–11. Do NOT
 - **No redirect URI** (API Services apps have none).

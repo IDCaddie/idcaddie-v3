@@ -47,16 +47,31 @@ export const OKTA_SETUP = {
     "In Okta Admin, create an API Services app integration (not a Web app).",
     "Register ID Caddie's approved public key on the app.",
     "Grant these three read-only scopes: okta.users.read, okta.groups.read, okta.apps.read.",
-    "Assign a read-only admin role to the app.",
+    "Assign the Read Only Administrator role to the app (required in addition to the scopes).",
+  ],
+  // Troubleshooting keyed to the two DISTINCT failure modes. A scope problem fails when the token is requested; a role problem fails
+  // later, on the API call. That single distinction tells a customer which of the two steps they missed.
+  troubleshootingTitle: "If validation fails",
+  troubleshooting: [
+    { symptom: "Validation reports the scopes were refused", cause: "One of the three scopes is missing, or an extra scope was granted.", fix: "Check the app's Okta API Scopes tab — grant exactly the three scopes listed above, and nothing else." },
+    { symptom: "Validation succeeds but no data is returned, or you see a permission error", cause: "The admin role is missing or too narrow. Scopes alone do not grant data access.", fix: "Open the app's Admin roles tab and assign Read Only Administrator." },
+    { symptom: "Okta rejects the connection immediately", cause: "The public key registered on the app does not match the key ID shown below.", fix: "Re-register the public key and confirm the key ID matches exactly." },
   ],
   scopeStepTitle: "Required scopes",
   scopeStepNote: "Grant exactly these three scopes on the app's API Scopes tab — no more, no fewer. All three are read-only.",
   roleStepTitle: "Required admin role",
-  // The admin-role requirement is deliberately NOT stated as a specific named role. Okta may require an admin role on an API
-  // Services app in addition to the granted scopes, and the users-scoped read-only role this step previously named cannot be
-  // correct for reading applications. Guessing would send customers to configure the wrong thing, so the step states what IS
-  // known (read-only, least privilege) and defers the exact role. See docs/runbooks/OKTA_STAGING_APP_SETUP.md §6.
-  roleStepNote: "Assign a read-only administrator role. Use the least-privileged role that still allows reading users, groups, and applications — ID Caddie will confirm the exact role with you during setup. Never assign a role that can make changes.",
+  // O1C.1 — RESOLVED from official Okta documentation. An admin role IS required in ADDITION to the scopes: Okta does not assign one
+  // to a service app automatically, and without it every API call returns 403 even when all three scopes are granted.
+  //
+  // `Read Only Administrator` is the minimum STANDARD role that covers users, groups, applications and their assignments. A custom
+  // admin role with a resource set would be narrower, but Okta exposes no read-only permission for application USER assignments
+  // (only "Edit app's user assignments", a write permission ID Caddie must never request), so a custom role may fail on that one
+  // read. That path stays unverified rather than recommended. Super Admin is NOT required and must never be requested.
+  roleStepNote: "Assign the Read Only Administrator role to the app. This is required in addition to the scopes — without an admin role, Okta returns 403 even when the scopes are granted. Read Only Administrator cannot change anything in your org. Do not assign Super Admin.",
+  // Scopes and the admin role are SEPARATE mechanisms with different failure modes. Stated explicitly because conflating them is the
+  // single most likely setup mistake.
+  scopeVsRoleTitle: "Scopes and admin role are separate",
+  scopeVsRoleNote: "Okta needs both. The three scopes say which APIs ID Caddie may call; the admin role says which data those APIs will return. Granting scopes without the role, or the role without the scopes, will not work.",
   keyStepTitle: "Public-key registration",
   keyStepNote: "Confirm you registered ID Caddie's approved public key (below) on the app. The private key stays in ID Caddie's secure key store and is never entered here.",
   // Where the key id is actually used, and the one thing a customer must NOT paste.

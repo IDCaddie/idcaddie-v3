@@ -97,15 +97,138 @@ const EndpointSchema = z
     }
   });
 
-export const ProviderManifestSchema = z
+// ── Lifecycle envelope (O1C.1) ────────────────────────────────────────────────────────────────────────
+// Provider-agnostic. Declares WHAT a provider is, never WHETHER it may run: execution authorization stays in the composition root,
+// the dispatch guards, and the per-run hosted flags. A manifest is DATA — registering a capability must not grant one.
+export const PROVIDER_LIFECYCLE_STATUSES = ["certification_only", "pilot_ready", "enabled"] as const;
+export const PROVIDER_ACCESS_MODES = ["read_only", "read_write"] as const;
+
+// Capability verbs a provider may declare. Read/ingest verbs only: there is deliberately NO mutate/grant/revoke/remediate verb, so a
+// manifest cannot declare a write capability at all (see the superRefine access-mode check below).
+export const PROVIDER_CAPABILITIES = [
+  "validate", "aggregate", "persist", "paginate", "retry", "completeness", "reconcile",
+] as const;
+
+export const LifecycleSchema = z
+  .object({
+    status: z.enum(PROVIDER_LIFECYCLE_STATUSES),
+    access_mode: z.enum(PROVIDER_ACCESS_MODES),
+    execution: z
+      .object({
+        staging_enabled: z.boolean(),
+        production_enabled: z.boolean(),
+        explicit_hosted_authorization_required: z.boolean(),
+      })
+      .strict(),
+  })
+  .strict()
+  .superRefine((l, ctx) => {
+    // A certification-only provider can NEVER declare production execution, and can never waive explicit hosted authorization.
+    // This is enforced by the SCHEMA, so no manifest input — hand-edited, generated, or otherwise — can express the combination.
+    if (l.status === "certification_only") {
+      if (l.execution.production_enabled) {
+        ctx.addIssue({ code: "custom", path: ["execution", "production_enabled"], message: "a certification_only provider must declare production_enabled: false" });
+      }
+      if (!l.execution.explicit_hosted_authorization_required) {
+        ctx.addIssue({ code: "custom", path: ["execution", "explicit_hosted_authorization_required"], message: "a certification_only provider must require explicit hosted authorization" });
+      }
+    }
+  });
+
+// ── Native-connector manifests (O1C.1) ────────────────────────────────────────────────────────────────
+// WHY A SECOND KIND EXISTS. The shape above is an EXECUTOR PROGRAM: `base_url` + `endpoints` + `field_map` + `pagination` tell the
+// GENERIC executor how to fetch and map. That shape cannot describe a provider like Okta, for three structural reasons:
+//   1. `base_url` is one constant host, allowlisted by exact hostname — Okta's base URL is PER-TENANT (`https://<org>.okta.com`) and
+//      is server-derived from the ownership-validated connection. No constant host can exist.
+//   2. `field_map` is mandatory for a fact-emitting endpoint, but a native connector normalizes in reviewed TypeScript with its own
+//      response schemas. Declaring a field_map would claim to drive an executor that never reads it.
+//   3. `EMIT_FACT_TYPES` has no member for some native resources (e.g. application assignments).
+//
+// So `native_connector` declares WHAT is implemented and its lifecycle, and omits the executor program it does not use. This is a
+// GENERIC kind — any future provider implemented by reviewed native code uses it — and it keeps the neutral schema authoritative
+// instead of leaving a provider-specific format that only that provider's code understands.
+const NativeResourceIdSchema = z.string().min(1).max(64).regex(/^[a-z][a-z0-9_]*$/, "resource id must be lower_snake_case");
+const NativeEntrypointRoles = ["verify", "smoke", "aggregate", "persist"] as const;
+
+const NativeEntrypointSchema = z
+  .object({
+    role: z.enum(NativeEntrypointRoles),
+    // Repository-relative identifiers, validated for SHAPE only. The owning repository's consistency test proves they exist.
+    task_file: z.string().min(1).max(200).regex(/^[A-Za-z0-9._-]+$/, "task_file must be a bare filename"),
+    task_definition: z.string().min(1).max(200).regex(/^[A-Za-z0-9._-]+$/, "task_definition must be a bare filename"),
+    resources: z.array(NativeResourceIdSchema),   // empty for auth-only roles such as `verify`
+    persists: z.boolean(),
+  })
+  .strict()
+  .superRefine((e, ctx) => {
+    if (e.persists !== (e.role === "persist")) {
+      ctx.addIssue({ code: "custom", path: ["persists"], message: `entrypoint '${e.task_file}' sets persists=${e.persists} for role '${e.role}'` });
+    }
+  });
+
+export const NativeConnectorManifestSchema = z
   .object({
     manifest_version: z.literal(1),
+    manifest_kind: z.literal("native_connector"),
+    provider_id: z.string().min(1),
+    // A per-tenant provider has NO manifest-constant base URL. Stated explicitly rather than left as a missing field.
+    base_url_source: z.enum(["manifest", "server_derived"]),
+    auth: z.object({ kind: z.enum(AUTH_KINDS), token_kind: z.string().min(1), header: z.enum(AUTH_HEADERS) }).strict(),
+    api_base_path: z.string().regex(/^\/[A-Za-z0-9._/-]*$/, "api_base_path must be a leading-slash relative path"),
+    lifecycle: LifecycleSchema,
+    resources: z.array(NativeResourceIdSchema).min(1),
+    capabilities: z.array(z.enum(PROVIDER_CAPABILITIES)).min(1),
+    // Free-form lower_snake_case items — this is a TRUTHFULNESS field, and constraining it to an enum would tempt an author to drop
+    // an inconvenient gap rather than name it.
+    not_yet_available: z.array(z.string().min(1).max(64).regex(/^[a-z][a-z0-9_]*$/)).default([]),
+    entrypoints: z.array(NativeEntrypointSchema).min(1),
+    // Budget is referenced BY NAME, never duplicated numerically: runtime code stays authoritative and cannot drift from a copy.
+    budget_profile: z
+      .object({ name: z.string().min(1).max(120).regex(/^[A-Z][A-Z0-9_]*$/, "budget_profile.name must be an UPPER_SNAKE_CASE runtime constant"), source: z.string().min(1).max(200) })
+      .strict(),
+    rate_limit: z.object({ rps: z.number().positive(), burst: z.number().int().positive() }).strict(),
+  })
+  .strict()
+  .superRefine((m, ctx) => {
+    if (m.base_url_source === "manifest") {
+      ctx.addIssue({ code: "custom", path: ["base_url_source"], message: "a native_connector with a manifest-constant base URL should use the executor-program manifest kind" });
+    }
+    // A read_only provider must not declare a persisting entrypoint for a resource it does not declare, and must declare no
+    // capability outside the read/ingest verb set (the enum already guarantees the latter).
+    const declared = new Set(m.resources);
+    for (const e of m.entrypoints) {
+      for (const r of e.resources) {
+        if (!declared.has(r)) ctx.addIssue({ code: "custom", path: ["entrypoints"], message: `entrypoint '${e.task_file}' references undeclared resource '${r}'` });
+      }
+    }
+    // Every declared resource must be reachable by BOTH an aggregate and a persist entrypoint, or the declaration overstates what
+    // is implemented. (Many-to-one is allowed: one entrypoint may serve several resources.)
+    for (const r of m.resources) {
+      const roles = new Set(m.entrypoints.filter((e) => e.resources.includes(r)).map((e) => e.role));
+      if (!roles.has("aggregate")) ctx.addIssue({ code: "custom", path: ["resources"], message: `resource '${r}' has no aggregate entrypoint` });
+      if (!roles.has("persist")) ctx.addIssue({ code: "custom", path: ["resources"], message: `resource '${r}' has no persist entrypoint` });
+    }
+    if (m.lifecycle.access_mode === "read_only" && m.auth.header !== "bearer" && m.auth.header !== "api_key_header") {
+      ctx.addIssue({ code: "custom", path: ["auth", "header"], message: "unsupported auth header" });
+    }
+  });
+
+export type NativeConnectorManifest = z.infer<typeof NativeConnectorManifestSchema>;
+
+// The EXECUTOR-PROGRAM manifest — the original shape, unchanged. `manifest_kind` is OPTIONAL here and defaults to
+// "executor_program", so every existing manifest (slack.v1.json and friends) validates BYTE-UNCHANGED.
+export const ExecutorProgramManifestSchema = z
+  .object({
+    manifest_version: z.literal(1),
+    manifest_kind: z.literal("executor_program").optional().default("executor_program"),
     provider_id: z.string().min(1),
     auth: z.object({ kind: z.enum(AUTH_KINDS), token_kind: z.string().min(1), header: z.enum(AUTH_HEADERS) }).strict(),
     base_url: z.string().min(1),
     rate_limit: z.object({ rps: z.number().positive(), burst: z.number().int().positive() }).strict(),
     budget: z.object({ max_requests: z.number().int().positive(), max_items: z.number().int().positive(), max_wallclock_s: z.number().int().positive() }).strict(),
     endpoints: z.array(EndpointSchema).min(1),
+    // Optional so existing manifests are unaffected; when present it is validated exactly as for a native connector.
+    lifecycle: LifecycleSchema.optional(),
   })
   .strict()
   .superRefine((m, ctx) => {
@@ -121,4 +244,22 @@ export const ProviderManifestSchema = z
     }
   });
 
+export type ExecutorProgramManifest = z.infer<typeof ExecutorProgramManifestSchema>;
+
+// THE neutral manifest contract — a union over the two kinds. Native is tried first because it pins `manifest_kind` to a literal, so
+// an executor-program manifest falls through to the second branch immediately.
+//
+// BACKWARD COMPATIBILITY is the load-bearing property: `manifest_kind` is optional on the executor branch and defaults to
+// "executor_program", so every pre-O1C.1 manifest (slack.v1.json and friends) validates BYTE-UNCHANGED with no field added.
+//
+// A plain union rather than z.discriminatedUnion: the discriminator is optional on one branch, and both branches carry superRefine
+// (so they are not bare ZodObjects). The only cost is that a MALFORMED manifest reports issues from both branches;
+// manifest-validate.ts merely formats issue messages, so nothing depends on branch-specific error shapes.
+export const ProviderManifestSchema = z.union([NativeConnectorManifestSchema, ExecutorProgramManifestSchema]);
+
 export type ProviderManifest = z.infer<typeof ProviderManifestSchema>;
+
+// Narrowing helper so callers do not re-test the discriminator by hand.
+export function isNativeConnectorManifest(m: ProviderManifest): m is NativeConnectorManifest {
+  return (m as { manifest_kind?: string }).manifest_kind === "native_connector";
+}

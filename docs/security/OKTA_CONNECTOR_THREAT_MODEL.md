@@ -120,8 +120,18 @@ survive key rotation. No secret, token, assertion, private key or customer displ
 registered as `certificationOnly`. This reversed a prior judgement that absence was a stronger posture; the block count did not
 decrease and was verified empirically, not assumed.
 
-**Still outstanding:** live KID verification against the real Okta application, the unresolved Okta admin-role requirement (O1B), and
-production enablement — all gated.
+**O1C.1 — admin-role and manifest threats.**
+
+| Threat | Mitigation |
+|---|---|
+| **Over-privileged admin assignment.** A customer assigns Super Admin (or any write-capable role) to the service app, so a future scope or code defect could mutate the org | Setup copy names **`Read Only Administrator`** explicitly and says **"Do not assign Super Admin"**; a test asserts no copy anywhere requests Super Admin, and that the only permitted mention is the prohibition. The three OAuth scopes are read-only regardless of role, so a write role alone grants IDCaddie nothing — but it needlessly widens blast radius, so it is refused in guidance. |
+| **Scope/role conflation.** A customer grants scopes but no role (or vice versa) and cannot tell what failed | Documented as two mechanisms with distinct failure points: scope → `invalid_scope` at token request; role → `403` at the API call. Troubleshooting copy is keyed to that distinction and asserted by test. |
+| **Under-privileged custom role silently losing a resource.** A custom role covers users/groups/apps but 403s on application user assignments, producing a partial graph that could look like "no access" | Custom roles are **not recommended in v1** and the gap is documented. Separately, O1A guarantees a partial sweep reports `complete: false`, so a 403 can never be mistaken for "zero assignments" and can never trigger stale marking. |
+| **Manifest declares production execution.** A hand-edited or generated manifest flips the connector live | Refused by the **schema**: a `certification_only` provider cannot declare `production_enabled: true` or waive explicit hosted authorization. Capability verbs contain no write verb, so a write capability is not declarable. |
+| **Provider-specific manifest format drifts unnoticed.** A format only one provider's code understands escapes neutral validation | The neutral schema now admits a generic `native_connector` kind, so the active Okta manifest is validated by the **neutral** contract. Existing manifests validate byte-unchanged. |
+
+**Still outstanding:** live KID verification against the real Okta application, custom-admin-role viability, and production
+enablement — all gated.
 
 - **Residual**: broadening scope is a separate authorized capability phase.
 - **Evidence**: `okta-org-validator.test.ts` (scope table), `okta-authorize-url.test.ts`, runner `okta-provider-scaffold.test.ts`.
