@@ -45,16 +45,18 @@ describe("publication manifest — published_not_active is REAL", () => {
     expect(blob).not.toMatch(/arn:aws|\b\d{12}\b|secretsmanager|role\//i);
   });
 
-  it("names ONE authoritative URL, served by a dedicated project rather than the V3 application", () => {
-    // Exactly one authoritative endpoint: V3 must never also serve a JWKS, or two could diverge.
-    expect(manifest.jwks_url).toMatch(/^https:\/\/idcaddie-staging-jwks\.vercel\.app\/\.well-known\//);
+  it("names ONE authoritative URL on the custom hostname, not a platform URL", () => {
+    // Exactly one authoritative endpoint: V3 must never also serve a JWKS, or two could diverge. And the contract URL must be the
+    // custom hostname — a *.vercel.app URL is operational only and must never become customer configuration.
+    expect(manifest.jwks_url).toBe("https://jwks.staging.idcaddie.com/.well-known/idcaddie-okta-jwks.json");
+    expect(manifest.jwks_url).not.toMatch(/vercel\.app/);
     expect(String(manifest.hosting)).toMatch(/dedicated static/i);
     expect(String(manifest.hosting)).toMatch(/no AWS credentials at request time/i);
   });
 
-  it("records the final hostname as PENDING rather than treating a platform URL as the contract", () => {
-    // The approved hostname needs a DNS record at the registrar; until then the platform URL is operational, not contractual.
-    expect(manifest.jwks_url_final_pending).toBe("https://jwks.staging.idcaddie.com/.well-known/idcaddie-okta-jwks.json");
+  it("records that the endpoint was publicly verified on a matching TLS certificate", () => {
+    expect(manifest.verified_publicly).toBe(true);
+    expect(String(manifest.tls)).toMatch(/jwks\.staging\.idcaddie\.com/);
   });
 
   it("V3 does not host a competing JWKS artifact", () => {
