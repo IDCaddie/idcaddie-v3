@@ -1,0 +1,18 @@
+{
+  "environment": "staging",
+  "contract_version": "1.0.0",
+  "publication_status": "published_not_active",
+  "active_contract_kid": "VDkZAQoJl_prLRU83WiPreOBGoP6Fib3qC0CG880wz0",
+  "published_kids": [
+    "p7AyvDK0yI95_HdQBxdhBSOTt9mMYPczGL-4USxaMto"
+  ],
+  "signing_kid": "p7AyvDK0yI95_HdQBxdhBSOTt9mMYPczGL-4USxaMto",
+  "key_algorithm": "RS256",
+  "key_status": "active",
+  "thumbprint_method": "RFC7638",
+  "generated_by": "deploy/scripts/okta-jwks-publish.mjs (connector-runner)",
+  "notes": "published_not_active: the published KID is NOT the active contract KID. The hosted signer fails closed while they differ, which is intentional \u2014 no Okta application trusts the new key yet. The endpoint is served by a DEDICATED static project, never by the V3 application, so there is exactly one authoritative JWKS URL. The final hostname awaits a DNS record at the registrar. Cutover is O2C.2.",
+  "jwks_url": "https://idcaddie-staging-jwks.vercel.app/.well-known/idcaddie-okta-jwks.json",
+  "jwks_url_final_pending": "https://jwks.staging.idcaddie.com/.well-known/idcaddie-okta-jwks.json",
+  "hosting": "dedicated static Vercel project idcaddie-staging-jwks; no auth, no cookies, no AWS credentials at request time"
+}
