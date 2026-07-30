@@ -11,6 +11,9 @@ export async function proxy(request: NextRequest) {
 export const config = {
   // Run on app routes; skip Next internals and static assets (no session work needed there).
   matcher: [
-    "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)",
+    // `.well-known/` is EXCLUDED: it must be publicly reachable without a session. The Okta JWKS artifact lives there, and Okta
+    // fetches it server-to-server with no cookies — a redirect to /login would present an HTML page where a JWK Set is expected
+    // and silently break assertion verification. This exclusion is load-bearing, not cosmetic.
+    "/((?!_next/static|_next/image|favicon.ico|\\.well-known/|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)",
   ],
 };

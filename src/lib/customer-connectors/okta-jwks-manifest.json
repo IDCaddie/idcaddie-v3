@@ -1,0 +1,15 @@
+{
+  "environment": "staging",
+  "contract_version": "1.0.0",
+  "publication_status": "published_not_active",
+  "jwks_path": "/.well-known/idcaddie-okta-jwks.json",
+  "jwks_host": "PENDING_APPROVED_STAGING_DOMAIN",
+  "active_contract_kid": "VDkZAQoJl_prLRU83WiPreOBGoP6Fib3qC0CG880wz0",
+  "published_kids": ["p7AyvDK0yI95_HdQBxdhBSOTt9mMYPczGL-4USxaMto"],
+  "signing_kid": "p7AyvDK0yI95_HdQBxdhBSOTt9mMYPczGL-4USxaMto",
+  "key_algorithm": "RS256",
+  "key_status": "active",
+  "thumbprint_method": "RFC7638",
+  "generated_by": "deploy/scripts/okta-jwks-publish.mjs (connector-runner)",
+  "notes": "published_not_active: the published KID is NOT the active contract KID. The hosted signer fails closed while they differ, which is intentional — no Okta application trusts the new key yet. Cutover is O2C.2."
+}
