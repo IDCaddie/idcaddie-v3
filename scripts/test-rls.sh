@@ -90,6 +90,29 @@ grant select on auth.users to authenticated, service_role;
 revoke update, delete, truncate on public.files from authenticated;
 grant update (upload_status) on public.files to authenticated;
 
+-- The `runner_*` functions are TRUSTED-PRODUCER ONLY: their migrations grant EXECUTE to `connector_runner` and to nobody else,
+-- because they record facts about the outside world that only the runner observes. The blanket `grant execute on all functions`
+-- above hands every one of them to `authenticated`, which MASKS that boundary completely — under this harness a browser role
+-- appears able to call them, so a missing or wrong grant could never be detected. Same masking class as the files/0016 and
+-- connector-vault/0018 re-asserts above. Re-revoke them so the suite reflects the REAL hosted surface.
+--
+-- ONLY the browser roles are revoked here. `connector_runner`'s own access is left exactly as the migrations set it — some
+-- runner_* helpers are internal fencing functions that the runner must NOT hold (CP9c asserts precisely that), so re-granting
+-- across the board would break a real boundary while pretending to restore one.
+--
+-- 0064's V0 is the backstop that fails loudly if this drifts.
+do $$
+declare f record;
+begin
+  for f in
+    select p.oid::regprocedure as sig
+    from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'public' and p.proname like 'runner\_%'
+  loop
+    execute format('revoke all on function %s from authenticated, anon, service_role, public', f.sig);
+  end loop;
+end $$;
+
 -- The connector-vault tables (migrations 0017 + 0018) have a least-privilege grant surface that the
 -- blanket grant above re-broadens (it grants select/insert/update/delete on ALL tables to authenticated),
 -- which would MASK the intended posture — exactly the 0015/0016/0018 masking gap (staging verification of
