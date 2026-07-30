@@ -1,7 +1,7 @@
 {
   "environment": "staging",
   "contract_version": "1.1.0",
-  "publication_status": "active_pending_live_verification",
+  "publication_status": "live_verified",
   "active_contract_kid": "p7AyvDK0yI95_HdQBxdhBSOTt9mMYPczGL-4USxaMto",
   "published_kids": [
     "p7AyvDK0yI95_HdQBxdhBSOTt9mMYPczGL-4USxaMto"
@@ -11,9 +11,11 @@
   "key_status": "active",
   "thumbprint_method": "RFC7638",
   "generated_by": "deploy/scripts/okta-jwks-publish.mjs (connector-runner)",
-  "notes": "active_pending_live_verification: the O2C.2 cutover has made the published KID the active contract KID, so the hosted signer no longer fails closed. Okta trust is NOT yet proven by a live exchange — that is the single controlled verification this phase performs. Served by a DEDICATED static project on its own hostname, never by the V3 application, so there is exactly one authoritative JWKS URL.",
+  "notes": "live_verified: on 2026-07-30 one controlled staging run authenticated to Okta with the KMS-backed key, exchanged a client_credentials token scoped exactly okta.users.read, and completed one bounded GET /api/v1/users?limit=1 returning 200. The outcome was recorded through the runner-only 0064 path; the connector is `verified` and NOTHING more — not healthy, not syncing, not production-enabled. Served by a DEDICATED static project on its own hostname, never by the V3 application.",
   "jwks_url": "https://jwks.staging.idcaddie.com/.well-known/idcaddie-okta-jwks.json",
   "hosting": "dedicated static Vercel project idcaddie-staging-jwks on the custom hostname jwks.staging.idcaddie.com; no auth, no cookies, no AWS credentials at request time",
   "tls": "Let's Encrypt, CN=jwks.staging.idcaddie.com",
-  "verified_publicly": true
+  "verified_publicly": true,
+  "live_verified_at": "2026-07-30T23:01:30Z",
+  "live_verification_scope": "okta.users.read only; groups.read and apps.read remain unproven"
 }
