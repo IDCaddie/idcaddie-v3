@@ -110,6 +110,10 @@ export type OrgHostReason =
 const BARE_HOST = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/;
 // Accept the Okta apexes (customers use `<org>.okta.com` / `.oktapreview.com` / `.okta-emea.com`) so an arbitrary domain can't be
 // entered. (Custom vanity domains are a later, separately-designed concern — not accepted in this preview.)
+// The three documented Okta organization apexes. MUST match OKTA_APEX_DOMAINS in the connector-runner's
+// okta-organization-identity.ts — asserted by okta-contract-consistency.test.ts, because a host this wizard accepts but the runner
+// rejects produces a connection that validates and then never syncs.
+const OKTA_APEXES: readonly string[] = ["okta.com", "oktapreview.com", "okta-emea.com"];
 const OKTA_APEX = /\.(okta\.com|oktapreview\.com|okta-emea\.com)$/;
 const INTERNAL_SUFFIX = /\.(internal|local|localdomain|lan|intranet|corp|home|test|example|invalid)$/;
 
@@ -147,6 +151,12 @@ export function validateOktaOrgHost(raw: unknown): OrgHostResult {
   const tld = v.slice(v.lastIndexOf(".") + 1);
   if (!/[a-z]/.test(tld)) return { ok: false, reason: "ip_literal" }; // numeric TLD = an IP-ish literal
   if (!OKTA_APEX.test(v)) return { ok: false, reason: "not_okta_domain" };
+  // O1C — the organization part must be EXACTLY ONE label. Without this, `a.b.okta.com` and `acme.internal.okta.com` were
+  // accepted here while the connector-runner's identity rule (canonicalizeOktaOrgHost) rejects them as `bad_label`: a customer
+  // could complete setup and then have every sync fail. Subdomain confusion is also not a real Okta org host.
+  const apex = OKTA_APEXES.find((a) => v.endsWith(`.${a}`));
+  if (apex === undefined) return { ok: false, reason: "not_okta_domain" };
+  if (v.slice(0, v.length - apex.length - 1).includes(".")) return { ok: false, reason: "bad_shape" };
   return { ok: true, host: v };
 }
 

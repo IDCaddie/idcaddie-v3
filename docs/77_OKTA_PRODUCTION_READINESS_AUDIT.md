@@ -204,6 +204,40 @@ wording was introduced.
 **Live KID verification remains OUTSTANDING.** Repository consistency is not proof that the public key is registered on the real
 Okta application or that the three scopes are granted. Production enablement stays gated.
 
+#### 3.3.2 — O1C RESOLVED: organization identity + registry reconciliation (2026-07-30)
+
+**PR O1C-RUNNER** (`idcaddie-connector-runner` #99) and **PR O1C-V3**. **No fourth scope was added** — identity is derived from
+verified request context, so `okta.orgs.read` proved unnecessary. Contract stays at **1.0.0**.
+
+| Audit finding | Resolution |
+|---|---|
+| **Organization identity MISSING** (`/api/v1/org` absent) | Not needed. A versioned, deterministic `organizationFingerprint` is derived from provider + canonical org host + verified token endpoint. It is an **IDCaddie-derived value, never an Okta-issued org ID** — the access token is opaque, so there is no issuer claim to read and no signature we verify. Documented precisely rather than overclaimed. |
+| **Okta unregistered in `framework-registry.ts`** while 12 entrypoints ran | Registered as `certificationOnly`, mirroring `microsoft_entra`. Reverses a prior judgement that absence was "a stronger dormancy posture" — the objection is truthfulness, not strength. Block count verified **not** to have decreased. |
+| `OKTA_RESOURCES = ["users"]` vs six real flows | A purpose-built capability declaration states six resources, eight capabilities and eight not-yet-complete items, bound by test to the real entrypoints in **both** directions. |
+
+**Two defects this audit did not surface**, both found during implementation:
+
+1. **The runner had no Okta apex allowlist.** `okta-auth.ts`'s `ORG_HOST` is a transport check accepting any lowercase dotted host
+   with an alphabetic TLD — `evil.example.com` passed it. An identity-grade, boundary-anchored allowlist now rejects lookalikes
+   (`notokta.com`, `okta.com.evil.com`, `okta.co`, `0kta.com`, punycode).
+2. **V3's wizard accepted hosts the runner rejects.** `a.b.okta.com` and `acme.internal.okta.com` validated in the wizard but fail the
+   runner's single-label rule — a customer could have completed setup and then had every sync fail. Both sides now agree, asserted by
+   a shared host-policy matrix.
+
+**Also corrected:** the wizard's **"Use a custom Okta domain"** checkbox never enabled custom domains — it only disabled the
+convenience `.okta.com` append. Custom domains are structurally unsupported (the signer requires `issuerUrl === https://${orgHost}`),
+so the label promised something the product does not do. Relabelled, and the limitation is now stated.
+
+**Deliberately deferred:** `manifests/okta.v1.json` is not rewritten. Its schema pins `discovery_only`/`promotion_disabled` to
+`z.literal(true)` plus single-resource literals and a superseded pilot budget. Its flags are true *of the manifest-driven executor
+path* that the standalone persist tasks do not use — a real distinction, but one easy to misread. **Residual, stated plainly:** a
+reader of that file alone would still infer a users-only, non-promoting connector. Reconciling it remains **OPEN**.
+
+**Rotation and reconnect rules are defined, not implemented** (O2/O6): rotation requires an organization-fingerprint match and must
+not replace the existing credential on mismatch; a different organization must never silently repoint an existing connector.
+
+**Live KID verification and production enablement remain OUTSTANDING.**
+
 ### 3.4 Self-service UI — the wizard exists but its last step is a demo store
 
 `src/app/(authenticated)/connectors/[provider]/connect/okta-connect-wizard.tsx` is a real 4-step flow
