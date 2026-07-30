@@ -356,3 +356,15 @@ V9 a request role still cannot UPDATE or DELETE the table directly.
 
 The runner's own execution is asserted by grant shape rather than by SET ROLE: `postgres` holds its `connector_runner` membership
 with `set_option = false`, so the harness cannot assume that role and claiming otherwise would be untrue.
+
+
+## okta_capability_evidence_test.sql (0065)
+
+K0 grant shape (runner only; anon/authenticated/service_role denied) plus an assertion that 0064's contract pin moved to 1.2.0.
+K1 an owner can neither call the function nor INSERT directly. K2 capabilities are recorded independently and an unsubmitted
+capability simply does not exist — a groups run cannot imply apps. K3 audit exactly once per result, no credential material.
+K4 idempotent replay: no write, no second audit, no timestamp drift. K5 the isolation property — an apps failure leaves users and
+groups verified and does not fail the connector validation. K6 a stale failure cannot demote a verified capability, and the FULL
+evidence package survives the rejection. K7 stale KID, stale contract version, unknown capability, forged run and cross-tenant
+result are each refused. K8 the pinned-KID CHECK and the verified-evidence CHECK hold against direct owner UPDATEs. K9 a viewer
+reads only their own tenant and cannot write.

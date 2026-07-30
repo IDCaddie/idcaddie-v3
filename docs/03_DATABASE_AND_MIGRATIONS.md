@@ -138,3 +138,28 @@ older `runner_*` functions — they are SECURITY DEFINER with internal tenant ch
 is therefore a deliberate migration.
 
 **Evidence is all-or-nothing.** A `succeeded` row must carry fingerprints, KID, contract version, run id and timestamp together.
+
+---
+
+## 0065 — Okta per-capability evidence, contract pin 1.2.0 (O2C.3)
+
+`okta_connector_capability_evidence` — one row per proven-or-failed read capability (`users_read`, `groups_read`, `apps_read`),
+each bound to tenant, connector, a server-generated `connector_run`, the pinned KID and the contract version it was proven under.
+
+**Why a table, not three booleans.** 0064 recorded ONE outcome, correct when there was one thing to prove. With three read scopes,
+a single status would lose which scope was actually exercised — "the connector is verified" must never be able to mean "we tried
+users and assumed the rest."
+
+**Isolation.** A failed capability updates only its own row, so a groups failure cannot erase a users success. The demotion guard
+refuses `verified -> failed` outright, so a proven capability never reaches the failure branch at all.
+
+**Runner-only**, with `anon`/`authenticated`/`service_role` each revoked by name (a PUBLIC revoke does not remove Supabase's
+default-privilege grants — see 0064).
+
+**Contract pin moved 1.1.0 -> 1.2.0** in `runner_record_okta_connector_validation`, in lockstep with the artifact recording
+`live_kid_verification: verified`. The pin and the artifact cannot move independently: a stale pin silently rejects every future
+submission.
+
+**Backfill.** The users_read row is transcribed from the O2C.2 validation that already earned it — same run id, KID and
+timestamp, and `contract_version` left at **1.1.0** because that is what it was proven under. Making historical rows read 1.2.0
+would be tidier and false.

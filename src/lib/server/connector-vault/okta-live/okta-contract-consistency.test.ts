@@ -17,8 +17,8 @@ import { OKTA_CONTENT, OKTA_SETUP, OKTA_APPROVED_PUBLIC_KID, validateOktaOrgHost
 // ── The pinned cross-repository contract ────────────────────────────────────────────────────────────────────────
 // This exact literal also appears in the connector-runner's mirror of this test. Changing the contract REQUIRES bumping
 // contract_version and updating this literal in BOTH repositories.
-const PINNED_CONTRACT_VERSION = "1.1.0";
-const PINNED_CONTRACT_HASH = "3a6c870f95c38e636fa182ec6e72763cfffca139201a16429f6f059555ca4870";
+const PINNED_CONTRACT_VERSION = "1.2.0";
+const PINNED_CONTRACT_HASH = "9fa5f390e91c5323de527ff608640a5daa624fc1e44723e9432064113e114654";
 
 // Superseded values live HERE, in the test — never in the artifact or in shipped copy, where a consumer could read one by mistake.
 const STALE_KID = "i-Wptr6usN1tpkNp17vHXv_Mar4NPz53rn-bmlTq8j4";
@@ -57,7 +57,7 @@ describe("okta contract artifact — identical to the connector-runner's", () =>
     expect(contract.auth_mode).toBe("oauth_private_key_jwt");
     expect(contract.lifecycle_status).toBe("certificationOnly");
     // Repository consistency is NOT proof the key is registered on the real Okta application.
-    expect(contract.live_kid_verification).toBe("outstanding");
+    expect(contract.live_kid_verification).toBe("verified");
   });
 
   it("carries no stale KID and no write scope", () => {
