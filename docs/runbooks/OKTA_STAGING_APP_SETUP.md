@@ -26,24 +26,32 @@ Okta Admin Console (the staging test org **trial-5294016.okta.com** only) → **
 ## 3. Client authentication — **private_key_jwt**
 Set client authentication to **Public key / Private key JWT** (a signed JWT client assertion), NOT a client secret.
 
-## 4. Register the public key (reuse the existing keypair only if safe)
-Register **ID Caddie's PUBLIC JWK**. If reusing the existing keypair, paste **only the public JWK** — never the private key.
-The private key stays in AWS Secrets Manager and is never pasted here or anywhere else.
+## 4. Point the app at ID Caddie's JWKS URL — do not paste a key
+Under **Client Credentials → Public keys**, choose **"Use a URL to fetch keys dynamically"** and set:
+```
+https://jwks.staging.idcaddie.com/.well-known/idcaddie-okta-jwks.json
+```
+Do **not** paste a JWK. Fetching by URL means key rotation is a publication step on ID Caddie's side and never requires the
+customer to touch this app again. The endpoint serves public key material only; the private half is a non-exportable AWS KMS key
+that cannot be read by anyone, including ID Caddie.
 
 ## 5. Confirm the KID
-The registered public key's **KID must equal**:
+The key served at that URL — and the one the app must resolve — is:
 ```
-VDkZAQoJl_prLRU83WiPreOBGoP6Fib3qC0CG880wz0
+p7AyvDK0yI95_HdQBxdhBSOTt9mMYPczGL-4USxaMto
 ```
-(if reusing the existing keypair). If a new keypair is generated, record the new KID and hand it to engineering (non-secret).
+This is an **RFC 7638 thumbprint** of the published JWK, so it is verifiable from the endpoint itself rather than taken on trust.
 
 > **Corrected in O1B.** This step previously published `i-Wptr…q8j4`, while all 12 connector-runner task definitions already
 > expected the value above. Anyone who followed the earlier instruction registered a public key whose private half ID Caddie does
 > not hold, and every token request would have failed `invalid_client`. The authoritative value lives in
 > `contracts/okta-provider-contract.v1.json` and is asserted by `okta-contract-consistency.test.ts` in both repositories.
 >
-> **Repository consistency is not proof of registration.** Confirming the KID against the real Okta application is a LIVE
-> verification step that remains **outstanding**.
+> **Updated in O2C.2 (2026-07-30).** Steps 4–5 previously told the customer to paste a public JWK whose private half lived in
+> AWS Secrets Manager. Both changed: the key is now a non-exportable KMS key, and the app resolves it through the JWKS URL above.
+>
+> **Repository consistency is still not proof of registration.** Confirming the key against the real Okta application is a LIVE
+> verification step, performed once in O2C.2.
 
 ## 6. Grant the scopes — **exactly these three, all read-only**
 In the app's **Okta API Scopes** tab, grant **exactly**:
