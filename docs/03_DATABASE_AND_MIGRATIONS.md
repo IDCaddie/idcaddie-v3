@@ -236,3 +236,21 @@ audit record.
 **Forgery-proof:** `audit_logs` has RLS with a SELECT-only policy (no INSERT policy), browser roles cannot UPDATE the directory
 tables, the writer is revoked from anon/authenticated/service_role, and `audit_logs_no_mutation` makes a written row immutable for
 every role.
+
+---
+
+## 0069 — Close abandoned smoke connector runs (O2E cleanup)
+
+The O2C.2/O2C.3/O2C.4 bounded smokes each call `runner_open_connector_run` to obtain a server-generated run id for their
+capability evidence, then exit without finishing it — they are one-shot probes, not sweeps. Seven were left `running`.
+
+Harmless (no `connector_run_discovery` row, so they can never satisfy the stale gate) but not acceptable: a permanently-`running`
+run misrepresents system state and will confuse any future "is a sync in flight?" check.
+
+Closed as `canceled` — an existing terminal status and the truthful one — with `failure_code = 'abandoned_smoke_validation'`.
+The reason is a failure CODE, not a new status value: the run-status vocabulary is a lifecycle contract and widening it for a
+housekeeping event would be permanent.
+
+Scoped by three independent predicates, any one of which makes it a no-op elsewhere: the exact controlled connector id,
+`status = 'running'`, and the ABSENCE of a `connector_run_discovery` row. The third distinguishes "opened a run id and exited"
+from "was actually discovering", so a real stuck sweep is never touched. One bounded audit event per closed run.
