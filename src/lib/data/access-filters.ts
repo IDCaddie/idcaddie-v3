@@ -205,7 +205,9 @@ export function detailActiveFilters(f: AccessFilters): number {
 }
 
 // ── return context: allowlisted internal back-links only (no caller-supplied URL is ever honored) ──────────────────────────────────────
-export const ACCESS_SOURCES = ["overview", "findings", "identity", "application"] as const;
+// Phase 2 adds the three Directory lists. They are static internal routes with no id, so they need no `fromId` — but they DO carry `ret`,
+// so returning from a person lands back on the same page of the same search rather than at the top of an unfiltered list.
+export const ACCESS_SOURCES = ["overview", "findings", "identity", "application", "people", "groups", "applications"] as const;
 export type AccessSource = (typeof ACCESS_SOURCES)[number];
 export const isAccessSource = (v: string): v is AccessSource => (ACCESS_SOURCES as readonly string[]).includes(v);
 
@@ -234,6 +236,9 @@ export function backLink(sp: SearchParamsInput): { href: string; label: string }
     case "findings": return { href: withRet("/access/findings"), label: "Back to findings" };
     case "identity": return idOk ? { href: withRet(`/access/identities/${fromId}`), label: "Back to identity access" } : null;
     case "application": return idOk ? { href: withRet(`/access/applications/${fromId}`), label: "Back to application access" } : null;
+    case "people": return { href: withRet("/directory/people"), label: "Back to People" };
+    case "groups": return { href: withRet("/directory/groups"), label: "Back to Groups" };
+    case "applications": return { href: withRet("/directory/applications"), label: "Back to Directory applications" };
   }
 }
 

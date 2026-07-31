@@ -78,11 +78,24 @@ export function OktaStatusPanel({ status }: { status: OktaConnectorStatus }) {
         </div>
       )}
 
+      {/* Only shown once discovery has actually produced records. Before that these routes are real but empty, and sending the customer
+          to three empty lists would read as a failed connector. */}
       {status.discovered && (
         <div className="space-y-2">
-          <Link href="/access" className="inline-flex items-center rounded-md bg-zinc-900 px-3 py-2 text-sm font-medium text-white hover:bg-zinc-800 dark:bg-white dark:text-zinc-900 dark:hover:bg-zinc-200">
-            View access data
-          </Link>
+          <div className="flex flex-wrap items-center gap-2">
+            <Link href="/access" className="inline-flex items-center rounded-md bg-zinc-900 px-3 py-2 text-sm font-medium text-white hover:bg-zinc-800 dark:bg-white dark:text-zinc-900 dark:hover:bg-zinc-200">
+              View access data
+            </Link>
+            {[
+              { href: "/directory/people", label: "People" },
+              { href: "/directory/groups", label: "Groups" },
+              { href: "/directory/applications", label: "Applications" },
+            ].map((l) => (
+              <Link key={l.href} href={l.href} className="inline-flex items-center rounded-md border border-zinc-300 px-3 py-2 text-sm font-medium hover:border-zinc-400 dark:border-zinc-700 dark:hover:border-zinc-500">
+                {l.label}
+              </Link>
+            ))}
+          </div>
           {/* The two application models are genuinely separate surfaces; saying so prevents "the catalog is empty, so
               discovery failed" — a conclusion the numbers otherwise invite. */}
           <p className="text-xs text-zinc-500">

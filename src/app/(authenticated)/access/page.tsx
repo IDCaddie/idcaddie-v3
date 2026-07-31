@@ -44,9 +44,11 @@ export default async function AccessOverviewPage({ searchParams }: { searchParam
           </div>
 
           <StatGrid>
-            <StatCard label="Identities" value={result.data.counts.identities} />
-            <StatCard label="Groups" value={result.data.counts.groups} />
-            <StatCard label="Applications" value={result.data.counts.applications} />
+            {/* Phase 2: the three node counts now open the Directory list that produced them. The edge counts below have no list page
+                of their own and stay unlinked rather than pointing somewhere approximate. */}
+            <StatCard label="Identities" value={result.data.counts.identities} href="/directory/people" />
+            <StatCard label="Groups" value={result.data.counts.groups} href="/directory/groups" />
+            <StatCard label="Applications" value={result.data.counts.applications} href="/directory/applications" />
             <StatCard label="Group memberships" value={result.data.counts.memberships} />
             <StatCard label="Direct assignments" value={result.data.counts.directAssignments} />
             <StatCard label="Group assignments" value={result.data.counts.groupAssignments} />
