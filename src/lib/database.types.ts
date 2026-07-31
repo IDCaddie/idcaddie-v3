@@ -4113,6 +4113,14 @@ export type Database = {
         }
         Returns: Json
       }
+      product_group_access_subgraph: {
+        Args: {
+          p_group_id: string
+          p_include_stale?: boolean
+          p_tenant_id: string
+        }
+        Returns: Json
+      }
       product_identity_access_subgraph: {
         Args: {
           p_identity_id: string

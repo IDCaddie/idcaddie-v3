@@ -321,3 +321,33 @@ different organizations are both unsuperseded and both fully visible.
 The staging supersession is recorded in section 4, guarded so it is a no-op unless both connectors exist in the same tenant, the
 survivor has a validated config, the superseded one has none, and every legacy `external_id` has a counterpart under the survivor.
 
+## 0072 — `product_group_access_subgraph` (Phase 3)
+
+Groups were the one directory object with no home. People and applications each had an entity subgraph since 0061; a group could
+only be listed, and its row action pointed at filtered findings because there was nothing else to point at. Group membership is
+one of the two ways a person reaches an application, so "who is in this group and what does it grant" is a first-order question
+the product could not answer.
+
+Two deliberate differences from the 0061 subgraphs:
+
+1. **Connector-scoped edges.** The identity and application subgraphs scope by tenant + anchor id. This one also scopes every edge
+   and every neighbour row by the ANCHOR GROUP'S `connection_id`. Composite endpoint FKs already make a cross-connector edge
+   impossible, so this is defence in depth — but it is the property that keeps two connectors reading the same Okta organization
+   from bleeding into each other, which is the P0 that 0071 closed. Tested by dropping the FKs, planting the forbidden rows, and
+   requiring the RPC to exclude them on its own authority.
+
+2. **Bounded inside the function.** A group is the fan-in case: "Everyone" is one row pointing at every identity in the tenant. The
+   other two subgraphs let the loader cap the result after the RPC has built it, which for a group means materializing the whole
+   membership list as jsonb first. This one counts first and returns `bounded: true` with the summary and NO arrays — it fails
+   closed rather than truncating, because a half-populated member list that looks complete is worse than an honest refusal.
+
+The anchor is supersession-gated, so a group owned by a superseded connector returns null: the same answer as a group that does not
+exist and as one belonging to another tenant. Three causes, one indistinguishable response.
+
+`userAssignments` is scoped to (this group's members × the applications this group grants) so the existing Phase-13 engine can tell
+whether a member ALSO holds an application directly — the difference between "this group is how they get in" and "one of two ways".
+Derived by the engine from those rows, never computed in SQL.
+
+Read-only, definer, pinned `search_path`, EXECUTE to `authenticated` only. No raw payload column exists on any of these tables, and
+`external_id` / `normalized_*` / plumbing columns are not projected.
+

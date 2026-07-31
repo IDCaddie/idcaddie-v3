@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { Badge } from "@/components/badge";
-import { accessHref, parseAccessFilters, type SearchParamsInput } from "@/lib/data/access-filters";
+import { accessHref, parseAccessFilters, returnParams, type SearchParamsInput } from "@/lib/data/access-filters";
 import { loadDirectoryGroups, type DirectoryGroupRow } from "@/lib/data/directory-loaders";
 import { groupTypeLabel } from "@/lib/data/directory-display";
 import { getOktaConnectorStatus } from "@/lib/data/okta-connector-status";
@@ -8,9 +8,9 @@ import { DirectoryListPage, SyncCell, type Column } from "../directory-list-page
 
 export const metadata = { title: "Groups · ID Caddie" };
 
-// Groups discovered from the identity provider. There is NO group detail route and no group access subgraph RPC — migration 0061 provides
-// identity and application subgraphs only. So this page does not pretend to open a group; the one real destination a group name has today
-// is the governance findings filtered to that group, which is a working query, not a placeholder.
+// Groups discovered from the identity provider. Phase 3 gave groups a real detail route backed by `product_group_access_subgraph`
+// (migration 0072), so the group name now opens the group itself. Findings remains as a secondary action for the case where the
+// customer wants the governance view directly.
 
 export default async function DirectoryGroupsPage({ searchParams }: { searchParams: Promise<SearchParamsInput> }) {
   const sp = await searchParams;
@@ -20,7 +20,10 @@ export default async function DirectoryGroupsPage({ searchParams }: { searchPara
     getOktaConnectorStatus().catch(() => null),
   ]);
 
-  // Findings carry a subject type and a searchable subject label, so this lands on the real findings for this group rather than a stub.
+  // The group name opens the group. Filter state rides along so "← Groups" returns to the same page of the same search.
+  const detailHref = (id: string) => `/directory/groups/${id}?${returnParams("groups", filters).toString()}`;
+
+  // Secondary action. Findings carry a subject type and a searchable subject label, so this lands on the real findings for this group.
   const findingsHref = (name: string) =>
     accessHref("/access/findings", filters, { query: name.toLowerCase(), subjectType: "group", page: 1, includeStale: filters.includeStale });
 
@@ -28,7 +31,7 @@ export default async function DirectoryGroupsPage({ searchParams }: { searchPara
     {
       key: "name",
       header: "Group",
-      cell: (g) => <span className="font-medium">{g.name}</span>,
+      cell: (g) => <Link href={detailHref(g.id)} className="font-medium underline-offset-2 hover:underline">{g.name}</Link>,
     },
     {
       key: "type",
@@ -66,9 +69,9 @@ export default async function DirectoryGroupsPage({ searchParams }: { searchPara
       connectorConfigured={okta !== null}
       footnote={
         <>
-          Member counts and the applications a group grants are not shown here yet, and a group has no detail page of its own. Both are
-          reachable today from the other direction: open a person or an application on{" "}
-          <Link href="/access" className="underline">Access</Link> to see the groups involved in their access.
+          Member and application counts are not shown in this list: each would require loading the full membership and assignment
+          tables on every page view. Open a group to see its members, the applications it grants, and which of those its members
+          would still hold without it.
         </>
       }
     />
