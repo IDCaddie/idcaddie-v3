@@ -13,7 +13,11 @@ import { createOktaConnectorConfiguration, type CreateOktaConnectorResult } from
 export type OktaConnectFormState =
   | { readonly status: "idle" }
   | { readonly status: "saved"; readonly connectorId: string; readonly orgHost: string; readonly nextAction: string; readonly replay: boolean }
-  | { readonly status: "error"; readonly message: string };
+  | { readonly status: "error"; readonly message: string }
+  // A duplicate is not really an error — the customer's team already has this organization configured, and the useful response
+  // is a way to reach it. `connectorId` is null when the collision is with ANOTHER tenant's connector, in which case this
+  // degrades to the same generic message as "not found": the customer cannot distinguish the two.
+  | { readonly status: "exists"; readonly message: string; readonly connectorId: string | null };
 
 // Customer-safe messages. No database text, no exception, no provider response — a reason code is mapped to plain language here so
 // nothing internal can reach the browser through an error path.
@@ -24,7 +28,7 @@ function messageFor(result: Extract<CreateOktaConnectorResult, { ok: false }>): 
     case "insufficient_role": return "You need to be an owner or admin to add a connection.";
     case "invalid_client_id": return "Enter the API Services client ID from your Okta app (it starts with 0oa…).";
     case "invalid_idempotency_key": return "Something went wrong preparing the form. Please reload and try again.";
-    case "duplicate_configuration": return "This Okta organization and client ID are already configured for your team.";
+    case "duplicate_configuration": return "This Okta organization is already configured for your team.";
     case "invalid_org_host": return orgHostMessage(result.detail);
     default: return "We couldn't save this configuration. Please try again.";
   }
@@ -57,7 +61,13 @@ export async function saveOktaConfigurationAction(
     idempotencyKey: (formData.get("idempotencyKey") ?? "").toString(),
   });
 
-  if (!result.ok) return { status: "error", message: messageFor(result) };
+  if (!result.ok) {
+    // Surface a same-tenant duplicate as a NAVIGABLE state rather than a dead-end error string.
+    if (result.reason === "duplicate_configuration") {
+      return { status: "exists", message: messageFor(result), connectorId: result.existingConnectorId };
+    }
+    return { status: "error", message: messageFor(result) };
+  }
 
   return {
     status: "saved",

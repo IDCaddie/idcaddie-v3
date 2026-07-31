@@ -6,22 +6,26 @@ import type { DemoConnection } from "./demo-store";
 import type { StatusTone } from "@/components/status-tokens";
 
 export type ConnectorView = {
-  statusLabel: string; // "Connected" | "Paused" | "Preview" | "Coming soon"
+  statusLabel: string; // "Simulated" | "Simulated (paused)" | "Preview" | "Coming soon" — never "Connected"
   statusTone: StatusTone;
   statusNote: string | null; // e.g. "Preview mode"
   cta: { label: string; href: string | null; disabled: boolean };
 };
 
+// `demo` is BROWSER-LOCAL sessionStorage state from the preview flow. It is never evidence that a connector exists: the real
+// record lives in `connectors`/`okta_connector_configs` and is rendered server-side on the connection page. So every
+// demo-derived label below says "Simulated" or "Demo" — a simulated card must never read as Connected, Verified or Discovered,
+// because that is indistinguishable from a live connector to anyone looking at the screen.
 export function resolveConnectorView(c: CustomerConnector, demo: DemoConnection | null): ConnectorView {
   if (demo?.status === "verification_pending") {
     // Configuration saved, NOT verified/connected — never present this as connected/active.
-    return { statusLabel: "Verification pending", statusTone: "attention", statusNote: "Configuration saved", cta: { label: "View configuration", href: `/connectors/${c.provider}/status`, disabled: false } };
+    return { statusLabel: "Simulated", statusTone: "attention", statusNote: "Demo configuration", cta: { label: "View configuration", href: `/connectors/${c.provider}/status`, disabled: false } };
   }
   if (demo?.status === "connected_preview") {
-    return { statusLabel: "Connected", statusTone: "success", statusNote: "Preview mode", cta: { label: "Manage", href: `/connectors/${c.provider}/status`, disabled: false } };
+    return { statusLabel: "Simulated", statusTone: "attention", statusNote: "Demo configuration — not a real connection", cta: { label: "Manage", href: `/connectors/${c.provider}/status`, disabled: false } };
   }
   if (demo?.status === "paused_preview") {
-    return { statusLabel: "Paused", statusTone: "attention", statusNote: "Preview mode", cta: { label: "Manage", href: `/connectors/${c.provider}/status`, disabled: false } };
+    return { statusLabel: "Simulated (paused)", statusTone: "attention", statusNote: "Demo configuration", cta: { label: "Manage", href: `/connectors/${c.provider}/status`, disabled: false } };
   }
   if (c.availability === "coming_soon") {
     return { statusLabel: "Coming soon", statusTone: "neutral", statusNote: null, cta: { label: "Coming soon", href: null, disabled: true } };

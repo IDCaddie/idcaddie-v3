@@ -72,22 +72,26 @@ export const OKTA_SETUP = {
   // single most likely setup mistake.
   scopeVsRoleTitle: "Scopes and admin role are separate",
   scopeVsRoleNote: "Okta needs both. The three scopes say which APIs ID Caddie may call; the admin role says which data those APIs will return. Granting scopes without the role, or the role without the scopes, will not work.",
-  keyStepTitle: "Public-key registration",
-  keyStepNote: "Confirm you registered ID Caddie's approved public key (below) on the app. The private key stays in ID Caddie's secure key store and is never entered here.",
+  keyStepTitle: "Key authentication",
+  keyStepNote: "Point the app at ID Caddie's JWKS URL instead of pasting a key. Okta fetches the public key from that URL, so when ID Caddie rotates its key nothing changes in your Okta app. The private half is generated inside AWS KMS, cannot be exported, and is never entered here.",
   // Where the key id is actually used, and the one thing a customer must NOT paste.
-  keyStepWhere: "You paste ID Caddie's public key into the app's Public Keys tab in Okta. The key ID below is what Okta displays once it is registered — use it to confirm you registered the right key.",
+  keyStepWhere: "In the app's Client Credentials section choose public-key authentication, then select the option to fetch keys from a URL — Okta labels it \"Use a URL to fetch keys dynamically\". Paste the ID Caddie JWKS URL below. The key ID shown is what Okta will resolve from that URL; use it to confirm the right key was fetched.",
   noTokenNote: "Do not paste an Okta API token. This connection uses a service application with a registered key, so no token is needed and ID Caddie will never ask you for one.",
   serverValidatedNote: "Only non-secret configuration is reviewed here — an organization URL, a client ID and the public half of a signing key — and it is validated on ID Caddie's servers before anything is saved. The private signing key is generated inside AWS KMS and cannot be exported, so no credential is entered, displayed or stored by this screen.",
   issuerLabel: "Okta issuer",
   clientIdLabel: "API Services client ID",
-  clientIdHint: "The app's client ID (starts with 0oa…). This is non-secret.",
+  clientIdHint: "Okta generates the client ID after you create the API Services application — ID Caddie does not issue it. Copy it from the app's General tab (it starts with 0oa…). It is non-secret.",
   clientIdError: "Enter the API Services client ID (starts with 0oa…).",
   reviewTitle: "Review configuration",
-  savedTitle: "Verification pending",
-  savedMessage: "Your Okta service application configuration has been saved. ID Caddie has not yet verified the connection or imported any data.",
+  // During the staging pilot the two remaining stages are performed by ID Caddie operations, because the product cannot yet
+  // launch the verification/discovery jobs itself. Saying so plainly beats a disabled button the customer will try to press.
+  operatorAssistedTitle: "What happens next",
+  operatorAssistedNote: "Verification and initial discovery are operator-assisted during the staging pilot. Your configuration is saved; ID Caddie operations verifies the connection against your Okta organization, then runs the first discovery. Return to this page to see status and results — you do not need to do anything else.",
+  savedTitle: "Configuration saved",
+  savedMessage: "Your non-secret Okta configuration has been recorded. ID Caddie has not verified the connection and no directory data has been imported yet.",
   declareScope: "I have granted okta.users.read, okta.groups.read, and okta.apps.read on the app",
   declareRole: "I have assigned a read-only admin role to the app",
-  declareKey: "I have registered the approved public key on the app",
+  declareKey: "I have set the app to fetch keys from the ID Caddie JWKS URL",
   // Truthful connection status. Okta is `certificationOnly` in the authoritative governance contract, so the wizard must NOT imply
   // the connection is production-enabled. Plain-language equivalent — no internal governance vocabulary.
   statusLabel: "Verified for staging",
@@ -102,6 +106,10 @@ export const OKTA_SETUP = {
 // SUPERSEDED: `i-Wptr…q8j4` was published here before O1B while the runner had already moved to the value below. A customer who
 // followed the shipped instructions would have registered a public key whose private half ID Caddie does not hold, and every token
 // request would have failed `invalid_client`. That stale value is asserted ABSENT by okta-contract-consistency.test.ts.
+// The JWKS endpoint the customer configures in Okta. Mirrors `jwks_url` in okta-jwks-manifest.json — a test asserts the two
+// stay identical, because a stale URL here would send every new customer to configure an endpoint that serves nothing.
+export const OKTA_JWKS_URL = "https://jwks.staging.idcaddie.com/.well-known/idcaddie-okta-jwks.json" as const;
+
 export const OKTA_APPROVED_PUBLIC_KID = "p7AyvDK0yI95_HdQBxdhBSOTt9mMYPczGL-4USxaMto" as const;
 
 // Client-safe Okta client-id SHAPE check (the server-only okta-live validator can't be imported into the client wizard). Opaque

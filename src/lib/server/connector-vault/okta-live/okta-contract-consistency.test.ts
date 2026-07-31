@@ -301,9 +301,12 @@ describe("okta setup copy", () => {
   });
 
   it("says where the public key is used and that the private key stays with ID Caddie", () => {
-    expect(OKTA_SETUP.keyStepWhere).toMatch(/public key/i);
-    expect(OKTA_SETUP.keyStepNote).toMatch(/private key/i);
-    expect(`${OKTA_SETUP.keyStepNote} ${OKTA_SETUP.keyStepWhere}`).toMatch(/never entered here|stays in/i);
+    // O2C.2 replaced "paste the public key" with "point the app at our JWKS URL", so the wording moved. The property is
+    // unchanged: say where the PUBLIC key comes from, and that the PRIVATE half never leaves ID Caddie.
+    expect(OKTA_SETUP.keyStepWhere).toMatch(/public-key authentication/i);
+    expect(OKTA_SETUP.keyStepWhere).toMatch(/JWKS URL/i);
+    expect(OKTA_SETUP.keyStepNote).toMatch(/private half|private key/i);
+    expect(`${OKTA_SETUP.keyStepNote} ${OKTA_SETUP.keyStepWhere}`).toMatch(/never entered here|cannot be exported/i);
   });
 
   it("states read-only, and never claims the connection is production-enabled", () => {

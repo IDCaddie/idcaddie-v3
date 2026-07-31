@@ -11,6 +11,7 @@
 // Server-only: it calls next/headers via the user-scoped client, so importing it from client code throws.
 
 import { createClient } from "@/lib/supabase/server";
+import { findOwnOktaConnector } from "./okta-connector-status";
 import {
   canonicalizeOktaOrgHost,
   deriveOktaOrganizationIdentity,
@@ -33,7 +34,7 @@ export type CreateOktaConnectorFailure =
   | { readonly reason: "invalid_org_host"; readonly detail: OktaHostReason }
   | { readonly reason: "invalid_client_id" }
   | { readonly reason: "invalid_idempotency_key" }
-  | { readonly reason: "duplicate_configuration" }
+  | { readonly reason: "duplicate_configuration"; readonly existingConnectorId: string | null }
   | { readonly reason: "write_failed" };
 
 // The browser-safe DTO. Deliberately built by ALLOWLIST from named fields — a denylist would silently pass a future column.
@@ -124,7 +125,12 @@ export async function createOktaConnectorConfiguration(input: CreateOktaConnecto
   }
 
   const outcome = (data as { outcome?: string; connector_id?: string } | null)?.outcome;
-  if (outcome === "duplicate_configuration") return { ok: false, reason: "duplicate_configuration" };
+  if (outcome === "duplicate_configuration") {
+    // Look the collision up through RLS. If it belongs to ANOTHER tenant this returns null and the caller shows the generic
+    // message — the customer cannot tell "someone else has it" from "it does not exist", which is the point.
+    const existingConnectorId = await findOwnOktaConnector(host.host, clientId);
+    return { ok: false, reason: "duplicate_configuration", existingConnectorId };
+  }
   if (outcome !== "created" && outcome !== "idempotent_replay") return { ok: false, reason: "write_failed" };
 
   const connectorId = (data as { connector_id: string }).connector_id;

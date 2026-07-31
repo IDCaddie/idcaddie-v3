@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
   validateOktaOrgHost, normalizeOrgInput, ORG_HOST_MESSAGE, validateOktaClientId,
-  OKTA_CONTENT, OKTA_SETUP, OKTA_APPROVED_PUBLIC_KID, type OrgHostReason,
+  OKTA_CONTENT, OKTA_SETUP, OKTA_APPROVED_PUBLIC_KID, OKTA_JWKS_URL, type OrgHostReason,
 } from "@/lib/customer-connectors/okta-content";
 import { saveOktaConfigurationAction } from "./actions";
 
@@ -12,10 +12,13 @@ type Step = "instructions" | "organization" | "configuration" | "review" | "save
 
 // What the customer must do next, keyed to what the platform ACTUALLY has. O2A cannot say "connected": the platform signing key
 // does not exist yet (O2B) and nothing has been validated against Okta (O2D/O2E).
+// Every one of these means the same thing to a customer today: the configuration is recorded and ID Caddie operations performs
+// verification next. The per-connector distinctions were platform-readiness states from before the KMS key existed; keeping
+// them would restate a resolved internal condition as a customer instruction.
 const NEXT_ACTION_COPY: Record<string, string> = {
-  platform_signing_key_pending: "ID Caddie is finishing its signing-key setup. We'll validate this connection once that's ready — no action needed from you.",
-  public_key_publication_pending: "ID Caddie is publishing the public key you'll trust in Okta. We'll validate this connection once that's ready.",
-  live_validation_required: "This configuration still needs to be validated against your Okta organization before any data is read.",
+  platform_signing_key_pending: OKTA_SETUP.operatorAssistedNote,
+  public_key_publication_pending: OKTA_SETUP.operatorAssistedNote,
+  live_validation_required: OKTA_SETUP.operatorAssistedNote,
 };
 const STEPS = ["Instructions", "Organization", "Configuration", "Review"] as const;
 function stepIndex(s: Step): number {
@@ -47,6 +50,7 @@ export function OktaConnectWizard({ provider, canSave = true }: { provider: stri
   const [customDomain, setCustomDomain] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [existing, setExisting] = useState<{ message: string; connectorId: string | null } | null>(null);
   const [nextAction, setNextAction] = useState<string | null>(null);
   // One key per wizard mount, so a double-click or a network retry resolves to the SAME connector rather than a second one.
   const [idempotencyKey] = useState(() => crypto.randomUUID());
@@ -95,6 +99,7 @@ export function OktaConnectWizard({ provider, canSave = true }: { provider: stri
     fd.set("idempotencyKey", idempotencyKey);
     const result = await saveOktaConfigurationAction({ status: "idle" }, fd);
     setSaving(false);
+    if (result.status === "exists") { setExisting({ message: result.message, connectorId: result.connectorId }); return; }
     if (result.status === "error") { setSaveError(result.message); return; }
     if (result.status === "saved") { setNextAction(result.nextAction); setStep("saved"); }
   }
@@ -237,7 +242,13 @@ export function OktaConnectWizard({ provider, canSave = true }: { provider: stri
             <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/60">
               <div className="text-[11px] uppercase tracking-wide text-zinc-400 dark:text-zinc-500">{OKTA_SETUP.keyStepTitle}</div>
               <p className="mt-0.5 text-xs text-zinc-500">{OKTA_SETUP.keyStepNote}</p>
-              <code className="mt-1 block break-all text-xs text-zinc-700 dark:text-zinc-300">KID {OKTA_APPROVED_PUBLIC_KID}</code>
+              <p className="mt-2 text-xs text-zinc-500">{OKTA_SETUP.keyStepWhere}</p>
+              {/* The URL is the thing the customer must copy, so it gets its own field with a label — not buried in prose. */}
+              <div className="mt-2">
+                <div className="text-[11px] font-medium text-zinc-600 dark:text-zinc-400">ID Caddie JWKS URL</div>
+                <code className="mt-0.5 block break-all rounded border border-zinc-200 bg-white px-2 py-1.5 text-xs text-zinc-800 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-200">{OKTA_JWKS_URL}</code>
+              </div>
+              <code className="mt-2 block break-all text-xs text-zinc-500">Expected key ID: {OKTA_APPROVED_PUBLIC_KID}</code>
             </div>
             <fieldset className="space-y-2 text-sm text-zinc-700 dark:text-zinc-300">
               <legend className="sr-only">Confirm the Okta admin setup steps</legend>
@@ -270,6 +281,14 @@ export function OktaConnectWizard({ provider, canSave = true }: { provider: stri
             </dl>
             <p className="text-xs text-zinc-500">{OKTA_SETUP.serverValidatedNote} {OKTA_SETUP.statusNote}</p>
             {saveError && <p role="alert" className="text-sm text-red-600 dark:text-red-400">{saveError}</p>}
+            {existing && (
+              <div role="status" className="space-y-2 rounded-lg border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/60">
+                <p className="text-sm text-zinc-700 dark:text-zinc-300">{existing.message}</p>
+                {existing.connectorId && (
+                  <Link href={`/connectors/${provider}/status`} className={primary}>Open connector</Link>
+                )}
+              </div>
+            )}
             {!canSave && (
               // Say this BEFORE the disabled control, so the reason is read first rather than discovered by clicking.
               <p className="text-sm text-zinc-600 dark:text-zinc-400">

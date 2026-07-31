@@ -94,13 +94,17 @@ describe("Okta connect wizard — API Services configuration flow", () => {
     click("Save configuration");
 
     // terminal — verification pending, NOT connected. The save is now a SERVER ACTION, so the transition is async.
-    expect(await screen.findByRole("heading", { name: "Verification pending" })).toBeTruthy();
-    expect(screen.getByText(/has not yet verified the connection or imported any data/)).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "Configuration saved" })).toBeTruthy();
+    // Saved is NOT connected, and the operator-assisted reality is stated rather than implied by a dead button.
+    expect(screen.queryByText(/Connected/)).toBeNull();
+    expect(screen.getByText(/operator-assisted during the staging pilot/i)).toBeTruthy();
+    expect(screen.queryByText(/finishing its signing-key setup/i), "the obsolete platform dead end must be gone").toBeNull();
+    expect(screen.getByText(/has not verified the connection and no directory data has been imported yet/)).toBeTruthy();
     expect(screen.queryByText(/\bconnected\b/i)).toBeNull();
     expect(screen.queryByText(/\bhealthy\b/i)).toBeNull();
     // "verified" DOES appear — in the negation "has not yet verified the connection", which is the truthful copy. What must not
     // appear is an AFFIRMATIVE claim, so assert the negated form is present rather than banning the word.
-    expect(screen.getByText(/has not yet verified/i)).toBeTruthy();
+    expect(screen.getByText(/has not verified the connection/i)).toBeTruthy();
 
     // The browser sent ONLY the three non-secret inputs — no tenant, role, state, scopes or fingerprint.
     const sent = actionCalls.at(-1)!;
@@ -110,7 +114,7 @@ describe("Okta connect wizard — API Services configuration flow", () => {
     expect([...sent.keys()].sort()).toEqual(["clientId", "idempotencyKey", "orgHost"]);
 
     // The truthful next step is shown, derived from what the platform actually has.
-    expect(screen.getByText(/signing-key setup/i)).toBeTruthy();
+    expect(screen.getByText(/operator-assisted during the staging pilot/i)).toBeTruthy();
     expect(push).not.toHaveBeenCalled();
   });
 
@@ -127,7 +131,7 @@ describe("Okta connect wizard — API Services configuration flow", () => {
     expect((await screen.findByRole("alert")).textContent).toMatch(/owner or admin/i);
     // still on review — no false success
     expect(screen.getByRole("heading", { name: "Review configuration" })).toBeTruthy();
-    expect(screen.queryByRole("heading", { name: "Verification pending" })).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Configuration saved" })).toBeNull();
   });
 
   it("a double-click submits once, and the idempotency key is stable across attempts", async () => {
@@ -142,7 +146,7 @@ describe("Okta connect wizard — API Services configuration flow", () => {
     const btn = screen.getByRole("button", { name: "Save configuration" });
     fireEvent.click(btn);
     fireEvent.click(btn);   // immediate second click, before the first resolves
-    await screen.findByRole("heading", { name: "Verification pending" });
+    await screen.findByRole("heading", { name: "Configuration saved" });
 
     // The in-flight guard prevents the second submit; and even if a retry DID reach the server, the key is per-mount and stable,
     // so the RPC would return the same connector rather than create a second one.
@@ -215,7 +219,7 @@ describe("Okta connect wizard — safety", () => {
     click("Review");
     click("Save configuration");
     // The save is a SERVER ACTION now, so the terminal state arrives asynchronously — assert after it lands, not before.
-    await screen.findByRole("heading", { name: "Verification pending" });
+    await screen.findByRole("heading", { name: "Configuration saved" });
     expect(screen.queryByText(/Step \d of 4/)).toBeNull();
     expect(container.querySelector('[role="status"]')).not.toBeNull();
   });
