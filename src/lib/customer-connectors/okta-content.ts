@@ -77,7 +77,7 @@ export const OKTA_SETUP = {
   // Where the key id is actually used, and the one thing a customer must NOT paste.
   keyStepWhere: "You paste ID Caddie's public key into the app's Public Keys tab in Okta. The key ID below is what Okta displays once it is registered — use it to confirm you registered the right key.",
   noTokenNote: "Do not paste an Okta API token. This connection uses a service application with a registered key, so no token is needed and ID Caddie will never ask you for one.",
-  serverValidatedNote: "The issuer and client ID you enter are validated on ID Caddie's servers before anything is saved.",
+  serverValidatedNote: "Only non-secret configuration is reviewed here — an organization URL, a client ID and the public half of a signing key — and it is validated on ID Caddie's servers before anything is saved. The private signing key is generated inside AWS KMS and cannot be exported, so no credential is entered, displayed or stored by this screen.",
   issuerLabel: "Okta issuer",
   clientIdLabel: "API Services client ID",
   clientIdHint: "The app's client ID (starts with 0oa…). This is non-secret.",
@@ -90,8 +90,8 @@ export const OKTA_SETUP = {
   declareKey: "I have registered the approved public key on the app",
   // Truthful connection status. Okta is `certificationOnly` in the authoritative governance contract, so the wizard must NOT imply
   // the connection is production-enabled. Plain-language equivalent — no internal governance vocabulary.
-  statusLabel: "Certification-only pilot",
-  statusNote: "Okta is available for certification and staging use while ID Caddie completes its verification. Configuring this connection does not enable production data collection.",
+  statusLabel: "Verified for staging",
+  statusNote: "This configuration is verified for staging use. Production synchronization is disabled and scheduled synchronization is not enabled — discovery runs only when it is started deliberately.",
 } as const;
 
 // The approved public signing-key identifier to display (NON-secret; the private key is never here and never in this repository).

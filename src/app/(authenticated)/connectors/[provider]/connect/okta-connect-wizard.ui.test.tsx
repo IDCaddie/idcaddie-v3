@@ -54,7 +54,12 @@ function fillConfiguration(clientId = CLIENT_ID) {
 describe("Okta connect wizard — API Services configuration flow", () => {
   it("walks instructions → organization → configuration → review → verification pending", async () => {
     render(<OktaConnectWizard provider="okta" />);
-    expect(screen.getAllByText(/Preview mode/).length).toBe(1);
+    // The banner used to read "Preview mode — this walkthrough does not contact Okta or create a real connection."
+    // That became false once the connector was live-verified end to end. It now describes what the STEP does, and must
+    // still not promise any Okta contact at this point in the flow.
+    expect(screen.queryByText(/Preview mode/)).toBeNull();
+    expect(screen.getAllByText(/Reviewing connector configuration/).length).toBe(1);
+    expect(screen.getByText(/Nothing is sent to Okta until you start a verification/)).toBeTruthy();
     // step 1 — instructions (service app, no browser sign-in)
     expect(screen.getByText("Step 1 of 4")).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Set up Okta API Services" })).toBeTruthy();
@@ -213,5 +218,38 @@ describe("Okta connect wizard — safety", () => {
     await screen.findByRole("heading", { name: "Verification pending" });
     expect(screen.queryByText(/Step \d of 4/)).toBeNull();
     expect(container.querySelector('[role="status"]')).not.toBeNull();
+  });
+});
+
+// ── Permission state ────────────────────────────────────────────────────────────────────────────────────────
+// The server RPC is the real boundary; these assert the UI stops OFFERING an action it knows will be refused,
+// and says why before the user clicks rather than after.
+describe("Okta connect wizard — save permission", () => {
+  function toReview(props: { canSave?: boolean } = {}) {
+    render(<OktaConnectWizard provider="okta" {...props} />);
+    click("Start setup");
+    typeOrg("acme.okta.com");
+    click("Continue");
+    fillConfiguration();
+    click("Review");
+    expect(screen.getByRole("heading", { name: "Review configuration" })).toBeTruthy();
+  }
+
+  it("disables Save and explains why when the viewer is not owner/admin", () => {
+    toReview({ canSave: false });
+    expect((screen.getByRole("button", { name: "Save configuration" }) as HTMLButtonElement).disabled,
+      "an action that cannot succeed must not be offered").toBe(true);
+    expect(screen.getByText("Owner or administrator permissions are required to create a connector.")).toBeTruthy();
+  });
+
+  it("enables Save for an owner/admin", () => {
+    toReview({ canSave: true });
+    expect((screen.getByRole("button", { name: "Save configuration" }) as HTMLButtonElement).disabled).toBe(false);
+    expect(screen.queryByText(/Owner or administrator permissions are required/)).toBeNull();
+  });
+
+  it("defaults to enabled when the prop is omitted, so a caller cannot lock everyone out by accident", () => {
+    toReview();
+    expect((screen.getByRole("button", { name: "Save configuration" }) as HTMLButtonElement).disabled).toBe(false);
   });
 });
