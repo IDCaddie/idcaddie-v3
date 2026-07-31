@@ -28,10 +28,19 @@ describe("publication manifest — the O2C.2 live verification is REAL", () => {
   it("declares the live-verified state and the scope it is limited to", () => {
     expect(manifest.publication_status).toBe("live_verified");
     // The scope note is load-bearing: one users read proves the users grant and the admin role, and nothing about groups or apps.
-    expect(String(manifest.live_verification_scope)).toMatch(/okta\.users\.read only/);
-    expect(String(manifest.live_verification_scope)).toMatch(/unproven/);
+    // Each read scope is claimed ONLY because it has its own live call behind it, and the two unproven surfaces are named
+    // explicitly. "Okta is verified" must never be able to stand in for "memberships and assignments work too".
+    const m = manifest.capability_matrix as Record<string, string>;
+    expect(m.authentication).toBe("verified");
+    expect(m.users_read).toBe("verified");
+    expect(m.groups_read).toBe("verified");
+    expect(m.apps_read).toBe("verified");
+    expect(m.memberships).toBe("not_verified");
+    expect(m.assignments).toBe("not_verified");
+    expect(m.scheduled_sync).toBe("disabled");
+    expect(m.production).toBe("disabled");
     expect(manifest.environment).toBe("staging");
-    expect(manifest.contract_version).toBe("1.1.0");
+    expect(manifest.contract_version).toBe("1.2.0");
     expect(manifest.thumbprint_method).toBe("RFC7638");
   });
 
