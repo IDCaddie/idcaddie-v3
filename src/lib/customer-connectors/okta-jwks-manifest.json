@@ -11,7 +11,7 @@
   "key_status": "active",
   "thumbprint_method": "RFC7638",
   "generated_by": "deploy/scripts/okta-jwks-publish.mjs (connector-runner)",
-  "notes": "live_verified: every approved Okta read surface has been proven by its own bounded call with its own KMS Sign and single-scope token. The app-group-assignments read returned ZERO records — a valid, authorized, empty result that proves the endpoint is readable but exercises no record parsing. No provider data was persisted by any run. Initial discovery remains unauthorized, the scheduler is off, production is disabled.",
+  "notes": "live_verified: every approved Okta read surface proven by its own bounded call, and ONE controlled initial discovery run completed on staging 2026-07-31 across all five resource sweeps. Discovery was exercised once by hand; the scheduler remains off and production disabled. Each sweep is its own connector_run because the completeness gate that authorises stale marking is keyed per run — one run per sweep IS the gate's unit of accounting.",
   "jwks_url": "https://jwks.staging.idcaddie.com/.well-known/idcaddie-okta-jwks.json",
   "hosting": "dedicated static Vercel project idcaddie-staging-jwks on the custom hostname jwks.staging.idcaddie.com; no auth, no cookies, no AWS credentials at request time",
   "tls": "Let's Encrypt, CN=jwks.staging.idcaddie.com",
@@ -26,7 +26,7 @@
     "group_memberships_read": "verified",
     "app_user_assignments_read": "verified",
     "app_group_assignments_read": "verified",
-    "initial_discovery": "not_authorized",
+    "initial_discovery": "exercised_once_staging",
     "scheduled_sync": "disabled",
     "production": "disabled"
   }

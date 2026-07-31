@@ -2402,6 +2402,36 @@ it rather than being edited away.
 
 **Worth noting:** the app-group-assignments read returned **zero** records. That is a valid authorized empty result proving the
 endpoint is readable, but it exercises no record parsing — the weakest of the six proofs.
+## O2D COMPLETE — one controlled initial discovery on staging (v3 #365)
+
+**2026-07-31.** Five resource sweeps for controlled connector `cdf19b61…`, image `sha256:4c08b409…`, all complete and clean.
+
+| sweep | run | pages | seen | rejected | created | stale |
+|---|---|---|---|---|---|---|
+| users | `e86af420…` | 1 | 1 | 0 | 1 identity | 0 |
+| groups | `ab906d2e…` | 1 | 2 | 0 | 2 groups | 0 |
+| memberships | `439a691e…` | 2 | 1 | 0 | 1 edge | 0 |
+| applications | `ba337d74…` | 1 | 2 | 0 | 2 apps | 0 |
+| assignments | `ae7f2867…` | 4 | 1 | 0 | 1 user edge | 0 |
+
+All five `succeeded` / `completeness=true` / `termination_reason=last_page` / `review_required=false`. Connector advanced
+`verified → discovery_pending → discovering → discovered`; `status` stays `pending`, certification_only true, production disabled.
+
+**Five separate connector_runs, deliberately.** `connector_run_discovery` is `unique (run_id)` with no resource discriminator, so
+one shared run across five sweeps would have had the last writer own the run's completeness — letting a complete sweep authorise
+staling for an incomplete one. One run per sweep IS the gate's unit of accounting.
+
+**Legacy isolation held byte-for-byte.** All 7 legacy rows compared on id, connection_id, sync_status, updated_at and stale_since
+after every sweep: unchanged throughout. Zero cross-connector reassignment, zero stale marks anywhere.
+
+**App-group assignments: complete-empty.** Both apps enumerated (`applicationsProcessed: 2`, 2 pages), zero group assignments
+org-wide. Proven by full enumeration, not inferred from the earlier smoke.
+
+Zero orphan edges, zero duplicate canonical rows, zero raw payloads in facts. Five KMS Signs matching the five task ids. Legacy
+secret `LastAccessed` unchanged at 2026-07-23 with zero reads; the 5 GetSecretValue events are DB-URL injections, one per task.
+
+**Cleanup debt:** seven `connector_runs` left `running` by the earlier bounded smokes (they open a run but never finish one). They
+carry no `connector_run_discovery` row so they cannot satisfy the stale gate. Untouched by this phase, per instruction.
 
 ## O2C.4 — capability vocabulary for memberships and assignments (v3 #363, runner #111)
 
