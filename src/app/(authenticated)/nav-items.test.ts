@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { NAV_SECTIONS, IMPLEMENTED_ROUTES, isNavActive } from "./nav-items";
+import { NAV_SECTIONS, IMPLEMENTED_ROUTES, isNavActive, visibleNavSections, DEMO_MODE } from "./nav-items";
 
 describe("isNavActive", () => {
   it("Home is active only on exactly /", () => {
@@ -63,5 +63,41 @@ describe("NAV_SECTIONS", () => {
     for (const item of NAV_SECTIONS.flatMap((s) => s.items)) {
       if (item.href !== null) expect(IMPLEMENTED_ROUTES).toContain(item.href);
     }
+  });
+});
+
+// ── Demo presentation filter ────────────────────────────────────────────────────────────────────────────────
+// The filter exists to keep "Not built yet" off a projector, NOT to change what the product is. These assert the
+// honest default is untouched and that hiding is opt-in.
+describe("visibleNavSections", () => {
+  it("is the IDENTITY function when demo mode is off", () => {
+    expect(visibleNavSections(NAV_SECTIONS, false)).toEqual(NAV_SECTIONS);
+  });
+
+  it("defaults to off, so the honest nav is what ships", () => {
+    expect(DEMO_MODE).toBe(false);
+  });
+
+  it("hides unbuilt items and /people in demo mode, and empties no section by accident", () => {
+    const shown = visibleNavSections(NAV_SECTIONS, true);
+    const items = shown.flatMap((s) => s.items);
+    expect(items.every((i) => i.href !== null), "no unbuilt item may survive").toBe(true);
+    expect(items.some((i) => i.href === "/people"), "/people is hidden for the demo").toBe(false);
+    expect(shown.every((s) => s.items.length > 0), "a section emptied by filtering must be dropped").toBe(true);
+  });
+
+  it("keeps every screen the demo actually visits", () => {
+    const hrefs = visibleNavSections(NAV_SECTIONS, true).flatMap((s) => s.items).map((i) => i.href);
+    for (const need of ["/connectors", "/access", "/apps", "/audit"]) {
+      expect(hrefs, `${need} must remain reachable`).toContain(need);
+    }
+  });
+
+  it("hides NOTHING that is implemented except the explicitly listed route", () => {
+    // Guards against the filter quietly growing: if a future edit hides more, this fails and forces the decision
+    // to be made deliberately rather than in passing.
+    const before = NAV_SECTIONS.flatMap((s) => s.items).filter((i) => i.href !== null).map((i) => i.href);
+    const after = visibleNavSections(NAV_SECTIONS, true).flatMap((s) => s.items).map((i) => i.href);
+    expect(before.filter((h) => !after.includes(h))).toEqual(["/people"]);
   });
 });

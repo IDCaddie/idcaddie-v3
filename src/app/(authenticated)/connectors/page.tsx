@@ -20,7 +20,6 @@ export default async function ConnectorsPage() {
         </div>
         <h1 className="text-2xl font-semibold tracking-tight">Connectors</h1>
         <p className="text-sm text-zinc-600 dark:text-zinc-400">Connect your business apps to discover users, access, and software usage.</p>
-        <p className="text-xs text-zinc-400 dark:text-zinc-500">Preview connectors do not import data.</p>
       </header>
 
       <ConnectorMarketplace connectors={connectors} />
