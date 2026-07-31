@@ -7,10 +7,11 @@
 import {
   accessGate, getAccessCounts, listDirectoryIdentities, listDirectoryGroups, listDirectoryApplications,
   listGroupMemberships, listUserAssignments, listGroupAssignments, getIdentityAccessSubgraph, getApplicationAccessSubgraph,
+  getGroupAccessSubgraph,
   type ListResult,
 } from "./access-repository";
 import { assembleGovernanceGraph, type AccessGraphRows } from "./access-graph-assembly";
-import { evaluateGovernance, evaluateIdentityGovernance } from "@/lib/server/governance-analytics/evaluate";
+import { evaluateGovernance, evaluateIdentityGovernance, evaluateGroupGovernance } from "@/lib/server/governance-analytics/evaluate";
 import { resolveEffectiveAccess, resolveAllEffectiveAccess } from "@/lib/server/access-graph/resolve";
 import {
   mapFindingToView, mapSummaryToView, mapIdentityApplications, classificationView,
@@ -174,3 +175,121 @@ export async function loadApplicationAccessDetail(applicationId: string, include
     },
   };
 }
+
+// ── Phase 3: group detail ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+// One RPC call, then the existing Phase-13 access engine and Phase-14 governance engine over the returned neighbourhood. No per-row
+// query: the members, the applications the group grants, and those members' direct holdings of those same applications all arrive
+// together, which is exactly what is needed to say whether the group is the ONLY path to an application or one of two.
+
+export type GroupMemberView = {
+  readonly identityId: string; readonly displayName: string; readonly identifier: string | null;
+  readonly isActive: boolean | null;
+  readonly accountState: SyncStateView;          // the identity record's own evidence
+  readonly membershipState: SyncStateView;       // the membership edge's evidence — they can differ
+  readonly staleEvidence: boolean;
+};
+export type GroupApplicationView = {
+  readonly applicationId: string; readonly label: string;
+  readonly statusCategory: string | null; readonly signOnCategory: string | null;
+  readonly applicationState: SyncStateView; readonly assignmentState: SyncStateView;
+  readonly staleEvidence: boolean;
+  readonly alsoDirectFor: number;                // members who ALSO hold this application directly
+};
+export type SyncStateView = "current" | "stale";
+
+export type GroupAccessDetailData = {
+  readonly id: string; readonly displayName: string; readonly description: string | null;
+  readonly providerLabel: string; readonly connectionId: string;
+  readonly typeCategory: string | null; readonly isBuiltIn: boolean;
+  readonly syncState: SyncStateView; readonly staleSince: string | null; readonly lastSeenAt: string | null;
+  readonly bounded: boolean;                     // the neighbourhood was refused, not empty
+  readonly memberCount: number; readonly applicationCount: number;
+  readonly members: readonly GroupMemberView[];
+  readonly applications: readonly GroupApplicationView[];
+  readonly findings: readonly GovernanceFindingView[];
+  readonly staleEvidenceCount: number;
+};
+
+export async function loadGroupAccessDetail(groupId: string, includeStale = false): Promise<EntityDetailResult<GroupAccessDetailData>> {
+  const g = await accessGate();
+  if (!g.ok) return { ok: false, error: "not_found" };   // forbidden and missing collapse, as on the other two detail loaders
+  const sub = await getGroupAccessSubgraph(g.tenantId, groupId, includeStale);
+  if (!sub.ok) return sub;
+  const s = sub.data;
+
+  const grp = s.group;
+  const base = {
+    id: grp.id, displayName: groupLabel(grp), description: grp.description,
+    providerLabel: grp.provider, connectionId: grp.connection_id,
+    typeCategory: grp.group_type_category, isBuiltIn: grp.group_type_category === "built_in",
+    syncState: syncState(grp.sync_status),
+    // Only meaningful on a row that is actually stale — 0053/0054 left leftover timestamps on returning rows before 0070, and the
+    // display should not depend on that migration having run to be truthful.
+    staleSince: syncState(grp.sync_status) === "stale" ? grp.stale_since : null,
+    lastSeenAt: grp.last_seen_at,
+  };
+
+  // The RPC already refused a fan-in neighbourhood. Report the refusal; never render zeros that would read as "this group is empty".
+  if (s.bounded) {
+    return { ok: true, data: { ...base, bounded: true, memberCount: 0, applicationCount: 0, members: [], applications: [], findings: [], staleEvidenceCount: 0 } };
+  }
+
+  const rows: AccessGraphRows = {
+    identities: s.identities, groups: [grp], applications: s.applications,
+    memberships: s.memberships, userAssignments: s.userAssignments, groupAssignments: s.groupAssignments,
+  };
+  const graph = assembleGovernanceGraph(g.tenantId, rows);
+  const gov = evaluateGroupGovernance(graph, grp.id, { includeStale }, { detectedAt: new Date().toISOString() });
+
+  const membershipByIdentity = new Map(s.memberships.map((m) => [m.identity_account_id, m]));
+  const members: GroupMemberView[] = s.identities
+    .map((i) => {
+      const m = membershipByIdentity.get(i.id);
+      const accountState = syncState(i.sync_status);
+      const membershipState = m ? syncState(m.sync_status) : "stale";
+      const identifier = i.login ?? i.email ?? null;
+      const displayName = identityLabel(i);
+      return {
+        identityId: i.id, displayName,
+        // The name already falls back to login then email, so repeating it as a second column would say nothing.
+        identifier: identifier !== null && identifier !== displayName ? identifier : null,
+        isActive: i.is_active, accountState, membershipState,
+        staleEvidence: accountState === "stale" || membershipState === "stale",
+      };
+    })
+    .sort((a, b) => a.displayName.localeCompare(b.displayName) || a.identityId.localeCompare(b.identityId));
+
+  const assignmentByApp = new Map(s.groupAssignments.map((a) => [a.directory_application_id, a]));
+  const directHolders = new Map<string, number>();
+  for (const ua of s.userAssignments) directHolders.set(ua.directory_application_id, (directHolders.get(ua.directory_application_id) ?? 0) + 1);
+
+  const applications: GroupApplicationView[] = s.applications
+    .map((a) => {
+      const ga = assignmentByApp.get(a.id);
+      const applicationState = syncState(a.sync_status);
+      const assignmentState = ga ? syncState(ga.sync_status) : "stale";
+      return {
+        applicationId: a.id, label: applicationLabel(a),
+        statusCategory: a.status_category, signOnCategory: a.sign_on_category,
+        applicationState, assignmentState,
+        staleEvidence: applicationState === "stale" || assignmentState === "stale",
+        alsoDirectFor: directHolders.get(a.id) ?? 0,
+      };
+    })
+    .sort((a, b) => a.label.localeCompare(b.label) || a.applicationId.localeCompare(b.applicationId));
+
+  const identityLabels = new Map(s.identities.map((r) => [r.id, identityLabel(r)]));
+  const applicationLabels = new Map(s.applications.map((r) => [r.id, applicationLabel(r)]));
+
+  return {
+    ok: true,
+    data: {
+      ...base, bounded: false,
+      memberCount: members.length, applicationCount: applications.length,
+      members, applications,
+      findings: gov.findings.map((f) => mapFindingToView(f, identityLabels, applicationLabels)),
+      staleEvidenceCount: members.filter((m) => m.staleEvidence).length + applications.filter((a) => a.staleEvidence).length,
+    },
+  };
+}
+

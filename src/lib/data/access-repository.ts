@@ -10,9 +10,9 @@ import { createClient } from "@/lib/supabase/server";
 import { resolveTenantContext } from "@/lib/auth/tenant-context";
 import {
   identityRowSchema, groupRowSchema, applicationRowSchema, membershipRowSchema, userAssignmentRowSchema, groupAssignmentRowSchema,
-  countsSchema, identitySubgraphSchema, applicationSubgraphSchema, parseRows,
+  countsSchema, identitySubgraphSchema, applicationSubgraphSchema, groupSubgraphSchema, parseRows,
   type IdentityRow, type GroupRow, type ApplicationRow, type MembershipRow, type UserAssignmentRow, type GroupAssignmentRow,
-  type Counts, type IdentitySubgraph, type ApplicationSubgraph,
+  type Counts, type IdentitySubgraph, type ApplicationSubgraph, type GroupSubgraph,
 } from "./access-rpc-types";
 
 const OWNER_ADMIN_ROLES: readonly string[] = ["owner", "admin"];
@@ -81,5 +81,15 @@ export async function getApplicationAccessSubgraph(tenantId: string, application
   if (!r.ok) return r;
   if (r.data === null || r.data === undefined) return { ok: false, error: "not_found" };
   const p = applicationSubgraphSchema.safeParse(r.data);
+  return p.success ? { ok: true, data: p.data } : { ok: false, error: "query_failed" };
+}
+
+// Phase 3 — the group subgraph. Same not_found collapse as the other two: a group that does not exist, one owned by another
+// tenant, and one owned by a SUPERSEDED connector are three different causes with one indistinguishable answer.
+export async function getGroupAccessSubgraph(tenantId: string, groupId: string, includeStale = false): Promise<EntityResult<GroupSubgraph>> {
+  const r = await callRpc("product_group_access_subgraph", { p_tenant_id: tenantId, p_group_id: groupId, p_include_stale: includeStale });
+  if (!r.ok) return r;
+  if (r.data === null || r.data === undefined) return { ok: false, error: "not_found" };
+  const p = groupSubgraphSchema.safeParse(r.data);
   return p.success ? { ok: true, data: p.data } : { ok: false, error: "query_failed" };
 }

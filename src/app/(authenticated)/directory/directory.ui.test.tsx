@@ -103,21 +103,31 @@ describe("/directory/groups", () => {
     expect(screen.getByText("Built-in")).toBeTruthy();
   });
 
-  it("offers NO fake group-detail link — the one action goes to a query that really works", async () => {
-    const { container } = render(await GroupsPage({ searchParams: sp() }));
-    const hrefs = [...container.querySelectorAll("a")].map((a) => a.getAttribute("href") ?? "");
-    // There is no group detail route and no group subgraph RPC. Nothing may pretend otherwise.
-    expect(hrefs.some((h) => /\/directory\/groups\/[^?]/.test(h)), "no group detail route exists").toBe(false);
-    expect(hrefs.some((h) => /\/access\/groups\//.test(h)), "no access group route exists").toBe(false);
-    const findings = hrefs.find((h) => h.includes("/access/findings"));
-    expect(findings, "the row action must point at findings filtered to this group").toBeTruthy();
-    expect(decodeURIComponent(findings!)).toContain("subjectType=group");
+  it("opens the group itself, carrying the filter state so 'back' returns to the same list", async () => {
+    // Phase 3 replaced the Phase 2 placeholder: the group name is now a real route, not a findings query standing in for one.
+    render(await GroupsPage({ searchParams: sp({ q: "eng" }) }));
+    const href = screen.getByRole("link", { name: "Engineering" }).getAttribute("href") ?? "";
+    expect(href).toContain("/directory/groups/22222222-2222-4222-8222-222222222222");
+    expect(href).toContain("from=groups");
+    expect(decodeURIComponent(href)).toContain("q=eng");
   });
 
-  it("admits that member and application counts are not shown, and points somewhere real", async () => {
+  it("keeps findings as a SECONDARY action, still filtered to the group", async () => {
     const { container } = render(await GroupsPage({ searchParams: sp() }));
-    expect(container.textContent).toMatch(/Member counts and the applications a group grants are not shown here yet/i);
-    expect(container.textContent).toMatch(/no detail page of its own/i);
+    const findings = [...container.querySelectorAll("a")].map((a) => a.getAttribute("href") ?? "").find((h) => h.includes("/access/findings"));
+    expect(findings, "the findings action must survive Phase 3").toBeTruthy();
+    expect(decodeURIComponent(findings!)).toContain("subjectType=group");
+    // Still no invented /access/groups route — the group lives under /directory.
+    expect([...container.querySelectorAll("a")].some((a) => /\/access\/groups\//.test(a.getAttribute("href") ?? ""))).toBe(false);
+  });
+
+  it("still claims no member or application counts, and says why", async () => {
+    // The counts remain genuinely unavailable without loading whole edge tables. The page must not imply otherwise just because
+    // a detail route now exists.
+    const { container } = render(await GroupsPage({ searchParams: sp() }));
+    const head = container.querySelector("thead")!;
+    expect(within(head).queryByText(/member/i), "no member-count column may exist").toBeNull();
+    expect(container.textContent).toMatch(/would require loading the full membership and assignment tables/i);
   });
 });
 

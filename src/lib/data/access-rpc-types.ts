@@ -45,6 +45,25 @@ export const countsSchema = z.object({
   memberships: z.number().int().nonnegative(), userAssignments: z.number().int().nonnegative(), groupAssignments: z.number().int().nonnegative(),
 });
 
+// Phase 3 — the group subgraph. `bounded` is part of the contract, not an error: the RPC refuses to build the neighbourhood of a
+// fan-in group (an "Everyone" that names every identity in the tenant) and says so, rather than truncating it into a list that
+// looks complete. The summary is still returned in that case.
+export const groupSubgraphSchema = z.object({
+  group: groupRowSchema.extend({
+    last_seen_at: nullableTs,
+    description: nullableText,
+    provider_created_at: nullableTs,
+    provider_last_updated_at: nullableTs,
+  }),
+  bounded: z.boolean(),
+  memberships: z.array(membershipRowSchema),
+  identities: z.array(identityRowSchema),
+  groupAssignments: z.array(groupAssignmentRowSchema),
+  applications: z.array(applicationRowSchema),
+  userAssignments: z.array(userAssignmentRowSchema),
+});
+export type GroupSubgraph = z.infer<typeof groupSubgraphSchema>;
+
 export const identitySubgraphSchema = z.object({
   identity: identityRowSchema,
   memberships: z.array(membershipRowSchema), groups: z.array(groupRowSchema),

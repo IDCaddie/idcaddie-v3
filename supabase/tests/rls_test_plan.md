@@ -445,3 +445,19 @@ Two pre-existing suites were rescoped as part of this change: `AA6` (application
 asserted a GLOBAL `count(distinct connection_id)`. The harness runs every suite against one database, so those counts measured
 other suites' fixtures and broke as soon as this one added connections. Both now scope to their own connector ids.
 
+## group_access_subgraph_test.sql (0072)
+
+G0 grant shape: EXECUTE to `authenticated` only, definer, pinned search_path, and no direct table SELECT for browser roles.
+G1 the happy path — summary, current-only members, grants, and the member's direct holding of a granted application. G2
+`include_stale` widens to the SAME connector only and is not a back door to a superseded one. G3 superseded, cross-tenant and
+missing group ids all return null, addressed both with the caller's tenant and the owning tenant. G4 a genuinely different active
+Okta organization in the same tenant stays fully readable. G5a the six composite endpoint FKs exist and a cross-connector edge is
+rejected outright; G5b the FKs are then DROPPED, the forbidden rows planted, and the RPC must still exclude them on its own
+authority — a redundant guard that is never exercised is one nobody notices removing. G6 no `external_id`, raw payload, tenant id,
+run id, endpoint or `normalized_*` field appears anywhere in the response. G7 empty and stale groups resolve with real answers
+rather than failures. G8 repeated calls are byte-identical (every array is ORDER BY'd). G9 an editor of the same tenant gets the
+not-found answer — owner/admin only. G10 the fan-in bound: 2600 members puts the response over the 5000-row cap, and the RPC
+returns the summary with `bounded: true` and NO partial arrays, while a small group in the same tenant is still evaluated.
+
+G10 builds and removes ~5200 rows; it cleans up after itself so later suites in the shared database are unaffected.
+

@@ -353,6 +353,21 @@ export function evaluateGovernance(graph: GovernanceGraph, policy: GovernancePol
   return { findings, summary };
 }
 
+// Single-GROUP view (Phase 3): the same engine again, findings filtered to those whose subject IS the group or that reference it.
+// Two rules are group-subjected today — group_without_application_reach and group_broad_application_reach — and both read only this
+// group's own member and application counts, so a group-bounded subgraph evaluates them exactly. Reusing the engine rather than
+// re-deriving those two conditions is the whole point: a second implementation would drift from the first the day a rule changes.
+//
+// The summary is computed over the access of this group's MEMBERS, which is what the detail page reports.
+export function evaluateGroupGovernance(graph: GovernanceGraph, groupId: string, policy: GovernancePolicy = {}, ctx: GovernanceContext = {}): GovernanceEvaluation {
+  const rp = resolvePolicy(policy);
+  const c = buildCtx(graph, rp, ctx.detectedAt ?? null);
+  const all = dedupById(runRules(c, graph));
+  const findings = sortFindings(all.filter((f) => f.subjectId === groupId || f.relatedIds.includes(groupId)));
+  const summary = summarizeGovernance(findings, [...c.accessByIdentity.values()], graph);
+  return { findings, summary };
+}
+
 // Single-identity view: the same engine, findings filtered to those whose subject IS the identity or that reference it; summary
 // recomputed over just that identity's access. (App/group/graph-diagnostic findings are dropped — they are not identity-scoped.)
 export function evaluateIdentityGovernance(graph: GovernanceGraph, identityId: string, policy: GovernancePolicy = {}, ctx: GovernanceContext = {}): GovernanceEvaluation {

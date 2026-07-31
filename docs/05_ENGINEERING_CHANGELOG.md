@@ -398,6 +398,19 @@ from PRs verified via `git log` / `gh pr list`.
 
 ---
 
+## PR #379 — Phase 3: first-class Group detail (2026-07-31)
+
+Migration **0072** adds `product_group_access_subgraph` and `/directory/groups/[id]`. One RPC per page view; the existing Phase-13
+access engine and Phase-14 governance engine do the interpretation, with a new `evaluateGroupGovernance` mirroring the identity
+analogue rather than re-deriving the two group rules.
+
+Connector-scoped edges (defence in depth over the composite FKs) and bounded inside the function, because a group is the fan-in
+case. Supersession-gated anchor, so the P0 rule holds. The page answers the question the surface exists for: for each application
+the group grants, how many members would keep it anyway through a direct assignment.
+
+Eleven SQL groups plus 19 UI tests; eight mutations caught, including binding by name instead of id and truncating instead of
+refusing a fan-in group. **Staging only.**
+
 ## PR #378 — P0: one Okta organization, one active connector (2026-07-31)
 
 Migration **0071**. Two connectors in staging tenant `aaaa1111-…` read the same Okta organization, so Home, People, Groups,
