@@ -8,30 +8,11 @@
 // verification evidence (fingerprints, key ids) that must never reach a browser.
 
 import { createClient } from "@/lib/supabase/server";
+import { deriveLifecycle, isVerified, maskClientId, type OktaLifecycle } from "./okta-lifecycle";
 
-// The lifecycle the CUSTOMER sees. Deliberately more explicit than the database's `connection_state`, because "configured" and
-// "verified" are the two states most easily misread as "connected", and because verification and discovery are separate stages
-// that a single enum value flattens.
-export type OktaLifecycle =
-  | "configuration_saved"
-  | "verification_pending"
-  | "verifying"
-  | "verified"
-  | "initial_discovery_pending"
-  | "discovering"
-  | "discovered"
-  | "failed";
-
-export const OKTA_LIFECYCLE_LABEL: Record<OktaLifecycle, string> = {
-  configuration_saved: "Configuration saved",
-  verification_pending: "Verification pending",
-  verifying: "Verifying",
-  verified: "Verified",
-  initial_discovery_pending: "Initial discovery pending",
-  discovering: "Discovering",
-  discovered: "Discovered",
-  failed: "Failed",
-};
+// The lifecycle vocabulary is pure and lives in ./okta-lifecycle so the client marketplace card can use it. Re-exported
+// here so server callers keep a single import.
+export { OKTA_LIFECYCLE_LABEL, deriveLifecycle, maskClientId, isVerified, type OktaLifecycle } from "./okta-lifecycle";
 
 export type OktaConnectorStatus = {
   readonly connectorId: string;
@@ -49,30 +30,6 @@ export type OktaConnectorStatus = {
   readonly lastDiscoveryAt: string | null;
   readonly failureCategory: string | null;        // already a bounded category in the database; never free text
 };
-
-// A client id is NON-secret (the customer typed it, and it is visible in their Okta console) but there is no reason to render it
-// in full on a shared screen. Keep the shape recognisable so they can confirm it is the right app.
-export function maskClientId(clientId: string): string {
-  if (clientId.length <= 8) return clientId;
-  return `${clientId.slice(0, 6)}…${clientId.slice(-4)}`;
-}
-
-// Map the database's connection_state + validation_status onto the customer lifecycle.
-//
-// Verification and discovery are SEPARATE stages with separate evidence, so this reads both rather than trusting one field:
-// `validation_status` is the authority on verification, `connection_state` on discovery progress. A failed validation wins over
-// a hopeful connection_state — the failure is the thing the customer needs to act on.
-export function deriveLifecycle(connectionState: string | null, validationStatus: string | null): OktaLifecycle {
-  if (validationStatus === "failed" || connectionState === "error" || connectionState === "partial_failure") return "failed";
-  if (connectionState === "discovered") return "discovered";
-  if (connectionState === "discovering") return "discovering";
-  if (connectionState === "discovery_pending") return "initial_discovery_pending";
-  if (validationStatus === "succeeded" || connectionState === "verified") return "verified";
-  if (validationStatus === "pending" || connectionState === "verification_pending") return "verifying";
-  // `configured` with nothing validated yet: the configuration exists and verification has not started.
-  if (connectionState === "configured") return "verification_pending";
-  return "configuration_saved";
-}
 
 export async function getOktaConnectorStatus(): Promise<OktaConnectorStatus | null> {
   const supabase = await createClient();
@@ -103,7 +60,7 @@ export async function getOktaConnectorStatus(): Promise<OktaConnectorStatus | nu
     adminRole: "Read Only Administrator",
     lifecycle,
     configurationSaved: true,
-    verified: lifecycle === "verified" || lifecycle === "initial_discovery_pending" || lifecycle === "discovering" || lifecycle === "discovered",
+    verified: isVerified(lifecycle),
     discovered: lifecycle === "discovered",
     // Governance flags are read back from the row rather than assumed: the page must never claim a posture the database
     // does not actually hold. The types pin the only values the CHECK constraints permit.

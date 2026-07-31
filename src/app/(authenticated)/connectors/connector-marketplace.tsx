@@ -3,7 +3,7 @@ import { useMemo, useState, useId } from "react";
 import { ConnectorCard } from "./connector-card";
 import { useDemoConnectionsRaw } from "@/lib/customer-connectors/use-demo-connection";
 import { parseDemoRaw } from "@/lib/customer-connectors/demo-store";
-import { matchesStatusFilter, type StatusFilter } from "@/lib/customer-connectors/view";
+import { matchesStatusFilter, type RealConnectorState, type StatusFilter } from "@/lib/customer-connectors/view";
 import { CUSTOMER_CATEGORIES, type CustomerConnector, type CustomerCategory } from "@/lib/customer-connectors/catalog-types";
 
 const STATUS_FILTERS: { key: StatusFilter; label: string }[] = [
@@ -15,7 +15,7 @@ const STATUS_FILTERS: { key: StatusFilter; label: string }[] = [
 
 // The customer connector marketplace: instant client-side search + category/status filters over the catalog, with the preview
 // (sessionStorage) connection state overlaid. Keyboard accessible; responsive card grid. No internal/technical wording.
-export function ConnectorMarketplace({ connectors }: { connectors: CustomerConnector[] }) {
+export function ConnectorMarketplace({ connectors, realStates = {} }: { connectors: CustomerConnector[]; realStates?: Record<string, RealConnectorState> }) {
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState<CustomerCategory | "all">("all");
   const [status, setStatus] = useState<StatusFilter>("all");
@@ -28,10 +28,10 @@ export function ConnectorMarketplace({ connectors }: { connectors: CustomerConne
     return connectors.filter((c) => {
       if (q && !c.displayName.toLowerCase().includes(q) && !c.category.toLowerCase().includes(q)) return false;
       if (category !== "all" && c.category !== category) return false;
-      if (!matchesStatusFilter(c, demoMap[c.provider] ?? null, status)) return false;
+      if (!matchesStatusFilter(c, demoMap[c.provider] ?? null, status, realStates[c.provider] ?? null)) return false;
       return true;
     });
-  }, [connectors, query, category, status, demoMap]);
+  }, [connectors, query, category, status, demoMap, realStates]);
 
   // Status pills are the primary filter (standard weight); category pills are visually secondary (smaller, lighter).
   const pill = (active: boolean) =>
@@ -78,7 +78,7 @@ export function ConnectorMarketplace({ connectors }: { connectors: CustomerConne
       ) : (
         <ul className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {filtered.map((c) => (
-            <li key={c.provider}><ConnectorCard connector={c} /></li>
+            <li key={c.provider}><ConnectorCard connector={c} real={realStates[c.provider] ?? null} /></li>
           ))}
         </ul>
       )}

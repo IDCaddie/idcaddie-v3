@@ -31,16 +31,14 @@ describe("NAV_SECTIONS", () => {
     }
   });
 
-  it("marks the unbuilt old-app areas as not built (href null)", () => {
-    const byLabel = Object.fromEntries(
-      NAV_SECTIONS.flatMap((s) => s.items).map((i) => [i.label, i.href]),
-    );
-    for (const label of [
-      "AI / Analysis",
-      "Identity matching", // read-only match STATUS is on /people; the resolution workflow is not built
-    ]) {
-      expect(byLabel[label]).toBeNull();
-    }
+  it("carries no speculative unbuilt placeholders", () => {
+    // Phase 1 DELETED the "AI / Analysis" and "Identity matching" dead entries rather than restyling them. A nav item
+    // for a thing nobody has committed to build is a roadmap promise rendered as product, and it survived this long
+    // only because the filter hid it in demo mode. Nothing in the nav may be unlinkable now.
+    const items = NAV_SECTIONS.flatMap((s) => s.items);
+    expect(items.map((i) => i.label)).not.toContain("AI / Analysis");
+    expect(items.map((i) => i.label)).not.toContain("Identity matching");
+    expect(items.filter((i) => i.href === null)).toEqual([]);
   });
 
   it("links the implemented areas", () => {
@@ -48,15 +46,49 @@ describe("NAV_SECTIONS", () => {
       NAV_SECTIONS.flatMap((s) => s.items).map((i) => [i.label, i.href]),
     );
     expect(byLabel["Home"]).toBe("/");
-    expect(byLabel["Apps"]).toBe("/apps");
     expect(byLabel["Contracts"]).toBe("/contracts");
-    expect(byLabel["People / Users"]).toBe("/people");
     expect(byLabel["Reports"]).toBe("/reports");
     expect(byLabel["Audit / Logs"]).toBe("/audit");
     expect(byLabel["Admin / Settings"]).toBe("/admin");
     expect(byLabel["Files / Documents"]).toBe("/files");
-    expect(byLabel["Dashboards"]).toBe("/dashboards");
     expect(byLabel["Connectors"]).toBe("/connectors");
+  });
+
+  // ── Identity-first information architecture (Phase 1) ─────────────────────────────────────────────────────
+  // These are the load-bearing assertions of the restructure. Each one fails if the IA silently reverts.
+  const titles = () => NAV_SECTIONS.map((s) => s.title);
+
+  it("puts Directory and Access governance BEFORE SaaS intelligence", () => {
+    const t = titles();
+    expect(t).toContain("Directory");
+    expect(t).toContain("Access governance");
+    expect(t).toContain("SaaS intelligence");
+    expect(t.indexOf("Directory")).toBeLessThan(t.indexOf("SaaS intelligence"));
+    expect(t.indexOf("Access governance")).toBeLessThan(t.indexOf("SaaS intelligence"));
+  });
+
+  it("gives Directory its own first-class section with the three identity objects", () => {
+    const dir = NAV_SECTIONS.find((s) => s.title === "Directory");
+    expect(dir?.items.map((i) => i.label)).toEqual(["People", "Groups", "Applications"]);
+    // Real routes, not disabled labels — a section of dead entries is not a section.
+    for (const i of dir!.items) expect(IMPLEMENTED_ROUTES).toContain(i.href!);
+  });
+
+  it("keeps EVERY pre-existing SaaS route reachable after the restructure", () => {
+    // The restructure moved the SaaS layer down; it must not have dropped any of it. /people in particular was a
+    // top-level item and is now "App accounts" under SaaS intelligence — same route, clearer name.
+    const hrefs = NAV_SECTIONS.flatMap((s) => s.items).map((i) => i.href);
+    for (const need of ["/apps", "/catalog", "/contracts", "/files", "/people", "/dashboards"]) {
+      expect(hrefs, `${need} must still be reachable`).toContain(need);
+    }
+  });
+
+  it("does not use the word People for two different things", () => {
+    // Directory People = identities from the IdP. /people = per-app account records. Sharing a label made the two
+    // data models look like one, which is the misreading this phase exists to fix.
+    const peopleLabelled = NAV_SECTIONS.flatMap((s) => s.items).filter((i) => i.label === "People");
+    expect(peopleLabelled).toHaveLength(1);
+    expect(peopleLabelled[0].href).toBe("/directory/people");
   });
 
   it("every enabled nav item maps to an implemented route (no enabled item points at an unbuilt area)", () => {
@@ -88,7 +120,7 @@ describe("visibleNavSections", () => {
 
   it("keeps every screen the demo actually visits", () => {
     const hrefs = visibleNavSections(NAV_SECTIONS, true).flatMap((s) => s.items).map((i) => i.href);
-    for (const need of ["/connectors", "/access", "/apps", "/audit"]) {
+    for (const need of ["/connectors", "/access", "/apps", "/audit", "/directory/people"]) {
       expect(hrefs, `${need} must remain reachable`).toContain(need);
     }
   });

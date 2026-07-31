@@ -1,5 +1,7 @@
 import Link from "next/link";
 import { listCustomerConnectors } from "@/lib/customer-connectors/catalog";
+import { getOktaConnectorStatus } from "@/lib/data/okta-connector-status";
+import type { RealConnectorState } from "@/lib/customer-connectors/view";
 import { ConnectorMarketplace } from "./connector-marketplace";
 
 export const metadata = { title: "Connectors · ID Caddie" };
@@ -10,6 +12,12 @@ export const metadata = { title: "Connectors · ID Caddie" };
 // The read-only sync-review workflow (a separate role-gated route) is preserved via the link below.
 export default async function ConnectorsPage() {
   const connectors = listCustomerConnectors();
+
+  // Okta is the one provider that persists a REAL configuration, so its card is resolved from the database (RLS-scoped to the
+  // caller's tenant) rather than from browser-local preview state. Only the lifecycle is passed down. A failure to read is
+  // treated as "no connector" — the card falls back to the catalog default rather than inventing a status.
+  const okta = await getOktaConnectorStatus().catch(() => null);
+  const realStates: Record<string, RealConnectorState> = okta ? { okta: { lifecycle: okta.lifecycle } } : {};
   return (
     <main className="flex flex-1 flex-col gap-5 p-8">
       <header className="space-y-1">
@@ -22,7 +30,7 @@ export default async function ConnectorsPage() {
         <p className="text-sm text-zinc-600 dark:text-zinc-400">Connect your business apps to discover users, access, and software usage.</p>
       </header>
 
-      <ConnectorMarketplace connectors={connectors} />
+      <ConnectorMarketplace connectors={connectors} realStates={realStates} />
 
       <footer className="border-t border-zinc-200 pt-4 text-sm text-zinc-500 dark:border-zinc-800 dark:text-zinc-400">
         Already reviewing discovered items?{" "}
