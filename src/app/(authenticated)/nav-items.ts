@@ -32,58 +32,58 @@ export function visibleNavSections(sections: NavSection[], demoMode: boolean): N
 
 // The real, implemented authenticated routes that may be linked. Keep in sync with the route tree;
 // the test asserts every linked NavItem.href is one of these (so an unbuilt area can never be linked).
-export const IMPLEMENTED_ROUTES = ["/", "/apps", "/contracts", "/people", "/reports", "/audit", "/admin", "/files", "/dashboards", "/connectors", "/needs-attention", "/catalog", "/access"] as const;
+export const IMPLEMENTED_ROUTES = ["/", "/apps", "/contracts", "/people", "/reports", "/audit", "/admin", "/files", "/dashboards", "/connectors", "/needs-attention", "/catalog", "/access", "/access/findings", "/directory/people", "/directory/groups", "/directory/applications"] as const;
 
 export const NAV_SECTIONS: NavSection[] = [
   {
     title: "Workspace",
     items: [
       { label: "Home", href: "/" },
-      // Read-only summary of RLS-scoped "visible to you" counts linking to implemented pages. No builder
-      // / charts / connector-spend / AI / export — see the page's "Not built yet" copy.
-      { label: "Dashboards", href: "/dashboards", note: "read-only summary" },
       // Read-only cleanup queue composed from existing RLS-scoped DALs (apps/contracts/connectors). No sync.
       { label: "Needs Attention", href: "/needs-attention", note: "cleanup queue" },
+      // Customer connector marketplace. Okta persists a real configuration; the other providers are preview only.
+      { label: "Connectors", href: "/connectors" },
     ],
   },
   {
-    title: "Applications",
+    // The identity graph, promoted out of /access. Discovery writes `directory_*` + `identity_accounts`, and until now the
+    // only way to reach any of it was to drill into the Access report — which framed the product's subject matter as an audit
+    // artefact. People/Groups/Applications LIST pages land in Phase 2; their detail views already exist under /access.
+    title: "Directory",
     items: [
-      { label: "Apps", href: "/apps" },
-      // Read-only canonical app graph (vendors → products → aliases) from 0024; RLS-scoped, safe projection only.
+      { label: "People", href: "/directory/people", note: "list view in progress" },
+      { label: "Groups", href: "/directory/groups", note: "list view in progress" },
+      { label: "Applications", href: "/directory/applications", note: "from your identity provider" },
+    ],
+  },
+  {
+    title: "Access governance",
+    items: [
+      // Effective access + governance findings over the canonical directory graph (owner/admin, enforced server-side).
+      { label: "Access", href: "/access", note: "effective access, read-only" },
+      { label: "Findings", href: "/access/findings", note: "governance findings" },
+    ],
+  },
+  {
+    // Everything below is the SaaS layer. It is unchanged and fully reachable — it has moved in the IA, not shrunk. ELU, UAR
+    // and Reviews are deliberately ABSENT rather than listed as unbuilt: naming them here would imply a roadmap commitment
+    // this phase has not made.
+    title: "SaaS intelligence",
+    items: [
+      { label: "SaaS inventory", href: "/apps", note: "normalized software records" },
       { label: "App Catalog", href: "/catalog", note: "read-only" },
-      // Customer connector marketplace (browse / search / connect in preview). Connecting runs a SIMULATED
-      // preview flow only — no credentials, OAuth, sync, or provider activation. The vault is still not
-      // usable for real credentials; the operator sync-review workflow lives at /connectors/review.
-      { label: "Connectors", href: "/connectors", note: "preview" },
-      { label: "AI / Analysis", href: null },
-    ],
-  },
-  {
-    title: "Contracts & files",
-    items: [
+      // Formerly "People / Users" at the top level. Same route, same page — renamed because "People" now means the
+      // DIRECTORY identity above, and two nav items called People reading from two different tables is the exact
+      // confusion this restructure exists to remove. These are per-application account records, not directory identities.
+      { label: "App accounts", href: "/people", note: "accounts held in SaaS apps" },
       { label: "Contracts", href: "/contracts" },
-      // Read-only file list; upload/open happen on the contract (the verified path). No standalone
-      // upload/delete/export/open-download — see the page's "Not built yet" copy.
       { label: "Files / Documents", href: "/files", note: "read-only; upload on a contract" },
-    ],
-  },
-  {
-    title: "People & identity",
-    items: [
-      { label: "People / Users", href: "/people" },
-      // Read-only match STATUS is on /people; the matching workflow (resolve/review/merge) is not built.
-      { label: "Identity matching", href: null, note: "status on People; resolution not built" },
+      { label: "Spend & renewals", href: "/dashboards", note: "on Home" },
     ],
   },
   {
     title: "Insights",
     items: [
-      // Read-only access governance over the canonical directory graph (owner/admin only, enforced server-side; nav is display-only).
-      // Effective access + governance findings; no mutation, no exports, no usage/license/savings claims.
-      { label: "Access", href: "/access", note: "governance, read-only" },
-      // Read-only: summary counts (Reports) + recent audit entries (Audit). Generation/export/scheduling
-      // and before/after diff are NOT built — see the pages' "Not built yet" copy.
       { label: "Reports", href: "/reports", note: "summary counts only" },
       { label: "Audit / Logs", href: "/audit", note: "recent, read-only" },
     ],
@@ -91,8 +91,6 @@ export const NAV_SECTIONS: NavSection[] = [
   {
     title: "Administration",
     items: [
-      // Read-only: account context + module status + a "Not built yet" capability list. No admin
-      // writes (invitations / roles / SSO / SCIM / vault / billing / API keys / retention) — see the page.
       { label: "Admin / Settings", href: "/admin", note: "read-only context" },
     ],
   },

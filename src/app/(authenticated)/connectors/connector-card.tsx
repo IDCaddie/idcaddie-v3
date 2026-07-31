@@ -3,17 +3,17 @@ import Link from "next/link";
 import { Badge } from "@/components/badge";
 import { ConnectorIcon } from "@/components/connector-icon";
 import { useDemoConnection } from "@/lib/customer-connectors/use-demo-connection";
-import { resolveConnectorView } from "@/lib/customer-connectors/view";
+import { resolveConnectorView, type RealConnectorState } from "@/lib/customer-connectors/view";
 import type { CustomerConnector } from "@/lib/customer-connectors/catalog-types";
 
 // One marketplace card. Reads the sessionStorage demo state reactively so a preview connect/pause/disconnect updates the card
 // live. Visual hierarchy: prominent name + icon, muted category, a strong CTA for the connectable provider, a muted (still
 // accessible) treatment for coming-soon. No internal state, no secret/id/technical wording — customer copy only.
-export function ConnectorCard({ connector }: { connector: CustomerConnector }) {
+export function ConnectorCard({ connector, real }: { connector: CustomerConnector; real?: RealConnectorState | null }) {
   const demo = useDemoConnection(connector.provider);
-  const view = resolveConnectorView(connector, demo);
+  const view = resolveConnectorView(connector, demo, real);
   const comingSoon = view.cta.disabled;
-  const strong = connector.canConnect && !demo; // the "Connect …" call to action
+  const strong = connector.canConnect && !demo && !real; // the "Connect …" call to action
 
   const cardClass = comingSoon
     ? "border-zinc-200 bg-zinc-50/60 dark:border-zinc-800 dark:bg-zinc-900/40"

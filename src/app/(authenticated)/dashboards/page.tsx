@@ -1,4 +1,6 @@
 import Link from "next/link";
+import { loadAccessOverview } from "@/lib/data/access-loaders";
+import { IdentityOverview } from "./identity-overview";
 import { getDashboardSummaryForCurrentUser } from "@/lib/data/dashboard";
 import {
   getDashboardOverviewForCurrentUser,
@@ -89,9 +91,12 @@ const NOT_BUILT = [
 ];
 
 export default async function DashboardsPage() {
-  const [s, overview] = await Promise.all([
+  const [s, overview, access] = await Promise.all([
     getDashboardSummaryForCurrentUser(),
     getDashboardOverviewForCurrentUser(),
+    // Identity lead. `loadAccessOverview` is owner/admin gated and returns `forbidden` for anyone else — a viewer simply sees
+    // the SaaS summary, which is the same posture /access already takes.
+    loadAccessOverview().then((r) => (r.ok ? r.data : null)).catch(() => null),
   ]);
 
   const matchSub =
@@ -102,17 +107,23 @@ export default async function DashboardsPage() {
   return (
     <main className="flex flex-1 flex-col gap-6 p-8">
       <header className="space-y-1">
-        <h1 className="text-xl font-semibold">Dashboards</h1>
+        <h1 className="text-xl font-semibold">Home</h1>
         <p className="text-sm text-zinc-600 dark:text-zinc-400">
-          Read-only summary of what is <strong>visible to you</strong> (RLS-scoped) — not absolute
-          tenant-wide totals. A “—” means a count is temporarily unavailable. Each card opens an
-          implemented page. There is no report builder, charts, connector/spend analytics, AI, or export
-          here.
+          Your directory and access first, then the software it maps to. Read-only and{" "}
+          <strong>visible to you</strong> (RLS-scoped) — not absolute tenant-wide totals. A “—” means a
+          count is temporarily unavailable. Each card opens an implemented page.
         </p>
       </header>
 
+      <IdentityOverview data={access} />
+
+      <section aria-labelledby="saas-heading" className="space-y-3">
+        <div className="flex items-baseline justify-between gap-3">
+          <h2 id="saas-heading" className="text-sm font-medium">SaaS intelligence</h2>
+          <span className="text-xs text-zinc-500 dark:text-zinc-400">Normalized software records — separate from directory applications</span>
+        </div>
       <StatGrid>
-        <StatCard label="Apps visible" value={s.appsVisible} href="/apps" />
+        <StatCard label="SaaS inventory" value={s.appsVisible} href="/apps" />
         <StatCard label="Contracts visible" value={s.contractsVisible} href="/contracts" />
         <StatCard label="Files visible" value={s.filesVisible} href="/files" />
         <StatCard
@@ -139,6 +150,7 @@ export default async function DashboardsPage() {
           <div className="mt-2 text-xs text-zinc-500 underline">Open →</div>
         </Link>
       </StatGrid>
+      </section>
       <p className="text-xs text-zinc-500">
         Counts reflect only rows your tenant/org access allows (RLS-scoped). Matched/unmatched is the
         identity-account match status only (no person/IdP detail). “Recent audit entries” is a capped,
