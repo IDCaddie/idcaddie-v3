@@ -182,3 +182,26 @@ would still refuse the new values — as a function error rather than the omissi
 
 **Existing evidence is preserved by construction:** widening an IN-list rejects nothing previously accepted and rewrites no row.
 `users_read` keeps `contract_version = 1.1.0`.
+
+---
+
+## 0067 — Connector lifecycle re-arm (O2D.1)
+
+Adds ONE transition: **`discovered -> verified`**.
+
+**Why.** 0052's table had recovery paths out of `partial_failure` and `error`, and a rollback out of `discovery_pending` — every
+way out of a discovery that did NOT succeed. It had none out of `discovered`. A connector that COMPLETED discovery was terminal,
+so the second sweep failed at `verified -> discovery_pending` with "connection_state is not verified". Repeat discovery — and
+therefore stale marking, and therefore any scheduled sync — was not representable. Found by the O2D.1 baseline run, which died
+before opening a run or contacting Okta.
+
+**Deliberately NOT `discovered -> discovery_pending`.** The invariant that every discovery begins from `verified` is preserved and
+`discovery_pending` keeps a single entry path. The re-arm reuses the existing recovery idiom rather than adding a second one.
+
+**The re-arm moves a flag and nothing else.** It creates no connector run, writes no discovery row, and cannot alter provider,
+KID, contract version or governance flags — the function does not name those columns. Asserted, not assumed.
+
+**Grants unchanged:** `connector_runner` only, with anon/authenticated/service_role revoked by name (a PUBLIC revoke does not
+remove Supabase's default-privilege grants).
+
+Stale gating is untouched and asserted so by the suite.

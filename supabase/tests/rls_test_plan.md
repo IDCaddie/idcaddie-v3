@@ -375,3 +375,16 @@ reads only their own tenant and cannot write.
 The three membership/assignment capabilities each record as their own row. Recording app-USER assignments does NOT create or
 imply app-GROUP assignments. Prior `users_read`/`groups_read` evidence is asserted intact afterwards, and an undeclared
 capability (`app_admin_write`) is still refused. K9's viewer count rises from 3 to 5 rows accordingly.
+
+
+## connector_lifecycle_rearm_test.sql (0067)
+
+R0 grant shape. R1 owner/editor/viewer/anon can neither call the transition function nor write `connection_state` directly.
+R2 the one new edge works. R3 a full SECOND discovery cycle completes, which is the point. R4 the shortcuts stay closed —
+`discovered` may not jump to `discovery_pending`, `discovering` or `connected_unsynced`. R5 cross-tenant is refused; R5b a
+transition claiming the wrong `p_from` is refused (optimistic concurrency). R6 the re-arm creates no run and no discovery row and
+leaves provider/status untouched. R7 the stale gate still checks completeness, connection scope, last_page and the connector lock.
+
+The R4/R5 negatives assert on a flag set OUTSIDE the exception handler. `raise exception` is P0001, so raising inside the block
+and catching with `when others` swallows the failure — those negatives silently passed against a mutated function until a
+mutation run exposed it.
