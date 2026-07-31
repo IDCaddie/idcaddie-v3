@@ -2412,6 +2412,17 @@ everything. All five now pass `OKTA_PRODUCTION_BUDGET` explicitly; caps asserted
 **Lifecycle re-arm (0067).** The O2D.1 baseline run died before contacting Okta: the connector sits in `discovered` and there was
 no transition out of it. Discovery was single-shot by construction. Adds `discovered -> verified` only.
 
+## O2E cleanup — close abandoned smoke runs, migration 0069 (v3 #369)
+
+**2026-07-31.** Closes the seven `running` connector runs left by the bounded verification smokes as `canceled` with
+`failure_code = 'abandoned_smoke_validation'` and one bounded audit event each. Not deleted.
+
+Scoped so it cannot match anything outside the controlled staging connector — in particular it skips any run that HAS a
+`connector_run_discovery` row, so a genuinely stuck discovery sweep is never closed by housekeeping.
+
+Filed alongside the O2E Phase 0 inventory, which found scheduled sync blocked: the slot machinery is Entra-only.
+
+
 ## O2D.2 — stale-transition audit trail, migration 0068 (v3 #368)
 
 **2026-07-31.** Closes the gap O2D.1 exposed: a controlled group was staled correctly and left no `audit_logs` row, because the
