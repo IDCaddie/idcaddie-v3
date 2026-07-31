@@ -368,3 +368,10 @@ groups verified and does not fail the connector validation. K6 a stale failure c
 evidence package survives the rejection. K7 stale KID, stale contract version, unknown capability, forged run and cross-tenant
 result are each refused. K8 the pinned-KID CHECK and the verified-evidence CHECK hold against direct owner UPDATEs. K9 a viewer
 reads only their own tenant and cannot write.
+
+
+### 0066 additions (K7b)
+
+The three membership/assignment capabilities each record as their own row. Recording app-USER assignments does NOT create or
+imply app-GROUP assignments. Prior `users_read`/`groups_read` evidence is asserted intact afterwards, and an undeclared
+capability (`app_admin_write`) is still refused. K9's viewer count rises from 3 to 5 rows accordingly.
