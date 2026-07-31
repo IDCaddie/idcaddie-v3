@@ -10,6 +10,7 @@ vi.mock("@/lib/data/access-repository", () => ({
 }));
 import * as repoModule from "@/lib/data/access-repository";
 import { parseAccessFilters } from "./access-filters";
+import { loadAccessOverview } from "./access-loaders";
 import {
   loadDirectoryPeople, loadDirectoryGroups, loadDirectoryApplications,
   groupTypeLabel, appStatusLabel, signOnLabel, formatStaleSince, MAX_LIST_NODES,
@@ -287,5 +288,57 @@ describe("customer-facing labels", () => {
     expect(formatStaleSince("2026-01-05T23:30:00Z")).toBe("2026-01-05");
     expect(formatStaleSince("not a date")).toBeNull();
     expect(formatStaleSince(null)).toBeNull();
+  });
+});
+
+// ── parity with /access ──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+// A customer moving between Home, /access and a Directory list will compare the numbers. If they disagree without explanation, every one of
+// them stops being trusted. These pin the exact relationship so a future change to either loader cannot quietly break it.
+describe("Directory list counts vs the /access overview", () => {
+  const people = [
+    person({ id: "i1", display_name: "Ada", sync_status: "current" }),
+    person({ id: "i2", display_name: "Grace", sync_status: "current" }),
+    person({ id: "i3", display_name: "Ghost", sync_status: "stale", stale_since: "2026-01-05T00:00:00Z" }),
+  ];
+  const current = people.filter((p) => p.sync_status === "current");
+
+  beforeEach(() => {
+    // The counts RPC is stale-AGNOSTIC: it returns 3, including the stale row. Both surfaces get the same input.
+    repo.getAccessCounts.mockResolvedValue(counts({ identities: 3, groups: 0, applications: 0 }));
+    for (const fn of ["listDirectoryGroups", "listDirectoryApplications", "listGroupMemberships", "listUserAssignments", "listGroupAssignments"] as const) {
+      repo[fn].mockResolvedValue(ok([]));
+    }
+  });
+
+  it("agrees EXACTLY with /access in the default current-only scope", async () => {
+    repo.listDirectoryIdentities.mockImplementation((_t, o) => Promise.resolve(ok(o?.includeStale ? people : current)));
+    const overview = await loadAccessOverview(false);
+    if (!overview.ok || overview.data.status !== "complete") throw new Error("expected complete");
+    const d = complete<unknown>(await loadDirectoryPeople(F()));
+    expect(d.totalBeforeFilter).toBe(overview.data.counts.identities);
+    // …and both exclude the stale row, rather than both being wrong in the same way.
+    expect(d.totalBeforeFilter).toBe(2);
+  });
+
+  it("agrees with /access when both include stale", async () => {
+    repo.listDirectoryIdentities.mockImplementation((_t, o) => Promise.resolve(ok(o?.includeStale ? people : current)));
+    const overview = await loadAccessOverview(true);
+    if (!overview.ok || overview.data.status !== "complete") throw new Error("expected complete");
+    const d = complete<unknown>(await loadDirectoryPeople(F({ stale: "1" })));
+    expect(d.totalBeforeFilter).toBe(overview.data.counts.identities);
+    expect(d.totalBeforeFilter).toBe(3);
+  });
+
+  it("is HIGHER than the /access card only when /access is in its too-large state, because that card falls back to the raw total", async () => {
+    // The one legitimate divergence, pinned so it is a known property rather than a surprise: when the GRAPH is too large, /access can no
+    // longer show evaluated rows and displays the stale-agnostic RPC total (3, stale included). A per-table Directory list is unaffected
+    // and still shows its current-only 2. Documented in the Phase 2 report.
+    repo.getAccessCounts.mockResolvedValue(counts({ identities: 3, memberships: 999_999 }));
+    repo.listDirectoryIdentities.mockImplementation((_t, o) => Promise.resolve(ok(o?.includeStale ? people : current)));
+    const overview = await loadAccessOverview(false);
+    if (!overview.ok || overview.data.status !== "too_large") throw new Error("expected too_large");
+    expect(overview.data.counts.identities).toBe(3);
+    const d = complete<unknown>(await loadDirectoryPeople(F()));
+    expect(d.totalBeforeFilter).toBe(2);
   });
 });
