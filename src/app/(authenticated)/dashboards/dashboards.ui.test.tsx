@@ -151,3 +151,26 @@ describe("/dashboards is identity-first", () => {
     expect(screen.queryByText("Apps visible"), "old SaaS-first framing must be gone").toBeNull();
   });
 });
+
+// ── Phase 2 cross-links ───────────────────────────────────────────────────────────────────────────────────────
+// A count that opens the list which produced it is the difference between a dashboard and a report. These assert each
+// Home card lands where the GO says, and that the graph-derived numbers still go to Access, where they are explained.
+describe("Home identity cards link into the Directory", () => {
+  it("sends each count to the surface that owns it", async () => {
+    asMock(loadAccessOverview).mockResolvedValue(accessOk);
+    asMock(getDashboardSummaryForCurrentUser).mockResolvedValue(summary);
+    asMock(getDashboardOverviewForCurrentUser).mockResolvedValue({
+      spend: { byCurrency: [], contractsWithCost: 0 },
+      renewals: { due30: [], due90: [], missing: 0, topUpcoming: [] },
+    });
+    const { container } = render(await DashboardsPage());
+    const hrefFor = (label: string) => screen.getByText(label).closest("a")?.getAttribute("href");
+    expect(hrefFor("People")).toBe("/directory/people");
+    expect(hrefFor("Groups")).toBe("/directory/groups");
+    expect(hrefFor("Directory applications")).toBe("/directory/applications");
+    // Effective access and findings are DERIVED — they are computed and explained on Access, so that is where they open.
+    expect(hrefFor("Effective access")).toBe("/access");
+    expect(hrefFor("High findings")).toBe("/access/findings?severity=high");
+    expect(container).toBeTruthy();
+  });
+});

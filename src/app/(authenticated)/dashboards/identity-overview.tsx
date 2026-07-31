@@ -49,9 +49,11 @@ export function IdentityOverview({ data }: { data: AccessOverviewData | null }) 
       </div>
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
-        <Stat label="People" value={c.identities} href="/access" />
-        <Stat label="Groups" value={c.groups} href="/access" />
-        <Stat label="Directory applications" value={c.applications} href="/access" />
+        {/* Phase 2: the three directory counts open the list that produced them, not the Access report. The graph-derived numbers below
+            still open Access, because that is where they are computed and explained. */}
+        <Stat label="People" value={c.identities} href="/directory/people" />
+        <Stat label="Groups" value={c.groups} href="/directory/groups" />
+        <Stat label="Directory applications" value={c.applications} href="/directory/applications" />
         {data.status === "complete" ? (
           <>
             <Stat label="Effective access" value={data.effectiveRelationships} href="/access" />
@@ -60,7 +62,7 @@ export function IdentityOverview({ data }: { data: AccessOverviewData | null }) 
           </>
         ) : (
           <>
-            <Stat label="Group memberships" value={c.memberships} href="/access" />
+            <Stat label="Group memberships" value={c.memberships} href="/directory/groups" />
             <Stat label="Direct assignments" value={c.directAssignments} href="/access" />
             <Stat label="Group assignments" value={c.groupAssignments} href="/access" />
           </>

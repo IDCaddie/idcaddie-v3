@@ -96,3 +96,21 @@ describe("Okta status panel — failed", () => {
     expect(screen.getByText("Configuration").closest("li")?.textContent).toMatch(/Complete/);
   });
 });
+
+// ── Phase 2: directory links appear only once there is data behind them ──────────────────────────────────────
+describe("directory links on the connector status page", () => {
+  const hrefs = () => [...document.querySelectorAll("a")].map((a) => a.getAttribute("href") ?? "");
+
+  it("offers People, Groups and Applications once discovery has completed", () => {
+    render(<OktaStatusPanel status={{ ...base, lifecycle: "discovered", verified: true, discovered: true }} />);
+    expect(hrefs()).toEqual(expect.arrayContaining(["/access", "/directory/people", "/directory/groups", "/directory/applications"]));
+  });
+
+  it("offers NONE of them before discovery — three empty lists read as a broken connector", () => {
+    for (const lifecycle of ["configuration_saved", "verification_pending", "verified", "discovering", "failed"] as const) {
+      render(<OktaStatusPanel status={{ ...base, lifecycle, verified: lifecycle === "verified" || lifecycle === "discovering", discovered: false }} />);
+      for (const h of hrefs()) expect(h, `${lifecycle} must not link to a directory list`).not.toMatch(/^\/directory\//);
+      cleanup();
+    }
+  });
+});
