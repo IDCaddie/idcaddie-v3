@@ -163,3 +163,22 @@ submission.
 **Backfill.** The users_read row is transcribed from the O2C.2 validation that already earned it — same run id, KID and
 timestamp, and `contract_version` left at **1.1.0** because that is what it was proven under. Making historical rows read 1.2.0
 would be tidier and false.
+
+---
+
+## 0066 — Okta capability vocabulary: memberships and assignments (O2C.4)
+
+Widens the bounded `capability` CHECK (and the identical IN-list inside `runner_record_okta_capability_evidence`) to add
+`group_memberships_read`, `app_user_assignments_read` and `app_group_assignments_read`.
+
+**Three, not two.** App-USER and app-GROUP assignments are separate Okta endpoints that can fail independently — an
+administrator role can permit one and refuse the other — so a single "assignments" flag could claim access that does not exist.
+
+**Nothing else changes.** Table, RLS, audit trigger, pinned KID, pinned contract version, idempotency, demotion guard and
+direct-write denial all carry over and apply to the new capabilities unchanged.
+
+**Both lists must move together.** The function's own vocabulary guard runs BEFORE the constraint, so widening only the CHECK
+would still refuse the new values — as a function error rather than the omission it is.
+
+**Existing evidence is preserved by construction:** widening an IN-list rejects nothing previously accepted and rewrites no row.
+`users_read` keeps `contract_version = 1.1.0`.

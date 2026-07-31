@@ -2381,6 +2381,18 @@ No provider data persisted by any run — every directory table's newest row pre
 `LastAccessed` unchanged at 2026-07-23.
 
 users_read evidence keeps `contract_version: 1.1.0` because that is what it was proven under; only new submissions require 1.2.0.
+## O2C.4 — capability vocabulary for memberships and assignments (v3 #363, runner #111)
+
+**2026-07-30.** Migration 0066 widens the bounded capability vocabulary by three: `group_memberships_read`,
+`app_user_assignments_read`, `app_group_assignments_read`. Nothing else about the evidence model changes.
+
+The runner gains a linked bounded smoke: two calls per capability (a fixed prerequisite `?limit=1` to obtain a parent id from the
+authorized org, then the fixed target read), one token, one KMS Sign. The prerequisite exists because the controlled connector has
+no persisted resources and the tenant's persisted groups/apps belong to a different connector whose org binding cannot be
+verified.
+
+Scopes are taken from the production readers: memberships is `okta.groups.read` despite returning users; both app surfaces are
+`okta.apps.read`. All inside the approved three-scope contract — no scope gap.
 
 ## O2C.3 — per-capability evidence, contract 1.2.0 (v3 #361, runner #109)
 
