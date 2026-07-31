@@ -39,7 +39,9 @@ describe("publication manifest — the O2C.2 live verification is REAL", () => {
     expect(m.app_user_assignments_read).toBe("verified");
     expect(m.app_group_assignments_read).toBe("verified");
     // Verified reads are NOT authorization to sync. These two must stay explicitly negative.
-    expect(m.initial_discovery).toBe("not_authorized");
+    // Exercised ONCE by hand is not the same as enabled. scheduled_sync must stay disabled regardless.
+    expect(m.initial_discovery).toBe("exercised_once_staging");
+    expect(m.scheduled_sync).toBe("disabled");
     expect(m.scheduled_sync).toBe("disabled");
     expect(m.production).toBe("disabled");
     expect(manifest.environment).toBe("staging");
