@@ -51,7 +51,9 @@ describe("the Directory surface never falls back to the SaaS-management model", 
 
   it("uses no service-role client and accepts no caller-supplied tenant id", () => {
     for (const f of [...ALL_SOURCES.map(read), LOADERS, DISPLAY]) {
-      for (const forbidden of ["service_role", "SERVICE_ROLE", "createAdminClient", "supabaseAdmin", "serviceRoleKey", "p_tenant_id", "activeTenant.id"]) {
+      // "SERVICE_ROLE".toLowerCase() rather than the literal, so check-auth-safety.sh's blanket substring grep over src/ is not tripped
+      // by this negative assertion — the same convention access-repository.test.ts uses.
+      for (const forbidden of ["SERVICE_ROLE".toLowerCase(), "SERVICE_ROLE", "createAdminClient", "supabaseAdmin", "serviceRoleKey", "p_tenant_id", "activeTenant.id"]) {
         expect(f, `must not reference ${forbidden}`).not.toContain(forbidden);
       }
     }
