@@ -2000,6 +2000,9 @@ export type Database = {
           organization_id: string | null
           provider: string
           status: string
+          superseded_at: string | null
+          superseded_by: string | null
+          superseded_reason: string | null
           tenant_id: string
           updated_at: string
         }
@@ -2015,6 +2018,9 @@ export type Database = {
           organization_id?: string | null
           provider: string
           status?: string
+          superseded_at?: string | null
+          superseded_by?: string | null
+          superseded_reason?: string | null
           tenant_id: string
           updated_at?: string
         }
@@ -2030,6 +2036,9 @@ export type Database = {
           organization_id?: string | null
           provider?: string
           status?: string
+          superseded_at?: string | null
+          superseded_by?: string | null
+          superseded_reason?: string | null
           tenant_id?: string
           updated_at?: string
         }
@@ -2047,6 +2056,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "organizations"
             referencedColumns: ["id", "tenant_id"]
+          },
+          {
+            foreignKeyName: "connectors_superseded_by_fkey"
+            columns: ["superseded_by"]
+            isOneToOne: false
+            referencedRelation: "connectors"
+            referencedColumns: ["id"]
           },
           {
             foreignKeyName: "connectors_tenant_id_fkey"
@@ -3364,6 +3380,75 @@ export type Database = {
           },
         ]
       }
+      okta_connector_capability_evidence: {
+        Row: {
+          capability: string
+          connector_id: string
+          contract_version: string | null
+          created_at: string
+          error_category: string | null
+          first_verified_at: string | null
+          id: string
+          last_attempt_at: string
+          last_verified_at: string | null
+          provider: string
+          status: string
+          tenant_id: string
+          updated_at: string
+          validation_run_id: string | null
+          verified_kid: string | null
+        }
+        Insert: {
+          capability: string
+          connector_id: string
+          contract_version?: string | null
+          created_at?: string
+          error_category?: string | null
+          first_verified_at?: string | null
+          id?: string
+          last_attempt_at?: string
+          last_verified_at?: string | null
+          provider?: string
+          status: string
+          tenant_id: string
+          updated_at?: string
+          validation_run_id?: string | null
+          verified_kid?: string | null
+        }
+        Update: {
+          capability?: string
+          connector_id?: string
+          contract_version?: string | null
+          created_at?: string
+          error_category?: string | null
+          first_verified_at?: string | null
+          id?: string
+          last_attempt_at?: string
+          last_verified_at?: string | null
+          provider?: string
+          status?: string
+          tenant_id?: string
+          updated_at?: string
+          validation_run_id?: string | null
+          verified_kid?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "okta_cap_connector_tenant_fk"
+            columns: ["connector_id", "tenant_id"]
+            isOneToOne: false
+            referencedRelation: "connectors"
+            referencedColumns: ["id", "tenant_id"]
+          },
+          {
+            foreignKeyName: "okta_connector_capability_evidence_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       okta_connector_configs: {
         Row: {
           approved_scopes: string[]
@@ -3379,6 +3464,7 @@ export type Database = {
           id: string
           idempotency_key: string
           last_validated_at: string | null
+          last_validation_attempt_at: string | null
           normalized_org_host: string
           production_enabled: boolean
           proposed_organization_fingerprint: string
@@ -3390,8 +3476,11 @@ export type Database = {
           tenant_id: string
           updated_at: string
           validation_error_category: string | null
+          validation_run_id: string | null
           validation_status: string
+          verified_contract_version: string | null
           verified_organization_fingerprint: string | null
+          verified_service_app_fingerprint: string | null
         }
         Insert: {
           approved_scopes: string[]
@@ -3407,6 +3496,7 @@ export type Database = {
           id?: string
           idempotency_key: string
           last_validated_at?: string | null
+          last_validation_attempt_at?: string | null
           normalized_org_host: string
           production_enabled?: boolean
           proposed_organization_fingerprint: string
@@ -3418,8 +3508,11 @@ export type Database = {
           tenant_id: string
           updated_at?: string
           validation_error_category?: string | null
+          validation_run_id?: string | null
           validation_status?: string
+          verified_contract_version?: string | null
           verified_organization_fingerprint?: string | null
+          verified_service_app_fingerprint?: string | null
         }
         Update: {
           approved_scopes?: string[]
@@ -3435,6 +3528,7 @@ export type Database = {
           id?: string
           idempotency_key?: string
           last_validated_at?: string | null
+          last_validation_attempt_at?: string | null
           normalized_org_host?: string
           production_enabled?: boolean
           proposed_organization_fingerprint?: string
@@ -3446,8 +3540,11 @@ export type Database = {
           tenant_id?: string
           updated_at?: string
           validation_error_category?: string | null
+          validation_run_id?: string | null
           validation_status?: string
+          verified_contract_version?: string | null
           verified_organization_fingerprint?: string | null
+          verified_service_app_fingerprint?: string | null
         }
         Relationships: [
           {
@@ -4377,6 +4474,33 @@ export type Database = {
           p_result_code: string
         }
         Returns: undefined
+      }
+      runner_record_okta_capability_evidence: {
+        Args: {
+          p_capability: string
+          p_connector_id: string
+          p_contract_version: string
+          p_error_category?: string
+          p_outcome: string
+          p_run_id: string
+          p_tenant_id: string
+          p_verified_kid: string
+        }
+        Returns: Json
+      }
+      runner_record_okta_connector_validation: {
+        Args: {
+          p_connector_id: string
+          p_contract_version: string
+          p_error_category?: string
+          p_organization_fingerprint: string
+          p_outcome: string
+          p_run_id: string
+          p_service_app_fingerprint: string
+          p_tenant_id: string
+          p_verified_kid: string
+        }
+        Returns: Json
       }
       runner_record_okta_discovery_metrics: {
         Args: {

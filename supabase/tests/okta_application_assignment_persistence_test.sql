@@ -166,7 +166,11 @@ do $$ begin
   perform public.runner_promote_okta_application_user_assignments('d2000010-0000-4000-8000-000000000010','a2a20000-0000-4000-8000-0000000000a2');
   assert (select count(*) from public.directory_application_user_assignments where connection_id='cc2c0000-0000-4000-8000-0000000000cc')=1, 'AA6 B2/CC2 has its own user edge';
   assert (select count(*) from public.directory_application_user_assignments where connection_id='cb2b0000-0000-4000-8000-0000000000cb')=1, 'AA6 CB2 has its own user edge';
-  assert (select count(distinct connection_id) from public.directory_application_user_assignments)=3, 'AA6 user edges are per-connection (CA2, CB2, CC2)';
+  -- Scoped to THIS suite's three connections. The harness runs every suite against one database, so a global count measures
+  -- other suites' fixtures too and breaks the moment one is added (it did: the 0071 supersession suite creates its own edges).
+  assert (select count(distinct connection_id) from public.directory_application_user_assignments
+           where connection_id in ('ca2a0000-0000-4000-8000-0000000000ca','cb2b0000-0000-4000-8000-0000000000cb','cc2c0000-0000-4000-8000-0000000000cc'))=3,
+    'AA6 user edges are per-connection (CA2, CB2, CC2)';
 end $$;
 
 -- ════ AA7: stale — first run zero; complete second run stales an absent user edge; scoped; no hard delete ════════════════════

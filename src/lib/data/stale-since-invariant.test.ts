@@ -137,8 +137,22 @@ describe("migration 0070 — the four already-correct promote paths were left al
     }
   });
 
-  it("is the highest-numbered migration, so nothing later silently reintroduces the bug", () => {
-    const nums = readdirSync(MIGRATIONS).filter((f) => f.endsWith(".sql")).map((f) => Number(f.slice(0, 4)));
-    expect(Math.max(...nums)).toBe(70);
+  it("is not silently undone by a later migration", () => {
+    // The first version of this asserted 0070 was the highest-numbered migration, which broke the moment 0071 landed and
+    // guarded nothing real. What actually matters: no LATER migration may reissue either promote function without the clear,
+    // or drop the CHECK. 0071 legitimately reissues nine OTHER 0061 read RPCs, so the check must be specific, not a blanket ban.
+    const later = readdirSync(MIGRATIONS)
+      .filter((f) => f.endsWith(".sql") && Number(f.slice(0, 4)) > 70)
+      .map((f) => [f, readFileSync(join(MIGRATIONS, f), "utf8")] as const);
+
+    for (const [name, sql] of later) {
+      for (const fn of ["runner_promote_okta_directory_users", "runner_promote_okta_directory_groups"]) {
+        const i = sql.indexOf(`create or replace function public.${fn}(`);
+        if (i === -1) continue;                       // not reissued here — fine
+        const body = sql.slice(i, sql.indexOf("\n$$;", i));
+        expect(body, `${name} reissues ${fn} without clearing stale_since`).toContain("stale_since = null");
+      }
+      expect(sql, `${name} must not drop the invariant CHECK`).not.toMatch(/drop constraint \w*current_no_stale_since/);
+    }
   });
 });
