@@ -18,6 +18,7 @@ let rpcResult: unknown = { outcome: "created", connector_id: "33333333-3333-4333
 let rpcError: { code?: string } | null = null;
 let rowResult: Record<string, unknown> | null = null;
 let rowError: unknown = null;
+let duplicateLookup: { connector_id: string } | null = null;
 
 const defaultRow = () => ({
   normalized_org_host: "acme.okta.com",
@@ -37,16 +38,25 @@ vi.mock("@/lib/supabase/server", () => ({
   createClient: async () => ({
     auth: { getUser: async () => ({ data: { user } }) },
     from: (table: string) => ({
-      select: () => ({
-        eq: () => ({
-          // tenant_memberships lookup resolves directly; okta_connector_configs read-back uses .single()
+      select: () => {
+        // `findOwnOktaConnector` chains .eq().eq().is().maybeSingle(); the read-back uses .eq().single(). One self-returning
+        // builder covers both without pretending to be a query planner.
+        const builder: Record<string, unknown> = {
           then: undefined,
           single: async () => ({ data: rowResult ?? defaultRow(), error: rowError }),
-          ...(table === "tenant_memberships"
-            ? { then: (r: (v: unknown) => unknown) => r({ data: memberships, error: membershipError }) }
-            : {}),
-        }),
-      }),
+          // Duplicate lookup: null means "no connector visible to THIS tenant", which is what RLS returns for someone
+          // else's connector — the case the UI must not distinguish from not-found.
+          maybeSingle: async () => ({ data: duplicateLookup, error: null }),
+        };
+        builder.eq = () => builder;
+        builder.is = () => builder;
+        builder.order = () => builder;
+        builder.limit = () => builder;
+        if (table === "tenant_memberships") {
+          builder.then = (r: (v: unknown) => unknown) => r({ data: memberships, error: membershipError });
+        }
+        return builder;
+      },
     }),
     rpc: async (fn: string, args: Record<string, unknown>) => {
       calls.push({ fn, args });
@@ -187,7 +197,29 @@ describe("outcomes", () => {
 
   it("surfaces a duplicate configuration as its own reason", async () => {
     rpcResult = { outcome: "duplicate_configuration" };
-    expect(await createOktaConnectorConfiguration(VALID)).toEqual({ ok: false, reason: "duplicate_configuration" });
+    // The duplicate now carries the colliding connector so the UI can offer "Open connector". It is null when the collision
+    // is with ANOTHER tenant's connector — RLS returns nothing there, so that case is indistinguishable from not-found.
+    expect(await createOktaConnectorConfiguration(VALID)).toEqual({
+      ok: false, reason: "duplicate_configuration", existingConnectorId: null,
+    });
+  });
+
+  it("returns the colliding connector when the CALLER'S OWN tenant already has it", async () => {
+    rpcResult = { outcome: "duplicate_configuration" };
+    duplicateLookup = { connector_id: "11111111-2222-4333-8444-555555555555" };
+    expect(await createOktaConnectorConfiguration(VALID)).toEqual({
+      ok: false, reason: "duplicate_configuration", existingConnectorId: "11111111-2222-4333-8444-555555555555",
+    });
+    duplicateLookup = null;
+  });
+
+  it("does NOT reveal a collision owned by another tenant", async () => {
+    // RLS returns nothing for another tenant's row, so the lookup yields null and the caller shows the same generic
+    // message it would show for a configuration that does not exist. Cross-tenant existence stays unobservable.
+    rpcResult = { outcome: "duplicate_configuration" };
+    duplicateLookup = null;
+    const r = await createOktaConnectorConfiguration(VALID);
+    expect(r).toEqual({ ok: false, reason: "duplicate_configuration", existingConnectorId: null });
   });
 
   it("treats an unknown outcome as a failure rather than a success", async () => {
