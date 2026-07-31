@@ -36,7 +36,10 @@ const field = "w-full rounded-md border border-zinc-300 px-3 py-2 text-sm focus:
 // OAuth, NO /authorize redirect, NO consent, NO callback, NO refresh token. This wizard only collects NON-SECRET configuration
 // metadata (issuer, client id, declared completions) and, on save, shows "verification pending". A real client-credentials
 // verification happens later, server-side. It contacts nothing, stores no secret, and the private key is never entered here.
-export function OktaConnectWizard({ provider }: { provider: string }) {
+// `canSave` is PRESENTATIONAL. The server RPC re-checks owner/admin and is the real boundary; this prop only
+// decides whether to offer the button. Defaults true so a caller that omits it degrades to the old behaviour
+// (offer, and let the server refuse) rather than silently locking everyone out.
+export function OktaConnectWizard({ provider, canSave = true }: { provider: string; canSave?: boolean }) {
   const router = useRouter();
   const [step, setStep] = useState<Step>("instructions");
   const [orgInput, setOrgInput] = useState("");
@@ -83,7 +86,7 @@ export function OktaConnectWizard({ provider }: { provider: string }) {
   // owner/admin through a SECURITY DEFINER RPC. Still NO secret and NO provider contact — the customer supplies only the
   // non-secret org host and client id, and nothing is verified against Okta here.
   async function save() {
-    if (saving || orgHost === null) return;
+    if (saving || orgHost === null || !canSave) return;
     setSaving(true);                       // duplicate-submit guard; the idempotency key below is the durable one
     setSaveError(null);
     const fd = new FormData();
@@ -100,8 +103,9 @@ export function OktaConnectWizard({ provider }: { provider: string }) {
     <div className="w-full rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm dark:border-zinc-800 dark:bg-zinc-900 sm:p-8">
       <div className="space-y-6">
         {!terminal && (
-          <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-300">
-            <span className="font-semibold">Preview mode</span> — this walkthrough does not contact Okta or create a real connection.
+          <div className="rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900/60 dark:text-zinc-400">
+            <span className="font-medium text-zinc-800 dark:text-zinc-200">Reviewing connector configuration</span> — this step records
+            non-secret settings. Nothing is sent to Okta until you start a verification.
           </div>
         )}
 
@@ -256,18 +260,31 @@ export function OktaConnectWizard({ provider }: { provider: string }) {
               <p className="text-sm text-zinc-600 dark:text-zinc-400">Confirm the non-secret configuration before saving. No secret or private key is shown.</p>
             </div>
             <dl className="divide-y divide-zinc-200 rounded-lg border border-zinc-200 text-sm dark:divide-zinc-800 dark:border-zinc-800">
-              <div className="flex justify-between gap-3 px-3 py-2"><dt className="text-zinc-500">{OKTA_SETUP.issuerLabel}</dt><dd className="text-right"><code className="text-zinc-700 dark:text-zinc-300">{issuer}</code></dd></div>
-              <div className="flex justify-between gap-3 px-3 py-2"><dt className="text-zinc-500">{OKTA_SETUP.clientIdLabel}</dt><dd className="text-right"><code className="break-all text-zinc-700 dark:text-zinc-300">{clientId}</code></dd></div>
-              <div className="flex justify-between gap-3 px-3 py-2"><dt className="text-zinc-500">Scopes</dt><dd className="text-right">{OKTA_CONTENT.scopeLabels.map((s) => <code key={s} className="block text-zinc-700 dark:text-zinc-300">{s}</code>)}</dd></div>
-              <div className="flex justify-between gap-3 px-3 py-2"><dt className="text-zinc-500">Public key</dt><dd className="text-right break-all text-zinc-700 dark:text-zinc-300">KID {OKTA_APPROVED_PUBLIC_KID}</dd></div>
-              <div className="flex justify-between gap-3 px-3 py-2"><dt className="text-zinc-500">Admin role</dt><dd className="text-right text-zinc-700 dark:text-zinc-300">Read-only, assigned</dd></div>
-              <div className="flex justify-between gap-3 px-3 py-2"><dt className="text-zinc-500">Access</dt><dd className="text-right text-zinc-700 dark:text-zinc-300">Read-only</dd></div>
-              <div className="flex justify-between gap-3 px-3 py-2"><dt className="text-zinc-500">Status</dt><dd className="text-right text-zinc-700 dark:text-zinc-300">{OKTA_SETUP.statusLabel}</dd></div>
+              <div className="flex items-start justify-between gap-4 px-3 py-2.5"><dt className="text-zinc-500">{OKTA_SETUP.issuerLabel}</dt><dd className="text-right"><code className="text-zinc-700 dark:text-zinc-300">{issuer}</code></dd></div>
+              <div className="flex items-start justify-between gap-4 px-3 py-2.5"><dt className="text-zinc-500">{OKTA_SETUP.clientIdLabel}</dt><dd className="text-right"><code className="break-all text-zinc-700 dark:text-zinc-300">{clientId}</code></dd></div>
+              <div className="flex items-start justify-between gap-4 px-3 py-2.5"><dt className="text-zinc-500">Scopes</dt><dd className="text-right">{OKTA_CONTENT.scopeLabels.map((s) => <code key={s} className="block text-zinc-700 dark:text-zinc-300">{s}</code>)}</dd></div>
+              <div className="flex items-start justify-between gap-4 px-3 py-2.5"><dt className="text-zinc-500">Public key</dt><dd className="text-right break-all text-zinc-700 dark:text-zinc-300">KID {OKTA_APPROVED_PUBLIC_KID}</dd></div>
+              <div className="flex items-start justify-between gap-4 px-3 py-2.5"><dt className="text-zinc-500">Admin role</dt><dd className="text-right text-zinc-700 dark:text-zinc-300">Read Only Administrator</dd></div>
+              <div className="flex items-start justify-between gap-4 px-3 py-2.5"><dt className="text-zinc-500">Access</dt><dd className="text-right text-zinc-700 dark:text-zinc-300">Read-only directory discovery</dd></div>
+              <div className="flex items-start justify-between gap-4 px-3 py-2.5"><dt className="text-zinc-500">Status</dt><dd className="text-right"><span className="text-zinc-700 dark:text-zinc-300">{OKTA_SETUP.statusLabel}</span><span className="block text-xs text-zinc-500">Production synchronization disabled</span></dd></div>
             </dl>
             <p className="text-xs text-zinc-500">{OKTA_SETUP.serverValidatedNote} {OKTA_SETUP.statusNote}</p>
             {saveError && <p role="alert" className="text-sm text-red-600 dark:text-red-400">{saveError}</p>}
-            <div className="flex gap-2">
-              <button type="button" onClick={save} disabled={saving} className={primary}>
+            {!canSave && (
+              // Say this BEFORE the disabled control, so the reason is read first rather than discovered by clicking.
+              <p className="text-sm text-zinc-600 dark:text-zinc-400">
+                Owner or administrator permissions are required to create a connector.
+              </p>
+            )}
+            <div className="flex gap-3 pt-1">
+              <button
+                type="button"
+                onClick={save}
+                disabled={saving || !canSave}
+                aria-disabled={saving || !canSave}
+                title={!canSave ? "Owner or administrator permissions are required to create a connector." : undefined}
+                className={primary}
+              >
                 {saving ? "Saving…" : "Save configuration"}
               </button>
               <button type="button" onClick={() => setStep("configuration")} disabled={saving} className={secondary}>Back</button>

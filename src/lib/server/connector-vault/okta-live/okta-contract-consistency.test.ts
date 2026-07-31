@@ -308,8 +308,13 @@ describe("okta setup copy", () => {
 
   it("states read-only, and never claims the connection is production-enabled", () => {
     expect(OKTA_CONTENT.readOnlyStatement).toMatch(/read-only/i);
-    // Truthful status: certification-only, matching the contract's certificationOnly lifecycle.
-    expect(OKTA_SETUP.statusLabel).toMatch(/certification-only|staging-gated/i);
+    // The status must scope itself to staging and must SAY that production sync is off. Previously this pinned the
+    // literal "certification-only"; that phrase reads as "unfinished" to a customer, and the property worth
+    // protecting was never the wording — it is that the copy can never be read as "production is on". So: the label
+    // is scoped to staging, and the note states the production position explicitly.
+    expect(OKTA_SETUP.statusLabel).toMatch(/staging/i);
+    expect(OKTA_SETUP.statusLabel).not.toMatch(/production/i);
+    expect(OKTA_SETUP.statusNote).toMatch(/production synchronization is disabled/i);
     const blob = JSON.stringify({ OKTA_CONTENT, OKTA_SETUP });
     expect(blob).not.toMatch(/production[- ]enabled|fully enabled|live connection is active/i);
   });
