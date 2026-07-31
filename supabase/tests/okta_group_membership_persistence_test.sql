@@ -117,7 +117,11 @@ do $$ begin
   -- edges exist per connection; each references its OWN connection's canonical group+identity rows (composite FK enforced).
   assert (select count(*) from public.directory_group_memberships where connection_id='c8c8c8c8-0000-4000-8000-000000000008')=1, 'MM6 M8B has its own edge';
   assert (select count(*) from public.directory_group_memberships where connection_id='c7b7c7b7-0000-4000-8000-00000000007b')=1, 'MM6 CM7B has its own edge';
-  assert (select count(distinct connection_id) from public.directory_group_memberships)=3, 'MM6 edges are per-connection (3 connections)';
+  -- Scoped to THIS suite's three connections. The harness runs every suite against one database, so a global count measures
+  -- other suites' fixtures too and breaks the moment one is added (it did: the 0071 supersession suite creates its own edges).
+  assert (select count(distinct connection_id) from public.directory_group_memberships
+           where connection_id in ('c7c7c7c7-0000-4000-8000-000000000007','c7b7c7b7-0000-4000-8000-00000000007b','c8c8c8c8-0000-4000-8000-000000000008'))=3,
+    'MM6 edges are per-connection (3 connections)';
 end $$;
 
 -- ════ MM7: stale — first run zero; complete second run stales an absent edge; scoped; no hard delete ═════════════════════════

@@ -286,3 +286,38 @@ Only `current` is constrained — `stale`, `review_required` and `disconnected` 
 connector scoping, discovery ordering, promotion budgets, and the 0068 audit triggers. The repair moves no row between statuses, so it
 fires no audit trigger (those carry `when (old.sync_status = 'current' and new.sync_status = 'stale')`) — asserted in the suite, not assumed.
 
+## 0071 — One Okta organization, one active connector (P0)
+
+A tenant could hold two connector rows reading the SAME Okta organization, and every product surface counted both. Staging tenant
+`aaaa1111-…` had exactly that: `Okta (A1 Procurement)` (2026-07-21, 5 runs, no `okta_connector_configs` row — it predates 0063) and
+`Okta Staging (O2C.2 verification)` (2026-07-30, 24 runs, validated config for `trial-5294016.okta.com`). Home reported 2 people
+where the organization has 1, 9 groups where it has 7, and 4 applications where it has 2.
+
+**The proof that it is one organization** is Okta external ids — opaque, globally unique, provider-issued. Measured before the fix:
+every legacy `external_id` was also present under the controlled connector (1/1 identities, 2/2 groups, 2/2 applications) and none
+was unique to the legacy one. The legacy row set is a strict subset: the same organization, read twice.
+
+**The rule.** Supersession is DECLARED, not inferred. `connectors` gains `superseded_by` / `superseded_at` / `superseded_reason`
+(all three set together, enforced by CHECK; no self-supersession). Product reads then exclude any row whose connector carries the
+pointer. Nothing guesses at read time — a rule like "prefer the newest" would silently change what a customer sees whenever the
+underlying facts shift.
+
+Explicitly NOT how this is solved: no `DISTINCT`, no dedup on name/label/login/email, no "pick one row per external_id". Those
+choose a winner per ROW; the duplication is per CONNECTOR, and only connector-level ownership resolves it without inventing a
+preference between two equally real records.
+
+All nine 0061 read RPCs are reissued with one added predicate. Each body un-patches to byte-identical 0061. Enforcing in the
+database rather than the application is what makes Home, People, Groups, Directory applications, Access, Findings and both detail
+pages agree by construction. The two subgraph functions gate their ANCHOR select, so a superseded record is indistinguishable from
+one that never existed.
+
+**Nothing is deleted or rewritten.** Every legacy row keeps its data, its `sync_status` and its connector. `connector_runs`,
+`connector_run_discovery`, `discovery_facts` and `audit_logs` are untouched. The exclusion is read-time only — clearing the pointer
+restores the rows immediately.
+
+**Distinct organizations stay supported.** The filter keys on the per-connector pointer, so two Okta connectors for two genuinely
+different organizations are both unsuperseded and both fully visible.
+
+The staging supersession is recorded in section 4, guarded so it is a no-op unless both connectors exist in the same tenant, the
+survivor has a validated config, the superseded one has none, and every legacy `external_id` has a counterpart under the survivor.
+

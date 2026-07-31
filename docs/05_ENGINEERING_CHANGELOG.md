@@ -398,6 +398,23 @@ from PRs verified via `git log` / `gh pr list`.
 
 ---
 
+## PR #378 — P0: one Okta organization, one active connector (2026-07-31)
+
+Migration **0071**. Two connectors in staging tenant `aaaa1111-…` read the same Okta organization, so Home, People, Groups,
+Directory applications, Access and Findings all double-counted. Proven one organization by Okta external-id overlap — every legacy
+id also present under the controlled connector, none unique to it.
+
+`connectors` gains a declared `superseded_by` pointer (with timestamp and reason, all three enforced together); all nine 0061 read
+RPCs exclude rows owned by a superseded connector, and both subgraph functions gate their anchor so a superseded record has no
+detail page. No DISTINCT, no row-attribute dedup — the duplication is per connector, so the fix is per connector. Nothing deleted
+or rewritten; the exclusion is read-time only and reversible. A second, genuinely different Okta organization stays fully visible.
+
+`getOktaConnectorStatus` and `findOwnOktaConnector` also stop resolving superseded connectors, so the connector surface agrees with
+the directory surfaces.
+
+Eight groups against real Postgres, six mutations caught. `AA6` and `MM6` rescoped — both asserted global cross-suite counts.
+**Staging only.**
+
 ## PR #377 — Phase 2.1: `current` → `stale_since IS NULL` invariant (2026-07-31)
 
 Migration **0070**. `runner_promote_okta_directory_users` (0053) and `runner_promote_okta_directory_groups` (0054) restored a row to

@@ -423,3 +423,25 @@ use a dedicated connector so their hand-inserted rows stay out of the breaker's 
 The repair's WHERE clause cannot be covered here — the harness applies migrations to an empty database, so it runs against zero rows.
 That scope is asserted statically in `src/lib/data/stale-since-invariant.test.ts`.
 
+## connector_supersession_test.sql (0071)
+
+S0 the pointer's shape is enforced: a bare `superseded_by`, a reason with no pointer, and self-supersession are all rejected, and
+no rejected attempt leaves a partial write. S1 reproduces the DEFECT — before supersession every surface double-counts. S2 after
+recording it, the counts RPC and all six list RPCs return the same numbers, no list leaks a row owned by the superseded connector,
+and `include_stale` does not resurrect one. S3 detail pages agree: the same person exists under both connectors as two rows, the
+surviving one opens and the superseded one is indistinguishable from a record that never existed; the surviving subgraph does not
+reference the superseded connector. S4 a genuinely DIFFERENT Okta organization in the same tenant stays fully visible, lists and
+detail pages included — a "one okta connector per tenant" rule would have deleted it from the product. S5 nothing was deleted or
+rewritten: every legacy row still exists, still `current`, still owned by the legacy connector, and the connector row remains with
+its recorded reason. S6 the exclusion keys on OWNERSHIP, not row resemblance — giving the superseded row a different external_id,
+login and display name does not bring it back, and clearing the pointer restores it immediately. S7 another tenant is unaffected
+and authorization still governs.
+
+Fixture `created_at` values are deliberately DISTINCT: with a tie, an "oldest row per external_id" implementation would fail at the
+first count assertion for the wrong reason. Distinct timestamps let such an implementation appear to work, so it is caught by S1 —
+which is the point, because a row-attribute dedup hides duplicates before any decision is recorded.
+
+Two pre-existing suites were rescoped as part of this change: `AA6` (application assignments) and `MM6` (group memberships) each
+asserted a GLOBAL `count(distinct connection_id)`. The harness runs every suite against one database, so those counts measured
+other suites' fixtures and broke as soon as this one added connections. Both now scope to their own connector ids.
+

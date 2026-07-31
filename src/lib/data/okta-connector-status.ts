@@ -46,9 +46,14 @@ export async function getOktaConnectorStatus(): Promise<OktaConnectorStatus | nu
 
   const { data: conn } = await supabase
     .from("connectors")
-    .select("connection_state, last_sync_at")
+    .select("connection_state, last_sync_at, superseded_by")
     .eq("id", data.connector_id)
     .maybeSingle();
+
+  // A superseded connector is not the tenant's Okta connection any more — another connector reads the same organization and owns
+  // every product surface. Reporting its lifecycle here would contradict Home, People, Groups and Applications, which exclude it.
+  // Absent and superseded are deliberately the same answer: there is no ACTIVE Okta connector to describe.
+  if (conn?.superseded_by) return null;
 
   const lifecycle = deriveLifecycle(conn?.connection_state ?? null, data.validation_status);
 
@@ -87,5 +92,10 @@ export async function findOwnOktaConnector(orgHost: string, clientId: string): P
     .is("disabled_at", null)
     .maybeSingle();
   if (error || !data) return null;
+
+  // Never point the customer at a superseded connector: its status page is gone and its data is excluded everywhere. Falling back
+  // to the generic duplicate message is the honest answer.
+  const { data: conn } = await supabase.from("connectors").select("superseded_by").eq("id", data.connector_id).maybeSingle();
+  if (!conn || conn.superseded_by) return null;
   return data.connector_id;
 }
