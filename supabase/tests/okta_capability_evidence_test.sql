@@ -176,6 +176,30 @@ begin
     raise exception 'K7 a cross-tenant result must be refused';
   exception when insufficient_privilege then null; end;
 
+  -- K7b (0066): the three ASSIGNMENT/MEMBERSHIP capabilities are accepted, each as its own row, and an undeclared one is not.
+  -- They are separate rows on purpose: app-USER and app-GROUP assignments are different Okta endpoints that can fail
+  -- independently, so one flag covering both could claim access that does not exist.
+  v_res := public.runner_record_okta_capability_evidence(TA, v_connector, v_run1, 'group_memberships_read', 'verified', KID, '1.2.0', null);
+  assert v_res->>'status' = 'verified', 'K7b group_memberships_read recorded';
+  v_res := public.runner_record_okta_capability_evidence(TA, v_connector, v_run2, 'app_user_assignments_read', 'verified', KID, '1.2.0', null);
+  assert v_res->>'status' = 'verified', 'K7b app_user_assignments_read recorded';
+
+  -- Recording app-USER assignments must NOT imply app-GROUP assignments.
+  select count(*) into v_n from public.okta_connector_capability_evidence
+    where connector_id = v_connector and capability = 'app_group_assignments_read';
+  assert v_n = 0, 'K7b app_group_assignments_read must not appear from an app-user run, saw ' || v_n;
+
+  -- ...and the three earlier capabilities are untouched by any of it.
+  select count(*) into v_n from public.okta_connector_capability_evidence
+    where connector_id = v_connector and status = 'verified'
+      and capability in ('users_read', 'groups_read');
+  assert v_n = 2, 'K7b prior evidence must be preserved, saw ' || v_n;
+
+  begin
+    perform public.runner_record_okta_capability_evidence(TA, v_connector, v_run3, 'app_admin_write', 'verified', KID, '1.2.0', null);
+    raise exception 'K7b an undeclared capability must be refused';
+  exception when sqlstate '22023' then null; end;
+
   -- K8: the pinned-KID CHECK holds against a direct owner UPDATE, and verified evidence cannot be stripped.
   begin
     update public.okta_connector_capability_evidence set verified_kid = 'VDkZAQoJl_prLRU83WiPreOBGoP6Fib3qC0CG880wz0'
@@ -196,7 +220,7 @@ set role authenticated;
 do $$ declare n int; begin
   select count(*) into n from public.okta_connector_capability_evidence
     where tenant_id = 'e0a70000-0000-4000-8000-00000000e001';
-  assert n = 3, 'K9 a viewer must read their own tenant evidence, saw ' || n;
+  assert n = 5, 'K9 a viewer must read their own tenant evidence, saw ' || n;
   select count(*) into n from public.okta_connector_capability_evidence
     where tenant_id = 'e0a70000-0000-4000-8000-00000000e002';
   assert n = 0, 'K9 a viewer must not read another tenant, saw ' || n;
