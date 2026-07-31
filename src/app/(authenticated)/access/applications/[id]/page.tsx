@@ -86,7 +86,15 @@ export default async function ApplicationAccessPage({ params, searchParams }: { 
               <p className="text-sm text-zinc-600 dark:text-zinc-400">No groups are assigned to this application in the selected scope.</p>
             ) : (
               <ul className="flex flex-wrap gap-2 text-sm">
-                {groups.map((g, i) => <li key={i}><Badge tone="neutral">{g.groupLabel}{g.staleEvidence ? " · stale" : ""}</Badge></li>)}
+                {/* Phase 4: the group opens. Routed on the canonical id, never the label — two groups can share a name, and a
+                    name is not a route. The filter state rides along so "← " returns here. */}
+                {groups.map((g) => (
+                  <li key={g.groupId}>
+                    <Link href={`/directory/groups/${g.groupId}?${returnParams("application", filters, id).toString()}`} className="rounded-full">
+                      <Badge tone="neutral">{g.groupLabel}{g.staleEvidence ? " · stale" : ""}</Badge>
+                    </Link>
+                  </li>
+                ))}
                 {result.data.assignedGroups.length > MAX_GROUPS_SHOWN ? <li className="self-center text-xs text-zinc-400">+{result.data.assignedGroups.length - MAX_GROUPS_SHOWN} more</li> : null}
               </ul>
             )}

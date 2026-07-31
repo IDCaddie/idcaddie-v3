@@ -73,7 +73,9 @@ export default async function GroupDetailPage({ params, searchParams }: { params
   const d = r.data;
   const identityHref = (i: string) => `/access/identities/${i}?${returnParams("groups", filters).toString()}`;
   const applicationHref = (a: string) => `/access/applications/${a}?${returnParams("groups", filters).toString()}`;
-  const findingsHref = accessHref("/access/findings", filters, { query: d.displayName.toLowerCase(), subjectType: "group", page: 1 });
+  // Filter by the group SUBJECT BUCKET plus the group's own label. The bucket is the structural filter; the label narrows within it.
+  // Neither is used to route — the primary actions on this page all use canonical ids.
+  const findingsHref = accessHref("/access/findings", filters, { query: d.displayName.toLowerCase(), subject: "groups", subjectType: null, page: 1 });
 
   return (
     <main className="flex flex-1 flex-col gap-6 p-8">

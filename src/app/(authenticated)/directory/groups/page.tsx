@@ -25,7 +25,7 @@ export default async function DirectoryGroupsPage({ searchParams }: { searchPara
 
   // Secondary action. Findings carry a subject type and a searchable subject label, so this lands on the real findings for this group.
   const findingsHref = (name: string) =>
-    accessHref("/access/findings", filters, { query: name.toLowerCase(), subjectType: "group", page: 1, includeStale: filters.includeStale });
+    accessHref("/access/findings", filters, { query: name.toLowerCase(), subject: "groups", page: 1, includeStale: filters.includeStale });
 
   const columns: readonly Column<DirectoryGroupRow>[] = [
     {

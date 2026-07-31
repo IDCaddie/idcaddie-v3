@@ -116,7 +116,7 @@ describe("/directory/groups", () => {
     const { container } = render(await GroupsPage({ searchParams: sp() }));
     const findings = [...container.querySelectorAll("a")].map((a) => a.getAttribute("href") ?? "").find((h) => h.includes("/access/findings"));
     expect(findings, "the findings action must survive Phase 3").toBeTruthy();
-    expect(decodeURIComponent(findings!)).toContain("subjectType=group");
+    expect(decodeURIComponent(findings!)).toContain("subject=groups");
     // Still no invented /access/groups route — the group lives under /directory.
     expect([...container.querySelectorAll("a")].some((a) => /\/access\/groups\//.test(a.getAttribute("href") ?? ""))).toBe(false);
   });

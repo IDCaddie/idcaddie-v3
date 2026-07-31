@@ -175,7 +175,7 @@ describe("identity + application detail — not-found indistinguishability + no 
     noLeak(text);
   });
   it("identity detail renders access + finding; UUID only in hrefs; no remove control", async () => {
-    loaders.loadIdentityAccessDetail.mockResolvedValue({ ok: true, data: { id: SEED_UUID, displayName: "Ada Lovelace", providerLabel: "okta", syncState: "current", staleSince: null, bounded: false, effectiveApplicationCount: 1, applications: [{ applicationId: SEED_UUID, applicationLabel: "Salesforce", classification: "BOTH", classificationLabel: "Direct and through group", explanation: "Access is represented through a direct assignment and 1 group.", groupPaths: [{ groupLabel: "Engineering", staleEvidence: false }], staleEvidence: false }], findings: [finding()] } });
+    loaders.loadIdentityAccessDetail.mockResolvedValue({ ok: true, data: { id: SEED_UUID, displayName: "Ada Lovelace", providerLabel: "okta", syncState: "current", staleSince: null, bounded: false, effectiveApplicationCount: 1, applications: [{ applicationId: SEED_UUID, applicationLabel: "Salesforce", classification: "BOTH", classificationLabel: "Direct and through group", explanation: "Access is represented through a direct assignment and 1 group.", groupPaths: [{ groupId: "9c000000-0000-4000-8000-0000000090a1", groupLabel: "Engineering", staleEvidence: false }], staleEvidence: false }], findings: [finding()] } });
     const { container } = render(await IdentityAccessPage({ params: Promise.resolve({ id: SEED_UUID }), searchParams: Promise.resolve({}) }));
     const text = container.textContent ?? "";
     expect(text).toContain("Ada Lovelace");
@@ -221,9 +221,9 @@ const UUID_A = "22222222-3333-4444-8555-666666666666";
 const UUID_B = "33333333-4444-4555-8666-777777777777";
 
 describe("detail-page filters, pagination + return-context", () => {
-  const identityDetail = (apps: { applicationId: string; applicationLabel: string; classification: "DIRECT" | "GROUP" | "BOTH"; classificationLabel: string; explanation: string; groupPaths: { groupLabel: string; staleEvidence: boolean }[]; staleEvidence: boolean }[]) =>
+  const identityDetail = (apps: { applicationId: string; applicationLabel: string; classification: "DIRECT" | "GROUP" | "BOTH"; classificationLabel: string; explanation: string; groupPaths: { groupId: "9c000000-0000-4000-8000-0000000090a1", groupLabel: string; staleEvidence: boolean }[]; staleEvidence: boolean }[]) =>
     ({ ok: true as const, data: { id: SEED_UUID, displayName: "Ada Lovelace", providerLabel: "okta", syncState: "current" as const, staleSince: null, bounded: false, effectiveApplicationCount: apps.length, applications: apps, findings: [] } });
-  const app = (over: Partial<{ applicationId: string; applicationLabel: string; classification: "DIRECT" | "GROUP" | "BOTH"; classificationLabel: string; explanation: string; groupPaths: { groupLabel: string; staleEvidence: boolean }[]; staleEvidence: boolean }> = {}) =>
+  const app = (over: Partial<{ applicationId: string; applicationLabel: string; classification: "DIRECT" | "GROUP" | "BOTH"; classificationLabel: string; explanation: string; groupPaths: { groupId: "9c000000-0000-4000-8000-0000000090a1", groupLabel: string; staleEvidence: boolean }[]; staleEvidence: boolean }> = {}) =>
     ({ applicationId: UUID_A, applicationLabel: "Salesforce", classification: "DIRECT" as const, classificationLabel: "Direct", explanation: "Access is represented through a direct assignment.", groupPaths: [], staleEvidence: false, ...over });
 
   it("identity detail: classification filter narrows applications + pre-selects", async () => {
@@ -304,5 +304,104 @@ describe("regression: complete-empty vs filtered-empty is keyed on APPLIED filte
     expect(text).toContain("Showing the first 50 of 55 findings");
     expect(text).toContain("Finding 49"); // index 49 = the 50th, rendered
     expect(text).not.toContain("Finding 50"); // 51st+ capped out
+  });
+});
+
+// ── Phase 4: cross-links between identity-graph objects ────────────────────────────────────────────────────────
+// Every one of these must route on a canonical id. The Phase 1–3 pages already linked people and applications; the
+// group links are what Phase 4 adds, and they are the ones that close the loop between the two directions.
+describe("identity-graph cross-links", () => {
+  const GID = "9c000000-0000-4000-8000-0000000090a1";
+
+  it("person detail links each group path to the GROUP, by id", async () => {
+    // "Through <group>" is the answer to "why does this person have this?" — it was plain text before Phase 4.
+    loaders.loadIdentityAccessDetail.mockResolvedValue({ ok: true, data: { id: SEED_UUID, displayName: "Ada Lovelace", providerLabel: "okta", syncState: "current", staleSince: null, bounded: false, effectiveApplicationCount: 1, applications: [{ applicationId: SEED_UUID, applicationLabel: "Salesforce", classification: "GROUP", classificationLabel: "Through group", explanation: "Access is represented through 1 group.", groupPaths: [{ groupId: GID, groupLabel: "Engineering", staleEvidence: false }], staleEvidence: false }], findings: [] } });
+    const { container } = render(await IdentityAccessPage({ params: Promise.resolve({ id: SEED_UUID }), searchParams: Promise.resolve({}) }));
+    const link = [...container.querySelectorAll("a")].find((a) => (a.getAttribute("href") ?? "").includes("/directory/groups/"));
+    expect(link, "a group path must be a link").toBeTruthy();
+    expect(link!.getAttribute("href")).toContain(`/directory/groups/${GID}`);
+    expect(link!.getAttribute("href")).toContain("from=identity");
+    // Never routed on the label.
+    expect(link!.getAttribute("href")).not.toContain(link!.textContent ?? "@@");
+  });
+
+  it("application detail links each assigned group to the GROUP, by id", async () => {
+    loaders.loadApplicationAccessDetail.mockResolvedValue({ ok: true, data: { id: SEED_UUID, displayName: "Salesforce", providerLabel: "okta", syncState: "current", staleSince: null, catalogMatchStatus: null, bounded: false, effectiveIdentityCount: 0, directOnlyCount: 0, groupOnlyCount: 0, bothCount: 0, identities: [], assignedGroups: [{ groupId: GID, groupLabel: "Engineering", staleEvidence: false }], findings: [] } });
+    const { container } = render(await ApplicationAccessPage({ params: Promise.resolve({ id: SEED_UUID }), searchParams: Promise.resolve({}) }));
+    const link = [...container.querySelectorAll("a")].find((a) => (a.getAttribute("href") ?? "").includes("/directory/groups/"));
+    expect(link, "an assigned group must be a link").toBeTruthy();
+    expect(link!.getAttribute("href")).toContain(`/directory/groups/${GID}`);
+    expect(link!.getAttribute("href")).toContain("from=application");
+  });
+});
+
+// ── Phase 4: Findings organised by subject ─────────────────────────────────────────────────────────────────────
+describe("findings grouped by subject", () => {
+  const GID2 = "9c000000-0000-4000-8000-0000000090b2";
+  const overview = (findings: GovernanceFindingView[]) => ({ ok: true as const, data: { status: "complete" as const, counts: { identities: 1, groups: 1, applications: 1, memberships: 0, directAssignments: 0, groupAssignments: 0 }, breakdown: { directOnly: 0, groupOnly: 0, both: 0 }, effectiveRelationships: 0, governanceFindingsTotal: findings.length, summary: { total: findings.length, bySeverity: { info: 0, low: 0, medium: findings.length, high: 0 } }, findings } });
+
+  const mixed = () => [
+    finding({ id: "g1", subjectType: "group", severity: "high", severityLabel: "High", title: "Group reaches many applications",
+              subject: { kind: "group", label: "Engineering", href: `/directory/groups/${GID2}` } }),
+    finding({ id: "i1", subjectType: "identity", severity: "low", severityLabel: "Low", title: "Person overlap" }),
+    finding({ id: "x1", subjectType: "graph", severity: "medium", severityLabel: "Medium", title: "Edges ignored", subject: null }),
+  ];
+
+  it("renders a heading per subject bucket, worst severity first", async () => {
+    loaders.loadAccessOverview.mockResolvedValue(overview(mixed()));
+    const { container } = render(await AccessFindingsPage({ searchParams: Promise.resolve({}) }));
+    const headings = [...container.querySelectorAll("h2")].map((h) => h.textContent);
+    // Groups holds the High, so it leads; Connector & directory holds the Medium; People the Low.
+    expect(headings).toEqual(["Groups", "Connector & directory", "People"]);
+  });
+
+  it("hides nothing — every finding still renders", async () => {
+    loaders.loadAccessOverview.mockResolvedValue(overview(mixed()));
+    const { container } = render(await AccessFindingsPage({ searchParams: Promise.resolve({}) }));
+    const text = container.textContent ?? "";
+    for (const title of ["Group reaches many applications", "Person overlap", "Edges ignored"]) expect(text).toContain(title);
+  });
+
+  it("gives a group finding a primary action that opens the GROUP by id", async () => {
+    loaders.loadAccessOverview.mockResolvedValue(overview(mixed()));
+    const { container } = render(await AccessFindingsPage({ searchParams: Promise.resolve({}) }));
+    const link = [...container.querySelectorAll("a")].find((a) => (a.getAttribute("href") ?? "").includes("/directory/groups/"));
+    expect(link!.getAttribute("href")).toContain(`/directory/groups/${GID2}`);
+    expect(link!.textContent).toContain("Open group");
+  });
+
+  it("does NOT fabricate an action for a finding with no safe subject", async () => {
+    loaders.loadAccessOverview.mockResolvedValue(overview([finding({ id: "x1", subjectType: "graph", title: "Edges ignored", subject: null })]));
+    const { container } = render(await AccessFindingsPage({ searchParams: Promise.resolve({}) }));
+    const text = container.textContent ?? "";
+    expect(text).toContain("describes your directory connection as a whole");
+    expect([...container.querySelectorAll("a")].some((a) => /\/access\/identities\/|\/directory\/groups\/|\/access\/applications\//.test(a.getAttribute("href") ?? ""))).toBe(false);
+  });
+
+  it("offers a per-bucket filter that scopes the URL", async () => {
+    loaders.loadAccessOverview.mockResolvedValue(overview(mixed()));
+    const { container } = render(await AccessFindingsPage({ searchParams: Promise.resolve({}) }));
+    const only = [...container.querySelectorAll("a")].find((a) => (a.textContent ?? "").startsWith("Show only groups"));
+    expect(decodeURIComponent(only!.getAttribute("href")!)).toContain("subject=groups");
+    expect(container.querySelector("select[name='subject']")).toBeTruthy();
+  });
+
+  it("applies the subject filter and pre-selects it", async () => {
+    loaders.loadAccessOverview.mockResolvedValue(overview(mixed()));
+    const { container } = render(await AccessFindingsPage({ searchParams: Promise.resolve({ subject: "groups" }) }));
+    const text = container.textContent ?? "";
+    expect(text).toContain("Group reaches many applications");
+    expect(text).not.toContain("Person overlap");
+    expect((container.querySelector("select[name='subject']") as HTMLSelectElement).value).toBe("groups");
+  });
+
+  it("keeps high severity leading within a bucket", async () => {
+    loaders.loadAccessOverview.mockResolvedValue(overview([
+      finding({ id: "a", subjectType: "identity", severity: "high", severityLabel: "High", title: "Zed high" }),
+      finding({ id: "b", subjectType: "identity", severity: "low", severityLabel: "Low", title: "Alpha low" }),
+    ]));
+    const { container } = render(await AccessFindingsPage({ searchParams: Promise.resolve({}) }));
+    const text = container.textContent ?? "";
+    expect(text.indexOf("Zed high")).toBeLessThan(text.indexOf("Alpha low"));
   });
 });

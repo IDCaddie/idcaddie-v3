@@ -4,6 +4,7 @@ import { Badge } from "@/components/badge";
 import {
   parseAccessFilters, filterFindings, paginate, accessHref, accessQueryString, findingsActiveFilters, returnParams,
   SEVERITY_OPTIONS, CONFIDENCE_OPTIONS, SUBJECT_TYPE_OPTIONS, RULE_OPTIONS,
+  groupFindingsBySubject, subjectBucket, SUBJECT_BUCKET_OPTIONS,
 } from "@/lib/data/access-filters";
 
 export const metadata = { title: "Access findings · ID Caddie" };
@@ -80,8 +81,17 @@ export default async function AccessFindingsPage({ searchParams }: { searchParam
                 {RULE_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
               </select>
             </label>
+            {/* The customer-facing bucket. The finer engine `subjectType` filter is kept beside it — the two compose, and an
+                existing link carrying `subjectType` keeps working. */}
             <label className="flex flex-col gap-1">
               <span className="text-zinc-500">Subject</span>
+              <select name="subject" defaultValue={filters.subject ?? ""} className="rounded border border-zinc-300 px-2 py-1 dark:border-zinc-700 dark:bg-zinc-900">
+                <option value="">All</option>
+                {SUBJECT_BUCKET_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+              </select>
+            </label>
+            <label className="flex flex-col gap-1">
+              <span className="text-zinc-500">Subject type</span>
               <select name="subjectType" defaultValue={filters.subjectType ?? ""} className="rounded border border-zinc-300 px-2 py-1 dark:border-zinc-700 dark:bg-zinc-900">
                 <option value="">All</option>
                 {SUBJECT_TYPE_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
@@ -122,40 +132,67 @@ export default async function AccessFindingsPage({ searchParams }: { searchParam
               </p>
             </div>
           ) : (
-            <section className="space-y-2 text-sm">
-              <ul className="space-y-2">
-                {paged.rows.map((f) => (
-                  <li key={f.id} className="rounded border border-zinc-200 dark:border-zinc-800">
-                    <details className="group">
-                      <summary className="flex cursor-pointer flex-wrap items-center gap-2 p-3">
-                        <Badge tone={f.severityTone}>{f.severityLabel}</Badge>
-                        <span className="text-zinc-500">{f.confidenceLabel}</span>
-                        {f.staleEvidence ? <Badge tone="neutral">Stale evidence</Badge> : null}
-                        <span className="font-medium">{f.title}</span>
-                      </summary>
-                      <div className="space-y-2 border-t border-zinc-100 p-3 dark:border-zinc-800">
-                        <p className="text-zinc-600 dark:text-zinc-400">{f.summary}</p>
-                        {f.guidance ? <p className="text-xs text-zinc-500">{f.guidance}</p> : null}
-                        <p className="text-xs text-zinc-500">Scope: access represented in your connected directory{f.staleEvidence ? ", including stale evidence" : ""}.</p>
-                        {f.evidenceRows.length > 0 ? (
-                          <dl className="flex flex-wrap gap-x-6 gap-y-1 text-xs text-zinc-500">
-                            {f.evidenceRows.map((e) => (
-                              <div key={e.label} className="flex gap-1"><dt>{e.label}:</dt><dd className="tabular-nums text-zinc-700 dark:text-zinc-300">{e.value}</dd></div>
-                            ))}
-                          </dl>
-                        ) : null}
-                        {f.subject ? (
-                          <Link href={`${f.subject.href}?${ret}`} className="inline-block text-xs underline">View access details: {f.subject.label}</Link>
-                        ) : null}
-                        <p className="text-xs text-zinc-400">
-                          This reflects access topology represented in your connected directory. It does not indicate application usage,
-                          license state, or that access is safe to remove.
-                        </p>
-                      </div>
-                    </details>
-                  </li>
-                ))}
-              </ul>
+            <section className="space-y-6 text-sm">
+              {/* Grouped by SUBJECT, ordered by the worst severity each bucket contains — so the subject area needing attention
+                  first is first, and severity still leads within each. Nothing is hidden: this changes order and grouping only.
+                  Buckets with no findings on this page are omitted rather than rendered as zeros. */}
+              {groupFindingsBySubject(paged.rows).map((bucket) => (
+                <div key={bucket.bucket} className="space-y-2">
+                  <div className="flex flex-wrap items-baseline justify-between gap-2 border-b border-zinc-200 pb-1 dark:border-zinc-800">
+                    <h2 className="text-sm font-semibold">{bucket.label}</h2>
+                    <Link href={accessHref(base, filters, { subject: bucket.bucket, page: 1 })} className="text-xs text-zinc-500 underline">
+                      Show only {bucket.label.toLowerCase()}
+                    </Link>
+                  </div>
+                  <ul className="space-y-2">
+                    {bucket.findings.map((f) => (
+                      <li key={f.id} className="rounded border border-zinc-200 dark:border-zinc-800">
+                        <details className="group">
+                          <summary className="flex cursor-pointer flex-wrap items-center gap-2 p-3">
+                            <Badge tone={f.severityTone}>{f.severityLabel}</Badge>
+                            <span className="text-zinc-500">{f.confidenceLabel}</span>
+                            {f.staleEvidence ? <Badge tone="neutral">Stale evidence</Badge> : null}
+                            <span className="font-medium">{f.title}</span>
+                            {/* The subject label, when one resolved safely. Never a bare id, never a fabricated name. */}
+                            {f.subject ? <span className="text-zinc-500">· {f.subject.label}</span> : null}
+                          </summary>
+                          <div className="space-y-2 border-t border-zinc-100 p-3 dark:border-zinc-800">
+                            <p className="text-zinc-600 dark:text-zinc-400">{f.summary}</p>
+                            {f.guidance ? <p className="text-xs text-zinc-500">{f.guidance}</p> : null}
+                            <p className="text-xs text-zinc-500">Scope: access represented in your connected directory{f.staleEvidence ? ", including stale evidence" : ""}.</p>
+                            {f.evidenceRows.length > 0 ? (
+                              <dl className="flex flex-wrap gap-x-6 gap-y-1 text-xs text-zinc-500">
+                                {f.evidenceRows.map((e) => (
+                                  <div key={e.label} className="flex gap-1"><dt>{e.label}:</dt><dd className="tabular-nums text-zinc-700 dark:text-zinc-300">{e.value}</dd></div>
+                                ))}
+                              </dl>
+                            ) : null}
+                            {/* PRIMARY ACTION. A link exists only when the subject id resolved to a known object in the evaluated
+                                scope; a superseded connector's row never resolves, so it can never become a route. Where there is
+                                no safe object — a structural finding about the directory as a whole — say so rather than invent a
+                                destination. */}
+                            {f.subject ? (
+                              <Link href={`${f.subject.href}?${ret}`} className="inline-block text-xs underline">
+                                {f.subject.kind === "group" ? "Open group" : f.subject.kind === "application" ? "Open application" : "Open person"}: {f.subject.label}
+                              </Link>
+                            ) : (
+                              <p className="text-xs text-zinc-500">
+                                {subjectBucket(f.subjectType) === "directory"
+                                  ? "This describes your directory connection as a whole rather than one record, so there is no object to open."
+                                  : "The subject of this finding is outside the currently evaluated directory scope, so it cannot be opened from here."}
+                              </p>
+                            )}
+                            <p className="text-xs text-zinc-400">
+                              This reflects access topology represented in your connected directory. It does not indicate application usage,
+                              license state, or that access is safe to remove.
+                            </p>
+                          </div>
+                        </details>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ))}
 
               {paged.totalPages > 1 ? (
                 <nav aria-label="Findings pagination" className="flex flex-wrap items-center justify-between gap-2 pt-2 text-sm">

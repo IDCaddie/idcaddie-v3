@@ -142,7 +142,7 @@ describe("group detail — findings and evidence", () => {
     expect(screen.getByText("No application assignments represented")).toBeTruthy();
     expect(screen.getByText("Info")).toBeTruthy();
     const link = [...container.querySelectorAll("a")].find((a) => (a.getAttribute("href") ?? "").includes("/access/findings"));
-    expect(decodeURIComponent(link!.getAttribute("href")!)).toContain("subjectType=group");
+    expect(decodeURIComponent(link!.getAttribute("href")!)).toContain("subject=groups");
   });
 
   it("says there are none rather than hiding the section", async () => {
