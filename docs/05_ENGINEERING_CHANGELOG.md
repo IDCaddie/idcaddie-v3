@@ -2380,7 +2380,29 @@ one item, schema valid, token and payload discarded. Both reported `hasNextPage:
 No provider data persisted by any run — every directory table's newest row predates the runs by six days. Legacy secret
 `LastAccessed` unchanged at 2026-07-23.
 
-users_read evidence keeps `contract_version: 1.1.0` because that is what it was proven under; only new submissions require 1.2.0.
+users_read evidence keeps `contract_version: 1.1.0` because that is what it was proven under; only new submissions require 1.2.0.## O2C.4 COMPLETE — memberships and assignments read verified (v3 #363/#364, runner #111/#112)
+
+**2026-07-31.** Migration 0066 applied to staging; three bounded sub-resource smokes verified live.
+
+| capability | endpoint | scope | result | run |
+|---|---|---|---|---|
+| `group_memberships_read` | `/api/v1/groups/{id}/users?limit=1` | `okta.groups.read` | 200, 1 item | `22ca55c1…` |
+| `app_user_assignments_read` | `/api/v1/apps/{id}/users?limit=1` | `okta.apps.read` | 200, 1 item | `08f113bb…` |
+| `app_group_assignments_read` | `/api/v1/apps/{id}/groups?limit=1` | `okta.apps.read` | **200, 0 items** | `666b6e7d…` |
+
+Each: two calls (fixed prerequisite + fixed target), one token, one KMS Sign. **Exactly three Sign events**, matching the three
+task ids. No provider data persisted — every directory table's newest row predates the runs by six days, and
+`directory_application_group_assignments` remains empty. Legacy secret `LastAccessed` unchanged at 2026-07-23; zero reads of it.
+
+**The first memberships attempt failed and the failure was mine.** It returned HTTP 200 with one member and reported
+`schemaValid: false` because the reader strict-parsed the RAW record — `_links`/`credentials` are what the sanitizer drops, and
+the production reader has always sanitized first. Fixed (runner #112), test fixtures now carry those containers, and the run was
+repeated under explicit authorization. The superseded `failed / provider_error` row was left in place until the re-run replaced
+it rather than being edited away.
+
+**Worth noting:** the app-group-assignments read returned **zero** records. That is a valid authorized empty result proving the
+endpoint is readable, but it exercises no record parsing — the weakest of the six proofs.
+
 ## O2C.4 — capability vocabulary for memberships and assignments (v3 #363, runner #111)
 
 **2026-07-30.** Migration 0066 widens the bounded capability vocabulary by three: `group_memberships_read`,

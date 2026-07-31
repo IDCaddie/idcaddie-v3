@@ -35,8 +35,11 @@ describe("publication manifest — the O2C.2 live verification is REAL", () => {
     expect(m.users_read).toBe("verified");
     expect(m.groups_read).toBe("verified");
     expect(m.apps_read).toBe("verified");
-    expect(m.memberships).toBe("not_verified");
-    expect(m.assignments).toBe("not_verified");
+    expect(m.group_memberships_read).toBe("verified");
+    expect(m.app_user_assignments_read).toBe("verified");
+    expect(m.app_group_assignments_read).toBe("verified");
+    // Verified reads are NOT authorization to sync. These two must stay explicitly negative.
+    expect(m.initial_discovery).toBe("not_authorized");
     expect(m.scheduled_sync).toBe("disabled");
     expect(m.production).toBe("disabled");
     expect(manifest.environment).toBe("staging");

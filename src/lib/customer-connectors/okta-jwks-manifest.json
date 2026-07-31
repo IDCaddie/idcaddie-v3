@@ -11,22 +11,23 @@
   "key_status": "active",
   "thumbprint_method": "RFC7638",
   "generated_by": "deploy/scripts/okta-jwks-publish.mjs (connector-runner)",
-  "notes": "live_verified: on 2026-07-30 three controlled staging runs each authenticated with the KMS-backed key and completed ONE bounded read — users, groups and apps — each with its own KMS Sign, its own single-scope token and its own recorded capability evidence. No provider data was persisted by any of them. The connector is `verified` and NOTHING more: no memberships, no assignments, no discovery, no scheduler, production disabled.",
+  "notes": "live_verified: every approved Okta read surface has been proven by its own bounded call with its own KMS Sign and single-scope token. The app-group-assignments read returned ZERO records — a valid, authorized, empty result that proves the endpoint is readable but exercises no record parsing. No provider data was persisted by any run. Initial discovery remains unauthorized, the scheduler is off, production is disabled.",
   "jwks_url": "https://jwks.staging.idcaddie.com/.well-known/idcaddie-okta-jwks.json",
   "hosting": "dedicated static Vercel project idcaddie-staging-jwks on the custom hostname jwks.staging.idcaddie.com; no auth, no cookies, no AWS credentials at request time",
   "tls": "Let's Encrypt, CN=jwks.staging.idcaddie.com",
   "verified_publicly": true,
   "live_verified_at": "2026-07-30T23:01:30Z",
-  "live_verification_scope": "users_read, groups_read and apps_read each proven by their own bounded live call; memberships and assignments NOT verified",
+  "live_verification_scope": "users_read, groups_read, apps_read, group_memberships_read, app_user_assignments_read and app_group_assignments_read each proven by their own bounded live call; initial discovery and scheduled sync NOT authorized",
   "capability_matrix": {
     "authentication": "verified",
     "users_read": "verified",
     "groups_read": "verified",
     "apps_read": "verified",
-    "memberships": "not_verified",
-    "assignments": "not_verified",
+    "group_memberships_read": "verified",
+    "app_user_assignments_read": "verified",
+    "app_group_assignments_read": "verified",
+    "initial_discovery": "not_authorized",
     "scheduled_sync": "disabled",
-    "discovery": "not_authorized",
     "production": "disabled"
   }
 }
