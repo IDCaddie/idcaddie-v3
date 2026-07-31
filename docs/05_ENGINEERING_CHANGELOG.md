@@ -2410,7 +2410,21 @@ passed one, so all five hosted persist tasks were silently pilot tasks — O2D o
 everything. All five now pass `OKTA_PRODUCTION_BUDGET` explicitly; caps asserted finite, positive and frozen.
 
 **Lifecycle re-arm (0067).** The O2D.1 baseline run died before contacting Okta: the connector sits in `discovered` and there was
-no transition out of it. Discovery was single-shot by construction. Adds `discovered -> verified` only.
+no transition out of it. Discovery was single-shot by construction. Adds `discovered -> verified` only.## O2D.2 — stale-transition audit trail, migration 0068 (v3 #368)
+
+**2026-07-31.** Closes the gap O2D.1 exposed: a controlled group was staled correctly and left no `audit_logs` row, because the
+canonical directory tables carried no audit trigger.
+
+One `SECURITY DEFINER` trigger function plus six triggers, gated on `WHEN (old.sync_status = 'current' and new.sync_status =
+'stale')`. The six stale RPCs are untouched. Bounded payload with an exact asserted key set; `last_seen_run_id` named precisely
+for what it is rather than presented as the staling run.
+
+Mutation-verified: disabling the insert, dropping the WHEN clause, duplicating the event, adding provider data, and removing
+connector scoping each break the suite.
+
+Also extends `scripts/test-rls.sh` to revoke browser-role EXECUTE on TRIGGER-returning functions. Its blanket
+`grant execute on all functions` masked the migration's revoke — the same masking class already fixed for `runner_*`.
+
 ## O2D.1 COMPLETE — production budget configured and controlled stale marking verified (v3 #367)
 
 **2026-07-31.** One complete five-sweep discovery on the production budget staled exactly one controlled group.

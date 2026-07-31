@@ -205,3 +205,34 @@ KID, contract version or governance flags — the function does not name those c
 remove Supabase's default-privilege grants).
 
 Stale gating is untouched and asserted so by the suite.
+
+---
+
+## 0068 — Okta stale-transition audit (O2D.2)
+
+Adds an immutable audit event for every real `current -> stale` transition on the six canonical Okta resources: identity
+accounts, directory groups, directory applications, group memberships, application user assignments, application group
+assignments. (`app_users` also has `sync_status` but is not an Okta discovery target and is out of scope.)
+
+**A trigger, not an insert inside the six RPCs.** The trigger's `WHEN (old.sync_status = 'current' and new.sync_status =
+'stale')` makes "only real transitions are audited" structural rather than something six functions must each remember. It also
+covers any future path that performs the transition. The `runner_mark_absent_okta_*_stale` functions are NOT modified —
+reproducing ~490 lines across four migrations to insert six audit calls would put every threshold and completeness gate into the
+diff, which is the opposite of leaving their behaviour unchanged.
+
+**The four no-event cases fall out for free**, because none of them updates a row: breaker triggered and incomplete/ineligible run
+both return before the UPDATE; an already-stale row is excluded by the RPC's `sync_status = 'current'` predicate; a replay with no
+new absence matches zero rows.
+
+**Bounded payload, exact key set:** connector, provider, resource type, prior/new status, stale timestamp, last-seen run, fixed
+reason code. No provider payload, name, email/login, token, assertion, signature, digest, exception text or ARN — asserted by an
+exact-key-set check, not a substring scan.
+
+**`last_seen_run_id` is named precisely.** It is the run that last SAW the row present, not the run that staled it: the stale
+UPDATE deliberately leaves `last_discovery_run_id` alone, which is what makes an absent row identifiable. The staling run is
+recoverable by correlating `stale_since` against `connector_run_discovery`. Recording a guessed value would put inference into an
+audit record.
+
+**Forgery-proof:** `audit_logs` has RLS with a SELECT-only policy (no INSERT policy), browser roles cannot UPDATE the directory
+tables, the writer is revoked from anon/authenticated/service_role, and `audit_logs_no_mutation` makes a written row immutable for
+every role.

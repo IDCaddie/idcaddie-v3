@@ -388,3 +388,16 @@ leaves provider/status untouched. R7 the stale gate still checks completeness, c
 The R4/R5 negatives assert on a flag set OUTSIDE the exception handler. `raise exception` is P0001, so raising inside the block
 and catching with `when others` swallows the failure — those negatives silently passed against a mutated function until a
 mutation run exposed it.
+
+
+## okta_stale_transition_audit_test.sql (0068)
+
+T0 six triggers exist and no browser role may execute the writer. T1 inserting current rows and a status-preserving UPDATE emit
+nothing. T2 one transition emits exactly one event, with an EXACT key set and no provider/credential data. T3 three transitions
+emit three events, not one per batch. T4 a replay and a forced re-write of an already-stale row emit nothing. T5 a same-tenant
+"legacy" connector row and another tenant's row are neither staled nor audited. T6 identities and applications are covered, not
+just groups. T7 written events survive UPDATE and DELETE attempts. T8 owner/admin/editor/viewer/anon cannot forge an event.
+T9 no forged event exists and the genuine ones remain.
+
+All counts are scoped to this suite's fixture tenants: the harness runs every suite against one database and other suites
+legitimately stale rows, so a global count would measure them too.
