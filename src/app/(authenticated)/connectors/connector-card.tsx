@@ -37,6 +37,11 @@ export function ConnectorCard({ connector, real }: { connector: CustomerConnecto
         </div>
         <Badge tone={view.statusTone} variant="solid">{view.statusLabel}</Badge>
       </div>
+      {/* The note qualifies the badge — "Failed" alone does not say whether the customer must do anything, and
+          "Simulated" alone does not say it is not a real connection. Both were computed and then dropped on the floor. */}
+      {view.statusNote && (
+        <p className={`-mt-1 text-[11px] ${view.statusTone === "danger" ? "text-red-700 dark:text-red-400" : "text-zinc-500 dark:text-zinc-400"}`}>{view.statusNote}</p>
+      )}
       <p className="line-clamp-2 min-h-[2.5rem] text-sm text-zinc-600 dark:text-zinc-400">{connector.description}</p>
       <div className="mt-auto flex items-center justify-between gap-2 pt-1">
         <div className="flex min-w-0 flex-wrap gap-1 text-[11px] text-zinc-500 dark:text-zinc-400">

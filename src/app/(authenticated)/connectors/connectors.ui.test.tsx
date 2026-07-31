@@ -117,3 +117,35 @@ describe("/connectors marketplace", () => {
     expect(sf && within(sf as HTMLElement).queryByRole("link")).toBeNull();
   });
 });
+
+// ── The status note must actually reach the screen ──────────────────────────────────────────────────────────
+// resolveConnectorView computed a qualifying note for every non-default state and no component rendered it, so a
+// simulated card said only "Simulated" and a failed connector said only "Failed" — neither of which tells the
+// customer whether the thing is real or whether they need to act.
+describe("connector card status note", () => {
+  it("renders the note that qualifies the badge", async () => {
+    const { ConnectorCard } = await import("./connector-card");
+    const okta = { provider: "okta", displayName: "Okta", category: "Identity", description: "d", capabilities: [], setupTime: "2m", icon: { initial: "O", tint: "sky" }, availability: "preview", canConnect: true } as never;
+    render(<ConnectorCard connector={okta} real={{ lifecycle: "failed" }} />);
+    expect(screen.getByText("Failed")).toBeTruthy();
+    expect(screen.getByText("Action may be required"), "a failed card must say whether to act").toBeTruthy();
+    cleanup();
+
+    render(<ConnectorCard connector={okta} real={{ lifecycle: "verification_pending" }} />);
+    expect(screen.getByText("Verification in progress")).toBeTruthy();
+    cleanup();
+
+    // Verified and discovered have nothing to qualify — no note, not an empty element.
+    render(<ConnectorCard connector={okta} real={{ lifecycle: "discovered" }} />);
+    expect(screen.queryByText("Verification in progress")).toBeNull();
+    expect(screen.queryByText("Action may be required")).toBeNull();
+  });
+
+  it("tells the customer a simulated card is not a real connection", async () => {
+    const { ConnectorCard } = await import("./connector-card");
+    const okta = { provider: "okta", displayName: "Okta", category: "Identity", description: "d", capabilities: [], setupTime: "2m", icon: { initial: "O", tint: "sky" }, availability: "preview", canConnect: true } as never;
+    window.sessionStorage.setItem("idcaddie:demo-connectors:v1", JSON.stringify({ okta: { status: "connected_preview" } }));
+    render(<ConnectorCard connector={okta} />);
+    expect(screen.getByText(/not a real connection/)).toBeTruthy();
+  });
+});
