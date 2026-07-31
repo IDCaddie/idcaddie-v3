@@ -254,3 +254,35 @@ housekeeping event would be permanent.
 Scoped by three independent predicates, any one of which makes it a no-op elsewhere: the exact controlled connector id,
 `status = 'running'`, and the ABSENCE of a `connector_run_discovery` row. The third distinguishes "opened a run id and exited"
 from "was actually discovering", so a real stuck sweep is never touched. One bounded audit event per closed run.
+
+## 0070 — `sync_status = 'current'` → `stale_since IS NULL` (Phase 2.1)
+
+Four of the six Okta promote RPCs cleared `stale_since` when restoring a row to `current` — `runner_promote_okta_directory_group_memberships`
+(0056), `..._directory_applications` (0057), and both assignment promoters (0060). Two did not:
+`runner_promote_okta_directory_users` (0053) and `runner_promote_okta_directory_groups` (0054).
+
+An identity or group that disappeared from Okta, was marked stale, then reappeared therefore ended up `sync_status = 'current'` carrying
+the `stale_since` from when it went missing. Nothing failed; the row held a contradiction, and any reader trusting `stale_since` over
+`sync_status` reported a live record as last seen months ago. The Directory list pages worked around it by only rendering the timestamp on
+rows that were actually stale — a UI workaround for a database defect.
+
+Three parts:
+
+1. **Repair** on all six discovery tables, not only the two that can produce the state — a repair covering just the paths believed broken
+   cannot prove the others were clean. Scoped to `sync_status = 'current'` so a genuinely stale row's evidence is never erased, and
+   idempotent (`stale_since is not null` keeps the write off correct rows).
+2. **Both promote functions replaced**, with `stale_since = null` added to the do-update-set. The bodies were extracted from 0053/0054 and
+   edited on exactly one line each, verified by diff before assembly. The four already-correct promoters are NOT reissued.
+3. **A validated CHECK** on all six tables: `sync_status <> 'current' or stale_since is null`. Added `NOT VALID` then `VALIDATE` as separate
+   statements so the file stays safe against a large table later.
+
+**A CHECK, not a normalizing trigger.** A `BEFORE UPDATE` trigger nulling `stale_since` whenever a row became `current` would also work and
+would cover paths that do not exist yet. It was rejected: it would silently repair every future occurrence of the same bug, so the next
+promote function written without the clear would look correct forever. The CHECK fails at the moment the mistake is written.
+
+Only `current` is constrained — `stale`, `review_required` and `disconnected` may all legitimately carry a timestamp.
+
+**Unchanged:** stale thresholds, the mass-staleness circuit breaker, completeness/eligibility gates, the latest-run supersession guard,
+connector scoping, discovery ordering, promotion budgets, and the 0068 audit triggers. The repair moves no row between statuses, so it
+fires no audit trigger (those carry `when (old.sync_status = 'current' and new.sync_status = 'stale')`) — asserted in the suite, not assumed.
+

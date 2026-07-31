@@ -401,3 +401,25 @@ T9 no forged event exists and the genuine ones remain.
 
 All counts are scoped to this suite's fixture tenants: the harness runs every suite against one database and other suites
 legitimately stale rows, so a global count would measure them too.
+
+## current_stale_since_invariant_test.sql (0070)
+
+C0 the CHECK exists on all six discovery tables and every one is VALIDATED (a `NOT VALID` constraint would let pre-existing bad rows
+survive). C1 `current` + `stale_since` is rejected on INSERT and on UPDATE, across three different tables. C2 `stale`, `review_required`
+and `disconnected` may still carry a timestamp — the invariant constrains only `current`. C3 the identity round trip through the REAL
+RPCs: discovered → absent → stale with a timestamp → rediscovered → current with the timestamp cleared, `first_seen_at` preserved.
+C4 the same round trip for groups (the 0054 path). C5 replaying a promote over an already-current row is idempotent and preserves
+`first_seen_at`. C6 a promote clears `stale_since` for its OWN connector only — a sibling connector in the same tenant and a row in
+another tenant both stay stale. C7 incomplete / rejected-records / not-last_page runs still cannot promote, and the gated row keeps its
+`stale_since` — no ineligible path leaks through the new clear. C8 the 0068 audit still fires on `current → stale` and only there:
+promote writes nothing, the newly fixed `stale → current` writes nothing, and a repair-shaped UPDATE writes nothing. C9 the repair is a
+no-op on a repaired database and never clears a genuinely stale row. C10 no row anywhere violates the invariant after the whole suite —
+the same query used for the hosted staging check.
+
+Fixtures are sized to four entities with one disappearing (25%) so they clear the 30% mass-staleness circuit breaker WITHOUT altering it;
+a two-row fixture trips the breaker and the test ends up asserting on the breaker rather than on the timestamp. The CHECK-constraint cases
+use a dedicated connector so their hand-inserted rows stay out of the breaker's denominator in the RPC round-trip cases.
+
+The repair's WHERE clause cannot be covered here — the harness applies migrations to an empty database, so it runs against zero rows.
+That scope is asserted statically in `src/lib/data/stale-since-invariant.test.ts`.
+

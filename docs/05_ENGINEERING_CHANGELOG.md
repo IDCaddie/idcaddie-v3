@@ -398,6 +398,20 @@ from PRs verified via `git log` / `gh pr list`.
 
 ---
 
+## PR #377 — Phase 2.1: `current` → `stale_since IS NULL` invariant (2026-07-31)
+
+Migration **0070**. `runner_promote_okta_directory_users` (0053) and `runner_promote_okta_directory_groups` (0054) restored a row to
+`current` without clearing `stale_since`, unlike the other four promoters. A returning identity or group was `current` while carrying the
+timestamp from when it went missing. Repairs all six tables (scoped to `current`, idempotent), replaces the two functions with a one-line
+change each, and adds a validated CHECK to all six. A normalizing trigger was rejected in favour of the CHECK: it would silently mask
+every future recurrence.
+
+Eleven behavioural groups against real Postgres driving the real RPCs, plus a static guard for the repair's scope (unobservable in the
+harness, which applies migrations to an empty database). Four mutations each caught, including widening the repair to still-stale rows —
+which would erase last-seen evidence — and clearing `stale_since` tenant-wide on promote.
+
+No threshold, breaker, gate, trigger or budget touched. **Staging only; not yet applied.** RISK-007 / Phase C posture unchanged.
+
 ### PR #180 — B2c-run operational runbook (first real-token event) · 2026-06-25
 - **Category:** RISK-007 — B2c-**run** operational runbook. **DOCS ONLY.** No code change. **No real run happened, no real Slack API call, no real token, no real client secret, no production/hosted command.** Tests/RLS/types unchanged (**686** / **620** / **1955**); no doc 17 §5 box ticked.
 - **New `docs/45_B2C_RUN_FIRST_REAL_TOKEN_RUNBOOK.md`** — the human-operator checklist for the first real Slack OAuth/token event. **B2c-run is an OPERATIONAL event, not a normal code PR**; it is executed by a human against the (now-enabled) staging B2c-route, **only after Sam's explicit "GO" immediately before execution**, using a **low-risk, disposable Slack DEV workspace/app** with a **source-revocable** credential and the **exact staging redirect only** — never production, never as part of merge/CI/local testing.
