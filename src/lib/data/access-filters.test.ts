@@ -7,7 +7,7 @@ import {
 import type { GovernanceFindingView, IdentityApplicationAccessView } from "./access-view-models";
 import type { ApplicationIdentityAccessView } from "./access-loaders";
 
-const EMPTY: AccessFilters = { query: null, provider: null, connectionId: null, includeStale: false, classification: null, severity: null, confidence: null, ruleId: null, subjectType: null, catalogMatch: null, staleEvidence: null, page: 1, pageSize: DEFAULT_PAGE_SIZE };
+const EMPTY: AccessFilters = { query: null, provider: null, connectionId: null, includeStale: false, classification: null, severity: null, confidence: null, ruleId: null, subjectType: null, subject: null, catalogMatch: null, staleEvidence: null, page: 1, pageSize: DEFAULT_PAGE_SIZE };
 const UUID = "11111111-2222-4333-8444-555555555555";
 
 describe("parseAccessFilters — strict allowlist parsing", () => {
@@ -15,7 +15,7 @@ describe("parseAccessFilters — strict allowlist parsing", () => {
     const f = parseAccessFilters({ severity: "high", confidence: "low", classification: "BOTH", subjectType: "identity", catalogMatch: "unmatched" });
     expect(f).toMatchObject({ severity: "high", confidence: "low", classification: "BOTH", subjectType: "identity", catalogMatch: "unmatched" });
     const bad = parseAccessFilters({ severity: "critical", confidence: "certain", classification: "SOMETHING", subjectType: "root", catalogMatch: "maybe" });
-    expect(bad).toMatchObject({ severity: null, confidence: null, classification: null, subjectType: null, catalogMatch: null });
+    expect(bad).toMatchObject({ severity: null, confidence: null, classification: null, subjectType: null, subject: null, catalogMatch: null });
   });
   it("validates rule id against the allowlist and connection/provider by shape", () => {
     expect(parseAccessFilters({ rule: "redundant_direct_access" }).ruleId).toBe("redundant_direct_access");

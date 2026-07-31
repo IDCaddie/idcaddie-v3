@@ -120,7 +120,14 @@ export default async function IdentityAccessPage({ params, searchParams }: { par
                         <p className="mt-1 text-zinc-600 dark:text-zinc-400">{a.explanation}</p>
                         {shownPaths.length > 0 ? (
                           <ul className="mt-1 list-disc pl-5 text-xs text-zinc-500">
-                            {shownPaths.map((p, i) => <li key={i}>Through {p.groupLabel}{p.staleEvidence ? " (stale evidence)" : ""}</li>)}
+                            {/* Phase 4: "through <group>" is the most useful link on this page — it is the answer to "why does
+                                this person have this?". Routed on the canonical group id. */}
+                            {shownPaths.map((p) => (
+                              <li key={p.groupId}>
+                                Through <Link href={`/directory/groups/${p.groupId}?${returnParams("identity", filters, id).toString()}`} className="underline underline-offset-2">{p.groupLabel}</Link>
+                                {p.staleEvidence ? " (stale evidence)" : ""}
+                              </li>
+                            ))}
                             {a.groupPaths.length > MAX_GROUP_PATHS ? <li className="list-none text-zinc-400">+{a.groupPaths.length - MAX_GROUP_PATHS} more group path{a.groupPaths.length - MAX_GROUP_PATHS === 1 ? "" : "s"}</li> : null}
                           </ul>
                         ) : null}

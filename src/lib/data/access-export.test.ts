@@ -35,9 +35,9 @@ describe("buildFindingsCsv", () => {
 });
 
 describe("buildIdentityAccessCsv", () => {
-  const app = (over: Partial<IdentityApplicationAccessView> = {}): IdentityApplicationAccessView => ({ applicationId: UUID, applicationLabel: "Salesforce", classification: "BOTH", classificationLabel: "Direct and through group", explanation: "", groupPaths: [{ groupLabel: "Engineering", staleEvidence: false }, { groupLabel: "Sales", staleEvidence: true }], staleEvidence: true, ...over });
+  const app = (over: Partial<IdentityApplicationAccessView> = {}): IdentityApplicationAccessView => ({ applicationId: UUID, applicationLabel: "Salesforce", classification: "BOTH", classificationLabel: "Direct and through group", explanation: "", groupPaths: [{ groupId: "9c000000-0000-4000-8000-0000000090a1", groupLabel: "Engineering", staleEvidence: false }, { groupId: "9c000000-0000-4000-8000-0000000090a1", groupLabel: "Sales", staleEvidence: true }], staleEvidence: true, ...over });
   it("emits the allowlisted header + derives direct_assignment_count, group count/labels, stale Yes/No", () => {
-    const csv = buildIdentityAccessCsv("Ada Lovelace", "okta", [app(), app({ applicationLabel: "Slack", classification: "GROUP", groupPaths: [{ groupLabel: "All", staleEvidence: false }], staleEvidence: false })]);
+    const csv = buildIdentityAccessCsv("Ada Lovelace", "okta", [app(), app({ applicationLabel: "Slack", classification: "GROUP", groupPaths: [{ groupId: "9c000000-0000-4000-8000-0000000090a1", groupLabel: "All", staleEvidence: false }], staleEvidence: false })]);
     const [header, r1, r2] = csv.split("\r\n");
     expect(header).toBe(IDENTITY_ACCESS_COLUMNS.join(","));
     expect(r1).toBe('Ada Lovelace,Salesforce,okta,BOTH,1,2,Engineering; Sales,Yes'); // BOTH → direct_assignment_count 1

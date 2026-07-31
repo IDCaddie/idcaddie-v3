@@ -398,6 +398,26 @@ from PRs verified via `git log` / `gh pr list`.
 
 ---
 
+## PR #380 — Phase 4: identity-graph cross-linking, Findings by subject (2026-07-31)
+
+No migration. `subjectLink` gains GROUP subjects (they rendered as no link at all) and disambiguates ASSIGNMENT subjects by RULE —
+`direct_assignment_with_stale_endpoint` carries an identity id, `group_assignment_with_stale_endpoint` a group id, and both are
+uuids so the value cannot say which. `graph` findings stay unlinked: their subjectId is a sha256 scope token.
+
+`GroupPathView` and `ApplicationAssignedGroupView` gain the canonical group id, so "Through &lt;group&gt;" on a person and the
+assigned groups on an application become links. Routed on ids, never labels.
+
+/access/findings is grouped into five subject buckets (People, Groups, Applications, Assignments, Connector & directory), ordered by
+the worst severity each contains, severity still leading within each. Nothing is hidden — order and grouping only. A `subject` URL
+filter composes with the existing severity/rule/subjectType filters.
+
+Findings with no safe subject get a truthful explanation instead of a fabricated action.
+
+Needs Attention integration DEFERRED with reason: it is six cheap parallel reads today, and consuming findings would add a counts
+RPC plus up to six full table page-throughs.
+
+Five mutations caught, including routing by display name and mapping an assignment finding to the wrong subject kind.
+
 ## PR #379 — Phase 3: first-class Group detail (2026-07-31)
 
 Migration **0072** adds `product_group_access_subgraph` and `/directory/groups/[id]`. One RPC per page view; the existing Phase-13

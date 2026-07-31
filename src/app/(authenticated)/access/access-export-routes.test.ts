@@ -73,7 +73,7 @@ describe("identity export route — not-found indistinguishable, bounded, ok", (
   it("ok → 200 CSV with the identity's applications, filters applied", async () => {
     loaders.identity.mockResolvedValue({ ok: true, data: { id: UUID, displayName: "Ada Lovelace", providerLabel: "okta", syncState: "current", staleSince: null, bounded: false, effectiveApplicationCount: 2, applications: [
       { applicationId: "a", applicationLabel: "Salesforce", classification: "DIRECT", classificationLabel: "Direct", explanation: "", groupPaths: [], staleEvidence: false },
-      { applicationId: "b", applicationLabel: "Slack", classification: "GROUP", classificationLabel: "Through group", explanation: "", groupPaths: [{ groupLabel: "All", staleEvidence: false }], staleEvidence: false },
+      { applicationId: "b", applicationLabel: "Slack", classification: "GROUP", classificationLabel: "Through group", explanation: "", groupPaths: [{ groupId: "9c000000-0000-4000-8000-0000000090a1", groupLabel: "All", staleEvidence: false }], staleEvidence: false },
     ], findings: [] } });
     const res = await identityExport(req(`/access/identities/${UUID}/export?classification=DIRECT`), p(UUID));
     expect(res.status).toBe(200);

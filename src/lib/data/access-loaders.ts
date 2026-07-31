@@ -36,7 +36,8 @@ export type IdentityAccessDetailData = {
   effectiveApplicationCount: number; applications: readonly IdentityApplicationAccessView[]; findings: readonly GovernanceFindingView[];
 };
 export type ApplicationIdentityAccessView = { identityId: string; identityLabel: string; classification: ClassificationView; classificationLabel: string; staleEvidence: boolean };
-export type ApplicationAssignedGroupView = { groupLabel: string; staleEvidence: boolean };
+// Phase 4: the group id travels with the label so the application's assigned groups become links.
+export type ApplicationAssignedGroupView = { groupId: string; groupLabel: string; staleEvidence: boolean };
 export type ApplicationAccessDetailData = {
   id: string; displayName: string; providerLabel: string; syncState: "current" | "stale"; staleSince: string | null; catalogMatchStatus: string | null; bounded: boolean;
   effectiveIdentityCount: number; directOnlyCount: number; groupOnlyCount: number; bothCount: number;
@@ -89,7 +90,8 @@ export async function loadAccessOverview(includeStale = false): Promise<AccessOv
   for (const ia of access) for (const app of ia.effective) { if (app.classification === "DIRECT") directOnly++; else if (app.classification === "GROUP") groupOnly++; else both++; }
   const identityLabels = new Map(ids.rows.map((r) => [r.id, identityLabel(r)]));
   const applicationLabels = new Map(apps.rows.map((r) => [r.id, applicationLabel(r)]));
-  const findings = evaluation.findings.map((f) => mapFindingToView(f, identityLabels, applicationLabels)); // all, sorted higher-severity-first
+  const groupLabels = new Map(grps.rows.map((r) => [r.id, groupLabel(r)]));
+  const findings = evaluation.findings.map((f) => mapFindingToView(f, identityLabels, applicationLabels, groupLabels)); // all, sorted higher-severity-first
   return {
     ok: true,
     data: {
@@ -125,7 +127,7 @@ export async function loadIdentityAccessDetail(identityId: string, includeStale 
       syncState: syncState(s.identity.sync_status), staleSince: s.identity.stale_since, bounded: false,
       effectiveApplicationCount: access.effectiveCount,
       applications: mapIdentityApplications(access, applicationLabels, groupLabels),
-      findings: gov.findings.map((f) => mapFindingToView(f, identityLabels, applicationLabels)),
+      findings: gov.findings.map((f) => mapFindingToView(f, identityLabels, applicationLabels, groupLabels)),
     },
   };
 }
@@ -161,10 +163,11 @@ export async function loadApplicationAccessDetail(applicationId: string, include
   identities.sort((a, b) => a.identityLabel.localeCompare(b.identityLabel) || a.identityId.localeCompare(b.identityId));
   const assignedGroups: ApplicationAssignedGroupView[] = s.groupAssignments
     .filter((e) => e.directory_application_id === appId)
-    .map((e) => ({ groupLabel: groupLabel(s.groups.find((gr) => gr.id === e.directory_group_id) ?? {}), staleEvidence: e.sync_status !== "current" }))
-    .sort((a, b) => a.groupLabel.localeCompare(b.groupLabel));
+      .map((e) => ({ groupId: e.directory_group_id, groupLabel: groupLabel(s.groups.find((gr) => gr.id === e.directory_group_id) ?? {}), staleEvidence: e.sync_status !== "current" }))
+      .sort((a, b) => a.groupLabel.localeCompare(b.groupLabel) || a.groupId.localeCompare(b.groupId));
   const gov = evaluateGovernance(graph, { includeStale }, { detectedAt });
-  const findings = gov.findings.filter((f) => f.subjectId === appId || f.relatedIds.includes(appId)).map((f) => mapFindingToView(f, identityLabels, applicationLabels));
+  const groupLabels = new Map(s.groups.map((r) => [r.id, groupLabel(r)]));
+    const findings = gov.findings.filter((f) => f.subjectId === appId || f.relatedIds.includes(appId)).map((f) => mapFindingToView(f, identityLabels, applicationLabels, groupLabels));
   return {
     ok: true,
     data: {
@@ -287,7 +290,7 @@ export async function loadGroupAccessDetail(groupId: string, includeStale = fals
       ...base, bounded: false,
       memberCount: members.length, applicationCount: applications.length,
       members, applications,
-      findings: gov.findings.map((f) => mapFindingToView(f, identityLabels, applicationLabels)),
+      findings: gov.findings.map((f) => mapFindingToView(f, identityLabels, applicationLabels, new Map([[grp.id, groupLabel(grp)]]))),
       staleEvidenceCount: members.filter((m) => m.staleEvidence).length + applications.filter((a) => a.staleEvidence).length,
     },
   };

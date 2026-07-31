@@ -17,6 +17,34 @@ export const SEVERITIES = ["high", "medium", "low", "info"] as const;
 export const CONFIDENCES = ["high", "medium", "low"] as const;
 export const CLASSIFICATIONS = ["DIRECT", "GROUP", "BOTH"] as const;
 export const SUBJECT_TYPES = ["identity", "group", "application", "assignment", "effective_access", "graph"] as const;
+
+// ── Phase 4: finding SUBJECT BUCKETS ────────────────────────────────────────────────────────────────────────────────────────────────
+// The engine's six subject types are the right vocabulary for rules and the wrong one for a customer: `identity` and
+// `effective_access` are both "a person", and `graph` is a structural observation about the directory as a whole. Five buckets group
+// them without reclassifying anything — the taxonomy and the engine output are untouched, only the presentation.
+export const SUBJECT_BUCKETS = ["people", "groups", "applications", "assignments", "directory"] as const;
+export type SubjectBucket = (typeof SUBJECT_BUCKETS)[number];
+export const isSubjectBucket = (v: string): v is SubjectBucket => (SUBJECT_BUCKETS as readonly string[]).includes(v);
+
+// Exhaustive over GovernanceSubjectType — a new subject type is a compile error here rather than a finding that silently vanishes
+// from every bucket.
+const BUCKET_OF: Record<GovernanceSubjectType, SubjectBucket> = {
+  identity: "people",
+  effective_access: "people",     // a finding about what a PERSON can reach
+  group: "groups",
+  application: "applications",
+  assignment: "assignments",
+  graph: "directory",             // structural, scope-level; has no object to open
+};
+export const subjectBucket = (t: GovernanceSubjectType): SubjectBucket => BUCKET_OF[t];
+
+export const SUBJECT_BUCKET_LABEL: Record<SubjectBucket, string> = {
+  people: "People",
+  groups: "Groups",
+  applications: "Applications",
+  assignments: "Assignments",
+  directory: "Connector & directory",
+};
 export const CATALOG_MATCHES = ["matched", "unmatched", "unavailable"] as const;
 export const RULE_IDS = Object.keys(RULE_PROSE) as GovernanceRuleId[];
 
@@ -45,6 +73,7 @@ export type AccessFilters = {
   readonly confidence: GovernanceConfidence | null;
   readonly ruleId: GovernanceRuleId | null;
   readonly subjectType: GovernanceSubjectType | null;
+  readonly subject: SubjectBucket | null;      // the customer-facing bucket; independent of the finer subjectType
   readonly catalogMatch: (typeof CATALOG_MATCHES)[number] | null;
   readonly staleEvidence: boolean | null;
   readonly page: number;                  // 1-based offset page
@@ -86,6 +115,7 @@ export function parseAccessFilters(sp: SearchParamsInput): AccessFilters {
     confidence: pick(first(sp.confidence), isConfidence),
     ruleId: pick(first(sp.rule), isRuleId),
     subjectType: pick(first(sp.subjectType), isSubjectType),
+    subject: pick(first(sp.subject), isSubjectBucket),
     catalogMatch: pick(first(sp.catalogMatch), isCatalogMatch),
     staleEvidence: staleEvid === "1" ? true : staleEvid === "0" ? false : null,
     page: clampInt(first(sp.page), 1, 100_000, 1),
@@ -105,6 +135,7 @@ export function accessQueryString(f: AccessFilters): string {
   if (f.confidence) p.set("confidence", f.confidence);
   if (f.ruleId) p.set("rule", f.ruleId);
   if (f.subjectType) p.set("subjectType", f.subjectType);
+  if (f.subject) p.set("subject", f.subject);
   if (f.catalogMatch) p.set("catalogMatch", f.catalogMatch);
   if (f.staleEvidence !== null) p.set("staleEvidence", f.staleEvidence ? "1" : "0");
   if (f.pageSize !== DEFAULT_PAGE_SIZE) p.set("pageSize", String(f.pageSize));
@@ -151,6 +182,7 @@ export function filterFindings(findings: readonly GovernanceFindingView[], f: Ac
     if (f.confidence && v.confidence !== f.confidence) return false;
     if (f.ruleId && v.ruleId !== f.ruleId) return false;
     if (f.subjectType && v.subjectType !== f.subjectType) return false;
+    if (f.subject && subjectBucket(v.subjectType) !== f.subject) return false;
     if (f.staleEvidence !== null && v.staleEvidence !== f.staleEvidence) return false;
     if (f.query && !(contains(v.title, f.query) || contains(v.summary, f.query) || (v.subject ? contains(v.subject.label, f.query) : false))) return false;
     return true;
@@ -193,6 +225,7 @@ export function findingsActiveFilters(f: AccessFilters): number {
   if (f.confidence) n++;
   if (f.ruleId) n++;
   if (f.subjectType) n++;
+  if (f.subject) n++;
   if (f.staleEvidence !== null) n++;
   return n;
 }
@@ -259,3 +292,27 @@ export const CLASSIFICATION_OPTIONS: { value: ClassificationView; label: string 
 export const RULE_OPTIONS: { value: GovernanceRuleId; label: string }[] = RULE_IDS
   .map((id) => ({ value: id, label: RULE_PROSE[id].title }))
   .sort((a, b) => a.label.localeCompare(b.label));
+
+// Group an already-filtered, already-severity-sorted finding list into buckets.
+//
+// Bucket ORDER is by the highest severity each contains, so the subject area that needs attention first is first; ties fall back to
+// the fixed SUBJECT_BUCKETS order for determinism. Rows inside a bucket keep the engine's ordering, which is severity-desc. Empty
+// buckets are omitted rather than rendered as zeros.
+//
+// This changes ORDER and GROUPING only. Nothing is hidden: flattening the result reproduces the same set.
+const SEVERITY_WEIGHT: Record<GovernanceSeverity, number> = { high: 3, medium: 2, low: 1, info: 0 };
+export function groupFindingsBySubject(findings: readonly GovernanceFindingView[]): { bucket: SubjectBucket; label: string; findings: GovernanceFindingView[] }[] {
+  const by = new Map<SubjectBucket, GovernanceFindingView[]>();
+  for (const f of findings) {
+    const b = subjectBucket(f.subjectType);
+    (by.get(b) ?? by.set(b, []).get(b)!).push(f);
+  }
+  const worst = (rows: GovernanceFindingView[]) => Math.max(...rows.map((r) => SEVERITY_WEIGHT[r.severity]));
+  return [...by.entries()]
+    .map(([bucket, rows]) => ({ bucket, label: SUBJECT_BUCKET_LABEL[bucket], findings: rows }))
+    .sort((a, b) => worst(b.findings) - worst(a.findings) || SUBJECT_BUCKETS.indexOf(a.bucket) - SUBJECT_BUCKETS.indexOf(b.bucket));
+}
+
+export const SUBJECT_BUCKET_OPTIONS: { value: SubjectBucket; label: string }[] =
+  SUBJECT_BUCKETS.map((b) => ({ value: b, label: SUBJECT_BUCKET_LABEL[b] }));
+
