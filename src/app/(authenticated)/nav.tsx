@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { NAV_SECTIONS, isNavActive } from "./nav-items";
+import { NAV_SECTIONS, isNavActive, visibleNavSections, DEMO_MODE } from "./nav-items";
 
 // Persistent authenticated shell sidebar. Active state is derived from the current path (usePathname).
 // It renders ONLY the user's own email + active tenant name/role (no tenant id — that stays on the
@@ -41,7 +41,7 @@ export function AppNav({
       </div>
 
       <nav className="flex-1 overflow-y-auto p-3 text-sm">
-        {NAV_SECTIONS.map((section) => (
+        {visibleNavSections(NAV_SECTIONS, DEMO_MODE).map((section) => (
           <div key={section.title} className="mb-4">
             <div className="px-2 pb-1 text-[11px] font-medium uppercase tracking-wide text-zinc-400">
               {section.title}
@@ -86,9 +86,11 @@ export function AppNav({
       </nav>
 
       <div className="border-t border-zinc-200 p-3 dark:border-zinc-800">
-        <p className="mb-2 text-[11px] text-zinc-400">
-          Items marked “Not built yet” are old-app areas not yet implemented in v3.
-        </p>
+        {!DEMO_MODE && (
+          <p className="mb-2 text-[11px] text-zinc-400">
+            Items marked “Not built yet” are old-app areas not yet implemented in v3.
+          </p>
+        )}
         <form action="/logout" method="post">
           <button
             type="submit"

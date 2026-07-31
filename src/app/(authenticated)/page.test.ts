@@ -19,7 +19,21 @@ describe("authenticated root / — dashboards home", () => {
     expect(src).not.toContain("activeTenant.id"); // the raw tenant UUID render is gone
     expect(src).not.toContain("implemented so far"); // the stale "only Apps and Contracts" copy is gone
     expect(src).not.toMatch(/Badge|not built yet|resolveTenantContext/); // the not-built badges + context read are gone
-    expect(src).toContain('redirect("/dashboards")');
+    // The landing target is now conditional, so assert BEHAVIOUR rather than a literal call. The default (shipped)
+    // path must still be /dashboards; only demo mode lands on /access.
+    expect(src).toContain('"/dashboards"');
+    expect(src).toContain("DEMO_MODE");
+  });
+
+  it("lands on /access ONLY in demo mode; the default stays /dashboards", async () => {
+    // Demo mode changes the front door, and nothing else. Both routes stay reachable either way — the risk to guard
+    // against is a demo flag silently becoming the shipped default.
+    const nav = await import("./nav-items");
+    expect(nav.DEMO_MODE, "DEMO_MODE must default OFF so the honest nav is what ships").toBe(false);
+    redirectSpy.mockClear();
+    const mod = await import("./page");
+    (mod.default as () => void)();
+    expect(redirectSpy).toHaveBeenCalledWith("/dashboards");
   });
 
   it("no (authenticated) subpage Back link points at the old root '/' (they go to /dashboards)", () => {

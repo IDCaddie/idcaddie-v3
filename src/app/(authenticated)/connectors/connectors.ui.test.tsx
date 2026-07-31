@@ -37,11 +37,15 @@ describe("/connectors marketplace", () => {
     expect(container.querySelectorAll("ul li").length).toBeGreaterThanOrEqual(12);
   });
 
-  it("shows the compact P5E17b header copy + preview note", async () => {
+  it("shows the compact header copy and NO blanket 'does not import data' claim", async () => {
     await renderPage();
     expect(screen.getByRole("heading", { level: 1, name: "Connectors" })).toBeTruthy();
     expect(screen.getByText("Connect your business apps to discover users, access, and software usage.")).toBeTruthy();
-    expect(screen.getByText("Preview connectors do not import data.")).toBeTruthy();
+    // The page-level note used to read "Preview connectors do not import data." That became FALSE once Okta went
+    // live: it authenticates with a KMS-backed key and persists five discovered resource types. A blanket caption
+    // cannot be accurate now that preview providers differ, so there is no page-level claim about importing —
+    // each card carries its own state and the provider detail page enumerates exactly what is accessed.
+    expect(screen.queryByText(/do not import data/i)).toBeNull();
     // the old long defensive copy is gone
     expect(screen.queryByText(/nothing syncs until a connection is fully ready/)).toBeNull();
   });

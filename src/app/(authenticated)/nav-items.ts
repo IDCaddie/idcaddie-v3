@@ -7,6 +7,29 @@
 export type NavItem = { label: string; href: string | null; note?: string };
 export type NavSection = { title: string; items: NavItem[] };
 
+// ── Demo presentation mode ────────────────────────────────────────────────────────────────────────────────────
+// The "Not built yet" markers below are a DELIBERATE honesty feature — they exist so an unbuilt area can never be
+// mistaken for a working one, and they are the right default. They are also the wrong thing to project onto a wall
+// during a leadership walkthrough, where every screenshot would carry them.
+//
+// So this hides them; it does not delete them. Off by default: the honest nav is what ships. `/people` is hidden too
+// for the same reason — it reads `app_users` (the SaaS-management surface), which is legitimately empty for a
+// directory-only tenant, so in a demo it reads as broken rather than as out-of-scope.
+export const DEMO_MODE = process.env.NEXT_PUBLIC_DEMO_MODE === "1";
+
+// Routes hidden in demo mode even though they are implemented. Keep this list SHORT and justified — anything here is
+// a thing the product does that we are choosing not to show, which is a decision, not a default.
+const DEMO_HIDDEN_ROUTES = new Set<string>(["/people"]);
+
+// Presentation filter: drop unbuilt (href === null) items and demo-hidden routes, then drop any section left empty.
+// Pure and total — the unfiltered NAV_SECTIONS remains the source of truth and the tests assert against it.
+export function visibleNavSections(sections: NavSection[], demoMode: boolean): NavSection[] {
+  if (!demoMode) return sections;
+  return sections
+    .map((s) => ({ ...s, items: s.items.filter((i) => i.href !== null && !DEMO_HIDDEN_ROUTES.has(i.href)) }))
+    .filter((s) => s.items.length > 0);
+}
+
 // The real, implemented authenticated routes that may be linked. Keep in sync with the route tree;
 // the test asserts every linked NavItem.href is one of these (so an unbuilt area can never be linked).
 export const IMPLEMENTED_ROUTES = ["/", "/apps", "/contracts", "/people", "/reports", "/audit", "/admin", "/files", "/dashboards", "/connectors", "/needs-attention", "/catalog", "/access"] as const;
