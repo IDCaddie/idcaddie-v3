@@ -2411,6 +2411,29 @@ everything. All five now pass `OKTA_PRODUCTION_BUDGET` explicitly; caps asserted
 
 **Lifecycle re-arm (0067).** The O2D.1 baseline run died before contacting Okta: the connector sits in `discovered` and there was
 no transition out of it. Discovery was single-shot by construction. Adds `discovered -> verified` only.
+## O2D.1 COMPLETE — production budget configured and controlled stale marking verified (v3 #367)
+
+**2026-07-31.** One complete five-sweep discovery on the production budget staled exactly one controlled group.
+
+| | |
+|---|---|
+| groups sweep | `dbaa4843…` — seen 6, created 4, updated 2, **staleCandidates 1, groupsMarkedStale 1**, breaker **not** triggered |
+| staled row | `zz-idcaddie-stale-test` — `sync_status: stale`, `stale_since: 2026-07-31 17:16:31`, row PRESENT |
+| unchanged | all six live groups `current`; identities/apps/memberships/assignments **0 stale** |
+| all five runs | `succeeded` / `complete=true` / `last_page` / `rejected=0` / `review_required=false` |
+
+**The circuit breaker's denominator is post-promotion, not pre-run.** An earlier attempt (3 prior current, 1 absent = 33% > 30%)
+tripped the breaker and marked zero — correctly. Adding four disposable groups moved the denominator to 6, so 1 absent = 16.7% and
+the real stale path executed. The 30% threshold was NEVER changed; the org was made large enough for the guard to permit the write.
+
+**Budget:** first live stale run used peak 6 pages of 400 (1.5%) and 6 records of 80,000. Selection and boundedness are proven;
+scale is not.
+
+**GAP — stale transitions are NOT audited.** `directory_groups` (and the other canonical directory tables) carry no audit
+trigger; only `okta_connector_capability_evidence` does. Forensic evidence exists — `stale_since`, `updated_at`,
+`last_discovery_run_id` still pointing at the run that last SAW the group, `connector_run_discovery` metrics, and the task's
+`groupsMarkedStale` — but there is no `audit_logs` row for a row leaving `current`. For a signal that feeds access decisions that
+is a real hole, and it should be closed before scheduled sync makes staling routine and unattended.
 
 ## O2D COMPLETE — one controlled initial discovery on staging (v3 #365)
 
