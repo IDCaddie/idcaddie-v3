@@ -42,10 +42,13 @@ const syncState = (s: string): SyncState => (s === "current" ? "current" : "stal
 
 // `staleSince` is populated ONLY for a row that is actually stale.
 //
-// This is not cosmetic. `runner_promote_okta_directory_users` (0053) and `..._groups` (0054) set `sync_status = 'current'` on re-promotion
-// but do NOT reset `stale_since = null` — unlike the application/membership/assignment promoters (0056/0057/0060), which do. So a person who
-// disappeared and came back is `current` carrying a leftover timestamp, and printing it would state a falsehood on screen. Gating on the
-// state we trust makes the display correct for all six tables regardless. The migration that clears the column is reported as Phase 3.
+// This began as a workaround: `runner_promote_okta_directory_users` (0053) and `..._groups` (0054) restored a row to `current` without
+// clearing `stale_since`, unlike the other four promoters, so a person who disappeared and came back was `current` carrying a leftover
+// timestamp. Migration 0070 fixed both functions, repaired the existing rows, and added a CHECK enforcing
+// `sync_status = 'current' -> stale_since is null` on all six tables, so the contradictory state can no longer be written.
+//
+// The gate stays anyway. It costs one comparison, it is correct for every sync state rather than just the two that were broken, and it
+// means the display does not depend on a database constraint being present to be truthful.
 const staleSince = (state: SyncState, raw: string | null): string | null => (state === "stale" ? raw : null);
 
 export type PersonRow = {
