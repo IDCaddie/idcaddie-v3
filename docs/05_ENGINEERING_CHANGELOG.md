@@ -2401,7 +2401,17 @@ repeated under explicit authorization. The superseded `failed / provider_error` 
 it rather than being edited away.
 
 **Worth noting:** the app-group-assignments read returned **zero** records. That is a valid authorized empty result proving the
-endpoint is readable, but it exercises no record parsing — the weakest of the six proofs.
+endpoint is readable, but it exercises no record parsing — the weakest of the six proofs.## O2D.1 — production budget and the lifecycle re-arm (runner #113, v3 #366)
+
+**2026-07-31.** Two defects, both found by running rather than by review.
+
+**Production budget.** `budget` was an optional dep falling through to the pilot default (5 pages / 100 records). No entrypoint
+passed one, so all five hosted persist tasks were silently pilot tasks — O2D only completed because the trial org has two of
+everything. All five now pass `OKTA_PRODUCTION_BUDGET` explicitly; caps asserted finite, positive and frozen.
+
+**Lifecycle re-arm (0067).** The O2D.1 baseline run died before contacting Okta: the connector sits in `discovered` and there was
+no transition out of it. Discovery was single-shot by construction. Adds `discovered -> verified` only.
+
 ## O2D COMPLETE — one controlled initial discovery on staging (v3 #365)
 
 **2026-07-31.** Five resource sweeps for controlled connector `cdf19b61…`, image `sha256:4c08b409…`, all complete and clean.
