@@ -2358,7 +2358,30 @@ readiness. The connector is `verified` and nothing more — `status` stays `pend
 disabled.
 
 **Known stale:** the contract artifact still reads `live_kid_verification: "outstanding"`. Correcting it costs a contract version
-bump to 1.2.0 plus a migration to re-pin 0064's expected contract version — deliberately not done inside this phase.
+bump to 1.2.0 plus a migration to re-pin 0064's expected contract version — deliberately not done inside this phase.## O2C.3 COMPLETE — users, groups and apps read verified (v3 #361/#362, runner #109)
+
+**2026-07-30.** Contract at **1.2.0** (`live_kid_verification: verified`), migration 0065 applied to staging, and two further
+controlled runs completed the read-scope matrix.
+
+| capability | state | evidence |
+|---|---|---|
+| authentication | verified | O2C.2, one CloudTrail Sign |
+| users_read | verified | contract 1.1.0, run `d1eefb10…` |
+| groups_read | verified | contract 1.2.0, run `ae25cfe2…` |
+| apps_read | verified | contract 1.2.0, run `541b1fcb…` |
+| memberships | **not verified** | no bounded reader run |
+| assignments | **not verified** | no bounded reader run |
+| scheduled sync | disabled | 0 services, 0 EventBridge rules |
+| production | disabled | untouched throughout |
+
+Each read was ONE call with a single-scope token: `GET /api/v1/groups?limit=1` and `GET /api/v1/apps?limit=1`, both HTTP 200 with
+one item, schema valid, token and payload discarded. Both reported `hasNextPage: true` and **did not follow it**.
+
+No provider data persisted by any run — every directory table's newest row predates the runs by six days. Legacy secret
+`LastAccessed` unchanged at 2026-07-23.
+
+users_read evidence keeps `contract_version: 1.1.0` because that is what it was proven under; only new submissions require 1.2.0.
+
 ## O2C.3 — per-capability evidence, contract 1.2.0 (v3 #361, runner #109)
 
 **2026-07-30.** Contract moves to **1.2.0** recording `live_kid_verification: verified`, and migration 0065 adds
