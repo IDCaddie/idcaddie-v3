@@ -2410,7 +2410,9 @@ passed one, so all five hosted persist tasks were silently pilot tasks — O2D o
 everything. All five now pass `OKTA_PRODUCTION_BUDGET` explicitly; caps asserted finite, positive and frozen.
 
 **Lifecycle re-arm (0067).** The O2D.1 baseline run died before contacting Okta: the connector sits in `discovered` and there was
-no transition out of it. Discovery was single-shot by construction. Adds `discovered -> verified` only.## O2D.2 — stale-transition audit trail, migration 0068 (v3 #368)
+no transition out of it. Discovery was single-shot by construction. Adds `discovered -> verified` only.
+
+## O2D.2 — stale-transition audit trail, migration 0068 (v3 #368)
 
 **2026-07-31.** Closes the gap O2D.1 exposed: a controlled group was staled correctly and left no `audit_logs` row, because the
 canonical directory tables carried no audit trigger.
