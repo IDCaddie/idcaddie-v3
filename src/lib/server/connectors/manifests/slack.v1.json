@@ -30,8 +30,12 @@
       "item_schema_ref": "slack_user",
       "field_map": {
         "app_user_external_id": "id",
+        "app_instance_key": "team_id",
         "display_name": "profile.real_name",
-        "email": "profile.email"
+        "email": "profile.email",
+        "is_bot": "is_bot",
+        "is_deleted": "deleted",
+        "is_admin": "is_admin"
       },
       "response": { "ok_path": "ok" },
       "required_scopes": ["users:read", "users:read.email"]

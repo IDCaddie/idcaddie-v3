@@ -155,6 +155,13 @@ const AppUserAccountFact = z.object({
   display_name: z.string().optional(),
   status: z.string().optional(),
   role_hint: z.string().optional(),
+  // Provider-reported OBSERVATIONS, not conclusions. The bounded canonical vocabulary (0076's account_kind /
+  // account_status CHECK) is derived from these in ONE place — the promote RPC — so a provider that never reports a
+  // flag yields `unknown` instead of a defaulted `human`. Booleans, so a declarative field_map can carry them
+  // (`is_deleted: "deleted"`) without provider-specific normalizer code.
+  is_bot: z.boolean().optional(),
+  is_deleted: z.boolean().optional(),
+  is_admin: z.boolean().optional(),
   last_activity_at: z.string().optional(),
   source_user_id: z.string().optional(),
   matched_person_id: z.string().optional(), // future RESOLVED output only — not required input

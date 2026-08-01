@@ -98,6 +98,8 @@ revoke all on public.app_account_groups from anon, authenticated, connector_runn
 revoke all on public.app_account_group_memberships from anon, authenticated, connector_runner;
 revoke all on public.app_account_identity_matches from anon, authenticated, connector_runner;
 revoke all on public.connector_capability_state from anon, authenticated, connector_runner;
+-- 0077 adds one more (per-resource run completeness). Same posture, same lockstep rule.
+revoke all on public.connector_run_resource_discovery from anon, authenticated, connector_runner;
 grant update (upload_status) on public.files to authenticated;
 
 -- The `runner_*` functions are TRUSTED-PRODUCER ONLY: their migrations grant EXECUTE to `connector_runner` and to nobody else,
