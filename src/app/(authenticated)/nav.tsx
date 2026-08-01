@@ -2,7 +2,10 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { Suspense } from "react";
 import { NAV_SECTIONS, isNavActive, visibleNavSections, DEMO_MODE } from "./nav-items";
+import { ConnectorSwitcher } from "./connector-switcher";
+import type { ScopeConnector } from "@/lib/data/connector-scope";
 
 // Persistent authenticated shell sidebar. Active state is derived from the current path (usePathname).
 // It renders ONLY the user's own email + active tenant name/role (no tenant id — that stays on the
@@ -14,10 +17,12 @@ export function AppNav({
   email,
   tenantName,
   tenantRole,
+  connectors = [],
 }: {
   email: string | null;
   tenantName: string | null;
   tenantRole: string | null;
+  connectors?: readonly ScopeConnector[];
 }) {
   const pathname = usePathname();
 
@@ -39,6 +44,12 @@ export function AppNav({
           )}
         </div>
       </div>
+
+      {/* Suspense because the switcher reads searchParams, which opts its subtree into client-side rendering. Without it every
+          page using this shell would be forced dynamic at build time. */}
+      <Suspense fallback={null}>
+        <ConnectorSwitcher connectors={connectors} />
+      </Suspense>
 
       <nav className="flex-1 overflow-y-auto p-3 text-sm">
         {visibleNavSections(NAV_SECTIONS, DEMO_MODE).map((section) => (

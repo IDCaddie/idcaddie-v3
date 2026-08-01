@@ -1992,6 +1992,8 @@ export type Database = {
           connected_by: string | null
           connection_state: string | null
           created_at: string
+          disconnected_at: string | null
+          disconnected_reason: string | null
           display_name: string | null
           granted_scopes_safe: string[] | null
           health: string | null
@@ -2010,6 +2012,8 @@ export type Database = {
           connected_by?: string | null
           connection_state?: string | null
           created_at?: string
+          disconnected_at?: string | null
+          disconnected_reason?: string | null
           display_name?: string | null
           granted_scopes_safe?: string[] | null
           health?: string | null
@@ -2028,6 +2032,8 @@ export type Database = {
           connected_by?: string | null
           connection_state?: string | null
           created_at?: string
+          disconnected_at?: string | null
+          disconnected_reason?: string | null
           display_name?: string | null
           granted_scopes_safe?: string[] | null
           health?: string | null
@@ -4105,12 +4111,63 @@ export type Database = {
         }
         Returns: Json
       }
+      product_connector_inventory: {
+        Args: { p_tenant_id: string }
+        Returns: {
+          applications: number
+          connection_state: string
+          created_at: string
+          disconnected_at: string
+          disconnected_reason: string
+          display_name: string
+          group_assignments: number
+          groups: number
+          id: string
+          identities: number
+          last_discovery_at: string
+          last_run_failure_code: string
+          last_run_status: string
+          last_verified_at: string
+          lifecycle: string
+          memberships: number
+          organization: string
+          provider: string
+          status: string
+          superseded_by: string
+          user_assignments: number
+        }[]
+      }
+      product_connector_runs: {
+        Args: {
+          p_before?: string
+          p_connector_id: string
+          p_limit?: number
+          p_tenant_id: string
+        }
+        Returns: {
+          completed_at: string
+          completeness: boolean
+          failure_code: string
+          id: string
+          records_failed: number
+          records_imported: number
+          records_seen: number
+          review_required: boolean
+          started_at: string
+          status: string
+          termination_reason: string
+        }[]
+      }
       product_directory_access_counts: {
         Args: {
           p_connection_id?: string
           p_provider?: string
           p_tenant_id: string
         }
+        Returns: Json
+      }
+      product_disconnect_connector: {
+        Args: { p_connector_id: string; p_reason: string; p_tenant_id: string }
         Returns: Json
       }
       product_group_access_subgraph: {
@@ -4248,6 +4305,19 @@ export type Database = {
           stale_since: string
           sync_status: string
         }[]
+      }
+      product_reconnect_connector: {
+        Args: { p_connector_id: string; p_tenant_id: string }
+        Returns: Json
+      }
+      product_replace_connector: {
+        Args: {
+          p_new_connector_id: string
+          p_old_connector_id: string
+          p_reason: string
+          p_tenant_id: string
+        }
+        Returns: Json
       }
       runner_acquire_lock: {
         Args: {

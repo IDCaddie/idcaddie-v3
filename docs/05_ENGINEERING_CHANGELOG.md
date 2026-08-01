@@ -398,6 +398,25 @@ from PRs verified via `git log` / `gh pr list`.
 
 ---
 
+## PR #381 — Phase 5: enterprise connector management (2026-07-31)
+
+Migration **0073**. The product assumed one directory; a workspace can have several, and they are separate organizations that are
+never merged.
+
+Disconnect joins supersession under one notion of "active" — `superseded_by` (replaced) or `disconnected_at` (retired, no
+successor). Both are read-time exclusions: nothing is deleted, and reconnect restores by clearing a column. The active predicate
+widened across all ten product read RPCs.
+
+Connector scoping: the 0061 RPCs always accepted `p_connection_id` and nothing ever sent it. The DAL now does, and the scope lives
+in the URL, so Home, Directory, Access and Findings cannot disagree. A global switcher renders only when there is more than one
+active directory.
+
+New surfaces: `/connectors/manage` (every directory, active and retired, with per-connector counts — never summed) and
+`/connectors/manage/[id]` (status, verification, discovery history, health with a stated reason, and the three operator actions).
+
+Eight groups against real Postgres, 18 UI tests, eight mutations caught — including disconnect deleting rows instead of excluding
+them, the inventory hiding retired connectors, and counts being summed across organizations. **Staging only.**
+
 ## PR #380 — Phase 4: identity-graph cross-linking, Findings by subject (2026-07-31)
 
 No migration. `subjectLink` gains GROUP subjects (they rendered as no link at all) and disambiguates ASSIGNMENT subjects by RULE —

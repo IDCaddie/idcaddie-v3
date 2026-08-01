@@ -22,7 +22,10 @@ export const MAX_PAGE = 100;
 export type Gate = { ok: true; tenantId: string } | { ok: false };
 export type ListResult<T> = { ok: true; data: T } | { ok: false; error: "query_failed" };
 export type EntityResult<T> = { ok: true; data: T } | { ok: false; error: "not_found" | "query_failed" };
-export type ListOptions = { includeStale?: boolean; afterId?: string | null; limit?: number };
+// `connectionId` scopes a read to ONE connector. Phase 5: the 0061 RPCs always accepted `p_connection_id`, but nothing ever sent
+// it — every surface read the whole tenant. With more than one active directory that is the wrong default, so the scope now
+// travels with the request. null means "every ACTIVE connector", which is still the correct answer for a single-directory tenant.
+export type ListOptions = { includeStale?: boolean; afterId?: string | null; limit?: number; connectionId?: string | null; provider?: string | null };
 
 // The 0061 RPCs are absent from the generated Database types, so narrow-cast the .rpc call boundary (never `any` the whole client).
 type RpcFn = (name: string, args: Record<string, unknown>) => PromiseLike<{ data: unknown; error: { message: string } | null }>;
@@ -45,12 +48,12 @@ async function callRpc(name: string, args: Record<string, unknown>): Promise<{ o
 }
 
 const clampLimit = (n: number | undefined): number => Math.min(Math.max(Math.trunc(n ?? DEFAULT_PAGE), 1), MAX_PAGE);
-const listArgs = (tenantId: string, o: ListOptions) => ({ p_tenant_id: tenantId, p_include_stale: o.includeStale === true, p_after_id: o.afterId ?? null, p_limit: clampLimit(o.limit) });
+const listArgs = (tenantId: string, o: ListOptions) => ({ p_tenant_id: tenantId, p_connection_id: o.connectionId ?? null, p_provider: o.provider ?? null, p_include_stale: o.includeStale === true, p_after_id: o.afterId ?? null, p_limit: clampLimit(o.limit) });
 
 // tenantId MUST come from accessGate(); the RPC re-verifies via has_tenant_role. The counts function is stale-AGNOSTIC (it declares no
 // p_include_stale and counts all rows — the correct conservative bound for the overview's too-large gate), so no stale arg is passed.
-export async function getAccessCounts(tenantId: string): Promise<ListResult<Counts>> {
-  const r = await callRpc("product_directory_access_counts", { p_tenant_id: tenantId });
+export async function getAccessCounts(tenantId: string, connectionId: string | null = null): Promise<ListResult<Counts>> {
+  const r = await callRpc("product_directory_access_counts", { p_tenant_id: tenantId, p_connection_id: connectionId });
   if (!r.ok) return r;
   const p = countsSchema.safeParse(r.data);
   return p.success ? { ok: true, data: p.data } : { ok: false, error: "query_failed" };
@@ -93,3 +96,55 @@ export async function getGroupAccessSubgraph(tenantId: string, groupId: string, 
   const p = groupSubgraphSchema.safeParse(r.data);
   return p.success ? { ok: true, data: p.data } : { ok: false, error: "query_failed" };
 }
+
+// ── Phase 5: connector management ─────────────────────────────────────────────────────────────────────────────────────────────────
+// The inventory is ONE row per connector including its directory counts, so the management page is a single round trip no matter how
+// many directories a workspace has. It is also the one product read that deliberately RETURNS inactive connectors — its job is to
+// show what exists, and hiding a disconnected connector would make disconnect look like deletion.
+export type ConnectorInventoryRow = {
+  id: string; provider: string; display_name: string | null; organization: string | null;
+  connection_state: string | null; status: string | null; lifecycle: string;
+  superseded_by: string | null; disconnected_at: string | null; disconnected_reason: string | null;
+  last_verified_at: string | null; last_discovery_at: string | null; last_run_status: string | null; last_run_failure_code: string | null;
+  created_at: string | null;
+  identities: number; groups: number; applications: number; memberships: number; user_assignments: number; group_assignments: number;
+};
+
+export async function listConnectorInventory(tenantId: string): Promise<ListResult<ConnectorInventoryRow[]>> {
+  const r = await callRpc("product_connector_inventory", { p_tenant_id: tenantId });
+  if (!r.ok) return r;
+  return { ok: true, data: Array.isArray(r.data) ? (r.data as ConnectorInventoryRow[]) : [] };
+}
+
+export type ConnectorRunRow = {
+  id: string; started_at: string | null; completed_at: string | null; status: string | null;
+  failure_code: string | null; records_seen: number | null; records_imported: number | null; records_failed: number | null;
+  completeness: boolean | null; termination_reason: string | null; review_required: boolean | null;
+};
+
+export async function listConnectorRuns(tenantId: string, connectorId: string, before: string | null = null, limit = 50): Promise<ListResult<ConnectorRunRow[]>> {
+  const r = await callRpc("product_connector_runs", { p_tenant_id: tenantId, p_connector_id: connectorId, p_before: before, p_limit: limit });
+  if (!r.ok) return r;
+  return { ok: true, data: Array.isArray(r.data) ? (r.data as ConnectorRunRow[]) : [] };
+}
+
+// ── operator actions ──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+// Every one is owner/admin-gated, tenant-scoped and audited IN THE DATABASE. The bounded `reason` code is what the UI renders; a raw
+// database error never reaches a caller.
+export type ConnectorActionResult = { ok: true; reason: string } | { ok: false; error: "query_failed" | "not_authorized"; reason?: string };
+
+async function connectorAction(rpc: string, args: Record<string, unknown>): Promise<ConnectorActionResult> {
+  const r = await callRpc(rpc, args);
+  if (!r.ok) return { ok: false, error: "query_failed" };
+  const d = r.data as { ok?: boolean; reason?: string } | null;
+  if (d?.ok === true) return { ok: true, reason: d.reason ?? "ok" };
+  return { ok: false, error: "query_failed", reason: d?.reason };
+}
+
+export const disconnectConnector = (tenantId: string, connectorId: string, reason: string) =>
+  connectorAction("product_disconnect_connector", { p_tenant_id: tenantId, p_connector_id: connectorId, p_reason: reason });
+export const reconnectConnector = (tenantId: string, connectorId: string) =>
+  connectorAction("product_reconnect_connector", { p_tenant_id: tenantId, p_connector_id: connectorId });
+export const replaceConnector = (tenantId: string, oldId: string, newId: string, reason: string) =>
+  connectorAction("product_replace_connector", { p_tenant_id: tenantId, p_old_connector_id: oldId, p_new_connector_id: newId, p_reason: reason });
+

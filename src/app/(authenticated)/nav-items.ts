@@ -32,7 +32,7 @@ export function visibleNavSections(sections: NavSection[], demoMode: boolean): N
 
 // The real, implemented authenticated routes that may be linked. Keep in sync with the route tree;
 // the test asserts every linked NavItem.href is one of these (so an unbuilt area can never be linked).
-export const IMPLEMENTED_ROUTES = ["/", "/apps", "/contracts", "/people", "/reports", "/audit", "/admin", "/files", "/dashboards", "/connectors", "/needs-attention", "/catalog", "/access", "/access/findings", "/directory/people", "/directory/groups", "/directory/applications"] as const;
+export const IMPLEMENTED_ROUTES = ["/", "/apps", "/contracts", "/people", "/reports", "/audit", "/admin", "/files", "/dashboards", "/connectors", "/needs-attention", "/catalog", "/access", "/access/findings", "/connectors/manage", "/directory/people", "/directory/groups", "/directory/applications"] as const;
 
 export const NAV_SECTIONS: NavSection[] = [
   {
@@ -42,7 +42,10 @@ export const NAV_SECTIONS: NavSection[] = [
       // Read-only cleanup queue composed from existing RLS-scoped DALs (apps/contracts/connectors). No sync.
       { label: "Needs Attention", href: "/needs-attention", note: "cleanup queue" },
       // Customer connector marketplace. Okta persists a real configuration; the other providers are preview only.
-      { label: "Connectors", href: "/connectors" },
+      // Phase 5: managing the directories a workspace has connected is a different job from browsing the marketplace of
+      // providers it could connect. "Connectors" is the catalogue; "Directories" is the estate.
+      { label: "Directories", href: "/connectors/manage", note: "connected directories" },
+      { label: "Connectors", href: "/connectors", note: "add a provider" },
     ],
   },
   {

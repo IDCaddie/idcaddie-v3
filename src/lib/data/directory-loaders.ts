@@ -125,7 +125,7 @@ function byLabel<T extends { name: string; id: string }>(a: T, b: T): number {
 // The shared body of all three loaders: gate -> count pre-check -> page one table -> map -> sort -> search -> paginate.
 async function loadList<Row extends { id: string }, View extends { id: string; name: string }>(
   countKey: keyof Counts,
-  fetchPage: (tenantId: string, afterId: string | null, includeStale: boolean) => Promise<ListResult<Row[]>>,
+  fetchPage: (tenantId: string, afterId: string | null, includeStale: boolean, connectionId: string | null) => Promise<ListResult<Row[]>>,
   toView: (r: Row) => View,
   searchable: (v: View) => readonly (string | null)[],
   f: AccessFilters,
@@ -134,12 +134,12 @@ async function loadList<Row extends { id: string }, View extends { id: string; n
   if (!g.ok) return { ok: false, error: "forbidden" };
 
   // Counts are stale-agnostic (all rows), which is the conservative bound: we never start paging a table that could exceed the ceiling.
-  const counts = await getAccessCounts(g.tenantId);
+  const counts = await getAccessCounts(g.tenantId, f.connectionId);
   if (!counts.ok) return { ok: false, error: "query_failed" };
   const total = counts.data[countKey];
   if (total > MAX_LIST_NODES) return { ok: true, data: { status: "too_large", total } };
 
-  const r = await pageAll((afterId) => fetchPage(g.tenantId, afterId, f.includeStale));
+  const r = await pageAll((afterId) => fetchPage(g.tenantId, afterId, f.includeStale, f.connectionId));
   if (!r.ok) return { ok: false, error: "query_failed" };
 
   const all = r.rows.map(toView).sort(byLabel);
@@ -152,7 +152,7 @@ async function loadList<Row extends { id: string }, View extends { id: string; n
 export function loadDirectoryPeople(f: AccessFilters): Promise<DirectoryListResult<PersonRow>> {
   return loadList(
     "identities",
-    (t, afterId, includeStale) => listDirectoryIdentities(t, { afterId, includeStale, limit: PAGE }),
+    (t, afterId, includeStale, connectionId) => listDirectoryIdentities(t, { afterId, includeStale, limit: PAGE, connectionId }),
     (r) => {
       const name = identityLabel(r);
       // `identityLabel` already falls back display_name -> login -> email, so the secondary column would otherwise repeat the primary one.
@@ -174,7 +174,7 @@ export function loadDirectoryPeople(f: AccessFilters): Promise<DirectoryListResu
 export function loadDirectoryGroups(f: AccessFilters): Promise<DirectoryListResult<DirectoryGroupRow>> {
   return loadList(
     "groups",
-    (t, afterId, includeStale) => listDirectoryGroups(t, { afterId, includeStale, limit: PAGE }),
+    (t, afterId, includeStale, connectionId) => listDirectoryGroups(t, { afterId, includeStale, limit: PAGE, connectionId }),
     (r) => ({
       id: r.id, name: groupLabel(r), typeCategory: r.group_type_category, isBuiltIn: isBuiltIn(r.group_type_category),
       provider: r.provider, syncState: syncState(r.sync_status), staleSince: staleSince(syncState(r.sync_status), r.stale_since),
@@ -187,7 +187,7 @@ export function loadDirectoryGroups(f: AccessFilters): Promise<DirectoryListResu
 export function loadDirectoryApplications(f: AccessFilters): Promise<DirectoryListResult<DirectoryApplicationRow>> {
   return loadList(
     "applications",
-    (t, afterId, includeStale) => listDirectoryApplications(t, { afterId, includeStale, limit: PAGE }),
+    (t, afterId, includeStale, connectionId) => listDirectoryApplications(t, { afterId, includeStale, limit: PAGE, connectionId }),
     (r) => ({
       id: r.id, name: applicationLabel(r), statusCategory: r.status_category, signOnCategory: r.sign_on_category,
       catalogMatch: catalogMatch(r.catalog_match_status), provider: r.provider,

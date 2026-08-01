@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { getSessionUser } from "@/lib/auth/session";
 import { resolveTenantContext } from "@/lib/auth/tenant-context";
+import { resolveConnectorScope } from "@/lib/data/connector-scope";
 import { AppNav } from "./nav";
 
 // Server-side guard for the whole authenticated route group. This is the authoritative auth
@@ -22,12 +23,17 @@ export default async function AuthenticatedLayout({
   // simply shows no active tenant — it never blocks rendering (the layout already guards the session).
   const ctx = await resolveTenantContext();
 
+  // The workspace's ACTIVE directories, for the global scope switcher. Two small RLS-scoped reads. Owner/admin-gated like every
+  // other identity read, and non-fatal: a viewer, or a failed read, simply gets no switcher rather than a broken shell.
+  const scope = await resolveConnectorScope(null).catch(() => null);
+
   return (
     <div className="flex min-h-screen">
       <AppNav
         email={ctx?.email ?? user.email ?? null}
         tenantName={ctx?.activeTenant?.name ?? null}
         tenantRole={ctx?.activeTenant?.role ?? null}
+        connectors={scope?.ok ? scope.scope.active : []}
       />
       <div className="flex flex-1 flex-col">{children}</div>
     </div>
