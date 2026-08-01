@@ -398,6 +398,20 @@ from PRs verified via `git log` / `gh pr list`.
 
 ---
 
+## PR #383 — Phase 6: stale-aware counts (2026-07-31)
+
+Migration **0074**. The counts RPC answered one question with a number used for two jobs: the conservative too-large bound, and
+the number shown in the too-large fallback. A directory with 6 current groups and 1 retained stale group displayed "7 groups".
+
+Now explicit: `current` (customer-facing), `stale`, `other`, `totalEvidence` (the gate, exclusively), with the invariant
+`totalEvidence = current + stale + other`. `other` exists because `sync_status` permits four values and folding the unwritten two
+into `stale` would be a silent miscategorisation. The bound is unchanged — it reproduces the same numbers as before.
+
+Six flat keys retained as documented deprecated aliases of `totalEvidence`; both production callers migrated in the same change.
+
+Seven groups against real Postgres, 8 new application tests, seven mutations caught — including displaying total evidence,
+gating on current, deduplicating across connectors, and re-pointing a deprecated key. **Staging only.**
+
 ## PR #382 — Phase 5B: unified connector marketplace, instances and lifecycle actions (2026-07-31)
 
 No migration. **Root cause:** `/connectors` asked `getOktaConnectorStatus()`, which reads `okta_connector_configs` — a table only

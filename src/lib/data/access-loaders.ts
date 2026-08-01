@@ -65,11 +65,19 @@ async function pageAll<T extends { id?: string }>(fetch: (afterId: string | null
 export async function loadAccessOverview(includeStale = false, connectionId: string | null = null): Promise<AccessOverviewResult> {
   const g = await accessGate();
   if (!g.ok) return { ok: false, error: "forbidden" };
-  const counts = await getAccessCounts(g.tenantId, connectionId); // counts are stale-agnostic (total rows) — the conservative bound for the too-large gate
+  const counts = await getAccessCounts(g.tenantId, connectionId);
   if (!counts.ok) return { ok: false, error: "query_failed" };
-  const c = counts.data;
-  const countsView: CountsView = { identities: c.identities, groups: c.groups, applications: c.applications, memberships: c.memberships, directAssignments: c.userAssignments, groupAssignments: c.groupAssignments };
-  if (c.identities > MAX_NODES || c.groups > MAX_NODES || c.applications > MAX_NODES || c.memberships > MAX_EDGES || c.userAssignments > MAX_EDGES || c.groupAssignments > MAX_EDGES) {
+  // Phase 6 — the two readings are used for two different jobs, explicitly.
+  //
+  //   GATE on totalEvidence. A stale row still occupies a row in any response that includes stale evidence, so gating on the
+  //   current count would under-count the worst case and weaken the bound. These are the same numbers the gate used before.
+  //
+  //   DISPLAY current. The `too_large` fallback is the only place these counts reach a screen, and showing the stale-inclusive
+  //   total there is what made Home report 7 groups where every list showed 6.
+  const g_ = counts.data.totalEvidence;
+  const cur = counts.data.current;
+  const countsView: CountsView = { identities: cur.identities, groups: cur.groups, applications: cur.applications, memberships: cur.memberships, directAssignments: cur.userAssignments, groupAssignments: cur.groupAssignments };
+  if (g_.identities > MAX_NODES || g_.groups > MAX_NODES || g_.applications > MAX_NODES || g_.memberships > MAX_EDGES || g_.userAssignments > MAX_EDGES || g_.groupAssignments > MAX_EDGES) {
     return { ok: true, data: { status: "too_large", counts: countsView } };
   }
   const opt = (afterId: string | null) => ({ includeStale, afterId, limit: PAGE, connectionId });

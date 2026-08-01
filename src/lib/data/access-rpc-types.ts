@@ -40,9 +40,28 @@ export const groupAssignmentRowSchema = z.object({
   id: uuid.optional(), connection_id: uuid, provider: z.string().min(1), directory_application_id: uuid, directory_group_id: uuid, sync_status: syncStatus, stale_since: nullableTs,
 });
 
-export const countsSchema = z.object({
+// Phase 6 — the count contract is explicit about WHICH question it answers.
+//
+//   current       what the directory contains now — the customer-facing number
+//   stale         retained but last seen in an earlier discovery
+//   other         any other row state the CHECK permits (review_required, disconnected); nothing writes these today
+//   totalEvidence every retained row — the conservative bound, and the ONLY count a safety gate may use
+//
+// Invariant: totalEvidence = current + stale + other. `other` is reported rather than folded into `stale`, so if something ever
+// starts writing those states they appear honestly instead of inflating a category they do not belong to.
+const resourceCounts = z.object({
   identities: z.number().int().nonnegative(), groups: z.number().int().nonnegative(), applications: z.number().int().nonnegative(),
   memberships: z.number().int().nonnegative(), userAssignments: z.number().int().nonnegative(), groupAssignments: z.number().int().nonnegative(),
+});
+export type ResourceCounts = z.infer<typeof resourceCounts>;
+
+export const countsSchema = resourceCounts.extend({
+  // The six flat keys above are DEPRECATED aliases of totalEvidence, retained so no existing caller changed meaning silently.
+  // New code reads `current` or `totalEvidence` and says which it means.
+  current: resourceCounts,
+  stale: resourceCounts,
+  other: resourceCounts,
+  totalEvidence: resourceCounts,
 });
 
 // Phase 3 — the group subgraph. `bounded` is part of the contract, not an error: the RPC refuses to build the neighbourhood of a

@@ -31,7 +31,7 @@ beforeEach(() => {
 describe("loadAccessOverview — displayed counts", () => {
   it("complete view: StatCard counts come from the paged rows, NOT the stale-inflated counts-RPC total", async () => {
     // counts RPC returns a stale-agnostic TOTAL far above the current-only paged rows (but under the caps → not too_large).
-    repo.getAccessCounts.mockResolvedValue(ok({ identities: 500, groups: 500, applications: 500, memberships: 500, userAssignments: 500, groupAssignments: 500 }));
+    repo.getAccessCounts.mockResolvedValue(ok({ identities: 500, groups: 500, applications: 500, memberships: 500, userAssignments: 500, groupAssignments: 500, current: { identities: 500, groups: 500, applications: 500, memberships: 500, userAssignments: 500, groupAssignments: 500 }, stale: { identities: 0, groups: 0, applications: 0, memberships: 0, userAssignments: 0, groupAssignments: 0 }, other: { identities: 0, groups: 0, applications: 0, memberships: 0, userAssignments: 0, groupAssignments: 0 }, totalEvidence: { identities: 500, groups: 500, applications: 500, memberships: 500, userAssignments: 500, groupAssignments: 500 } }));
     const r = await loadAccessOverview(false);
     expect(r.ok).toBe(true);
     if (!r.ok || r.data.status !== "complete") throw new Error("expected complete");
@@ -39,7 +39,7 @@ describe("loadAccessOverview — displayed counts", () => {
   });
 
   it("too_large gate still uses the RPC total (conservative), showing the total-directory counts", async () => {
-    repo.getAccessCounts.mockResolvedValue(ok({ identities: 99999, groups: 1, applications: 1, memberships: 1, userAssignments: 1, groupAssignments: 0 }));
+    repo.getAccessCounts.mockResolvedValue(ok({ identities: 99999, groups: 1, applications: 1, memberships: 1, userAssignments: 1, groupAssignments: 0, current: { identities: 99999, groups: 1, applications: 1, memberships: 1, userAssignments: 1, groupAssignments: 0 }, stale: { identities: 0, groups: 0, applications: 0, memberships: 0, userAssignments: 0, groupAssignments: 0 }, other: { identities: 0, groups: 0, applications: 0, memberships: 0, userAssignments: 0, groupAssignments: 0 }, totalEvidence: { identities: 99999, groups: 1, applications: 1, memberships: 1, userAssignments: 1, groupAssignments: 0 } }));
     const r = await loadAccessOverview(false);
     if (!r.ok || r.data.status !== "too_large") throw new Error("expected too_large");
     expect(r.data.counts.identities).toBe(99999);
@@ -52,5 +52,37 @@ describe("loadAccessOverview — displayed counts", () => {
     repo.accessGate.mockResolvedValue({ ok: true, tenantId: "t1" });
     repo.getAccessCounts.mockResolvedValue({ ok: false, error: "query_failed" });
     expect(await loadAccessOverview(false)).toEqual({ ok: false, error: "query_failed" });
+  });
+});
+
+// ── Phase 6: the same split on the Access overview ────────────────────────────────────────────────────────────────────────────
+describe("loadAccessOverview — current counts, conservative bound", () => {
+  const counts = (cur: Record<string, number>, stale: Record<string, number> = {}) => {
+    const z = { identities: 0, groups: 0, applications: 0, memberships: 0, userAssignments: 0, groupAssignments: 0 };
+    const c = { ...z, ...cur }, s = { ...z, ...stale }, o = { ...z };
+    const total = Object.fromEntries(Object.keys(z).map((k) => [k, (c as never)[k] + (s as never)[k]])) as typeof z;
+    return ok({ ...total, current: c, stale: s, other: o, totalEvidence: total });
+  };
+
+  it("gates on TOTAL EVIDENCE — a bound that ignored retained rows would under-count the worst case", async () => {
+    repo.getAccessCounts.mockResolvedValue(counts({ identities: 2000 }, { identities: 1 }));
+    const r = await loadAccessOverview(false);
+    if (!r.ok || r.data.status !== "too_large") throw new Error("expected too_large");
+  });
+
+  it("DISPLAYS current counts in the too-large fallback — this is the 7-vs-6 fix", async () => {
+    // The only place these counts ever reach a screen. Showing the stale-inclusive total here is what made Home report 7 groups.
+    repo.getAccessCounts.mockResolvedValue(counts({ identities: 99999, groups: 6 }, { groups: 1 }));
+    const r = await loadAccessOverview(false);
+    if (!r.ok || r.data.status !== "too_large") throw new Error("expected too_large");
+    expect(r.data.counts.groups, "6 current groups, not 7 retained rows").toBe(6);
+  });
+
+  it("no surface labels total evidence as the current count", async () => {
+    repo.getAccessCounts.mockResolvedValue(counts({ identities: 99999, groups: 6, applications: 2 }, { groups: 1, applications: 3 }));
+    const r = await loadAccessOverview(false);
+    if (!r.ok || r.data.status !== "too_large") throw new Error("expected too_large");
+    expect(r.data.counts.groups).toBe(6);
+    expect(r.data.counts.applications).toBe(2);
   });
 });

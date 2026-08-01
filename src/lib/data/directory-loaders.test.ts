@@ -28,8 +28,18 @@ const repo = {
 };
 
 const ok = <T>(data: T) => ({ ok: true as const, data });
-const counts = (o: Partial<Record<"identities" | "groups" | "applications" | "memberships" | "userAssignments" | "groupAssignments", number>> = {}) =>
-  ok({ identities: 0, groups: 0, applications: 0, memberships: 0, userAssignments: 0, groupAssignments: 0, ...o });
+type CountKey = "identities" | "groups" | "applications" | "memberships" | "userAssignments" | "groupAssignments";
+const ZERO: Record<CountKey, number> = { identities: 0, groups: 0, applications: 0, memberships: 0, userAssignments: 0, groupAssignments: 0 };
+
+// Phase 6: the counts RPC now answers two questions. `o` is the CURRENT count; `stale` is retained-but-not-current. Total evidence
+// is derived rather than passed, so a fixture cannot accidentally assert a total that contradicts its own parts.
+const counts = (o: Partial<Record<CountKey, number>> = {}, stale: Partial<Record<CountKey, number>> = {}) => {
+  const cur = { ...ZERO, ...o };
+  const st = { ...ZERO, ...stale };
+  const other = { ...ZERO };
+  const total = Object.fromEntries((Object.keys(ZERO) as CountKey[]).map((k) => [k, cur[k] + st[k] + other[k]])) as Record<CountKey, number>;
+  return ok({ ...total, current: cur, stale: st, other, totalEvidence: total });
+};
 
 const person = (o: Record<string, unknown> = {}) => ({
   id: "i1", connection_id: "c1", provider: "okta", sync_status: "current" as const, stale_since: null,
@@ -340,5 +350,50 @@ describe("Directory list counts vs the /access overview", () => {
     expect(overview.data.counts.identities).toBe(3);
     const d = complete<unknown>(await loadDirectoryPeople(F()));
     expect(d.totalBeforeFilter).toBe(2);
+  });
+});
+
+// ── Phase 6: which count is used for which job ────────────────────────────────────────────────────────────────────────────────
+// The bug: `product_directory_access_counts` counted every row regardless of sync_status, and the too-large FALLBACK displayed
+// that number. A directory with 6 current groups and 1 retained stale group told the customer "7 groups" while every list showed
+// 6. Both readings are legitimate; they answer different questions and are now used for different jobs.
+describe("current counts are displayed, total evidence bounds the gate", () => {
+  it("gates on TOTAL EVIDENCE, so retained stale rows cannot slip past the bound", async () => {
+    // 1 under the ceiling on current, 1 over on total. Gating on current would let an unsafe response through.
+    repo.getAccessCounts.mockResolvedValue(counts({ identities: MAX_LIST_NODES }, { identities: 1 }));
+    const r = await loadDirectoryPeople(F());
+    if (!r.ok || r.data.status !== "too_large") throw new Error("expected too_large — the bound must count retained evidence");
+    expect(repo.listDirectoryIdentities, "and it must refuse before reading a row").not.toHaveBeenCalled();
+  });
+
+  it("DISPLAYS the current count in that refusal, not the stale-inclusive total", async () => {
+    // "5,000 people" in a customer-facing notice must mean people who exist now.
+    repo.getAccessCounts.mockResolvedValue(counts({ identities: MAX_LIST_NODES }, { identities: 7 }));
+    const r = await loadDirectoryPeople(F());
+    if (!r.ok || r.data.status !== "too_large") throw new Error("expected too_large");
+    expect(r.data.total).toBe(MAX_LIST_NODES);
+    expect(r.data.total).not.toBe(MAX_LIST_NODES + 7);
+  });
+
+  it("does not refuse a directory that is only large once stale evidence is added — unless it really is", async () => {
+    repo.getAccessCounts.mockResolvedValue(counts({ identities: 3 }, { identities: 1 }));
+    repo.listDirectoryIdentities.mockResolvedValue(ok([person()]));
+    const r = await loadDirectoryPeople(F());
+    if (!r.ok || r.data.status !== "complete") throw new Error("a small directory must still list");
+  });
+
+  it("the staging shape: 6 current groups and 1 stale is not 7 groups", async () => {
+    repo.getAccessCounts.mockResolvedValue(counts({ groups: 6 }, { groups: 1 }));
+    repo.listDirectoryGroups.mockResolvedValue(ok(Array.from({ length: 6 }, (_, i) => group({ id: `g${i}`, name: `G${i}` }))));
+    const d = complete<unknown>(await loadDirectoryGroups(F()));
+    expect(d.totalBeforeFilter, "the list shows what exists now").toBe(6);
+  });
+
+  it("an include-stale view can truthfully show all 7 retained records", async () => {
+    repo.getAccessCounts.mockResolvedValue(counts({ groups: 6 }, { groups: 1 }));
+    repo.listDirectoryGroups.mockImplementation((_t, o) =>
+      Promise.resolve(ok(Array.from({ length: o?.includeStale ? 7 : 6 }, (_, i) => group({ id: `g${i}`, name: `G${i}`, sync_status: i === 6 ? "stale" : "current" })))));
+    const d = complete<unknown>(await loadDirectoryGroups(F({ stale: "1" })));
+    expect(d.totalBeforeFilter).toBe(7);
   });
 });
