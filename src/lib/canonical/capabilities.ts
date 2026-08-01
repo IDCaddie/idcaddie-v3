@@ -50,6 +50,8 @@ export type SourceState =
   | "stale"            // last observation is not current
   | "failed"           // the last attempt failed
   | "review_required"  // discovery completed but was flagged for review
+  | "plan_dependent"   // built, connected, but the workspace's PLAN does not expose it
+  | "permission_dependent" // built, connected, but the granted scopes do not allow it
   | "unavailable"      // ID Caddie has not built it (planned / not_applicable)
   | "unknown";         // we could not determine it — a READ FAILURE, never a zero
 
@@ -79,7 +81,24 @@ const SUPPORT: Record<string, Partial<Record<Capability, Support>>> = {
     ["hr_manager", "planned"], ["hr_department", "planned"],
   ]) as Partial<Record<Capability, Support>>,
   microsoft_entra: Object.fromEntries(DIRECTORY.map((c) => [c, "planned" as Support])) as Partial<Record<Capability, Support>>,
-  slack: Object.fromEntries((["app_accounts", "roles", "usage", "activity"] as Capability[]).map((c) => [c, "planned" as Support])) as Partial<Record<Capability, Support>>,
+  // Slack — driven by what vendor/connectors/manifests/slack.v1.json actually declares, not by what Slack could theoretically
+  // provide. The manifest has exactly three endpoints: auth.test, users.list (→ app_user_account) and usergroups.list (→ group).
+  //
+  // `app_accounts` and `roles` are `implemented` because users.list carries both the member list and `is_admin`. `usage` and
+  // `activity` stay `planned`: Slack's analytics APIs are Business+/Enterprise-gated and the manifest requests no scope for
+  // them, so a workspace on a lower plan would get nothing and a zero would be a lie about the workspace rather than about us.
+  // `licenses` is `planned` for the same reason — billable-seat information needs an admin/billing scope this app does not hold.
+  slack: {
+    app_accounts: "implemented", roles: "implemented",
+    usage: "planned", licenses: "planned", activity: "planned",
+    // Slack has user groups, and the manifest reads them — but they are APP-ACCOUNT groups, not directory groups. Mapping them
+    // onto `groups` would put Slack user groups in the identity Directory, which is exactly the conflation this phase forbids.
+    identity: "not_applicable", groups: "not_applicable", directory_applications: "not_applicable",
+    memberships: "not_applicable", assignments: "not_applicable",
+    contracts: "not_applicable", invoices: "not_applicable", spend: "not_applicable",
+    hr_manager: "not_applicable", hr_department: "not_applicable",
+    browser_discovery: "not_applicable", files: "not_applicable",
+  },
   google_workspace: Object.fromEntries(DIRECTORY.map((c) => [c, "planned" as Support])) as Partial<Record<Capability, Support>>,
 };
 
@@ -89,6 +108,9 @@ export const supportFor = (provider: string, c: Capability): Support => SUPPORT[
 // Which provider OWNS a capability for the product. One owner per capability — the rule that stops two surfaces disagreeing.
 const OWNER: Partial<Record<Capability, string>> = {
   identity: "okta", groups: "okta", directory_applications: "okta", memberships: "okta", assignments: "okta",
+  // Slack owns SaaS app-account evidence. Okta declares these `planned`, so this is not a contested ownership — it is the only
+  // provider that can answer them today.
+  app_accounts: "slack", roles: "slack",
 };
 export const ownerOf = (c: Capability): string | null => OWNER[c] ?? null;
 
@@ -111,6 +133,8 @@ const EXPLAIN: Record<SourceState, (label: string, provider: string | null) => s
   stale: (l) => `${l} was last seen in an earlier discovery and has not been re-observed.`,
   failed: (l) => `The last attempt to read ${l.toLowerCase()} failed.`,
   review_required: (l) => `${l} was discovered but flagged for review before it can be relied on.`,
+  plan_dependent: (l, p) => `${l} is not available on this ${p ?? "provider"} workspace's plan. This is a limitation of the workspace, not of the connector.`,
+  permission_dependent: (l) => `${l} requires a permission this connector was not granted. Reauthorize with the additional scope to enable it.`,
   unavailable: (l, p) => `${l} is not available for ${p ?? "this provider"} yet.`,
   unknown: (l) => `${l} could not be determined. This is not a statement that there is none.`,
 };

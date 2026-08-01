@@ -10,11 +10,15 @@ import { CAPABILITIES, canShowValue, type CapabilityStatus, type SourceState } f
 const TONE: Record<SourceState, "success" | "attention" | "danger" | "neutral"> = {
   available: "success", stale: "attention", incomplete: "attention", review_required: "attention",
   failed: "danger", not_connected: "neutral", source_required: "neutral", unavailable: "neutral", unknown: "neutral",
+  // Plan and permission limits are the WORKSPACE's constraint, not a fault — toned as information, and actionable in the
+  // permission case because reauthorizing with another scope genuinely fixes it.
+  plan_dependent: "neutral", permission_dependent: "attention",
 };
 const STATE_LABEL: Record<SourceState, string> = {
   available: "Available", stale: "Stale", incomplete: "Not discovered", review_required: "Review required",
   failed: "Failed", not_connected: "Not connected", source_required: "Source required",
   unavailable: "Not available yet", unknown: "Unknown",
+  plan_dependent: "Not on this plan", permission_dependent: "Needs permission",
 };
 
 // A capability the product has not built is shown once, collapsed — a long list of "not available yet" would bury the states
