@@ -32,7 +32,7 @@ export function visibleNavSections(sections: NavSection[], demoMode: boolean): N
 
 // The real, implemented authenticated routes that may be linked. Keep in sync with the route tree;
 // the test asserts every linked NavItem.href is one of these (so an unbuilt area can never be linked).
-export const IMPLEMENTED_ROUTES = ["/", "/apps", "/contracts", "/people", "/reports", "/audit", "/admin", "/files", "/dashboards", "/connectors", "/needs-attention", "/catalog", "/access", "/access/findings", "/connectors/manage", "/directory/people", "/directory/groups", "/directory/applications"] as const;
+export const IMPLEMENTED_ROUTES = ["/", "/apps", "/contracts", "/people", "/reports", "/audit", "/admin", "/files", "/dashboards", "/connectors", "/needs-attention", "/catalog", "/access", "/access/findings", "/connectors/manage", "/directory/people", "/directory/groups", "/directory/applications", "/saas/accounts", "/saas/groups"] as const;
 
 export const NAV_SECTIONS: NavSection[] = [
   {
@@ -75,10 +75,14 @@ export const NAV_SECTIONS: NavSection[] = [
     items: [
       { label: "SaaS inventory", href: "/apps", note: "normalized software records" },
       { label: "App Catalog", href: "/catalog", note: "read-only" },
-      // Formerly "People / Users" at the top level. Same route, same page — renamed because "People" now means the
-      // DIRECTORY identity above, and two nav items called People reading from two different tables is the exact
-      // confusion this restructure exists to remove. These are per-application account records, not directory identities.
-      { label: "App accounts", href: "/people", note: "accounts held in SaaS apps" },
+      // The CANONICAL account surface (0076/0077/0078). Connector-discovered accounts land in `app_accounts`, and this is
+      // the only place they are visible. `/people` below reads the older `app_users` table, which no connector writes —
+      // the two are different models, and pointing this item at the old one would show an empty page after a real sync.
+      { label: "Application accounts", href: "/saas/accounts", note: "discovered by your connectors" },
+      { label: "User groups", href: "/saas/groups", note: "groups inside your applications" },
+      // The pre-connector account register. Manually maintained; hidden in demo mode because it is legitimately empty
+      // for a connector-only workspace.
+      { label: "Manually tracked accounts", href: "/people", note: "entered by an administrator" },
       { label: "Contracts", href: "/contracts" },
       { label: "Files / Documents", href: "/files", note: "read-only; upload on a contract" },
       { label: "Spend & renewals", href: "/dashboards", note: "on Home" },
