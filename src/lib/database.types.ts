@@ -12,6 +12,328 @@ export type Json =
 export type Database = {
   public: {
     Tables: {
+      app_account_group_memberships: {
+        Row: {
+          app_account_group_id: string
+          app_account_id: string
+          connection_id: string
+          created_at: string
+          first_seen_at: string
+          id: string
+          last_discovery_run_id: string | null
+          last_seen_at: string
+          provider: string
+          stale_since: string | null
+          sync_status: string
+          tenant_id: string
+          updated_at: string
+        }
+        Insert: {
+          app_account_group_id: string
+          app_account_id: string
+          connection_id: string
+          created_at?: string
+          first_seen_at?: string
+          id?: string
+          last_discovery_run_id?: string | null
+          last_seen_at?: string
+          provider: string
+          stale_since?: string | null
+          sync_status?: string
+          tenant_id: string
+          updated_at?: string
+        }
+        Update: {
+          app_account_group_id?: string
+          app_account_id?: string
+          connection_id?: string
+          created_at?: string
+          first_seen_at?: string
+          id?: string
+          last_discovery_run_id?: string | null
+          last_seen_at?: string
+          provider?: string
+          stale_since?: string | null
+          sync_status?: string
+          tenant_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "aagm_account_fk"
+            columns: [
+              "app_account_id",
+              "tenant_id",
+              "connection_id",
+              "provider",
+            ]
+            isOneToOne: false
+            referencedRelation: "app_accounts"
+            referencedColumns: ["id", "tenant_id", "connection_id", "provider"]
+          },
+          {
+            foreignKeyName: "aagm_group_fk"
+            columns: [
+              "app_account_group_id",
+              "tenant_id",
+              "connection_id",
+              "provider",
+            ]
+            isOneToOne: false
+            referencedRelation: "app_account_groups"
+            referencedColumns: ["id", "tenant_id", "connection_id", "provider"]
+          },
+          {
+            foreignKeyName: "app_account_group_memberships_connection_id_fkey"
+            columns: ["connection_id"]
+            isOneToOne: false
+            referencedRelation: "connectors"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "app_account_group_memberships_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      app_account_groups: {
+        Row: {
+          connection_id: string
+          created_at: string
+          description: string | null
+          external_id: string
+          first_seen_at: string
+          handle: string | null
+          id: string
+          is_active: boolean | null
+          last_discovery_run_id: string | null
+          last_seen_at: string
+          member_count: number | null
+          name: string | null
+          provider: string
+          stale_since: string | null
+          sync_status: string
+          tenant_id: string
+          updated_at: string
+          workspace_external_id: string | null
+        }
+        Insert: {
+          connection_id: string
+          created_at?: string
+          description?: string | null
+          external_id: string
+          first_seen_at?: string
+          handle?: string | null
+          id?: string
+          is_active?: boolean | null
+          last_discovery_run_id?: string | null
+          last_seen_at?: string
+          member_count?: number | null
+          name?: string | null
+          provider: string
+          stale_since?: string | null
+          sync_status?: string
+          tenant_id: string
+          updated_at?: string
+          workspace_external_id?: string | null
+        }
+        Update: {
+          connection_id?: string
+          created_at?: string
+          description?: string | null
+          external_id?: string
+          first_seen_at?: string
+          handle?: string | null
+          id?: string
+          is_active?: boolean | null
+          last_discovery_run_id?: string | null
+          last_seen_at?: string
+          member_count?: number | null
+          name?: string | null
+          provider?: string
+          stale_since?: string | null
+          sync_status?: string
+          tenant_id?: string
+          updated_at?: string
+          workspace_external_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "app_account_groups_connection_id_fkey"
+            columns: ["connection_id"]
+            isOneToOne: false
+            referencedRelation: "connectors"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "app_account_groups_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      app_account_identity_matches: {
+        Row: {
+          app_account_id: string
+          confidence: string
+          created_at: string
+          decided_at: string | null
+          decided_by: string | null
+          id: string
+          identity_account_id: string
+          method: string
+          rationale: string | null
+          status: string
+          tenant_id: string
+        }
+        Insert: {
+          app_account_id: string
+          confidence: string
+          created_at?: string
+          decided_at?: string | null
+          decided_by?: string | null
+          id?: string
+          identity_account_id: string
+          method: string
+          rationale?: string | null
+          status?: string
+          tenant_id: string
+        }
+        Update: {
+          app_account_id?: string
+          confidence?: string
+          created_at?: string
+          decided_at?: string | null
+          decided_by?: string | null
+          id?: string
+          identity_account_id?: string
+          method?: string
+          rationale?: string | null
+          status?: string
+          tenant_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "aaim_account_fk"
+            columns: ["app_account_id", "tenant_id"]
+            isOneToOne: false
+            referencedRelation: "app_accounts"
+            referencedColumns: ["id", "tenant_id"]
+          },
+          {
+            foreignKeyName: "app_account_identity_matches_identity_account_id_fkey"
+            columns: ["identity_account_id"]
+            isOneToOne: false
+            referencedRelation: "identity_accounts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "app_account_identity_matches_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      app_accounts: {
+        Row: {
+          account_kind: string
+          account_status: string
+          connection_id: string
+          created_at: string
+          display_name: string | null
+          email: string | null
+          external_id: string
+          first_seen_at: string
+          id: string
+          is_admin: boolean | null
+          last_discovery_run_id: string | null
+          last_seen_at: string
+          normalized_email: string | null
+          normalizer_version: string | null
+          provider: string
+          sanitizer_version: string | null
+          schema_version: string | null
+          source_endpoint: string | null
+          stale_since: string | null
+          sync_status: string
+          tenant_id: string
+          updated_at: string
+          workspace_external_id: string | null
+        }
+        Insert: {
+          account_kind?: string
+          account_status?: string
+          connection_id: string
+          created_at?: string
+          display_name?: string | null
+          email?: string | null
+          external_id: string
+          first_seen_at?: string
+          id?: string
+          is_admin?: boolean | null
+          last_discovery_run_id?: string | null
+          last_seen_at?: string
+          normalized_email?: string | null
+          normalizer_version?: string | null
+          provider: string
+          sanitizer_version?: string | null
+          schema_version?: string | null
+          source_endpoint?: string | null
+          stale_since?: string | null
+          sync_status?: string
+          tenant_id: string
+          updated_at?: string
+          workspace_external_id?: string | null
+        }
+        Update: {
+          account_kind?: string
+          account_status?: string
+          connection_id?: string
+          created_at?: string
+          display_name?: string | null
+          email?: string | null
+          external_id?: string
+          first_seen_at?: string
+          id?: string
+          is_admin?: boolean | null
+          last_discovery_run_id?: string | null
+          last_seen_at?: string
+          normalized_email?: string | null
+          normalizer_version?: string | null
+          provider?: string
+          sanitizer_version?: string | null
+          schema_version?: string | null
+          source_endpoint?: string | null
+          stale_since?: string | null
+          sync_status?: string
+          tenant_id?: string
+          updated_at?: string
+          workspace_external_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "app_accounts_connection_id_fkey"
+            columns: ["connection_id"]
+            isOneToOne: false
+            referencedRelation: "connectors"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "app_accounts_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       app_aliases: {
         Row: {
           alias_type: string
@@ -665,6 +987,66 @@ export type Database = {
           version?: number
         }
         Relationships: []
+      }
+      connector_capability_state: {
+        Row: {
+          capability: string
+          connection_id: string
+          created_at: string
+          id: string
+          last_attempt_at: string | null
+          last_run_id: string | null
+          last_success_at: string | null
+          observed_count: number | null
+          reason_code: string | null
+          state: string
+          tenant_id: string
+          updated_at: string
+        }
+        Insert: {
+          capability: string
+          connection_id: string
+          created_at?: string
+          id?: string
+          last_attempt_at?: string | null
+          last_run_id?: string | null
+          last_success_at?: string | null
+          observed_count?: number | null
+          reason_code?: string | null
+          state: string
+          tenant_id: string
+          updated_at?: string
+        }
+        Update: {
+          capability?: string
+          connection_id?: string
+          created_at?: string
+          id?: string
+          last_attempt_at?: string | null
+          last_run_id?: string | null
+          last_success_at?: string | null
+          observed_count?: number | null
+          reason_code?: string | null
+          state?: string
+          tenant_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "connector_capability_state_connection_id_fkey"
+            columns: ["connection_id"]
+            isOneToOne: false
+            referencedRelation: "connectors"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "connector_capability_state_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       connector_credential_references: {
         Row: {

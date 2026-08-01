@@ -398,6 +398,25 @@ from PRs verified via `git log` / `gh pr list`.
 
 ---
 
+## PR #386 — Phase 8 (part 1): canonical app-account evidence (2026-08-01)
+
+Migration **0076**. Phase 0 traced every Slack stage and found the blocker was not OAuth: the manifest, executor, exchange, vault
+and verification are all real and hosted-proven, but the fact sink is in-memory and **there was nowhere for a SaaS account to
+land**. No amount of Slack work could reach a product surface.
+
+Adds provider-agnostic app-account evidence: accounts, groups, memberships, identity matches and per-connector capability state.
+Not Slack-specific — the manifest already emits generic `app_user_account`/`group` facts, as do the Okta and Entra normalizers.
+
+Slack is **not** an identity provider: no FK to `identity_accounts` in either direction, and its directory capabilities are
+`not_applicable`. Matching has exactly two methods and display-name is not one. Bots and service accounts are categorised rather
+than counted as people. `plan_dependent` and `permission_dependent` are distinct states so one gated endpoint never marks a
+healthy connector broken.
+
+Also fixed: `test-rls.sh` re-broadens every table after migrations to mirror hosted Supabase defaults, which was **masking** the
+new revokes — the same hazard the `files` block documents. The five tables are now re-asserted in lockstep.
+
+Nine SQL groups, seven mutations caught. Doc **81** classifies every Slack stage. **Staging only; not applied.**
+
 ## PR #385 — Phase 7B: canonical intelligence layer (2026-07-31)
 
 Migration **0075** plus a new pure `src/lib/canonical/` layer. The objective was not a page: it is the model that lets a new

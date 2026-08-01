@@ -88,6 +88,16 @@ grant select on auth.users to authenticated, service_role;
 -- update these two lines too, or the blanket grant above would mask the difference (T37's exact-column
 -- invariant assertion is the backstop that fails loudly if they drift).
 revoke update, delete, truncate on public.files from authenticated;
+
+-- Same reasoning for the Phase-8 app-account evidence tables (0076): the migration revokes ALL from every browser role and
+-- from connector_runner, because reads go through product RPCs and writes go through definer promote RPCs. The blanket grant
+-- above would mask that, so the suite could not detect a table accidentally becoming browser-readable. KEEP IN LOCKSTEP with
+-- 0076's revoke block.
+revoke all on public.app_accounts from anon, authenticated, connector_runner;
+revoke all on public.app_account_groups from anon, authenticated, connector_runner;
+revoke all on public.app_account_group_memberships from anon, authenticated, connector_runner;
+revoke all on public.app_account_identity_matches from anon, authenticated, connector_runner;
+revoke all on public.connector_capability_state from anon, authenticated, connector_runner;
 grant update (upload_status) on public.files to authenticated;
 
 -- The `runner_*` functions are TRUSTED-PRODUCER ONLY: their migrations grant EXECUTE to `connector_runner` and to nobody else,
