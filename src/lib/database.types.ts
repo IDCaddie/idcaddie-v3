@@ -358,6 +358,87 @@ export type Database = {
           },
         ]
       }
+      application_matches: {
+        Row: {
+          app_id: string
+          confidence: string
+          created_at: string
+          decided_at: string | null
+          decided_by: string | null
+          directory_application_id: string
+          id: string
+          method: string
+          rationale: string | null
+          status: string
+          tenant_id: string
+          updated_at: string
+        }
+        Insert: {
+          app_id: string
+          confidence: string
+          created_at?: string
+          decided_at?: string | null
+          decided_by?: string | null
+          directory_application_id: string
+          id?: string
+          method: string
+          rationale?: string | null
+          status?: string
+          tenant_id: string
+          updated_at?: string
+        }
+        Update: {
+          app_id?: string
+          confidence?: string
+          created_at?: string
+          decided_at?: string | null
+          decided_by?: string | null
+          directory_application_id?: string
+          id?: string
+          method?: string
+          rationale?: string | null
+          status?: string
+          tenant_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "application_matches_app_id_fkey"
+            columns: ["app_id"]
+            isOneToOne: false
+            referencedRelation: "apps"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "application_matches_app_tenant_fk"
+            columns: ["app_id", "tenant_id"]
+            isOneToOne: false
+            referencedRelation: "apps"
+            referencedColumns: ["id", "tenant_id"]
+          },
+          {
+            foreignKeyName: "application_matches_dir_tenant_fk"
+            columns: ["directory_application_id", "tenant_id"]
+            isOneToOne: false
+            referencedRelation: "directory_applications"
+            referencedColumns: ["id", "tenant_id"]
+          },
+          {
+            foreignKeyName: "application_matches_directory_application_id_fkey"
+            columns: ["directory_application_id"]
+            isOneToOne: false
+            referencedRelation: "directory_applications"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "application_matches_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       apps: {
         Row: {
           business_owner_user_id: string | null
