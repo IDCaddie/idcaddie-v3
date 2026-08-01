@@ -184,3 +184,31 @@ from 2026-07-05 and their validity at Slack is unverified.
 **Harness trap, now hit four times:** `scripts/test-rls.sh` re-broadens every table after migrations to mirror hosted
 Supabase defaults, which masks migration revokes. A new locked-down table must be re-asserted there in lockstep —
 `connector_run_resource_discovery` is, next to the 0076 block.
+
+### Hosted staging apply — 2026-08-01
+
+Applied to `ycdpzduxugdsffjqyoai` (staging). `supabase db push --linked --dry-run` first confirmed exactly one pending
+migration; head moved `0076` → `0077`.
+
+Verified **on the hosted database**, not locally: all 7 functions carry `search_path=""` and `prosecdef`, owned by
+`postgres`; `anon` / `authenticated` / `service_role` hold **no** EXECUTE on any of them; `connector_runner` holds
+EXECUTE on the five write RPCs and `runner_insert_discovery_fact`, and **not** on the trigger writer; the runner holds
+no INSERT/UPDATE on `app_accounts`, `app_account_groups`, `connector_capability_state`, `discovery_facts` or
+`connector_run_resource_discovery`; the new table has RLS on with zero policies; both triggers carry the
+`current → stale` WHEN clause; all six constraints match.
+
+W0–W12 ran hosted inside a transaction that rolls back — isolated fixtures, zero residue by construction, confirmed
+afterwards (test tenants 0, `connector_run_resource_discovery` 0 rows, canonical tables unchanged). No Slack contact.
+The harness was itself proven honest by appending a deliberate `assert false` and confirming it surfaced as an error.
+
+**The one thing local testing could not have caught.** `pg_default_acl` on this database grants `EXECUTE` on every new
+`postgres`-owned public function to `anon`, `authenticated` and `service_role`. `audit_saas_stale_transition()`
+originally had no revoke — 0068 spends four explicit lines on exactly this for its equivalent function — so it would
+have shipped with the request roles holding EXECUTE. `scripts/test-rls.sh:116-131` re-revokes every trigger-returning
+function, so a green local run proved nothing about it. Fixed before apply; verified hosted after.
+
+Two further gaps were closed in the same pass, both found by mutation-testing rather than reading: both promoters were
+missing the latest-run guard that 0053/0054/0060 carry (a replayed older promote silently un-retired accounts, silently
+because the audit trigger fires only on `current → stale`), and W3's rejected/capped assertions passed for the wrong
+reason — the circuit breaker forced `staleMarked=0` regardless, so either eligibility clause could be deleted from the
+staler with the suite still green. They now assert `eligible`, which the gate and the breaker answer differently.
