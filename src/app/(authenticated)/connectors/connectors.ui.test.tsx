@@ -55,7 +55,7 @@ describe("provider availability and instance lifecycle are separate facts", () =
   it("a coming-soon provider with no instances offers no action", async () => {
     const { container } = render(await ConnectorsPage());
     const sf = cardFor(container, "Salesforce");
-    expect(within(sf).getByText("Coming soon", { selector: "span[aria-disabled='true']" })).toBeTruthy();
+    expect(within(sf).getByText("Not available yet", { selector: "span[aria-disabled='true']" })).toBeTruthy();
     expect(within(sf).queryByRole("link", { name: /Connect/ })).toBeNull();
   });
 

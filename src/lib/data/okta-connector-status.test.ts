@@ -77,8 +77,9 @@ describe("Okta setup instructions", () => {
   });
 
   it("states the operator-assisted reality instead of promising self-service", () => {
-    expect(OKTA_SETUP.operatorAssistedNote).toMatch(/operator-assisted/i);
-    expect(OKTA_SETUP.operatorAssistedNote).toMatch(/ID Caddie operations/i);
+    expect(OKTA_SETUP.operatorAssistedNote).toMatch(/ID Caddie verifies the connection/i);
+    expect(OKTA_SETUP.operatorAssistedNote).not.toMatch(/operator-assisted|staging|pilot/i);
+    expect(OKTA_SETUP.operatorAssistedNote).toMatch(/ID Caddie verifies the connection/i);
     // The terminal state is named for what was achieved, not for the next stage.
     expect(OKTA_SETUP.savedTitle).toBe("Configuration saved");
     expect(OKTA_SETUP.savedTitle.toLowerCase()).not.toContain("connected");

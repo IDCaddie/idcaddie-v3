@@ -62,9 +62,7 @@ export default async function ContractsPage() {
           </Link>
         </div>
         <p className="text-sm text-zinc-600 dark:text-zinc-400">
-          The contracts you may see — visibility is enforced by Postgres RLS. You can create and edit
-          contracts (RLS decides whether a save is allowed); linked apps, invoices, files, deletion,
-          and PDF/AI extraction are not built here.
+          Your contracts. You can create and edit a contract if you have permission in this workspace.
         </p>
       </header>
 

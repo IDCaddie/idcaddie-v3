@@ -7,7 +7,7 @@ import type { CustomerConnector } from "@/lib/customer-connectors/catalog-types"
 
 // One provider card, carrying two separate facts.
 //
-//   The BADGE describes the PRODUCT: Available / Preview / Coming soon. It is the same for every customer.
+//   The BADGE describes the PRODUCT: Available / Preview / Not available yet. It is the same for every customer.
 //   The INSTANCE LIST describes THIS WORKSPACE: what is configured and how far each one got.
 //
 // Keeping them apart is the whole point of Phase 5B. A synthetic Entra connector can exist while Entra ingestion does not — the
@@ -24,7 +24,7 @@ const LIFECYCLE_TONE: Record<string, "success" | "attention" | "danger" | "neutr
 };
 
 export function ProviderCard({ connector, model }: { connector: CustomerConnector; model: ProviderCardModel }) {
-  const comingSoon = model.availabilityLabel === "Coming soon";
+  const comingSoon = model.availabilityLabel === "Not available yet";
   const cardClass = comingSoon
     ? "border-zinc-200 bg-zinc-50/60 dark:border-zinc-800 dark:bg-zinc-900/40"
     : "border-zinc-200 hover:border-zinc-300 dark:border-zinc-800 dark:hover:border-zinc-700";
@@ -76,7 +76,7 @@ export function ProviderCard({ connector, model }: { connector: CustomerConnecto
           </Link>
         ) : (
           // A coming-soon provider with nothing configured gets no action rather than a button that cannot work.
-          <span aria-disabled="true" className="rounded-md border border-dashed border-zinc-300 px-3 py-1.5 text-xs text-zinc-500 dark:border-zinc-700 dark:text-zinc-400">Coming soon</span>
+          <span aria-disabled="true" className="rounded-md border border-dashed border-zinc-300 px-3 py-1.5 text-xs text-zinc-500 dark:border-zinc-700 dark:text-zinc-400">Not available yet</span>
         )}
         {model.secondary && (
           <Link href={model.secondary.href} className="rounded-md border border-zinc-300 px-3 py-1.5 text-xs font-medium hover:border-zinc-400 dark:border-zinc-600">

@@ -97,7 +97,7 @@ describe("Okta connect wizard — API Services configuration flow", () => {
     expect(await screen.findByRole("heading", { name: "Configuration saved" })).toBeTruthy();
     // Saved is NOT connected, and the operator-assisted reality is stated rather than implied by a dead button.
     expect(screen.queryByText(/Connected/)).toBeNull();
-    expect(screen.getByText(/operator-assisted during the staging pilot/i)).toBeTruthy();
+    expect(screen.getByText(/ID Caddie verifies the connection/i)).toBeTruthy();
     expect(screen.queryByText(/finishing its signing-key setup/i), "the obsolete platform dead end must be gone").toBeNull();
     expect(screen.getByText(/has not verified the connection and no directory data has been imported yet/)).toBeTruthy();
     expect(screen.queryByText(/\bconnected\b/i)).toBeNull();
@@ -114,7 +114,7 @@ describe("Okta connect wizard — API Services configuration flow", () => {
     expect([...sent.keys()].sort()).toEqual(["clientId", "idempotencyKey", "orgHost"]);
 
     // The truthful next step is shown, derived from what the platform actually has.
-    expect(screen.getByText(/operator-assisted during the staging pilot/i)).toBeTruthy();
+    expect(screen.getByText(/ID Caddie verifies the connection/i)).toBeTruthy();
     expect(push).not.toHaveBeenCalled();
   });
 

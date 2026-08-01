@@ -35,7 +35,7 @@ export function OktaStatusPanel({ status }: { status: OktaConnectorStatus }) {
           {OKTA_LIFECYCLE_LABEL[status.lifecycle]}
         </span>
         {/* Never "Connected": a saved configuration is not a connection, and a verified connection is not a sync. */}
-        <span className="text-xs text-zinc-500">Production synchronization disabled</span>
+        <span className="text-xs text-zinc-500">Scheduled synchronization not enabled</span>
       </div>
 
       {status.failureCategory && (
@@ -71,9 +71,7 @@ export function OktaStatusPanel({ status }: { status: OktaConnectorStatus }) {
         <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/60">
           <h2 className="text-sm font-medium text-zinc-800 dark:text-zinc-200">What happens next</h2>
           <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
-            Verification and initial discovery are operator-assisted during the staging pilot. Your configuration is saved;
-            ID Caddie operations verifies the connection against your Okta organization, then runs the first discovery.
-            Return to this page to see status and results — you do not need to do anything else.
+            Your configuration is saved. ID Caddie verifies the connection to your Okta organization and runs the first discovery. Return to this page for status and results — there is nothing else you need to do.
           </p>
         </div>
       )}

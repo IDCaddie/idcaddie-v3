@@ -84,9 +84,7 @@ export default async function ContractDetailPage({
               </Link>
             </div>
             <p className="text-sm text-zinc-600 dark:text-zinc-400">
-              Contract detail. Visibility is enforced by Postgres RLS. You can edit the supported
-              fields (RLS decides whether a save is allowed) and attach PDF files (below); invoices,
-              linking/unlinking, deletion, and PDF/AI extraction are not built here.
+              Contract detail. You can edit the fields below and attach PDF documents.
             </p>
           </header>
 
@@ -143,7 +141,7 @@ export default async function ContractDetailPage({
           <section className="space-y-2 text-sm">
             <h2 className="font-medium">Ownership</h2>
             <p className="text-xs text-zinc-500">
-              Organizations shown by name where visible to you, otherwise “Assigned” — raw ids are never shown.
+              Organizations shown by name where you have access, otherwise “Assigned”.
             </p>
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <Field label="Procurement org" value={orgDisplayName(result.data.procurementOrgId, orgLookup)} />
@@ -159,8 +157,7 @@ export default async function ContractDetailPage({
           <section className="space-y-2 text-sm">
             <h2 className="font-medium">Linked apps</h2>
             <p className="text-xs text-zinc-500">
-              Apps linked to this contract that you may read (RLS-scoped). Read-only — no
-              linking/unlinking here.
+              Applications linked to this contract.
             </p>
             {!linkedApps || !linkedApps.ok ? (
               <p className="text-zinc-600 dark:text-zinc-400">
@@ -191,7 +188,7 @@ export default async function ContractDetailPage({
           />
 
           <p className="text-xs text-zinc-500">
-            Invoices are not shown yet — that table is default-deny and not safe to surface yet
+            Invoices are not part of this view
             (RISK-002).
           </p>
         </>

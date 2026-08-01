@@ -37,7 +37,7 @@ export function ConnectorDetailCta({ connector: c }: { connector: CustomerConnec
     );
   }
   if (c.availability === "preview") {
-    return <span aria-disabled="true" className="inline-block rounded-md border border-zinc-200 px-5 py-2.5 text-sm text-zinc-400 dark:border-zinc-800">Connection coming soon</span>;
+    return <span aria-disabled="true" className="inline-block rounded-md border border-zinc-200 px-5 py-2.5 text-sm text-zinc-400 dark:border-zinc-800">Not available yet</span>;
   }
   return null;
 }

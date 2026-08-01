@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { getReportsSummaryForCurrentUser } from "@/lib/data/reports";
+import { DEMO_MODE } from "@/app/(authenticated)/nav-items";
 import { StatCard, StatGrid } from "@/components/stat-card";
 
 export const metadata = { title: "Reports · ID Caddie" };
@@ -31,9 +32,7 @@ export default async function ReportsPage() {
         </div>
         <h1 className="text-xl font-semibold">Reports</h1>
         <p className="text-sm text-zinc-600 dark:text-zinc-400">
-          Read-only summary of what is <strong>visible to you</strong> (RLS-scoped) — not absolute
-          tenant-wide totals. A “—” means that count is temporarily unavailable. This is a simple summary,
-          not a report builder: there is no generation, export, scheduling, AI, or connector data here.
+          Summary counts across your workspace. A “—” means that count is temporarily unavailable.
         </p>
       </header>
 
@@ -50,29 +49,31 @@ export default async function ReportsPage() {
         match status only (no person/IdP detail, no spend, no license intelligence).
       </p>
 
-      <section className="space-y-2 text-sm">
-        <h2 className="font-medium">Reporting capabilities</h2>
-        <p className="text-xs text-zinc-500">
-          These old-app reporting capabilities are not implemented in v3 yet — shown so the gap is
-          explicit, not hidden. This surface is read-only.
-        </p>
-        <ul className="flex flex-wrap gap-2">
-          {NOT_BUILT.map((label) => (
-            <li key={label}>
-              <span
-                aria-disabled="true"
-                title="Not built yet"
-                className="inline-flex items-center gap-2 rounded border border-zinc-300 px-2.5 py-1 text-xs text-zinc-400 dark:border-zinc-700"
-              >
-                {label}
-                <span className="rounded-full border border-zinc-300 px-1.5 text-[10px] dark:border-zinc-700">
-                  Not built yet
+      {!DEMO_MODE && (
+        <section className="space-y-2 text-sm">
+          <h2 className="font-medium">Reporting capabilities</h2>
+          <p className="text-xs text-zinc-500">
+            These old-app reporting capabilities are not implemented in v3 yet — shown so the gap is
+            explicit, not hidden. This surface is read-only.
+          </p>
+          <ul className="flex flex-wrap gap-2">
+            {NOT_BUILT.map((label) => (
+              <li key={label}>
+                <span
+                  aria-disabled="true"
+                  title="Not built yet"
+                  className="inline-flex items-center gap-2 rounded border border-zinc-300 px-2.5 py-1 text-xs text-zinc-400 dark:border-zinc-700"
+                >
+                  {label}
+                  <span className="rounded-full border border-zinc-300 px-1.5 text-[10px] dark:border-zinc-700">
+                    Not built yet
+                  </span>
                 </span>
-              </span>
-            </li>
-          ))}
-        </ul>
-      </section>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
     </main>
   );
 }

@@ -315,9 +315,11 @@ describe("okta setup copy", () => {
     // literal "certification-only"; that phrase reads as "unfinished" to a customer, and the property worth
     // protecting was never the wording — it is that the copy can never be read as "production is on". So: the label
     // is scoped to staging, and the note states the production position explicitly.
-    expect(OKTA_SETUP.statusLabel).toMatch(/staging/i);
+    expect(OKTA_SETUP.statusLabel).toMatch(/verified/i);
+    // Deployment-environment words are for us, not for a customer reading their own connector.
+    expect(OKTA_SETUP.statusLabel).not.toMatch(/staging|production/i);
     expect(OKTA_SETUP.statusLabel).not.toMatch(/production/i);
-    expect(OKTA_SETUP.statusNote).toMatch(/production synchronization is disabled/i);
+    expect(OKTA_SETUP.statusNote).toMatch(/scheduled synchronization is not enabled/i);
     const blob = JSON.stringify({ OKTA_CONTENT, OKTA_SETUP });
     expect(blob).not.toMatch(/production[- ]enabled|fully enabled|live connection is active/i);
   });

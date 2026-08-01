@@ -66,9 +66,7 @@ export default async function NeedsAttentionPage() {
         </div>
         <h1 className="text-xl font-semibold">Needs Attention</h1>
         <p className="text-sm text-zinc-600 dark:text-zinc-400">
-          Items that need cleanup before your SaaS inventory is reliable. Everything here is{" "}
-          <strong>read-only</strong> and scoped to what is <strong>visible to you</strong> (RLS) — no sync is
-          run and no account details are shown.
+          Items to tidy up before your SaaS inventory is fully reliable.
         </p>
       </header>
 

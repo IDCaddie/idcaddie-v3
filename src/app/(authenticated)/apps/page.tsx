@@ -74,8 +74,7 @@ export default async function AppsPage({
         </div>
         <h1 className="text-xl font-semibold">Apps</h1>
         <p className="text-sm text-zinc-600 dark:text-zinc-400">
-          Read-only inventory of the apps you may see (RLS-scoped). Search, filters, and sort operate over
-          exactly those rows. Contract/user counts and owner presence are RLS-scoped; no raw owner ids.
+          Your SaaS application inventory. Search, filter and sort to find an application.
         </p>
       </header>
 
@@ -193,8 +192,7 @@ export default async function AppsPage({
             </table>
           </div>
           <p className="text-xs text-zinc-500">
-            Counts and owner presence are “visible to you” (RLS-scoped), not absolute totals. Connector-synced
-            inventory, spend/license intelligence, imports, and exports are not built yet.
+            Counts reflect the applications you have access to.
           </p>
         </section>
       )}

@@ -39,7 +39,7 @@ describe("SLACK_SYNC_COPY — read-only preview language, no false readiness, no
     for (const bad of ["connect slack", "run sync", "oauth ready", "oauth", "production connector ready", "xoxb"])
       expect(all, `copy must not contain "${bad}"`).not.toContain(bad);
     expect(all).toContain("read-only");
-    expect(all).toContain("manual run coming next");
+    expect(all).not.toMatch(/coming next|coming soon|not built/);
   });
 });
 

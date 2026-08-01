@@ -49,8 +49,7 @@ export default async function EditContractPage({
           <header className="space-y-1">
             <h1 className="text-xl font-semibold">Edit {result.data.contractName}</h1>
             <p className="text-sm text-zinc-600 dark:text-zinc-400">
-              Edit the supported fields. Postgres RLS decides whether your changes can be saved; a
-              denied save is reported generically. No delete/archive, no linked apps or files here.
+              Edit this contract. You need edit permission in this workspace to save.
             </p>
           </header>
           <div className="max-w-2xl">

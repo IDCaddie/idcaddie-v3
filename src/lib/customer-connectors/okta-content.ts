@@ -86,7 +86,7 @@ export const OKTA_SETUP = {
   // During the staging pilot the two remaining stages are performed by ID Caddie operations, because the product cannot yet
   // launch the verification/discovery jobs itself. Saying so plainly beats a disabled button the customer will try to press.
   operatorAssistedTitle: "What happens next",
-  operatorAssistedNote: "Verification and initial discovery are operator-assisted during the staging pilot. Your configuration is saved; ID Caddie operations verifies the connection against your Okta organization, then runs the first discovery. Return to this page to see status and results — you do not need to do anything else.",
+  operatorAssistedNote: "Your configuration is saved. ID Caddie verifies the connection to your Okta organization and runs the first discovery. Return to this page for status and results — there is nothing else you need to do.",
   savedTitle: "Configuration saved",
   savedMessage: "Your non-secret Okta configuration has been recorded. ID Caddie has not verified the connection and no directory data has been imported yet.",
   declareScope: "I have granted okta.users.read, okta.groups.read, and okta.apps.read on the app",
@@ -94,8 +94,8 @@ export const OKTA_SETUP = {
   declareKey: "I have set the app to fetch keys from the ID Caddie JWKS URL",
   // Truthful connection status. Okta is `certificationOnly` in the authoritative governance contract, so the wizard must NOT imply
   // the connection is production-enabled. Plain-language equivalent — no internal governance vocabulary.
-  statusLabel: "Verified for staging",
-  statusNote: "This configuration is verified for staging use. Production synchronization is disabled and scheduled synchronization is not enabled — discovery runs only when it is started deliberately.",
+  statusLabel: "Verified",
+  statusNote: "Discovery runs only when it is started deliberately. Scheduled synchronization is not enabled.",
 } as const;
 
 // The approved public signing-key identifier to display (NON-secret; the private key is never here and never in this repository).

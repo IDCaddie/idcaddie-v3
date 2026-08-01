@@ -1,0 +1,166 @@
+# 83 — Real OAuth completion: the architecture, and how to provision it
+
+**Canonical source for: how a real Slack OAuth callback completes without putting broad credentials in the web request
+path, and the exact steps to turn it on for staging.**
+
+Phase 8E built the safety primitives (workspace binding, exact callback allowlist, fail-closed assembly — doc
+[81](81_SLACK_CONNECTOR_STATE.md)). It deliberately did not switch the route, because switching it requires deciding
+*what the web tier is allowed to hold*. This doc makes that decision and records why.
+
+---
+
+## 1. The problem, stated precisely
+
+Completing an OAuth callback needs three capabilities:
+
+| capability | why | what it implies |
+|---|---|---|
+| read the Slack **client secret** | `oauth.v2.access` requires it in the POST body | AWS KMS decrypt + a read of `connector_app_secrets` |
+| **write** the returned bot token | it must land envelope-encrypted | AWS KMS encrypt + an insert into `connector_secrets` |
+| **consume** the `oauth_pending` row | single-use replay defence | one atomic UPDATE |
+
+The existing implementation reaches all three through `RunnerConnection` + `createRunnerAppSecretStore`, which
+authenticate as **`connector_runner_login`**. That role is the connector runner's identity: it can execute every
+`runner_*` function in the schema — open runs, insert discovery facts, promote canonical evidence, mark accounts stale.
+
+Handing that to Vercel would mean **the public web tier can drive the entire evidence pipeline**. A request-path bug, an
+SSRF, or a leaked deployment env would not just leak a token — it would let an attacker fabricate directory evidence.
+That is a materially worse blast radius than the thing we are trying to enable, and it is the stop condition this work
+was given.
+
+---
+
+## 2. The decision
+
+> **A new least-privilege database identity, `oauth_completer`, that can execute exactly three functions and nothing
+> else. No dedicated worker.**
+
+This is option 2 of the two offered. Option 1 (a separate OAuth-completion worker, with Vercel handing off a validated
+one-time job) was considered and rejected **for now**:
+
+- It does not remove the credential — it **moves** it. The worker still needs KMS and a database identity; we would
+  still have to decide what that identity may do, which is this same question with an extra queue in front of it.
+- It adds a hop that must be authenticated, a job store that must be single-use, and a failure mode where the user's
+  browser has returned but the connection has not completed. That is three new pieces of state on the exact path where
+  correctness matters most.
+- Its real advantage — no KMS in the web tier — is worth having, and is the right answer once there is a second
+  provider or a non-interactive re-auth. It is recorded here as the follow-up, not discarded.
+
+The narrow role gets the same security property for one new database role and no new moving parts. **Fewest files,
+smallest blast radius, and the boundary is enforced by Postgres rather than by our own discipline.**
+
+### What `oauth_completer` may do
+
+`NOINHERIT`, `NOBYPASSRLS`, and granted EXECUTE on exactly:
+
+1. `product_read_app_client_secret_envelope(...)` — returns the **envelope**, never plaintext
+2. `runner_ingest_connector_secret(...)` — writes the token envelope for one connector
+3. `runner_consume_oauth_pending(...)` — the atomic single-use consume
+
+It holds **no table grant at all**, and no grant on any `runner_*` discovery function. If the web tier is fully
+compromised, the attacker can complete an OAuth flow for a connector that already has a pending row — and cannot read
+one row of customer evidence, cannot write a fact, and cannot stale an account.
+
+### KMS
+
+The web tier gets a KMS grant for **decrypt on the app-secret key** and **encrypt on the connector-secret key**, and
+nothing else. Specifically **not** `kms:Decrypt` on the connector-secret key: the web tier writes tokens, it never reads
+them back. Reading them stays the runner's job, which is the separation
+[49](49_KMS_IAM_SEPARATION_VERIFIER.md) already verifies.
+
+---
+
+## 3. Provisioning runbook (staging)
+
+Everything below is a **human action**. None of it can be done from the repository, and none of it should be done from
+an agent session.
+
+### 3.1 Database role
+
+Applied as a migration, reviewed like any other. It creates the role with **no** password — the password is set out of
+band so it never appears in a migration, a repo, or a diff.
+
+```sql
+-- reviewed migration, not run ad-hoc
+create role oauth_completer nologin noinherit;
+revoke all on all tables in schema public from oauth_completer;
+grant execute on function public.product_read_app_client_secret_envelope(text, text) to oauth_completer;
+grant execute on function public.runner_ingest_connector_secret(uuid, uuid, text, integer, text, jsonb) to oauth_completer;
+grant execute on function public.runner_consume_oauth_pending(uuid, text, uuid, text, text, timestamptz) to oauth_completer;
+
+create role oauth_completer_login login noinherit password null;  -- password set out of band
+grant oauth_completer to oauth_completer_login;
+```
+
+Then, **outside the repo**: `alter role oauth_completer_login password '<generated>'`.
+
+Verify before going further — this is the whole point of the design, so it gets asserted rather than assumed:
+
+```sql
+-- must return ZERO rows
+select c.relname from pg_class c join pg_namespace n on n.oid = c.relnamespace
+ where n.nspname = 'public'
+   and (has_table_privilege('oauth_completer', c.oid, 'SELECT')
+     or has_table_privilege('oauth_completer', c.oid, 'INSERT')
+     or has_table_privilege('oauth_completer', c.oid, 'UPDATE'));
+
+-- must return EXACTLY the three functions above
+select p.oid::regprocedure from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+ where n.nspname = 'public' and has_function_privilege('oauth_completer', p.oid, 'EXECUTE')
+   and p.proname not in (select proname from pg_proc where pronamespace = 'pg_catalog'::regnamespace);
+```
+
+### 3.2 AWS
+
+- An IAM role for the Vercel deployment (OIDC-federated; **no long-lived access key**).
+- `kms:Decrypt` on the **app-secret** key only.
+- `kms:Encrypt` + `kms:GenerateDataKey` on the **connector-secret** key only.
+- Explicitly **no** `kms:Decrypt` on the connector-secret key.
+- CloudTrail on both keys, and an alarm on any `Decrypt` of the connector-secret key by this role — that call should be
+  impossible, so one occurrence is an incident, not a metric.
+
+### 3.3 Vercel environment (staging only — never Production scope)
+
+Set on the **Preview/staging** environment of `idcaddie-v3`:
+
+| variable | value | notes |
+|---|---|---|
+| `CONNECTOR_OAUTH_REAL_EXCHANGE_ENABLED` | `1` | the gate; absent = synthetic |
+| `CONNECTOR_OAUTH_REDIRECT_URI` | `https://idcaddie-v3.vercel.app/connectors/oauth/callback` | must be on the allowlist in `connector-oauth-config.ts` |
+| `CONNECTOR_OAUTH_EXPECTED_SLACK_TEAM_ID` | the approved workspace's `T…` id | unset ⇒ refuses; it is not a wildcard |
+| `CONNECTOR_OAUTH_EXPECTED_TENANT_ID` | staging fixture tenant | must match the `oauth_pending` row |
+| `CONNECTOR_OAUTH_EXPECTED_CONNECTOR_ID` | the Slack connector | ditto |
+| `CONNECTOR_OAUTH_EXPECTED_CORRELATION_ID` | from the authorize step | `= oauth_pending.state_jti` |
+| `CONNECTOR_OAUTH_STATE_SECRET` | generated | HMAC key for the state |
+| `SLACK_CLIENT_ID` | Slack app client id | not a secret |
+| `OAUTH_COMPLETER_DB_URL` | the `oauth_completer_login` connection string | **never** the runner's |
+| `AWS_ROLE_ARN` / region | the IAM role above | OIDC, no static key |
+
+**Do not set any of these on the Production environment.** `isRealExchangeEnabled` refuses when `VERCEL_ENV=production`
+regardless, but the second line of defence is not putting the values there in the first place.
+
+### 3.4 Slack app
+
+Redirect URL must **byte-match** `CONNECTOR_OAUTH_REDIRECT_URI`. Scopes must not exceed the reviewed manifest:
+`users:read`, `users:read.email`, `usergroups:read`. No write scope, no `channels:*`, no `chat:write`.
+
+---
+
+## 4. What is already enforced in code
+
+These need no runbook step — they are in `oauth-callback-real-runner.ts` and tested:
+
+- Production refusal, and an explicit opt-in that defaults off.
+- Exact whole-URI callback allowlist (not a host check — see the `.host` note in doc 81).
+- Workspace binding on `team.id`, checked **before** the token is stored.
+- Signed, expiring, tenant- and connector-bound, single-use state; replay denied by the atomic consume.
+- Bounded error categories; no OAuth code, client secret, token, host or env value in any result.
+- No silent fallback to the synthetic handler when real mode is enabled.
+
+---
+
+## 5. Follow-up
+
+Move completion to a dedicated worker when any of these becomes true: a second OAuth provider, non-interactive
+re-authorization, or a requirement that the web tier hold no KMS grant at all. At that point the `oauth_completer` role
+moves to the worker unchanged — the narrow grant is the part worth keeping either way.

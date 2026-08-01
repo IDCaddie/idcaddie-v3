@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { getAppDetailForCurrentUser } from "@/lib/data/apps";
+import { DEMO_MODE } from "@/app/(authenticated)/nav-items";
 import { listContractsLinkedToApp } from "@/lib/data/links";
 import { listAppUsersForApp } from "@/lib/data/app-users";
 import { listMatchesForAppUsers } from "@/lib/data/app-user-matches";
@@ -101,7 +102,7 @@ export default async function AppDetailPage({
           <header className="space-y-1">
             <h1 className="text-xl font-semibold">{result.data.name}</h1>
             <p className="text-sm text-zinc-600 dark:text-zinc-400">
-              Read-only app detail. Visibility is enforced by Postgres RLS. No editing here yet.
+              Application detail.
             </p>
             {slackSync.isSlackSynced ? (
               <div className="mt-2 inline-flex flex-wrap items-center gap-2 rounded border border-violet-300 bg-violet-50 px-3 py-2 text-xs text-violet-900 dark:border-violet-800 dark:bg-violet-950 dark:text-violet-200">
@@ -135,7 +136,7 @@ export default async function AppDetailPage({
             <section className="space-y-2 text-sm">
               <h2 className="font-medium">Last Slack sync</h2>
               <p className="text-xs text-zinc-500">
-                Status of the most recent manual Slack sync run for your tenant (RLS-scoped, read-only). Safe aggregates
+                Status of the most recent Slack sync for this application. Summary counts
                 only — no token, account emails/names, or raw data.
               </p>
               {!slackRun || !slackRun.ok ? (
@@ -197,7 +198,7 @@ export default async function AppDetailPage({
             <h2 className="font-medium">Ownership</h2>
             <p className="text-xs text-zinc-500">
               Owners shown as Yes/No (no user ids). Organizations shown by name where visible to you, otherwise
-              “Assigned” — raw ids are never shown.
+              “Assigned”.
             </p>
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
               <Field label="Business owner assigned" value={result.data.hasBusinessOwner ? "Yes" : "No"} />
@@ -240,7 +241,7 @@ export default async function AppDetailPage({
           <section className="space-y-2 text-sm">
             <h2 className="font-medium">Linked contracts</h2>
             <p className="text-xs text-zinc-500">
-              Contracts linked to this app that you may read (RLS-scoped). Read-only — no
+              Contracts linked to this application. Read-only — no
               linking/unlinking here.
             </p>
             {!linkedContracts || !linkedContracts.ok ? (
@@ -313,10 +314,8 @@ export default async function AppDetailPage({
           <section className="space-y-2 text-sm">
             <h2 className="font-medium">{slackSync.isSlackSynced ? SLACK_SYNC_COPY.usersHeading : "App users"}</h2>
             <p className="text-xs text-zinc-500">
-              {slackSync.isSlackSynced ? `${SLACK_SYNC_COPY.preview}. ` : ""}Accounts on this app that you may read
-              (RLS-scoped). Read-only — direct app_user roster fields plus a minimal matched/unmatched status; the match
-              shows status only (no matched-person name, email, or identity-provider data). No identity matching, license
-              utilization, or provisioning.
+              {slackSync.isSlackSynced ? `${SLACK_SYNC_COPY.preview}. ` : ""}Accounts held in this application.
+              The identity column shows whether a match exists, not who it matched.
             </p>
             {!appUsers || !appUsers.ok ? (
               <p className="text-zinc-600 dark:text-zinc-400">
@@ -387,41 +386,40 @@ export default async function AppDetailPage({
             )}
           </section>
 
-          <section className="space-y-2 text-sm">
-            <h2 className="font-medium">Actions</h2>
-            <p className="text-xs text-zinc-500">
-              These old-app actions are not implemented in v3 yet — shown so the gap is explicit, not
-              hidden. This surface is read-only.
-            </p>
-            <ul className="flex flex-wrap gap-2">
-              {[
-                "Link / unlink contracts",
-                "Edit / archive app",
-                "Connector sync",
-                "AI app / license analysis",
-                "Export",
-              ].map((action) => (
-                <li key={action}>
-                  <span
-                    aria-disabled="true"
-                    title="Not built yet"
-                    className="inline-flex items-center gap-2 rounded border border-zinc-300 px-2.5 py-1 text-xs text-zinc-400 dark:border-zinc-700"
-                  >
-                    {action}
-                    <span className="rounded-full border border-zinc-300 px-1.5 text-[10px] dark:border-zinc-700">
-                      Not built yet
+          {!DEMO_MODE && (
+            <section className="space-y-2 text-sm">
+              <h2 className="font-medium">Actions</h2>
+              <p className="text-xs text-zinc-500">
+                These old-app actions are not implemented in v3 yet — shown so the gap is explicit, not
+                hidden. This surface is read-only.
+              </p>
+              <ul className="flex flex-wrap gap-2">
+                {[
+                  "Link / unlink contracts",
+                  "Edit / archive app",
+                  "Connector sync",
+                  "AI app / license analysis",
+                  "Export",
+                ].map((action) => (
+                  <li key={action}>
+                    <span
+                      aria-disabled="true"
+                      title="Not built yet"
+                      className="inline-flex items-center gap-2 rounded border border-zinc-300 px-2.5 py-1 text-xs text-zinc-400 dark:border-zinc-700"
+                    >
+                      {action}
+                      <span className="rounded-full border border-zinc-300 px-1.5 text-[10px] dark:border-zinc-700">
+                        Not built yet
+                      </span>
                     </span>
-                  </span>
-                </li>
-              ))}
-            </ul>
-          </section>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
 
           <p className="text-xs text-zinc-500">
-            Only a matched/unmatched status is shown — no person names, identity-account details
-            (provider/email/status), license rules/utilization, invoices, or files. No identity
-            matching algorithm, merge, provisioning, deprovisioning, or unmanaged-account report yet
-            (those tables stay tenant-only / default-deny — RISK-002).
+            Only whether a match exists is shown here, not who it matched.
           </p>
         </>
       )}
