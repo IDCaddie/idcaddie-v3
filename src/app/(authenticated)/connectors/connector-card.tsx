@@ -2,30 +2,34 @@
 import Link from "next/link";
 import { Badge } from "@/components/badge";
 import { ConnectorIcon } from "@/components/connector-icon";
-import { useDemoConnection } from "@/lib/customer-connectors/use-demo-connection";
-import { resolveConnectorView, type RealConnectorState } from "@/lib/customer-connectors/view";
+import type { ProviderCardModel } from "@/lib/customer-connectors/provider-instances";
 import type { CustomerConnector } from "@/lib/customer-connectors/catalog-types";
 
-// One marketplace card. Reads the sessionStorage demo state reactively so a preview connect/pause/disconnect updates the card
-// live. Visual hierarchy: prominent name + icon, muted category, a strong CTA for the connectable provider, a muted (still
-// accessible) treatment for coming-soon. No internal state, no secret/id/technical wording — customer copy only.
-export function ConnectorCard({ connector, real }: { connector: CustomerConnector; real?: RealConnectorState | null }) {
-  const demo = useDemoConnection(connector.provider);
-  const view = resolveConnectorView(connector, demo, real);
-  const comingSoon = view.cta.disabled;
-  const strong = connector.canConnect && !demo && !real; // the "Connect …" call to action
+// One provider card, carrying two separate facts.
+//
+//   The BADGE describes the PRODUCT: Available / Preview / Coming soon. It is the same for every customer.
+//   The INSTANCE LIST describes THIS WORKSPACE: what is configured and how far each one got.
+//
+// Keeping them apart is the whole point of Phase 5B. A synthetic Entra connector can exist while Entra ingestion does not — the
+// card says "Preview" and "Configuration saved" simultaneously, and neither contradicts the other. Collapsing them into one
+// status was what produced "Connection coming soon" on a provider the workspace had already configured.
+//
+// Browser-local demo state is not consulted here at all. Persisted state is the only state.
 
+// Lifecycle tone. Only `discovered` earns success: a saved configuration is not a working connector, and a verified one has not
+// imported anything yet.
+const LIFECYCLE_TONE: Record<string, "success" | "attention" | "danger" | "neutral"> = {
+  discovered: "success", discovering: "attention", verified: "attention", configured: "attention",
+  failed: "danger", disconnected: "neutral", superseded: "neutral",
+};
+
+export function ProviderCard({ connector, model }: { connector: CustomerConnector; model: ProviderCardModel }) {
+  const comingSoon = model.availabilityLabel === "Coming soon";
   const cardClass = comingSoon
     ? "border-zinc-200 bg-zinc-50/60 dark:border-zinc-800 dark:bg-zinc-900/40"
-    : "border-zinc-200 hover:border-zinc-300 hover:shadow-sm dark:border-zinc-800 dark:hover:border-zinc-700";
+    : "border-zinc-200 hover:border-zinc-300 dark:border-zinc-800 dark:hover:border-zinc-700";
 
-  const ctaClass = comingSoon
-    ? "rounded-md border border-dashed border-zinc-300 px-3 py-1.5 text-xs text-zinc-500 dark:border-zinc-700 dark:text-zinc-400"
-    : strong
-      ? "rounded-md bg-zinc-900 px-3 py-1.5 text-xs font-semibold text-white dark:bg-white dark:text-zinc-900"
-      : "rounded-md border border-zinc-300 px-3 py-1.5 text-xs font-medium dark:border-zinc-600";
-
-  const inner = (
+  return (
     <div className={`flex h-full flex-col gap-3 rounded-xl border p-4 transition-colors ${cardClass}`}>
       <div className="flex items-start justify-between gap-2">
         <div className="flex min-w-0 items-center gap-3">
@@ -35,32 +39,51 @@ export function ConnectorCard({ connector, real }: { connector: CustomerConnecto
             <div className="text-[11px] uppercase tracking-wide text-zinc-400 dark:text-zinc-500">{connector.category}</div>
           </div>
         </div>
-        <Badge tone={view.statusTone} variant="solid">{view.statusLabel}</Badge>
+        {/* About the product, never about this workspace. */}
+        <Badge tone={model.availabilityLabel === "Available" ? "success" : "neutral"} variant="solid">{model.availabilityLabel}</Badge>
       </div>
-      {/* The note qualifies the badge — "Failed" alone does not say whether the customer must do anything, and
-          "Simulated" alone does not say it is not a real connection. Both were computed and then dropped on the floor. */}
-      {view.statusNote && (
-        <p className={`-mt-1 text-[11px] ${view.statusTone === "danger" ? "text-red-700 dark:text-red-400" : "text-zinc-500 dark:text-zinc-400"}`}>{view.statusNote}</p>
-      )}
-      <p className="line-clamp-2 min-h-[2.5rem] text-sm text-zinc-600 dark:text-zinc-400">{connector.description}</p>
-      <div className="mt-auto flex items-center justify-between gap-2 pt-1">
-        <div className="flex min-w-0 flex-wrap gap-1 text-[11px] text-zinc-500 dark:text-zinc-400">
-          {connector.capabilities.slice(0, 2).map((cap) => (
-            <span key={cap} className="rounded border border-zinc-200 px-1.5 py-0.5 dark:border-zinc-800">{cap}</span>
-          ))}
-        </div>
-        <span aria-disabled={comingSoon ? "true" : undefined} className={`shrink-0 ${ctaClass}`}>{view.cta.label}</span>
+
+      <p className="line-clamp-2 text-sm text-zinc-600 dark:text-zinc-400">{connector.description}</p>
+
+      {model.availabilityNote && <p className="text-xs text-zinc-500">{model.availabilityNote}</p>}
+
+      {/* ── This workspace's instances ─────────────────────────────────────────────────────────────────────────── */}
+      <div className="space-y-1.5 border-t border-zinc-100 pt-2 dark:border-zinc-800">
+        <div className="text-xs font-medium text-zinc-500">{model.instanceSummary}</div>
+        {model.instances.length > 0 && (
+          <ul className="space-y-1.5">
+            {/* Every instance is listed, never collapsed into one badge — two Okta organizations at different lifecycles are two
+                separate facts and a single summary would have to be wrong about one of them. */}
+            {model.instances.map((i) => (
+              <li key={i.id} className="flex flex-wrap items-center gap-1.5 text-xs">
+                <Link href={`/connectors/manage/${i.id}`} className="font-medium underline-offset-2 hover:underline">{i.name}</Link>
+                <Badge tone={LIFECYCLE_TONE[i.lifecycle] ?? "neutral"}>{i.lifecycleLabel}</Badge>
+                {i.organization && i.organization !== i.name && <span className="text-zinc-400">{i.organization}</span>}
+                {i.active && i.lifecycle === "discovered" && (
+                  <span className="text-zinc-500">{i.counts.people} people · {i.counts.groups} groups · {i.counts.applications} apps</span>
+                )}
+                {!i.active && <span className="text-zinc-400">history preserved</span>}
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
+      <div className="mt-auto flex flex-wrap items-center gap-2 pt-1">
+        {model.primary ? (
+          <Link href={model.primary.href} className="rounded-md bg-zinc-900 px-3 py-1.5 text-xs font-semibold text-white hover:bg-zinc-800 dark:bg-white dark:text-zinc-900 dark:hover:bg-zinc-200">
+            {model.primary.label}
+          </Link>
+        ) : (
+          // A coming-soon provider with nothing configured gets no action rather than a button that cannot work.
+          <span aria-disabled="true" className="rounded-md border border-dashed border-zinc-300 px-3 py-1.5 text-xs text-zinc-500 dark:border-zinc-700 dark:text-zinc-400">Coming soon</span>
+        )}
+        {model.secondary && (
+          <Link href={model.secondary.href} className="rounded-md border border-zinc-300 px-3 py-1.5 text-xs font-medium hover:border-zinc-400 dark:border-zinc-600">
+            {model.secondary.label}
+          </Link>
+        )}
       </div>
     </div>
-  );
-
-  // The whole card is a link when there is a destination; a coming-soon card is inert. h-full on the wrapper lets the inner
-  // card's h-full resolve against the stretched grid item, so every card in a row is equal height (Phase 2).
-  return view.cta.href ? (
-    <Link href={view.cta.href} aria-label={`${connector.displayName} — ${view.statusLabel}`} className="block h-full rounded-xl focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500">
-      {inner}
-    </Link>
-  ) : (
-    <div className="h-full">{inner}</div>
   );
 }

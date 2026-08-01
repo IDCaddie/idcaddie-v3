@@ -20,7 +20,15 @@ export function ConnectorSwitcher({ connectors }: { connectors: readonly ScopeCo
   const params = useSearchParams();
   if (connectors.length < 2) return null;
 
-  const current = params.get("connection") ?? "";
+  const requested = params.get("connection") ?? "";
+  // ELIGIBILITY: only connectors that are active (not superseded, not disconnected) reach this component — the resolver filters
+  // them server-side. A configuration-only connector IS eligible: scoping to it shows an honest empty directory, which is the
+  // truthful answer while it waits for verification, and excluding it would make a connector the customer just added invisible.
+  //
+  // FALLBACK: if the URL still names a connector that is no longer eligible — disconnected in another tab, or a stale bookmark —
+  // the control shows "All directories" rather than a blank or a hidden scope. The server resolver independently drops the id, so
+  // the data and the control agree; this only stops the SELECT from displaying a value it does not have.
+  const current = connectors.some((c) => c.id === requested) ? requested : "";
 
   const onChange = (value: string) => {
     const next = new URLSearchParams(params.toString());

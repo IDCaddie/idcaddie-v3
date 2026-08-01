@@ -398,6 +398,30 @@ from PRs verified via `git log` / `gh pr list`.
 
 ---
 
+## PR #382 — Phase 5B: unified connector marketplace, instances and lifecycle actions (2026-07-31)
+
+No migration. **Root cause:** `/connectors` asked `getOktaConnectorStatus()`, which reads `okta_connector_configs` — a table only
+Okta has. Slack and Entra had real connector rows and no config row, so their cards fell through to the static catalogue's
+"Preview / Connection coming soon" while the workspace was looking at those very instances on `/connectors/manage`. The override
+was also keyed one-per-provider, so a second Okta organization could not be represented at all.
+
+The marketplace now reads the provider-agnostic `product_connector_inventory`. Provider availability (about the product) and
+instance lifecycle (about this workspace) are rendered as two separate facts on one card, so "Preview" and "Configuration saved"
+coexist without contradiction — the synthetic Entra connector is exactly that case. Every instance is listed; none is collapsed
+into a single badge.
+
+The status filter is **Configured**, not Connected: a saved configuration is not a live connection.
+
+Disconnect and reconnect, built in Phase 5 but reachable only from connector detail, are now on every management row behind a
+disclosure carrying the full consequence list and a required checkbox plus reason. Actions are derived from the persisted
+lifecycle: **View access is never offered before discovery produced records**, and a superseded connector never offers reconnect.
+
+`view.ts` (the demo-state marketplace resolver) is deleted — the marketplace consults no browser-local state at all.
+
+18 action/card tests, 15 marketplace tests, 18 management tests. Five mutations caught: ignoring persisted Slack/Entra instances,
+labelling configured as Connected, offering access before discovery, allowing reconnect of a superseded connector, and rendering a
+read failure as "nothing configured". **Staging only.**
+
 ## PR #381 — Phase 5: enterprise connector management (2026-07-31)
 
 Migration **0073**. The product assumed one directory; a workspace can have several, and they are separate organizations that are
