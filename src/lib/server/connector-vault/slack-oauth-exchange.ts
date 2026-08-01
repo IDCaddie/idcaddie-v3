@@ -73,6 +73,8 @@ export type SlackExchangeReason =
   | "malformed_response"
   | "missing_bot_token"
   | "unexpected_token_type"
+  | "missing_workspace" // the response named no team, so the workspace cannot be proven
+  | "workspace_mismatch" // the token belongs to a DIFFERENT Slack workspace than the one authorized
   | "store_failed";
 
 export type SlackExchangeResult =
@@ -86,6 +88,12 @@ export type SlackExchangeInput = {
   connectorId: string;
   version: number;
   correlationId: string;
+  // The Slack workspace this authorization is allowed to be for, from server-trusted config. When set, a token for
+  // any other workspace is refused BEFORE the store handoff, so a wrong-workspace token is never persisted.
+  //
+  // Optional here because the synthetic path has no workspace to check. A real run must always supply it: the
+  // real-callback runner refuses to assemble without one, so "unset" cannot mean "any workspace" in production shape.
+  expectedTeamId?: string;
 };
 
 export type SlackExchangeDeps = {
@@ -150,6 +158,17 @@ export async function exchangeSlackOAuthCode(
   const token = b.access_token;
   if (typeof token !== "string" || token.length === 0) return { ok: false, reason: "missing_bot_token" };
   if (b.token_type !== "bot") return { ok: false, reason: "unexpected_token_type" };
+
+  // 4b) WORKSPACE BINDING. Slack decides which workspace the user consented on, not us — the authorize URL cannot
+  //     pin it. So the only place the answer exists is this response, and it has to be checked BEFORE the store: a
+  //     token that reached the vault is a token that will be used, and a token for the wrong workspace means reading
+  //     an organisation nobody authorized. The team id is compared, never the name (a name is not an identity).
+  if (typeof input.expectedTeamId === "string" && input.expectedTeamId.length > 0) {
+    const team = b.team;
+    const teamId = team && typeof team === "object" ? (team as Record<string, unknown>).id : undefined;
+    if (typeof teamId !== "string" || teamId.length === 0) return { ok: false, reason: "missing_workspace" };
+    if (teamId !== input.expectedTeamId) return { ok: false, reason: "workspace_mismatch" };
+  }
 
   // 5) hand the bot token STRAIGHT to the store/encrypt path — its only destination. Never returned/logged.
   let stored: Awaited<ReturnType<ExchangeStoreHandoff>>;

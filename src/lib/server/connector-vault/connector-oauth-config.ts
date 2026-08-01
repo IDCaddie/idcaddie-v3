@@ -28,6 +28,39 @@ export const STAGING_OAUTH_REDIRECT_URI = `https://idcaddie-v3.vercel.app${CONNE
 // absolute https + exact callback path + NO trailing slash.
 const REDIRECT_RE = /^https:\/\/[a-z0-9.-]+\/connectors\/oauth\/callback$/;
 
+// EXACT callback allowlist for a REAL run (Phase 8E). REDIRECT_RE constrains the SHAPE but accepts any host, and the
+// redirect URI is what a client secret and an authorization code get posted against. A typo'd or attacker-supplied
+// CONNECTOR_OAUTH_REDIRECT_URI that still matched the shape would be a credential-bearing request to somewhere else.
+// Shape-checking a URL is not the same as knowing where it points.
+//
+// Whole URIs, compared as strings — not hosts parsed out of the value. Parsing would mean this module contained the
+// substring `.host`, and `connector-oauth-config.test.ts` asserts it never does: the guard exists because the ONE
+// mistake this file must never make is deriving a redirect from a request Host header. An exact-string allowlist is
+// both stricter than a host check and keeps that guard meaningful.
+const REAL_CALLBACK_URIS: readonly string[] = [
+  `https://idcaddie-v3.vercel.app${CONNECTOR_OAUTH_CALLBACK_PATH}`,
+  `https://staging.idcaddie.com${CONNECTOR_OAUTH_CALLBACK_PATH}`,
+];
+
+export class ConnectorOAuthHostError extends Error {
+  constructor() { super("callback_host_not_allowlisted"); this.name = "ConnectorOAuthHostError"; }
+}
+
+// The redirect URI for a REAL run: the configured value, additionally required to be one of the allowlisted URIs.
+// Throws (fail closed) rather than falling back to the default — a real run must not silently retarget its callback.
+export function realConnectorOAuthRedirectUri(env: Record<string, string | undefined> = process.env): string {
+  const uri = connectorOAuthRedirectUri(env);
+  if (!REAL_CALLBACK_URIS.includes(uri)) throw new ConnectorOAuthHostError();
+  return uri;
+}
+
+// The ONE Slack workspace a real run is allowed to bind, from server-trusted config. No default: an unset value must
+// fail closed rather than mean "any workspace". Slack team ids are `T` + uppercase alphanumerics.
+export function expectedSlackTeamId(env: Record<string, string | undefined> = process.env): string | null {
+  const v = env.CONNECTOR_OAUTH_EXPECTED_SLACK_TEAM_ID;
+  return typeof v === "string" && /^T[A-Z0-9]{2,}$/.test(v) ? v : null;
+}
+
 // Resolve the server-trusted OAuth redirect URI from TRUSTED config ONLY (an explicit `CONNECTOR_OAUTH_REDIRECT_URI`
 // override, else the staging default). NEVER request-derived. Validated absolute-HTTPS + exact path + no trailing
 // slash (also re-asserted by the B2a `serverTrustedRedirectUri` helper). Throws on a malformed configured value.
