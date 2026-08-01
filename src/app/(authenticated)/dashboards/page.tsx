@@ -5,6 +5,8 @@ import { resolveConnectorScope } from "@/lib/data/connector-scope";
 import { parseAccessFilters, type SearchParamsInput } from "@/lib/data/access-filters";
 import { attentionQueue, healthRollup, posture, riskBreakdown } from "@/lib/data/executive-home";
 import { AccessPosture, AttentionPanel, HealthPanel, Metric, RiskPanel, Section } from "./executive-panels";
+import { CapabilityMatrix } from "./capability-panel";
+import { resolveAll, type ConnectorFacts } from "@/lib/canonical/capabilities";
 import { getDashboardSummaryForCurrentUser } from "@/lib/data/dashboard";
 import {
   getDashboardOverviewForCurrentUser,
@@ -130,9 +132,20 @@ export default async function DashboardsPage({ searchParams }: { searchParams?: 
   // inventory read failed we know nothing about the estate, and "No directory connected" would be a false claim about a
   // workspace that may have several. In that case the posture renders and only the health panel reports itself unavailable.
   const noDirectory = scope !== null && scope.active.length === 0;
+
   // In a scoped view the health panel describes ONE directory; unscoped it describes every active one, and must not flatten them.
   const shown = selected ? activeConnectors.filter((c) => c.id === selected.id) : activeConnectors;
   const rollup = healthRollup(shown);
+
+  // Phase 7B — resolve what each SOURCE can tell this workspace, from facts already loaded. This is what stops an unbuilt or
+  // unconnected capability rendering as a zero: the panel below reports a state and a sentence, never a number it cannot support.
+  const facts: readonly ConnectorFacts[] = shown.map((c) => ({
+    id: c.id, provider: c.provider, active: c.active, lifecycle: c.lifecycle,
+    healthState: c.health.state, lastDiscoveryAt: c.lastDiscoveryAt,
+    hasCurrentData: c.counts.people + c.counts.groups + c.counts.applications > 0,
+    hasStaleData: false,
+  }));
+  const capabilities = resolveAll(facts, inventoryR !== null && !inventoryR.ok);
 
   const p = posture(overviewR);
   const complete = overviewR.ok && overviewR.data.status === "complete" ? overviewR.data : null;
@@ -224,6 +237,11 @@ export default async function DashboardsPage({ searchParams }: { searchParams?: 
                 : <HealthPanel rollup={rollup} connectors={shown} stale={null} />}
             </Section>
           </div>
+
+          {/* ── What each source can tell us. Unsupported is a STATE, never a zero. ────────────────────────────── */}
+          <Section id="sources-heading" title="Source capabilities" action={{ label: "Connectors", href: "/connectors" }}>
+            <CapabilityMatrix statuses={capabilities} />
+          </Section>
 
           {/* ── Needs attention ─────────────────────────────────────────────────────────────────────────────────── */}
           <Section id="attention-heading" title="Needs attention" action={{ label: "All findings", href: "/access/findings" }}>

@@ -398,6 +398,28 @@ from PRs verified via `git log` / `gh pr list`.
 
 ---
 
+## PR #385 — Phase 7B: canonical intelligence layer (2026-07-31)
+
+Migration **0075** plus a new pure `src/lib/canonical/` layer. The objective was not a page: it is the model that lets a new
+connector light up every compatible surface without touching product code.
+
+**Capability model.** Two orthogonal axes — SUPPORT (has ID Caddie built it?) and STATE (what does this workspace have?) — kept
+apart, because collapsing them is what makes an unbuilt capability render as `0`. Nine states, none of which is a number, each
+with a customer sentence. Only Okta has any `implemented` capability today, and only the five directory ones; that is written down
+rather than guessed.
+
+**Metric lineage.** One owner per metric, machine-readable, with formula, refresh trigger, connector scope, unavailable state and
+security boundary. A test walks it, so the documentation cannot drift from the product.
+
+**Application match model** (0075). `directory_applications` and `public.apps` stay separate; matches are recorded judgements with
+confidence and provenance, never a name-based join. One accepted match per directory application, deliberately not unique on the
+SaaS side — two Okta organizations may share one contract. No matcher exists; the table is RLS-locked with no policy.
+
+Two modelling errors were caught while building: the composite endpoint FK had no unique key to reference, and the original
+SaaS-side uniqueness would have broken multi-directory workspaces.
+
+22 canonical tests, seven mutations caught. Docs 79 (canonical layer) and 80 (legacy review). **Staging only.**
+
 ## PR #384 — Phase 7A: executive Home (2026-07-31)
 
 No migration. Home becomes an identity-governance overview: context header, identity summary, then a three-column layout of
