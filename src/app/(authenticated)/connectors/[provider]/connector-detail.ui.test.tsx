@@ -57,7 +57,7 @@ describe("connector detail page", () => {
 
   it("a coming-soon provider shows the coming-soon state and no connect CTA", async () => {
     render(await DetailPage({ params: Promise.resolve({ provider: "salesforce" }) }));
-    expect(screen.getAllByText("Coming soon").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Not available yet").length).toBeGreaterThan(0);
     expect(screen.queryByRole("link", { name: /^Connect / })).toBeNull();
   });
 });
@@ -81,7 +81,7 @@ describe("ConnectorDetailCta (demo-aware)", () => {
 
   it("preview but not connectable → connection coming soon (disabled)", () => {
     render(<ConnectorDetailCta connector={{ ...oktaConnector, canConnect: false }} />);
-    const el = screen.getByText("Connection coming soon");
+    const el = screen.getByText("Not available yet");
     expect(el.getAttribute("aria-disabled")).toBe("true");
   });
 });

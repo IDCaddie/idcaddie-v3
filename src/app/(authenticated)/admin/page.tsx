@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { resolveTenantContext } from "@/lib/auth/tenant-context";
+import { DEMO_MODE } from "@/app/(authenticated)/nav-items";
 import { toAdminContextView, ADMIN_NOT_BUILT, IMPLEMENTED_MODULES } from "./admin-view";
 
 export const metadata = { title: "Admin / Settings · ID Caddie" };
@@ -23,9 +24,8 @@ export default async function AdminPage() {
         </div>
         <h1 className="text-xl font-semibold">Admin / Settings</h1>
         <p className="text-sm text-zinc-600 dark:text-zinc-400">
-          Read-only view of your current account context and what is implemented. Visibility is enforced
-          by Postgres RLS. There is no administration here yet — no invitations, role changes, tenant
-          switching, billing, connectors, API keys, or security-setting writes.
+          Your current account context. Invitations, role changes, workspace switching and billing are
+          managed by ID Caddie.
         </p>
       </header>
 
@@ -71,8 +71,7 @@ export default async function AdminPage() {
               )}
             </div>
             <p className="text-xs text-zinc-500">
-              Raw tenant/organization IDs are intentionally not shown here. (The home page shows the
-              tenant id as older skeleton/debug content.)
+              Internal identifiers are deliberately not shown here.
             </p>
           </section>
 
@@ -87,30 +86,32 @@ export default async function AdminPage() {
         </>
       )}
 
-      <section className="space-y-2 text-sm">
-        <h2 className="font-medium">Administration capabilities</h2>
-        <p className="text-xs text-zinc-500">
-          These old-app Admin / Settings capabilities are not implemented in v3 yet — shown so the gap is
-          explicit, not hidden. This surface is read-only.
-        </p>
-        <ul className="flex flex-wrap gap-2">
-          {ADMIN_NOT_BUILT.map((item) => (
-            <li key={item.label}>
-              <span
-                aria-disabled="true"
-                title="Not built yet"
-                className="inline-flex items-center gap-2 rounded border border-zinc-300 px-2.5 py-1 text-xs text-zinc-400 dark:border-zinc-700"
-              >
-                {item.label}
-                {item.note ? <span className="text-[10px] text-zinc-400">({item.note})</span> : null}
-                <span className="rounded-full border border-zinc-300 px-1.5 text-[10px] dark:border-zinc-700">
-                  Not built yet
+      {!DEMO_MODE && (
+        <section className="space-y-2 text-sm">
+          <h2 className="font-medium">Administration capabilities</h2>
+          <p className="text-xs text-zinc-500">
+            These old-app Admin / Settings capabilities are not implemented in v3 yet — shown so the gap is
+            explicit, not hidden. This surface is read-only.
+          </p>
+          <ul className="flex flex-wrap gap-2">
+            {ADMIN_NOT_BUILT.map((item) => (
+              <li key={item.label}>
+                <span
+                  aria-disabled="true"
+                  title="Not built yet"
+                  className="inline-flex items-center gap-2 rounded border border-zinc-300 px-2.5 py-1 text-xs text-zinc-400 dark:border-zinc-700"
+                >
+                  {item.label}
+                  {item.note ? <span className="text-[10px] text-zinc-400">({item.note})</span> : null}
+                  <span className="rounded-full border border-zinc-300 px-1.5 text-[10px] dark:border-zinc-700">
+                    Not built yet
+                  </span>
                 </span>
-              </span>
-            </li>
-          ))}
-        </ul>
-      </section>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
     </main>
   );
 }

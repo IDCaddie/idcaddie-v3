@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { listIdentityAccountsForCurrentUser } from "@/lib/data/people";
+import { DEMO_MODE } from "@/app/(authenticated)/nav-items";
 import { matchRateSummary } from "@/lib/data/account-match-summary";
 import { MatchRateMeter } from "@/components/match-rate-meter";
 
@@ -43,11 +44,8 @@ export default async function PeoplePage() {
         </div>
         <h1 className="text-xl font-semibold">People / Users</h1>
         <p className="text-sm text-zinc-600 dark:text-zinc-400">
-          Read-only view of the app-user <strong>accounts</strong> you may see (across the apps your
-          tenant/org access allows), with a matched/unmatched identity <strong>status</strong>.
-          Visibility is enforced by Postgres RLS. This is <strong>not</strong> the people directory, UAR,
-          or identity resolution — no person names, identity-provider data, license utilization, or
-          merging. Read-only.
+          Application accounts entered by an administrator, with whether each is matched to a person.
+          Accounts discovered by a connector appear under <strong>Application accounts</strong>.
         </p>
       </header>
 
@@ -59,9 +57,7 @@ export default async function PeoplePage() {
         <div className="rounded border border-zinc-300 p-4 text-sm dark:border-zinc-700">
           <div className="font-medium">No app-user accounts to show</div>
           <p className="mt-1 text-zinc-600 dark:text-zinc-400">
-            You have no app-user accounts visible yet — either none exist for the apps you can see, or
-            your tenant/org access does not include any. Accounts are populated by an administrator or,
-            later, by connectors / SCIM / IdP import (not built yet).
+            No manually tracked accounts yet. Accounts discovered by a connector appear under Application accounts.
           </p>
         </div>
       ) : (
@@ -136,36 +132,37 @@ export default async function PeoplePage() {
               </table>
             </div>
             <p className="text-xs text-zinc-500">
-              “Account” fields are the app account’s own values (RLS-scoped) — not person/IdP directory
-              data. “Identity” shows only whether a match exists for the account, not who it matched.
+              “Account” fields are the application’s own values. “Identity” shows whether a match exists, not who it matched.
             </p>
           </section>
         </>
       )}
 
-      <section className="space-y-2 text-sm">
-        <h2 className="font-medium">Identity matching &amp; people management</h2>
-        <p className="text-xs text-zinc-500">
-          These old-app capabilities are not implemented in v3 yet — shown so the gap is explicit, not
-          hidden. This surface is read-only.
-        </p>
-        <ul className="flex flex-wrap gap-2">
-          {NOT_BUILT_ACTIONS.map((action) => (
-            <li key={action}>
-              <span
-                aria-disabled="true"
-                title="Not built yet"
-                className="inline-flex items-center gap-2 rounded border border-zinc-300 px-2.5 py-1 text-xs text-zinc-400 dark:border-zinc-700"
-              >
-                {action}
-                <span className="rounded-full border border-zinc-300 px-1.5 text-[10px] dark:border-zinc-700">
-                  Not built yet
+      {!DEMO_MODE && (
+        <section className="space-y-2 text-sm">
+          <h2 className="font-medium">Identity matching &amp; people management</h2>
+          <p className="text-xs text-zinc-500">
+            These old-app capabilities are not implemented in v3 yet — shown so the gap is explicit, not
+            hidden. This surface is read-only.
+          </p>
+          <ul className="flex flex-wrap gap-2">
+            {NOT_BUILT_ACTIONS.map((action) => (
+              <li key={action}>
+                <span
+                  aria-disabled="true"
+                  title="Not built yet"
+                  className="inline-flex items-center gap-2 rounded border border-zinc-300 px-2.5 py-1 text-xs text-zinc-400 dark:border-zinc-700"
+                >
+                  {action}
+                  <span className="rounded-full border border-zinc-300 px-1.5 text-[10px] dark:border-zinc-700">
+                    Not built yet
+                  </span>
                 </span>
-              </span>
-            </li>
-          ))}
-        </ul>
-      </section>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
     </main>
   );
 }

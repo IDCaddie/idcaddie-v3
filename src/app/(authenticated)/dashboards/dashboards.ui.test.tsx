@@ -21,6 +21,10 @@ vi.mock("@/lib/data/access-loaders", () => ({ loadAccessOverview: vi.fn() }));
 // in jsdom. `executive-home` is PURE and loads for real, so the derivations under test are the ones the product actually runs.
 vi.mock("@/lib/data/connector-management", () => ({ loadConnectorManagement: vi.fn() }));
 vi.mock("@/lib/data/connector-scope", () => ({ resolveConnectorScope: vi.fn() }));
+// Phase 9: Home folds SaaS account evidence into the capability facts, so a Slack connector holding real accounts no
+// longer reports "not discovered yet". Server-only for the same access-rpc-types reason as access-loaders above. The
+// default here is the DENIED gate — the viewer path — so the existing expectations still describe a directory-only Home.
+vi.mock("@/lib/data/saas-accounts", () => ({ accessGate: vi.fn(async () => ({ ok: false })), getSaasCounts: vi.fn() }));
 
 import DashboardsPage from "./page";
 import { getDashboardSummaryForCurrentUser } from "@/lib/data/dashboard";
@@ -28,6 +32,7 @@ import { getDashboardOverviewForCurrentUser } from "@/lib/data/dashboard-overvie
 import { loadAccessOverview } from "@/lib/data/access-loaders";
 import { loadConnectorManagement } from "@/lib/data/connector-management";
 import { resolveConnectorScope } from "@/lib/data/connector-scope";
+import { accessGate, getSaasCounts } from "@/lib/data/saas-accounts";
 
 const asMock = <T,>(fn: T) => fn as unknown as { mockResolvedValue: (v: unknown) => void; mock: { calls: unknown[][] } };
 
@@ -226,5 +231,29 @@ describe("Home identity cards link into the Directory", () => {
     expect(hrefFor("Effective access")).toBe("/access");
     expect(hrefFor("High findings")).toBe("/access/findings?severity=high");
     expect(container).toBeTruthy();
+  });
+
+  // Phase 9 — the defect this fold-in exists to fix. Before it, `hasCurrentData` was computed from the DIRECTORY counts
+  // alone, so a Slack connector that had just discovered 40 accounts scored zero and Home told the customer application
+  // accounts had "not been discovered yet" for the connector that had discovered them.
+  it("a Slack connector holding application accounts does not report them as undiscovered", async () => {
+    const slack = connector({ id: "5b3b3a1e-1111-4c11-8c11-000000000001", provider: "slack", name: "Slack",
+      organization: null, counts: { people: 0, groups: 0, applications: 0, memberships: 0, userAssignments: 0, groupAssignments: 0 } });
+    withConnectors([slack]);
+    asMock(loadAccessOverview).mockResolvedValue(accessOk);
+    asMock(getDashboardSummaryForCurrentUser).mockResolvedValue(summary);
+    asMock(getDashboardOverviewForCurrentUser).mockResolvedValue({
+      spend: { byCurrency: [], contractsWithCost: 0 },
+      renewals: { due30: [], due90: [], missing: 0, topUpcoming: [] },
+    });
+    asMock(accessGate).mockResolvedValue({ ok: true, tenantId: "t" });
+    asMock(getSaasCounts).mockResolvedValue({ ok: true, data: {
+      accounts: { current: 40, stale: 0, totalEvidence: 40, humans: 35, bots: 5, unknownKind: 0, admins: 2, active: 40, inactive: 0, deleted: 0, lastSeenAt: null },
+      groups: { current: 4, stale: 0, totalEvidence: 4, lastSeenAt: null },
+      matching: { humans: 35, matched: 30, proposed: 3, unmatched: 2, withoutEmail: 0 },
+    } });
+
+    const { container } = render(await DashboardsPage());
+    expect(container.textContent).not.toMatch(/has not been discovered yet/i);
   });
 });

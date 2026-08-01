@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { loadAccessOverview } from "@/lib/data/access-loaders";
+import { DEMO_MODE } from "@/app/(authenticated)/nav-items";
 import { loadConnectorManagement } from "@/lib/data/connector-management";
 import { resolveConnectorScope } from "@/lib/data/connector-scope";
 import { parseAccessFilters, type SearchParamsInput } from "@/lib/data/access-filters";
@@ -8,6 +9,7 @@ import { AccessPosture, AttentionPanel, HealthPanel, Metric, RiskPanel, Section 
 import { CapabilityMatrix } from "./capability-panel";
 import { resolveAll, type ConnectorFacts } from "@/lib/canonical/capabilities";
 import { getDashboardSummaryForCurrentUser } from "@/lib/data/dashboard";
+import { accessGate, getSaasCounts } from "@/lib/data/saas-accounts";
 import {
   getDashboardOverviewForCurrentUser,
   type DashboardOverview,
@@ -139,12 +141,34 @@ export default async function DashboardsPage({ searchParams }: { searchParams?: 
 
   // Phase 7B — resolve what each SOURCE can tell this workspace, from facts already loaded. This is what stops an unbuilt or
   // unconnected capability rendering as a zero: the panel below reports a state and a sentence, never a number it cannot support.
-  const facts: readonly ConnectorFacts[] = shown.map((c) => ({
-    id: c.id, provider: c.provider, active: c.active, lifecycle: c.lifecycle,
-    healthState: c.health.state, lastDiscoveryAt: c.lastDiscoveryAt,
-    hasCurrentData: c.counts.people + c.counts.groups + c.counts.applications > 0,
-    hasStaleData: false,
-  }));
+  // `hasCurrentData` must reflect EVERY kind of evidence a connector produces, not just the directory kind. The connector
+  // inventory counts identity/directory rows only, so a Slack connector holding real application accounts scored zero here
+  // and Home told the customer application accounts had "not been discovered yet" for the connector that had just
+  // discovered them. The SaaS counts are read per connector and folded in.
+  //
+  // Home is visible to every role and the SaaS counts are owner/admin-only, so a viewer gets the directory-only answer —
+  // exactly what they saw before, never an error and never a claim the read did not support.
+  const saasGate = await accessGate().catch(() => ({ ok: false as const }));
+  const saasByConnector = new Map<string, { current: number; stale: number }>();
+  if (saasGate.ok) {
+    await Promise.all(shown.map(async (c) => {
+      const r = await getSaasCounts(saasGate.tenantId, c.id).catch(() => null);
+      if (r?.ok) saasByConnector.set(c.id, {
+        current: r.data.accounts.current + r.data.groups.current,
+        stale: r.data.accounts.stale + r.data.groups.stale,
+      });
+    }));
+  }
+
+  const facts: readonly ConnectorFacts[] = shown.map((c) => {
+    const saasCounts = saasByConnector.get(c.id) ?? { current: 0, stale: 0 };
+    return {
+      id: c.id, provider: c.provider, active: c.active, lifecycle: c.lifecycle,
+      healthState: c.health.state, lastDiscoveryAt: c.lastDiscoveryAt,
+      hasCurrentData: c.counts.people + c.counts.groups + c.counts.applications + saasCounts.current > 0,
+      hasStaleData: saasCounts.stale > 0,
+    };
+  });
   const capabilities = resolveAll(facts, inventoryR !== null && !inventoryR.ok);
 
   const p = posture(overviewR);
@@ -279,15 +303,13 @@ export default async function DashboardsPage({ searchParams }: { searchParams?: 
           className="flex flex-col justify-center rounded border border-zinc-200 p-4 transition hover:border-zinc-400 dark:border-zinc-800 dark:hover:border-zinc-600"
         >
           <div className="text-xs text-zinc-500">Needs Attention</div>
-          <div className="text-sm font-medium">Cleanup queue (RLS-scoped)</div>
+          <div className="text-sm font-medium">Cleanup queue</div>
           <div className="mt-2 text-xs text-zinc-500 underline">Open →</div>
         </Link>
       </StatGrid>
       </section>
       <p className="text-xs text-zinc-500">
-        Counts reflect only rows your tenant/org access allows (RLS-scoped). Matched/unmatched is the
-        identity-account match status only (no person/IdP detail). “Recent audit entries” is a capped,
-        RLS-scoped count — no audit detail, actor, or IP is shown here.
+        Counts reflect only what you have access to.
       </p>
 
       <section className="grid grid-cols-1 gap-4 lg:grid-cols-2">
@@ -295,29 +317,31 @@ export default async function DashboardsPage({ searchParams }: { searchParams?: 
         <RenewalsCard overview={overview} />
       </section>
 
-      <section className="space-y-2 text-sm">
-        <h2 className="font-medium">Dashboard capabilities</h2>
-        <p className="text-xs text-zinc-500">
-          These old-app dashboard capabilities are not implemented in v3 yet — shown so the gap is
-          explicit, not hidden. This surface is read-only.
-        </p>
-        <ul className="flex flex-wrap gap-2">
-          {NOT_BUILT.map((label) => (
-            <li key={label}>
-              <span
-                aria-disabled="true"
-                title="Not built yet"
-                className="inline-flex items-center gap-2 rounded border border-zinc-300 px-2.5 py-1 text-xs text-zinc-400 dark:border-zinc-700"
-              >
-                {label}
-                <span className="rounded-full border border-zinc-300 px-1.5 text-[10px] dark:border-zinc-700">
-                  Not built yet
+      {!DEMO_MODE && (
+        <section className="space-y-2 text-sm">
+          <h2 className="font-medium">Dashboard capabilities</h2>
+          <p className="text-xs text-zinc-500">
+            These old-app dashboard capabilities are not implemented in v3 yet — shown so the gap is
+            explicit, not hidden. This surface is read-only.
+          </p>
+          <ul className="flex flex-wrap gap-2">
+            {NOT_BUILT.map((label) => (
+              <li key={label}>
+                <span
+                  aria-disabled="true"
+                  title="Not built yet"
+                  className="inline-flex items-center gap-2 rounded border border-zinc-300 px-2.5 py-1 text-xs text-zinc-400 dark:border-zinc-700"
+                >
+                  {label}
+                  <span className="rounded-full border border-zinc-300 px-1.5 text-[10px] dark:border-zinc-700">
+                    Not built yet
+                  </span>
                 </span>
-              </span>
-            </li>
-          ))}
-        </ul>
-      </section>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
     </main>
   );
 }

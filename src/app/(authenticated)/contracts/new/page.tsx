@@ -23,9 +23,7 @@ export default async function NewContractPage() {
         </div>
         <h1 className="text-xl font-semibold">New contract</h1>
         <p className="text-sm text-zinc-600 dark:text-zinc-400">
-          Create a contract. Write access is enforced by Postgres RLS — if you can’t save, you don’t
-          have permission in this workspace. PDF upload / AI extraction, linked apps, invoices, files,
-          and deletion are not part of this form.
+          Create a contract. You need edit permission in this workspace to save.
         </p>
       </header>
       <div className="max-w-2xl">

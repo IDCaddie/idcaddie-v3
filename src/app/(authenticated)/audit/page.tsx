@@ -40,10 +40,8 @@ export default async function AuditPage({
         </div>
         <h1 className="text-xl font-semibold">Audit / Logs</h1>
         <p className="text-sm text-zinc-600 dark:text-zinc-400">
-          Read-only view of the most recent audit entries you may see (RLS-scoped to your tenant). Shows
-          the action, entity, and time only — <strong>not</strong> the actor identity, IP / user-agent, or
-          before/after detail. Search and filters narrow only these recent, already-visible rows. The log is
-          append-only; there is no edit, delete, or export here.
+          Recent activity in your workspace, showing what changed, to which record, and when. The activity
+          log cannot be edited or deleted.
         </p>
       </header>
 
@@ -156,9 +154,7 @@ export default async function AuditPage({
             </table>
           </div>
           <p className="text-xs text-zinc-500">
-            “Actor” shows only whether an actor was recorded, not who. Search/filter narrow the recent window
-            only. Before/after diff, raw-payload search, export, and the legacy retention/purge controls are
-            not built yet. Audit mutation/delete remains not built (the log is append-only by design).
+            Search and filters narrow the entries shown above.
           </p>
         </section>
       )}

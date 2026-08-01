@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { listCatalogForCurrentUser } from "@/lib/data/catalog";
+import { DEMO_MODE } from "@/app/(authenticated)/nav-items";
 import {
   buildCatalog,
   summarizeCatalog,
@@ -64,8 +65,7 @@ export default async function CatalogPage({
         </div>
         <h1 className="text-xl font-semibold">App Catalog</h1>
         <p className="text-sm text-zinc-600 dark:text-zinc-400">
-          Canonical vendors, products, and aliases used to normalize your SaaS inventory. Read-only and
-          RLS-scoped — you see only your tenant’s graph. No editing, alias review, or resolver runs here.
+          Canonical vendors and products used to keep your SaaS inventory consistent.
         </p>
       </header>
 
@@ -113,7 +113,7 @@ export default async function CatalogPage({
             <div className="rounded border border-zinc-300 p-4 text-sm dark:border-zinc-700">
               <div className="font-medium">No catalog entries yet.</div>
               <p className="mt-1 text-zinc-600 dark:text-zinc-400">
-                The resolver has not populated a canonical app graph for your tenant yet. This page is read-only.
+                No catalog records yet.
               </p>
             </div>
           ) : groups.length === 0 ? (
@@ -175,29 +175,31 @@ export default async function CatalogPage({
             </section>
           )}
 
-          <section className="space-y-2 text-sm">
-            <h2 className="font-medium">Catalog actions</h2>
-            <p className="text-xs text-zinc-500">
-              Alias review, product merges, and resolver runs are not built here yet — shown so the gap is
-              explicit. This surface is read-only.
-            </p>
-            <ul className="flex flex-wrap gap-2">
-              {NOT_BUILT.map((label) => (
-                <li key={label}>
-                  <span
-                    aria-disabled="true"
-                    title="Not built yet"
-                    className="inline-flex items-center gap-2 rounded border border-zinc-300 px-2.5 py-1 text-xs text-zinc-400 dark:border-zinc-700"
-                  >
-                    {label}
-                    <span className="rounded-full border border-zinc-300 px-1.5 text-[10px] dark:border-zinc-700">
-                      Not built yet
+          {!DEMO_MODE && (
+            <section className="space-y-2 text-sm">
+              <h2 className="font-medium">Catalog actions</h2>
+              <p className="text-xs text-zinc-500">
+                Alias review and product merges are managed by ID Caddie — listed here so the scope is
+                explicit. This surface is read-only.
+              </p>
+              <ul className="flex flex-wrap gap-2">
+                {NOT_BUILT.map((label) => (
+                  <li key={label}>
+                    <span
+                      aria-disabled="true"
+                      title="Not built yet"
+                      className="inline-flex items-center gap-2 rounded border border-zinc-300 px-2.5 py-1 text-xs text-zinc-400 dark:border-zinc-700"
+                    >
+                      {label}
+                      <span className="rounded-full border border-zinc-300 px-1.5 text-[10px] dark:border-zinc-700">
+                        Not built yet
+                      </span>
                     </span>
-                  </span>
-                </li>
-              ))}
-            </ul>
-          </section>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
         </>
       )}
     </main>

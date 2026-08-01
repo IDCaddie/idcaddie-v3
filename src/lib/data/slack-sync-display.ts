@@ -24,10 +24,10 @@ export const SLACK_SYNC_COPY = {
   badge: "Synced from Slack",
   preview: "Read-only Slack sync preview",
   description:
-    "Read-only preview of Slack users resolved into this tenant. Visibility is enforced by Postgres RLS. Manual run coming next.",
+    "Members discovered from your Slack workspace.",
   usersHeading: "Synced Slack users",
   emptyUsers: "No synced Slack users yet — Slack data will appear here after a sync run.",
-  comingNext: "Manual run coming next.",
+  comingNext: "",
 } as const;
 
 // Safe, human labels for a manual_sync_runs.status — no false-readiness language. Any unknown value falls back to the

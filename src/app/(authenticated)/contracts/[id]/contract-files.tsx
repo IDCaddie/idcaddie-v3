@@ -89,8 +89,7 @@ export function ContractFiles({
     <section className="space-y-3 text-sm">
       <h2 className="font-medium">Files / Attachments</h2>
       <p className="text-xs text-zinc-500">
-        Attach PDF contract documents (max 25 MB). Visibility and upload permission are enforced by
-        Postgres RLS and the private Storage bucket — you only see files for contracts you can access.
+        Attach PDF contract documents (up to 25 MB). You only see documents for contracts you can access.
       </p>
 
       <div className="flex flex-wrap items-center gap-2">

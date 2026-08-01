@@ -36,7 +36,7 @@ export default async function ConnectorDetailPage({ params }: { params: Promise<
               <div className="flex items-center gap-2 text-sm text-zinc-500 dark:text-zinc-400">
                 <span>{c.category}</span>
                 <span aria-hidden="true">·</span>
-                {c.availability === "coming_soon" ? <Badge tone="neutral" variant="solid">Coming soon</Badge> : <Badge tone="attention" variant="solid">Preview</Badge>}
+                {c.availability === "coming_soon" ? <Badge tone="neutral" variant="solid">Not available yet</Badge> : <Badge tone="attention" variant="solid">Preview</Badge>}
               </div>
               <p className="max-w-xl text-sm text-zinc-700 dark:text-zinc-300">{isOkta ? OKTA_CONTENT.valueStatement : c.description}</p>
             </div>

@@ -35,7 +35,7 @@ export default async function LoginPage({
       <div className="w-full max-w-sm space-y-6">
         <div className="space-y-1">
           <h1 className="text-xl font-semibold">Sign in to ID Caddie</h1>
-          <p className="text-sm text-zinc-500">Auth/session skeleton — not the product UI.</p>
+          <p className="text-sm text-zinc-500">Identity and SaaS access governance.</p>
         </div>
         <form action={signIn} className="space-y-4">
           <div className="space-y-1">
@@ -69,8 +69,7 @@ export default async function LoginPage({
           </button>
         </form>
         <p className="text-xs text-zinc-500">
-          Accounts are provisioned by an administrator. There is no self-serve signup in this
-          skeleton.
+          Accounts are provisioned by your administrator.
         </p>
       </div>
     </main>

@@ -34,7 +34,7 @@ describe("Okta status panel — saved but not verified", () => {
 
   it("states the operator-assisted reality instead of offering an action it cannot perform", () => {
     render(<OktaStatusPanel status={base} />);
-    expect(screen.getByText(/operator-assisted during the staging pilot/i)).toBeTruthy();
+    expect(screen.getByText(/ID Caddie verifies the connection/i)).toBeTruthy();
     // No verify/discovery control at all — not even a disabled one. A disabled button still invites a click and a
     // support ticket; content that explains who does it next does not.
     for (const b of screen.queryAllByRole("button")) {
@@ -82,7 +82,7 @@ describe("Okta status panel — discovered", () => {
 
   it("drops the operator-assisted callout once there is nothing left to wait for", () => {
     render(<OktaStatusPanel status={discovered} />);
-    expect(screen.queryByText(/operator-assisted during the staging pilot/i)).toBeNull();
+    expect(screen.queryByText(/ID Caddie verifies the connection/i)).toBeNull();
   });
 });
 

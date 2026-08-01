@@ -12,6 +12,28 @@ from PRs verified via `git log` / `gh pr list`.
 > **as of each PR's date** and are historical — where an older entry says "RISK-007 remains OPEN" / "Phase C remains
 > BLOCKED", that was accurate at that entry's date; this banner is the current state.
 
+### feat(saas) — Phase 9: canonical SaaS account reads, the first identity matcher, and a customer-language pass · 2026-08-01
+
+- **Migration 0078** — `product_app_accounts` / `_groups` / `_counts` / `product_connector_capabilities`. 0076 built the
+  tables and 0077 the write path; both left them RLS-on with no policy and revoked from `authenticated`, so a successful
+  Slack sweep would have populated the database and changed nothing on screen. Ordering is by display value, not uuid,
+  and search runs inside the function — the two 0061 limits, not repeated.
+- **The matcher** proposes on normalized email only. No display-name matching, no auto-acceptance, bots and service
+  accounts excluded, and an email matching more than one identity proposes **nothing** — an ambiguous match is an
+  unanswered question, not a low-confidence one. Never writes `identity_accounts`. Coverage is measured against humans.
+- **`/saas/accounts` and `/saas/groups`** over the canonical model, not the pre-0076 `app_users` page (which no connector
+  writes and would read zero after a real sync). Groups separate the provider's reported member count from the count we
+  can prove.
+- **Home defect fixed:** `hasCurrentData` came from directory counts alone, so a Slack connector holding real accounts
+  reported "not been discovered yet" for the connector that had just discovered them.
+- **Copy:** ~40 customer-facing strings carrying `RLS-scoped`, `Postgres RLS`, `default-deny`, `not built yet`,
+  `coming soon`, `the staging pilot` — and "Auth/session skeleton — not the product UI" on the sign-in page. Rewritten;
+  roadmap chips kept but demo-gated; `customer-facing-copy.test.ts` fails the build if any of it returns.
+- **Docs 83** records the least-privilege decision for real OAuth completion (a narrow `oauth_completer` role rather than
+  handing the web tier `connector_runner_login`) plus the staging provisioning runbook. The callback stays synthetic.
+- Mutation-tested: dropped tenant scope, ambiguous-email acceptance, bot matching, removed role gate, and reverting the
+  Home fix each fail the suite. `npm test` 2191 passed | 22 skipped.
+
 ### feat(oauth) — Phase 8E: real-callback safety primitives (workspace binding, exact callback allowlist, fail-closed assembly) · 2026-08-01
 
 - **Slack workspace binding.** `oauth.v2.access` names the workspace the user actually consented on — the authorize URL
