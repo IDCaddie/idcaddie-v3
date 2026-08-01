@@ -20,7 +20,7 @@
 import {
   accessGate, getAccessCounts, listDirectoryIdentities, listDirectoryGroups, listDirectoryApplications, type ListResult,
 } from "./access-repository";
-import type { Counts } from "./access-rpc-types";
+import type { ResourceCounts } from "./access-rpc-types";
 import { identityLabel, groupLabel, applicationLabel } from "./access-view-models";
 import { paginate, type AccessFilters, type Paged } from "./access-filters";
 import { type SyncState } from "./directory-display";
@@ -124,7 +124,7 @@ function byLabel<T extends { name: string; id: string }>(a: T, b: T): number {
 
 // The shared body of all three loaders: gate -> count pre-check -> page one table -> map -> sort -> search -> paginate.
 async function loadList<Row extends { id: string }, View extends { id: string; name: string }>(
-  countKey: keyof Counts,
+  countKey: keyof ResourceCounts,
   fetchPage: (tenantId: string, afterId: string | null, includeStale: boolean, connectionId: string | null) => Promise<ListResult<Row[]>>,
   toView: (r: Row) => View,
   searchable: (v: View) => readonly (string | null)[],
@@ -133,11 +133,12 @@ async function loadList<Row extends { id: string }, View extends { id: string; n
   const g = await accessGate();
   if (!g.ok) return { ok: false, error: "forbidden" };
 
-  // Counts are stale-agnostic (all rows), which is the conservative bound: we never start paging a table that could exceed the ceiling.
   const counts = await getAccessCounts(g.tenantId, f.connectionId);
   if (!counts.ok) return { ok: false, error: "query_failed" };
-  const total = counts.data[countKey];
-  if (total > MAX_LIST_NODES) return { ok: true, data: { status: "too_large", total } };
+  // GATE on total evidence — the conservative bound; we never start paging a table that could exceed the ceiling. DISPLAY the
+  // current count, because the too-large notice is customer-facing and "5,000 people" must mean people who exist now.
+  const bound = counts.data.totalEvidence[countKey];
+  if (bound > MAX_LIST_NODES) return { ok: true, data: { status: "too_large", total: counts.data.current[countKey] } };
 
   const r = await pageAll((afterId) => fetchPage(g.tenantId, afterId, f.includeStale, f.connectionId));
   if (!r.ok) return { ok: false, error: "query_failed" };

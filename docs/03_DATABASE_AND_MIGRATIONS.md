@@ -380,3 +380,35 @@ a number that is true of nothing.
 make a connector's history read as though a sweep had happened. Retirement is orthogonal, so a reconnected connector resumes
 exactly where it left off.
 
+## 0074 — Stale-aware counts: `current` vs `totalEvidence` (Phase 6)
+
+`product_directory_access_counts` counted every row regardless of `sync_status`. That was deliberate — it is the conservative
+pre-gate for the too-large check, and a bound must never under-count. But the same number is what the `too_large` FALLBACK
+displays, so a directory with 6 current groups and 1 retained stale group told the customer "7 groups" while every list showed 6.
+
+Both readings are legitimate and answer different questions, so both are now named:
+
+| key | meaning | used for |
+|---|---|---|
+| `current` | what the directory contains now | every customer-facing number |
+| `stale` | retained, last seen in an earlier discovery | include-stale views |
+| `other` | any other row state the CHECK permits | reported, never folded |
+| `totalEvidence` | every retained row | the safety gate, exclusively |
+
+**Four states, not two.** `sync_status` is CHECK-constrained to `('current','stale','review_required','disconnected')`. Only the
+first two are written today — nothing in either repository writes the others — but folding them into `stale` would be a silent
+miscategorisation that surfaces only when something starts writing them. So `other` is a named term and the invariant is
+`totalEvidence = current + stale + other`.
+
+**The bound did not weaken.** `totalEvidence` reproduces exactly the numbers the gate used before; a stale row still occupies a row
+in any response that includes stale evidence, so gating on `current` would under-count the worst case. Tests assert both that the
+bound is never below `current` and that it is strictly larger whenever stale rows exist.
+
+**Backward compatibility.** The six flat keys are retained with their existing meaning — total evidence — and documented as
+deprecated aliases of `totalEvidence`. No caller changed meaning silently; the two production callers moved to the explicit
+structure in the same change. Same signature, so no argument contract shifted.
+
+Scope is unchanged: tenant, optional connector, optional provider, and the exclusion of superseded and disconnected connectors.
+All-active mode sums distinct connector graphs and deduplicates nothing — two organizations may legitimately contain the same
+person, and collapsing them by name, email or provider external id would erase a real record.
+

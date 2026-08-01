@@ -475,3 +475,14 @@ can neither read the inventory nor disconnect, and an owner cannot act on anothe
 SHOWS retired directories, retirement outranks the discovery state in the lifecycle column, a retired directory still reports its
 contents, counts are per connector, and history survives.
 
+## stale_aware_counts_test.sql (0074)
+
+K1 one current and one stale of every resource yields current=1, stale=1, other=0, total=2 on all six, the invariant
+`total = current + stale + other` holds as an equality, and the deprecated flat key still means total evidence. K2 the bound did
+not weaken: `totalEvidence` is never below `current`, and is strictly larger whenever stale rows exist. K3 connector scope,
+disconnected and superseded exclusion, all-active aggregation, and cross-tenant non-disclosure all survive the new shape — an
+excluded connector returns zero rather than its data, and another tenant returns null rather than zeros. K4 all-active SUMS and
+never deduplicates: two connectors holding the same external id, login and email both count. K5 a re-promoted row moves
+stale → current without changing total evidence. K6 a `review_required` row is reported as `other`, never inflating `stale` or
+`current`, and the invariant still holds with a third state present. K7 an editor still gets no counts at all.
+
