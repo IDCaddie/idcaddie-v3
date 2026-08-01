@@ -10,7 +10,7 @@ export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
   const filters = parseAccessFilters(Object.fromEntries(new URL(request.url).searchParams));
-  const result = await loadAccessOverview(filters.includeStale);
+  const result = await loadAccessOverview(filters.includeStale, filters.connectionId);
   if (!result.ok) return result.error === "forbidden" ? exportError(403, "Not available.") : exportError(503, "Access data could not be loaded. Please try again later.");
   if (result.data.status !== "complete") {
     return exportError(409, "Export is unavailable while the full access graph cannot be evaluated within the current safety limits. Open a specific identity or application instead.");

@@ -351,3 +351,32 @@ Derived by the engine from those rows, never computed in SQL.
 Read-only, definer, pinned `search_path`, EXECUTE to `authenticated` only. No raw payload column exists on any of these tables, and
 `external_id` / `normalized_*` / plumbing columns are not projected.
 
+## 0073 — Connector management: disconnect, scoping, inventory (Phase 5)
+
+The product assumed one directory. A workspace can have several — Corporate Okta, a sandbox, a subsidiary — and they are separate
+organizations whose graphs are never merged.
+
+**Disconnect.** 0071 gave us supersession: "this connector was replaced by that one". That is right for *replacing* a connector and
+wrong for switching a directory off, because there is no successor to point at. Rather than a second exclusion mechanism, both now
+feed ONE notion of active: `superseded_by` (replaced) or `disconnected_at` (retired, no successor); neither set means active.
+Disconnect is a read-time exclusion — no row, run or audit event is removed, and reconnect restores everything by clearing a
+column. An auditor asking "who could reach this application in June" must still get an answer after the connector is gone.
+
+**The active predicate**, widened across all ten product read RPCs. Every body un-widens to byte-identical 0071/0072.
+
+**Connector scoping.** The 0061 RPCs always accepted `p_connection_id`; nothing ever sent it, so every surface read the whole
+tenant. The DAL now passes it, and the scope travels in the URL (`?connection=<uuid>`), so Home, Directory, Access and Findings
+cannot disagree. `null` still means "every active connector" — correct for a single-directory tenant.
+
+**Two management reads.** `product_connector_inventory` returns one row per connector with lifecycle, evidence timestamps and
+directory counts, so the management page is one round trip regardless of how many directories exist. It is the ONE product read
+that deliberately returns inactive connectors — hiding them would make disconnect look like deletion. `product_connector_runs`
+returns a connector's discovery history. Counts are per connector and never summed: adding two organizations' headcounts produces
+a number that is true of nothing.
+
+**Three operator actions**, each owner/admin-only, tenant-scoped, reason-bearing and self-auditing:
+`product_disconnect_connector`, `product_reconnect_connector`, `product_replace_connector`. Deliberately NOT expressed as
+`connection_state` transitions — that column is the DISCOVERY lifecycle governed by 0067, and pushing retirement through it would
+make a connector's history read as though a sweep had happened. Retirement is orthogonal, so a reconnected connector resumes
+exactly where it left off.
+

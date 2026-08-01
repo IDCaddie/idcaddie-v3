@@ -62,17 +62,17 @@ async function pageAll<T extends { id?: string }>(fetch: (afterId: string | null
   return { ok: true, rows };
 }
 
-export async function loadAccessOverview(includeStale = false): Promise<AccessOverviewResult> {
+export async function loadAccessOverview(includeStale = false, connectionId: string | null = null): Promise<AccessOverviewResult> {
   const g = await accessGate();
   if (!g.ok) return { ok: false, error: "forbidden" };
-  const counts = await getAccessCounts(g.tenantId); // counts are stale-agnostic (total rows) — the conservative bound for the too-large gate
+  const counts = await getAccessCounts(g.tenantId, connectionId); // counts are stale-agnostic (total rows) — the conservative bound for the too-large gate
   if (!counts.ok) return { ok: false, error: "query_failed" };
   const c = counts.data;
   const countsView: CountsView = { identities: c.identities, groups: c.groups, applications: c.applications, memberships: c.memberships, directAssignments: c.userAssignments, groupAssignments: c.groupAssignments };
   if (c.identities > MAX_NODES || c.groups > MAX_NODES || c.applications > MAX_NODES || c.memberships > MAX_EDGES || c.userAssignments > MAX_EDGES || c.groupAssignments > MAX_EDGES) {
     return { ok: true, data: { status: "too_large", counts: countsView } };
   }
-  const opt = (afterId: string | null) => ({ includeStale, afterId, limit: PAGE });
+  const opt = (afterId: string | null) => ({ includeStale, afterId, limit: PAGE, connectionId });
   const [ids, grps, apps, mem, ua, ga] = await Promise.all([
     pageAll((a) => listDirectoryIdentities(g.tenantId, opt(a))), pageAll((a) => listDirectoryGroups(g.tenantId, opt(a))), pageAll((a) => listDirectoryApplications(g.tenantId, opt(a))),
     pageAll((a) => listGroupMemberships(g.tenantId, opt(a))), pageAll((a) => listUserAssignments(g.tenantId, opt(a))), pageAll((a) => listGroupAssignments(g.tenantId, opt(a))),

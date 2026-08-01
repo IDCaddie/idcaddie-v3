@@ -461,3 +461,17 @@ returns the summary with `bounded: true` and NO partial arrays, while a small gr
 
 G10 builds and removes ~5200 rows; it cleans up after itself so later suites in the shared database are unaffected.
 
+## connector_management_test.sql (0073)
+
+M0 grant shape for all five new functions, and the disconnect CHECK rejects a timestamp with no reason. M1 two active Okta
+organizations stay separate: unscoped sees all three directories, scoped sees exactly one, the list agrees with the count on the
+same scope, and scoping to one never leaks another's rows. M2 disconnect EXCLUDES but never deletes — counts and lists drop it,
+explicitly scoping to it by id returns nothing, its group detail closes, and yet every identity/group/application/connector row
+survives with the reason recorded and exactly one audit event written. M3 reconnect restores without rediscovery and is idempotent.
+M4 replace uses supersession, refuses self-replacement and a cross-tenant successor, is audited, and a superseded connector can be
+neither reconnected nor disconnected. M5 a blank reason is rejected for both disconnect and replace, and a retired successor is
+refused — pointing at one would exclude both and leave the organization with no active directory. M6 an editor of the same tenant
+can neither read the inventory nor disconnect, and an owner cannot act on another tenant. M7 the inventory is the one read that
+SHOWS retired directories, retirement outranks the discovery state in the lifecycle column, a retired directory still reports its
+contents, counts are per connector, and history survives.
+

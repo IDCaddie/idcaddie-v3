@@ -16,7 +16,7 @@ export const metadata = { title: "Access findings · ID Caddie" };
 export default async function AccessFindingsPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const sp = await searchParams;
   const filters = parseAccessFilters(sp);
-  const result = await loadAccessOverview(filters.includeStale);
+  const result = await loadAccessOverview(filters.includeStale, filters.connectionId);
   const base = "/access/findings";
 
   return (

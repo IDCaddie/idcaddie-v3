@@ -15,7 +15,7 @@ export default async function AccessOverviewPage({ searchParams }: { searchParam
   const filters = parseAccessFilters(sp);
   const includeStale = filters.includeStale;
   const ret = returnParams("overview", filters).toString();
-  const result = await loadAccessOverview(includeStale);
+  const result = await loadAccessOverview(includeStale, filters.connectionId);
   const findingsBase = includeStale ? "/access/findings?stale=1" : "/access/findings";
 
   return (

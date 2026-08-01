@@ -58,9 +58,32 @@ describe("access-repository RPC args ⊆ migration-0061 declared params (schema-
     }
   });
 
-  it("getAccessCounts passes exactly { p_tenant_id } — the counts function is stale-agnostic (no p_include_stale)", async () => {
+  it("getAccessCounts sends only DECLARED args, and never p_include_stale — the counts function is stale-agnostic", async () => {
+    // Phase 5 added a connector scope, so the arg set is no longer a single key. What must hold is what this file exists for:
+    // every arg is declared by the function (an undeclared one is PGRST202), and `p_include_stale` — which the counts RPC does
+    // NOT declare, deliberately, because it is the conservative bound for the too-large gate — is never sent.
     await repo.getAccessCounts(TID);
-    expect(calls).toEqual([{ name: "product_directory_access_counts", args: { p_tenant_id: TID } }]);
-    expect(declaredParams("product_directory_access_counts")).not.toContain("p_include_stale");
+    expect(calls).toHaveLength(1);
+    expect(calls[0].name).toBe("product_directory_access_counts");
+    expect(calls[0].args.p_tenant_id).toBe(TID);
+    const declared = declaredParams("product_directory_access_counts");
+    for (const k of Object.keys(calls[0].args)) expect(declared, `${k} must be declared`).toContain(k);
+    expect(declared).not.toContain("p_include_stale");
+    expect(Object.keys(calls[0].args)).not.toContain("p_include_stale");
+  });
+
+  it("getAccessCounts scopes to ONE connector when asked", async () => {
+    calls.length = 0;
+    await repo.getAccessCounts(TID, "9c000000-0000-4000-8000-0000000090a1");
+    expect(calls[0].args.p_connection_id).toBe("9c000000-0000-4000-8000-0000000090a1");
+  });
+
+  it("the list RPCs carry the connector scope, and default it to null (every active connector)", async () => {
+    calls.length = 0;
+    await repo.listDirectoryIdentities(TID, {});
+    expect(calls[0].args.p_connection_id, "unscoped means every ACTIVE connector, not one").toBeNull();
+    calls.length = 0;
+    await repo.listDirectoryIdentities(TID, { connectionId: "9c000000-0000-4000-8000-0000000090a1" });
+    expect(calls[0].args.p_connection_id).toBe("9c000000-0000-4000-8000-0000000090a1");
   });
 });
