@@ -92,6 +92,18 @@ begin
     raise exception 'run % is not eligible to promote accounts (complete=%, rejected=%, termination=%, review=%)', p_run_id, v_complete, v_rejected, v_termination, v_review;
   end if;
 
+  -- LATEST-RUN guard, per resource — the same one 0053/0054/0060 carry, and the same one the staler below applies.
+  -- Without it, replaying an older run's promote resurrects accounts a newer complete sweep legitimately retired, and
+  -- SILENTLY: the audit trigger fires only on current -> stale, so a stale -> current reversal writes no event.
+  if exists (
+    select 1 from public.connector_runs r2 join public.connector_run_resource_discovery d2 on d2.run_id = r2.id
+     where r2.connector_id = v_connector_id and r2.tenant_id = p_tenant_id and r2.id <> p_run_id
+       and d2.resource = 'app_user_account' and d2.completeness is true and d2.termination_reason = 'last_page'
+       and r2.started_at > (select started_at from public.connector_runs where id = p_run_id)
+  ) then
+    raise exception 'run % is superseded by a later complete run; refusing to promote', p_run_id;
+  end if;
+
   with existing as (
     select a.external_id as ext from public.app_accounts a
      where a.tenant_id = p_tenant_id and a.connection_id = v_connector_id and a.provider = v_provider
@@ -167,6 +179,16 @@ begin
   if not found then raise exception 'run % has no group metrics; cannot promote', p_run_id; end if;
   if v_complete is not true or coalesce(v_rejected, 1) <> 0 or v_termination is distinct from 'last_page' or v_review is true then
     raise exception 'run % is not eligible to promote groups', p_run_id;
+  end if;
+
+  -- LATEST-RUN guard, scoped to THIS resource. See the accounts promoter above.
+  if exists (
+    select 1 from public.connector_runs r2 join public.connector_run_resource_discovery d2 on d2.run_id = r2.id
+     where r2.connector_id = v_connector_id and r2.tenant_id = p_tenant_id and r2.id <> p_run_id
+       and d2.resource = 'group' and d2.completeness is true and d2.termination_reason = 'last_page'
+       and r2.started_at > (select started_at from public.connector_runs where id = p_run_id)
+  ) then
+    raise exception 'run % is superseded by a later complete run; refusing to promote', p_run_id;
   end if;
 
   with src as (
@@ -291,6 +313,16 @@ begin
                              'connector_id', new.connection_id, 'provider', new.provider, 'reason_code', 'absent_from_complete_sweep'));
   return null;
 end $$;
+
+-- Least privilege for the audit writer itself, mirroring 0068:64-67 exactly. `create function` alone is NOT enough on
+-- hosted Supabase: 0045's ALTER DEFAULT PRIVILEGES grants EXECUTE on every new public function to anon/authenticated/
+-- service_role, and `scripts/test-rls.sh` re-revokes every trigger-returning function, so a local run cannot see the gap.
+-- A trigger return type keeps this off the PostgREST RPC surface, but EXECUTE + TRIGGER on a table carrying the columns
+-- the body reads is a forgery surface into audit_logs as the definer. That is the hole 0068 exists to close.
+revoke all on function public.audit_saas_stale_transition() from public;
+revoke all on function public.audit_saas_stale_transition() from anon;
+revoke all on function public.audit_saas_stale_transition() from authenticated;
+revoke all on function public.audit_saas_stale_transition() from service_role;
 
 create trigger saas_stale_audit_app_accounts after update on public.app_accounts
   for each row when (old.sync_status = 'current' and new.sync_status = 'stale')

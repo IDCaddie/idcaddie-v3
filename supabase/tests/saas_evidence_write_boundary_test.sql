@@ -162,12 +162,15 @@ begin
   -- rejected > 0
   perform pg_temp.seed_accounts(TA, C1, R4, array['U1'], true, 2, 'last_page');
   r := public.runner_mark_absent_saas_app_accounts_stale(R4, TA);
-  assert (r ->> 'staleMarked')::int = 0, 'W3 a run with rejected records must stale nothing';
+  -- `eligible`, not just `staleMarked`. Every prior C1 account is absent from this fixture (3 of 3), so the circuit
+  -- breaker would force staleMarked=0 on its own and the assertion would pass with the eligibility clause DELETED —
+  -- a test passing for the wrong reason. The gate returns eligible=false; the breaker returns eligible=true.
+  assert (r ->> 'eligible')::boolean = false and (r ->> 'staleMarked')::int = 0, 'W3 a run with rejected records must stale nothing';
 
   -- a capped run (page/item/time budget) is not last_page
   perform pg_temp.seed_accounts(TA, C1, R5, array['U1'], true, 0, 'page_budget');
   r := public.runner_mark_absent_saas_app_accounts_stale(R5, TA);
-  assert (r ->> 'staleMarked')::int = 0, 'W3 a capped run must stale nothing';
+  assert (r ->> 'eligible')::boolean = false and (r ->> 'staleMarked')::int = 0, 'W3 a capped run must stale nothing';
 
   -- and everything is still current.
   select count(*) into n from public.app_accounts where connection_id = C1 and sync_status = 'current';
@@ -270,7 +273,7 @@ declare
   C1 constant uuid := 'a1000000-0000-4000-8000-0000000000c1';
   OLD constant uuid := 'a1000000-0000-4000-8000-00000000d011';
   NEWR constant uuid := 'a1000000-0000-4000-8000-00000000d012';
-  r jsonb;
+  r jsonb; msg text; raised boolean;
 begin
   insert into public.connector_runs (id, tenant_id, connector_id, status, started_at)
   values (OLD, TA, C1, 'running', now() - interval '2 hours'), (NEWR, TA, C1, 'running', now());
@@ -281,6 +284,21 @@ begin
   r := public.runner_mark_absent_saas_app_accounts_stale(OLD, TA);
   assert (r ->> 'superseded')::boolean, 'W8 a superseded run must be refused';
   assert (r ->> 'staleMarked')::int = 0, 'W8 and stale nothing';
+
+  -- And the PROMOTERS carry the same guard. Without it, replaying the older run's promote returns every account the
+  -- newer sweep retired to `current` — and silently, because the audit trigger only fires on current -> stale.
+  -- Asserting the MESSAGE, not just that something raised: the eligibility gate above would also raise.
+  raised := false;
+  begin perform public.runner_promote_saas_app_accounts(OLD, TA); exception when others then raised := true; msg := sqlerrm; end;
+  assert raised, 'W8 a superseded run must not promote accounts';
+  assert msg like '%superseded by a later complete run%', 'W8 accounts must be refused by the latest-run guard, got: ' || msg;
+
+  perform public.runner_record_saas_resource_discovery(OLD,  TA, 'group', 1, 1, 1, 0, 0, 0, 'last_page', true, false);
+  perform public.runner_record_saas_resource_discovery(NEWR, TA, 'group', 1, 2, 2, 0, 0, 0, 'last_page', true, false);
+  raised := false;
+  begin perform public.runner_promote_saas_app_groups(OLD, TA); exception when others then raised := true; msg := sqlerrm; end;
+  assert raised, 'W8 a superseded run must not promote groups';
+  assert msg like '%superseded by a later complete run%', 'W8 groups must be refused by the latest-run guard, got: ' || msg;
 end $$;
 
 -- ════ W9: capability freshness — last_success_at is advanced, never erased ════════════════════════════════════════
