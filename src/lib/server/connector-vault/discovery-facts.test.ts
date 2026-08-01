@@ -131,6 +131,20 @@ describe("category-specific contract guarantees", () => {
     expect(parseDiscoveryFact({ ...FIXTURES.invoice_spend, canonical_app_id: "x" }).success).toBe(false);
   });
 
+  it("app_user_account carries provider observations as booleans, and only as booleans", () => {
+    // These exist so a DECLARATIVE field_map can carry them (`is_deleted: "deleted"`) without provider-specific
+    // normalizer code. The bounded canonical vocabulary (account_kind / account_status) is derived from them in the
+    // promote RPC — deliberately NOT here, so one place owns it.
+    const observed = { ...FIXTURES.app_user_account, is_bot: true, is_deleted: false, is_admin: false };
+    expect(parseDiscoveryFact(observed).success).toBe(true);
+    // A provider that changed shape must fail closed rather than have a truthy string read as "bot".
+    expect(parseDiscoveryFact({ ...FIXTURES.app_user_account, is_bot: "true" }).success).toBe(false);
+    // Absent is not false: an unreported flag has to stay absent so the promoter can record `unknown`.
+    expect("is_bot" in FIXTURES.app_user_account).toBe(false);
+    // Still strict — an observation the canonical model has no room for is refused, not ignored.
+    expect(parseDiscoveryFact({ ...FIXTURES.app_user_account, is_restricted: true }).success).toBe(false);
+  });
+
   it("app_user_account does not require matched_person_id (future resolved output only)", () => {
     expect("matched_person_id" in FIXTURES.app_user_account).toBe(false);
     expect(parseDiscoveryFact(FIXTURES.app_user_account).success).toBe(true);

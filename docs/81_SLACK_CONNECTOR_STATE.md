@@ -73,6 +73,20 @@ envelope store) and `ingestDeps`. Concrete implementations exist for all of them
 4. **Product RPCs + surfaces** — App Accounts, Sync Health, matching review.
 5. **Hosted run** — decrypt the existing token, `users.list` + `usergroups.list` against the controlled workspace.
 
+## Update — Phase 8D (migration 0077)
+
+Boundary 2 is **closed**. The executor's facts now reach the database: `saas-fact-rows.ts` splits envelope from payload,
+`DiscoveryWriter.insertFacts` writes them batched through the 0041 function, and the five 0077 RPCs promote them into
+`app_accounts` / `app_account_groups` behind a **per-resource** completeness gate. Full model in
+[82](82_SAAS_EVIDENCE_WRITE_BOUNDARY.md).
+
+**Boundary 1 remains open and deliberate:** `/connectors/oauth/callback/route.ts` still imports
+`handleSyntheticSlackOAuthCallback`. `oauth-real-exchange-wiring.ts` still has zero non-test callers. Replacing it
+crosses the client-secret decrypt boundary in the request path and needs its own GO.
+
+So the write path is complete ahead of the thing that will feed it. A live sweep still needs the real callback wired
+**and** a Slack-honoured token.
+
 ## Hosted staging state
 
 The Slack connector `1575cde3…` is **disconnected** (Phase 5B demo disposition, deliberate). Two active `oauth_access` secrets
