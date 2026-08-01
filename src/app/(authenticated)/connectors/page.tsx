@@ -1,40 +1,56 @@
 import Link from "next/link";
 import { listCustomerConnectors } from "@/lib/customer-connectors/catalog";
-import { getOktaConnectorStatus } from "@/lib/data/okta-connector-status";
-import type { RealConnectorState } from "@/lib/customer-connectors/view";
+import { loadConnectorManagement } from "@/lib/data/connector-management";
+import type { ProviderInstance } from "@/lib/customer-connectors/provider-instances";
 import { ConnectorMarketplace } from "./connector-marketplace";
 
 export const metadata = { title: "Connectors · ID Caddie" };
 
-// The customer connector marketplace. Browse / search / filter available app connectors and see connection status. Everything is
-// PREVIEW-ONLY: connecting runs a simulated flow, nothing syncs, no credentials are stored, no provider is activated. The catalog
-// is safe display metadata (src/lib/customer-connectors) — it never surfaces internal governance/registry/pilot/ECS/secret state.
-// The read-only sync-review workflow (a separate role-gated route) is preserved via the link below.
+// The provider catalogue, reconciled with what this workspace has actually configured.
+//
+// Phase 5B fixed the split brain: this page used to ask `getOktaConnectorStatus()`, which reads `okta_connector_configs` — a table
+// only Okta has. Every other provider fell through to its static "Preview / Connection coming soon" label even when a real
+// connector row existed, and the override was keyed one-per-provider so a second Okta organization could not be shown at all.
+//
+// It now reads the provider-agnostic connector inventory, so a card reflects EVERY instance of its provider. Provider availability
+// and instance lifecycle stay separate: "Preview" describes what ID Caddie supports, "Configuration saved" describes what this
+// workspace has. Both can be true at once, and a synthetic Entra connector is exactly that case.
+
 export default async function ConnectorsPage() {
   const connectors = listCustomerConnectors();
 
-  // Okta is the one provider that persists a REAL configuration, so its card is resolved from the database (RLS-scoped to the
-  // caller's tenant) rather than from browser-local preview state. Only the lifecycle is passed down. A failure to read is
-  // treated as "no connector" — the card falls back to the catalog default rather than inventing a status.
-  const okta = await getOktaConnectorStatus().catch(() => null);
-  const realStates: Record<string, RealConnectorState> = okta ? { okta: { lifecycle: okta.lifecycle } } : {};
+  // Owner/admin-gated, like every other read of tenant connector state. A forbidden result is NOT the same as "no instances":
+  // showing a viewer "No connector instances" would be a lie, so the marketplace says instance visibility needs an admin instead.
+  const inv = await loadConnectorManagement().catch(() => null);
+  const instances: ProviderInstance[] = inv?.ok ? inv.data.connectors.map((c) => ({
+    id: c.id, provider: c.provider, name: c.name, organization: c.organization,
+    lifecycle: c.lifecycle, lifecycleLabel: c.lifecycleLabel, active: c.active, supersededBy: c.supersededBy,
+    counts: { people: c.counts.people, groups: c.counts.groups, applications: c.counts.applications },
+  })) : [];
+
+  // Three outcomes, told apart deliberately: readable, not permitted, and failed. A read failure must never render as "nothing
+  // configured" — that would show a customer an empty estate because a query timed out.
+  const instanceState: "ok" | "forbidden" | "unavailable" =
+    inv?.ok ? "ok" : inv?.error === "forbidden" ? "forbidden" : "unavailable";
+
   return (
     <main className="flex flex-1 flex-col gap-5 p-8">
       <header className="space-y-1">
         <div className="text-sm">
-          <Link href="/dashboards" className="text-zinc-500 hover:underline">
-            ← Back
-          </Link>
+          <Link href="/dashboards" className="text-zinc-500 hover:underline">← Back</Link>
         </div>
         <h1 className="text-2xl font-semibold tracking-tight">Connectors</h1>
-        <p className="text-sm text-zinc-600 dark:text-zinc-400">Connect your business apps to discover users, access, and software usage.</p>
+        <p className="max-w-3xl text-sm text-zinc-600 dark:text-zinc-400">
+          The integrations ID Caddie supports, and the connectors this workspace has configured. Provider availability describes
+          what the product can do; each connector below shows what your workspace has actually set up.
+        </p>
       </header>
 
-      <ConnectorMarketplace connectors={connectors} realStates={realStates} />
+      <ConnectorMarketplace connectors={connectors} instances={instances} instanceState={instanceState} />
 
       <footer className="border-t border-zinc-200 pt-4 text-sm text-zinc-500 dark:border-zinc-800 dark:text-zinc-400">
-        Already reviewing discovered items?{" "}
-        <Link href="/connectors/review" className="underline hover:text-zinc-700 dark:hover:text-zinc-200">Go to sync review</Link>.
+        Managing what you already connected?{" "}
+        <Link href="/connectors/manage" className="underline hover:text-zinc-700 dark:hover:text-zinc-200">Go to Directories</Link>.
       </footer>
     </main>
   );

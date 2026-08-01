@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { Badge } from "@/components/badge";
 import { loadConnectorManagement, type ConnectorSummary } from "@/lib/data/connector-management";
-import type { ConnectorHealth } from "@/lib/data/connector-health";
+import { connectorActions, type ConnectorHealth } from "@/lib/data/connector-health";
+import { RowLifecycleActions } from "./connector-actions";
 
 export const metadata = { title: "Directories · ID Caddie" };
 
@@ -20,11 +21,14 @@ const HEALTH_TONE: Record<ConnectorHealth, "success" | "attention" | "danger" | 
 const fmtDate = (iso: string | null) => (iso ? new Date(iso).toISOString().slice(0, 10) : "—");
 
 function Row({ c }: { c: ConnectorSummary }) {
+  const { kinds, nextStep } = connectorActions(c);
   return (
     <tr className={`border-b border-zinc-200 dark:border-zinc-800 ${c.active ? "" : "opacity-70"}`}>
       <td className="py-2 pr-4">
         <Link href={`/connectors/manage/${c.id}`} className="font-medium underline-offset-2 hover:underline">{c.name}</Link>
         {c.organization && c.organization !== c.name && <div className="text-xs text-zinc-500">{c.organization}</div>}
+        {/* The truthful next step, on the row, so an operator does not have to open a connector to learn it is waiting on them. */}
+        <div className="text-xs text-zinc-500">{nextStep}</div>
       </td>
       <td className="py-2 pr-4 text-zinc-600 dark:text-zinc-400">{c.provider}</td>
       <td className="py-2 pr-4"><Badge tone={c.active ? "neutral" : "attention"}>{c.lifecycleLabel}</Badge></td>
@@ -35,10 +39,17 @@ function Row({ c }: { c: ConnectorSummary }) {
       <td className="py-2 pr-4 text-right tabular-nums">{c.counts.people}</td>
       <td className="py-2 pr-4 text-right tabular-nums">{c.counts.groups}</td>
       <td className="py-2 pr-4 text-right tabular-nums">{c.counts.applications}</td>
+      {/* Actions come from the persisted lifecycle, never from the row merely existing. "View access" in particular is offered
+          only once discovery has produced records — otherwise it is a link to an empty page that reads as a broken product. */}
       <td className="py-2 pr-4 text-right">
-        {c.active
-          ? <Link href={`/access?connection=${c.id}`} className="text-xs underline">View access</Link>
-          : <span className="text-xs text-zinc-400">Excluded</span>}
+        <div className="flex flex-wrap items-center justify-end gap-2 text-xs">
+          <Link href={`/connectors/manage/${c.id}`} className="underline">Open</Link>
+          {kinds.includes("directory") && <Link href={`/directory/people?connection=${c.id}`} className="underline">Directory</Link>}
+          {kinds.includes("access") && <Link href={`/access?connection=${c.id}`} className="underline">Access</Link>}
+          {kinds.includes("setup") && <Link href={`/connectors/${c.provider}`} className="underline">Setup</Link>}
+          {kinds.includes("replacement") && c.supersededBy && <Link href={`/connectors/manage/${c.supersededBy}`} className="underline">Replacement</Link>}
+          <RowLifecycleActions connector={c} kinds={kinds} />
+        </div>
       </td>
     </tr>
   );

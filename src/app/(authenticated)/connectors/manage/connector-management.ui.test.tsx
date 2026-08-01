@@ -113,7 +113,11 @@ describe("the directories list", () => {
     ]));
     const { container } = render(await ManagePage());
     expect([...container.querySelectorAll("a")].some((a) => (a.getAttribute("href") ?? "").startsWith("/access?connection="))).toBe(false);
-    expect(screen.getByText("Excluded")).toBeTruthy();
+    // Phase 5B replaced the "Excluded" placeholder with real actions: a retired directory can be opened, its history read, and
+    // it can be reconnected.
+    expect(screen.getByRole("link", { name: "Open" })).toBeTruthy();
+    expect(screen.getByText("Reconnect")).toBeTruthy();
+    expect(container.textContent).toMatch(/records, runs and audit history are retained/i);
   });
 
   it("says so when every directory has been retired", async () => {
@@ -179,11 +183,20 @@ describe("directory detail", () => {
     expect(reason.required, "a decision someone must explain later cannot be unexplained").toBe(true);
   });
 
-  it("tells the operator exactly what disconnect does NOT remove", async () => {
+  it("states every disconnect consequence, so the operator does not have to guess", async () => {
+    // Guesses about what disconnect destroys are what stop people using it — leaving a stale directory active instead.
     const { container } = render(await DetailPage({ params }));
-    expect(container.textContent).toMatch(/retained/i);
-    expect(container.textContent).toMatch(/nothing is deleted/i);
-    expect(container.textContent).toMatch(/reconnecting restores everything/i);
+    const text = (container.textContent ?? "").replace(/\s+/g, " ");
+    for (const claim of [
+      /Future verification and discovery are disabled/i,
+      /leaves Home, Directory, Access and Findings/i,
+      /no provider-side object is touched/i,
+      /people, groups and applications are retained/i,
+      /discovery runs and audit history are retained/i,
+      /reconnect it at any time. Nothing is deleted/i,
+    ]) expect(text, String(claim)).toMatch(claim);
+    // And an explicit confirmation, not just a button.
+    expect(container.querySelector('input[type="checkbox"][required]')).toBeTruthy();
   });
 
   it("distinguishes replace from disconnect, so neither is used for the other", async () => {

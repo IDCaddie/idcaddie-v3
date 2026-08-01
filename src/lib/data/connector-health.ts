@@ -32,3 +32,47 @@ export function connectorHealth(r: { lifecycle: string; last_run_status: string 
   return { state: "pending", label: "Awaiting verification", reason: "Configuration saved; the connection has not been verified yet." };
 }
 
+// ── Phase 5B: what a connector can actually DO next ───────────────────────────────────────────────────────────────────────────
+// Actions are decided by the persisted lifecycle, not by the row existing. The specific untruth this prevents: offering "View
+// access" on a connector that has discovered nothing, which sends the customer to an empty page and reads as a broken product
+// rather than as an unfinished setup.
+export type ConnectorActionKind = "open" | "directory" | "access" | "history" | "setup" | "disconnect" | "reconnect" | "replace" | "replacement";
+
+export type ConnectorActions = {
+  readonly kinds: readonly ConnectorActionKind[];
+  readonly nextStep: string;               // the truthful sentence for "what happens now"
+};
+
+export function connectorActions(c: {
+  lifecycle: string; active: boolean; supersededBy: string | null;
+  counts: { people: number; groups: number; applications: number };
+}): ConnectorActions {
+  const hasDirectory = c.counts.people + c.counts.groups + c.counts.applications > 0;
+
+  if (c.supersededBy) {
+    // Undoing a supersession is not an ordinary action: it would put two connectors for one organization back into active views.
+    return { kinds: ["open", "replacement", "history"], nextStep: "Replaced by another connector for the same organization. Its records and history are retained." };
+  }
+  if (!c.active) {
+    return { kinds: ["open", "history", "reconnect"], nextStep: "Disconnected. Its records, runs and audit history are retained, and reconnecting restores them." };
+  }
+  if (c.lifecycle === "failed") {
+    return { kinds: ["open", "history", "disconnect"], nextStep: "The last verification or discovery attempt failed. Review the run history before retrying." };
+  }
+  if (c.lifecycle === "discovered" && hasDirectory) {
+    return { kinds: ["open", "directory", "access", "history", "disconnect", "replace"], nextStep: "Discovered and current. People, groups and applications are available." };
+  }
+  if (c.lifecycle === "discovered") {
+    // Discovery completed but produced nothing. Access would be an empty page, so it is not offered.
+    return { kinds: ["open", "history", "disconnect", "replace"], nextStep: "Discovery completed but returned no records for this directory." };
+  }
+  if (c.lifecycle === "discovering") {
+    return { kinds: ["open", "history", "disconnect"], nextStep: "A discovery run is in progress." };
+  }
+  if (c.lifecycle === "verified") {
+    // Verified but nothing imported. ID Caddie operations runs the first discovery during the staging pilot, so the honest next
+    // step is stated as content rather than as a button the customer will press and nothing will happen.
+    return { kinds: ["open", "history", "disconnect", "replace"], nextStep: "Verified. Initial discovery is operator-assisted during the staging pilot and has not run yet." };
+  }
+  return { kinds: ["open", "setup", "history", "disconnect"], nextStep: "Configuration saved. The connection has not been verified yet." };
+}
