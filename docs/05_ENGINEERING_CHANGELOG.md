@@ -398,6 +398,21 @@ from PRs verified via `git log` / `gh pr list`.
 
 ---
 
+## PR #387 — Phase 8C (part 1): the real Slack HTTP client (2026-08-01)
+
+Phase 0 reconfirmation found the precise missing piece for the real callback: `SlackHttpClient` is a **type with no concrete
+implementation**. Every other dependency `makeRealOrchestratorDeps` needs — KMS key provider, envelope store, pending consumer,
+ingest deps — already exists.
+
+Adds `slack-http-client.ts`, the one file in the vault that touches the network. Host allowlist checked **before** the request is
+attempted (rejecting afterwards would already have sent the secret), `redirect: "error"` so a 30x cannot forward the
+credential-bearing body, `cache: "no-store"`, and the underlying network error discarded rather than wrapped because fetch
+failures embed the URL and callers log errors.
+
+Eight tests, three mutations caught: removing the host allowlist, following redirects, and wrapping the underlying error.
+
+**No Slack contact.** The route still imports the synthetic handler — wiring it is the next step. **Staging only.**
+
 ## PR #386 — Phase 8 (part 1): canonical app-account evidence (2026-08-01)
 
 Migration **0076**. Phase 0 traced every Slack stage and found the blocker was not OAuth: the manifest, executor, exchange, vault

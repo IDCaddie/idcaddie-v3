@@ -44,6 +44,25 @@ Design rules carried forward from earlier phases rather than rediscovered:
 `usage`, `licenses`, `activity` **planned** (Business+/Enterprise-gated, no scope requested); all directory capabilities
 **not_applicable** — Slack is not an identity provider.
 
+## Phase 8C progress
+
+**Built:** `slack-http-client.ts` — the ONE concrete `SlackHttpClient`. Every other vault module takes the type injected and never
+reaches the network, which is what has kept an accidental `slack.com` call out of the suite for eight phases. This is the single
+file to review for network behaviour.
+
+Containment properties, each enforced and mutation-tested rather than documented:
+- **Host allowlist checked before the request is attempted** — rejecting after `fetch` would already have sent the secret.
+  Covers suffix attacks (`slack.com.evil.test`), scheme downgrade, and other subdomains.
+- **`redirect: "error"`** — a 30x on a token endpoint would forward the credential-bearing body wherever it points.
+- **`cache: "no-store"`.**
+- **The underlying network error is discarded, not wrapped** — fetch failures embed the URL and callers log errors. Only a static
+  reason (`bad_host` / `network` / `timeout`) escapes.
+- **The body is read once and closed over**, so `json()` is re-callable and cannot fail mid-exchange with a consumed stream.
+
+**Not yet built:** the route that assembles `RealExchangeConfig` and calls the orchestrator. `makeRealOrchestratorDeps` needs
+`expectedContext`, `signer`, `pendingConsumer`, `httpClient` (now available), `clientId`, `clientSecretDeps` (KMS provider +
+envelope store) and `ingestDeps`. Concrete implementations exist for all of them.
+
 ## Remaining work, in order
 
 1. **DB fact sink** in the runner — write `app_user_account` / `group` facts through SECURITY DEFINER promote RPCs, mirroring the
