@@ -398,6 +398,27 @@ from PRs verified via `git log` / `gh pr list`.
 
 ---
 
+## PR #384 — Phase 7A: executive Home (2026-07-31)
+
+No migration. Home becomes an identity-governance overview: context header, identity summary, then a three-column layout of
+access posture / risk / connector health, then a bounded attention queue, with SaaS Intelligence kept clearly separate below.
+
+**Cost: 4 parallel reads, up from 3.** `loadAccessOverview` already paid for a counts RPC plus six bounded sweeps AND already
+returned the complete findings list, so the risk panel and the attention queue are projections of a result Home was fetching
+anyway. A findings-summary RPC would have bought nothing and cost a round trip. The one addition is the connector inventory for
+per-connector health.
+
+Every number is `current`; `totalEvidence` never appears as an active count. Severity counts come from the engine's own summary
+rather than being re-counted. No composite score, no trend, no percentage — none of those has data behind it.
+
+Absence is never rendered as health: `too_large` withholds the distribution and shows no findings figure, a failed inventory read
+says so explicitly, and in all-active mode the rollup reports the WORST connector and names it rather than showing one green tick.
+
+**A real bug found while testing:** a failed inventory read made Home claim "No directory connected". Onboarding now requires
+knowing the estate is empty, which the cheap scope read answers independently.
+
+16 derivation tests, 11 Home tests, seven mutations caught. `identity-overview.tsx` deleted. **Staging only.**
+
 ## PR #383 — Phase 6: stale-aware counts (2026-07-31)
 
 Migration **0074**. The counts RPC answered one question with a number used for two jobs: the conservative too-large bound, and
