@@ -68,6 +68,9 @@ export type OrchestratorDeps = {
   httpClient: SlackHttpClient;
   clientId: string;
   clientSecret: ClientSecretProvider;
+  // The Slack workspace this flow is allowed to bind (server-trusted config). Threaded to the exchange, which
+  // refuses a token from any other workspace BEFORE the store. Absent on the synthetic path; REQUIRED for a real run.
+  expectedTeamId?: string;
   // B1 — the store/encrypt handoff (use `b1StoreHandoff` to wire the real ingestion; tests inject an equivalent).
   store: ExchangeStoreHandoff;
   version: number; // explicit credential version threaded to B1
@@ -122,6 +125,7 @@ export async function orchestrateSlackOAuthCallback(
       connectorId: v.payload.cid,
       version: deps.version,
       correlationId: v.payload.corr,
+      ...(deps.expectedTeamId !== undefined ? { expectedTeamId: deps.expectedTeamId } : {}),
     },
     { httpClient: deps.httpClient, clientId: deps.clientId, clientSecret: deps.clientSecret, store: deps.store },
   );

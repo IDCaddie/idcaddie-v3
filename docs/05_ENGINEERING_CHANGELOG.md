@@ -12,6 +12,29 @@ from PRs verified via `git log` / `gh pr list`.
 > **as of each PR's date** and are historical — where an older entry says "RISK-007 remains OPEN" / "Phase C remains
 > BLOCKED", that was accurate at that entry's date; this banner is the current state.
 
+### feat(oauth) — Phase 8E: real-callback safety primitives (workspace binding, exact callback allowlist, fail-closed assembly) · 2026-08-01
+
+- **Slack workspace binding.** `oauth.v2.access` names the workspace the user actually consented on — the authorize URL
+  cannot pin it, so the response is the only place that fact exists. The exchange now compares `team.id` (never the
+  name) against server-trusted config and refuses **before the store handoff**: a wrong-workspace token never reaches
+  the vault. New bounded reasons `workspace_mismatch` / `missing_workspace`.
+- **Exact callback allowlist.** `REDIRECT_RE` constrains shape but accepts any host, and the redirect URI is what the
+  client secret and authorization code are posted against. Whole URIs are compared as strings rather than parsed for a
+  host — `connector-oauth-config.test.ts` asserts this module never contains `.host`, a guard that exists because the
+  one mistake this file must never make is trusting a request Host header. That guard caught the first attempt.
+- **`oauth-callback-real-runner.ts`** — the one place that decides what a real run trusts. Requires an explicit opt-in,
+  refuses in production, and has **no default** for workspace, tenant, connector, correlation, client id or callback;
+  an unset workspace is a refusal, not a wildcard. Refusal reasons carry no env value, host or id.
+- **Route unchanged, deliberately.** `withSlackClientSecret` needs AWS KMS and `createRunnerAppSecretStore` needs the
+  runner's DB identity — in the Vercel request path. That is the boundary crossing docs/81 says needs its own GO.
+  Switching the route before those exist would mean a silent synthetic fallback (forbidden) or a route that always
+  fails. See docs/81 "Phase 8E".
+- **Tests:** 32 new, covering valid flow, expired state, tampered state, replay denial, wrong tenant/connector/
+  correlation/redirect/subject, wrong workspace, missing workspace, Slack error, timeout and token-store failure.
+  Mutation-tested: removing the workspace check, the callback allowlist, the workspace-required rule, the production
+  guard, or the replay gate each fails the suite.
+- No Slack contact, no production, no scheduling, no new scope. `npm test` 2175 passed | 22 skipped; `tsc` clean.
+
 ### feat(ops) — Gate S2 bounded live scheduled campaign: 3 slots, all succeeded — S2 = PASS (P5E13) · 2026-07-14
 
 - The bounded live S2 campaign ran on staging on the operator/CI-built, scan-passed image `@sha256:f4563ad8…` (scheduled task-def

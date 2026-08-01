@@ -11,7 +11,7 @@
 | State generation / consume / replay denial | **REAL** | Hosted-proven: a replay returned `already_consumed` (docs/52 row 9). |
 | `oauth.v2.access` exchange | **REAL** | `slack-oauth-exchange.ts` — injected HTTP client, no global fetch. Ran once for real (RUN GATE A, 2026-07-04). |
 | Real exchange wiring | **REAL but UNUSED** | `oauth-real-exchange-wiring.ts` assembles every real seam behind `CONNECTOR_OAUTH_REAL_EXCHANGE_ENABLED`. **Zero non-test callers.** |
-| **Callback route** | **SYNTHETIC** | `/connectors/oauth/callback` imports `handleSyntheticSlackOAuthCallback`; production-disabled. **This is the remaining OAuth boundary.** |
+| **Callback route** | **SYNTHETIC** | `/connectors/oauth/callback` imports `handleSyntheticSlackOAuthCallback`; production-disabled. **This is the remaining OAuth boundary** — see the Phase 8E note below for what is now built and what still blocks it. |
 | Secret storage | **REAL** | Envelope (KMS-wrapped DEK + AEAD). Three real `oauth_access` rows for the Slack connector; RUN GATE B proved rotation + revocation. |
 | Verification (`auth.test`) | **REAL** | Manifest endpoint; decrypt/use proven against live Slack (docs/52 row 7). |
 | Discovery manifest | **REAL** | `slack.v1.json`: bearer auth, 18 rps / burst 5, 500-request / 100k-item / 600s budget, cursor pagination (`max_pages` 200), field maps, scopes. |
@@ -86,6 +86,33 @@ crosses the client-secret decrypt boundary in the request path and needs its own
 
 So the write path is complete ahead of the thing that will feed it. A live sweep still needs the real callback wired
 **and** a Slack-honoured token.
+
+### Phase 8E — what is built, and the one thing that still blocks it
+
+Built and tested (`oauth-callback-real-runner.ts`, `oauth-callback-real-runner.test.ts`):
+
+- **Workspace binding.** `oauth.v2.access` returns the team the user actually consented on — the authorize URL cannot
+  pin it, so the response is the only place the answer exists. The exchange now compares `team.id` (never the name)
+  against server-trusted config and refuses **before the store handoff**, so a wrong-workspace token never reaches the
+  vault. Unset config is a refusal, not a wildcard.
+- **Exact callback allowlist.** `REDIRECT_RE` constrains the shape but accepts any host, and the redirect URI is what
+  the client secret and the authorization code get posted against. Whole URIs are now compared as strings — not hosts
+  parsed out of the value, because `connector-oauth-config.test.ts` asserts this module never contains `.host`, and
+  that guard exists precisely because the one mistake this file must never make is trusting a request Host header.
+- **Fail-closed assembly.** Real mode requires an explicit opt-in, refuses in production, and has **no default** for
+  the workspace, tenant, connector, correlation, client id or callback. Every refusal is a bounded static reason that
+  carries no env value, host or id.
+- The expected context follows the RUN GATE A model: operator-supplied server-trusted values, the same triple the
+  authorize half persisted into `oauth_pending`, re-checked by the atomic consume.
+
+**The blocker is not code.** `withSlackClientSecret` needs a `ConnectorVaultKeyProvider` (AWS KMS) and
+`createRunnerAppSecretStore` needs a `RunnerConnection` — i.e. the **runner's `connector_runner_login` DB identity and
+AWS KMS credentials, in the Vercel request path**. That is exactly the boundary crossing this document says needs its
+own GO, and it is a credential-provisioning decision, not an implementation detail. Until those exist on the staging
+deployment, `buildRealCallbackRunner` has no deps to be handed and the route correctly stays synthetic.
+
+The route is deliberately **not** switched in this phase: flipping it while the real deps cannot be constructed would
+mean either a silent fallback to synthetic (forbidden) or a route that always 500s.
 
 ## Hosted staging state
 
