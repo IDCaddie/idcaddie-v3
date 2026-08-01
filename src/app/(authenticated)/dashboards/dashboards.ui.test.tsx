@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { render, screen, cleanup } from "@testing-library/react";
+import { render, screen, cleanup, within } from "@testing-library/react";
 
 // next/link → a plain <a> so the router context isn't needed. The real data loaders are mocked (no DB/network);
 // the pure formatMoney is kept real so currency formatting is exercised end-to-end.
@@ -17,13 +17,33 @@ vi.mock("@/lib/data/dashboard-overview-loader", async () => {
 // access-loaders reaches access-rpc-types, which THROWS if imported with a `window` present. That guard is a real
 // server-only boundary and is not something to weaken for a test — mock the loader instead.
 vi.mock("@/lib/data/access-loaders", () => ({ loadAccessOverview: vi.fn() }));
+// Phase 7A: Home now also reads the connector inventory and the URL scope. Both are server-only; mocked here so the page renders
+// in jsdom. `executive-home` is PURE and loads for real, so the derivations under test are the ones the product actually runs.
+vi.mock("@/lib/data/connector-management", () => ({ loadConnectorManagement: vi.fn() }));
+vi.mock("@/lib/data/connector-scope", () => ({ resolveConnectorScope: vi.fn() }));
 
 import DashboardsPage from "./page";
 import { getDashboardSummaryForCurrentUser } from "@/lib/data/dashboard";
 import { getDashboardOverviewForCurrentUser } from "@/lib/data/dashboard-overview-loader";
 import { loadAccessOverview } from "@/lib/data/access-loaders";
+import { loadConnectorManagement } from "@/lib/data/connector-management";
+import { resolveConnectorScope } from "@/lib/data/connector-scope";
 
-const asMock = <T,>(fn: T) => fn as unknown as { mockResolvedValue: (v: unknown) => void };
+const asMock = <T,>(fn: T) => fn as unknown as { mockResolvedValue: (v: unknown) => void; mock: { calls: unknown[][] } };
+
+const CONN = "cdf19b61-6f22-4e61-8784-99a453396805";
+const connector = (o: Record<string, unknown> = {}) => ({
+  id: CONN, provider: "okta", name: "Okta Staging", organization: "trial-5294016.okta.com",
+  lifecycle: "discovered", lifecycleLabel: "Discovered",
+  health: { state: "healthy", label: "Healthy", reason: "Verified and discovery has completed." },
+  active: true, supersededBy: null, disconnectedAt: null, disconnectedReason: null,
+  lastVerifiedAt: "2026-07-30T23:01:30Z", lastDiscoveryAt: "2026-07-31T17:19:51Z", createdAt: null,
+  counts: { people: 1, groups: 6, applications: 2, memberships: 1, userAssignments: 1, groupAssignments: 0 }, ...o,
+});
+const withConnectors = (cs: unknown[] = [connector()]) => {
+  asMock(loadConnectorManagement).mockResolvedValue({ ok: true, data: { connectors: cs, activeCount: cs.length, inactiveCount: 0 } });
+  asMock(resolveConnectorScope).mockResolvedValue({ ok: true, scope: { tenantId: "t", active: cs, selected: null, connectionId: null, multiple: cs.length > 1 } });
+};
 
 // A complete access graph. Numbers are deliberately distinct so an assertion can only pass by reading the right field.
 const accessOk = {
@@ -44,6 +64,7 @@ afterEach(cleanup);
 
 describe("/dashboards render", () => {
   it("renders populated spend + renewals cards", async () => {
+    withConnectors();
     asMock(loadAccessOverview).mockResolvedValue(accessOk);
     asMock(getDashboardSummaryForCurrentUser).mockResolvedValue(summary);
     asMock(getDashboardOverviewForCurrentUser).mockResolvedValue({
@@ -66,6 +87,7 @@ describe("/dashboards render", () => {
   });
 
   it("renders empty/unavailable states without crashing", async () => {
+    withConnectors();
     asMock(loadAccessOverview).mockResolvedValue(accessOk);
     asMock(getDashboardSummaryForCurrentUser).mockResolvedValue({ ...summary, appsVisible: null });
     asMock(getDashboardOverviewForCurrentUser).mockResolvedValue({
@@ -79,10 +101,8 @@ describe("/dashboards render", () => {
   });
 });
 
-// ── Identity-first Home (Phase 1) ─────────────────────────────────────────────────────────────────────────────
-// Home used to open with "App-user accounts visible", which is legitimately 0 for a directory-only tenant and made a
-// working product look empty. These assert the identity block leads and that it never fabricates numbers.
-describe("/dashboards is identity-first", () => {
+// ── Executive Home (Phase 7A) ─────────────────────────────────────────────────────────────────────────────────
+describe("/dashboards — executive identity posture", () => {
   const baseSaas = async () => {
     asMock(getDashboardSummaryForCurrentUser).mockResolvedValue(summary);
     asMock(getDashboardOverviewForCurrentUser).mockResolvedValue({
@@ -90,65 +110,98 @@ describe("/dashboards is identity-first", () => {
       renewals: { due30: [], due90: [], missing: 0, topUpcoming: [] },
     });
   };
+  // The heading sits inside a flex wrapper, so climb to the section that actually contains the cards.
+  const cardsIn = (c: HTMLElement) => c.querySelector("#summary-heading")!.closest("section") as HTMLElement;
 
-  it("leads with identity, and the SaaS summary comes AFTER it in document order", async () => {
-    asMock(loadAccessOverview).mockResolvedValue(accessOk);
-    await baseSaas();
+  it("leads with identity posture; the SaaS section comes AFTER it", async () => {
+    withConnectors(); asMock(loadAccessOverview).mockResolvedValue(accessOk); await baseSaas();
     const { container } = render(await DashboardsPage());
-    const identity = container.querySelector("#identity-heading");
+    const identity = container.querySelector("#summary-heading");
     const saas = container.querySelector("#saas-heading");
-    expect(identity, "identity block must render").toBeTruthy();
-    expect(saas, "SaaS block must still render — it moved, it did not go away").toBeTruthy();
-    // DOCUMENT_POSITION_FOLLOWING === 4: saas follows identity.
+    expect(identity, "identity summary must render").toBeTruthy();
+    expect(saas, "the SaaS section moved, it did not go away").toBeTruthy();
     expect(identity!.compareDocumentPosition(saas!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
-  it("renders real graph numbers, not recomputed ones", async () => {
-    asMock(loadAccessOverview).mockResolvedValue(accessOk);
-    await baseSaas();
-    render(await DashboardsPage());
-    for (const [label, value] of [["People", "42"], ["Groups", "9"], ["Directory applications", "6"], ["Effective access", "45"], ["Through group only", "30"], ["High findings", "2"]] as const) {
-      const el = screen.getByText(label);
-      expect(el.parentElement?.textContent, `${label} should show ${value}`).toContain(value);
+  it("shows CURRENT counts, never total evidence", async () => {
+    withConnectors(); asMock(loadAccessOverview).mockResolvedValue(accessOk); await baseSaas();
+    const { container } = render(await DashboardsPage());
+    for (const [label, value] of [["People", "42"], ["Groups", "9"], ["Directory applications", "6"],
+                                  ["Effective access", "45"], ["High findings", "2"]] as const) {
+      expect(within(cardsIn(container)).getByText(label).parentElement?.textContent, `${label} -> ${value}`).toContain(value);
     }
   });
 
-  it("explains group-granted access in words, not just a number", async () => {
-    asMock(loadAccessOverview).mockResolvedValue(accessOk);
+  it("one stale group does not inflate the Groups card", async () => {
+    // The Phase 6 contract: the loader hands Home CURRENT counts, and Home must not add retained evidence back in.
+    withConnectors();
+    asMock(loadAccessOverview).mockResolvedValue({ ...accessOk, data: { ...accessOk.data, counts: { ...accessOk.data.counts, groups: 6 } } });
     await baseSaas();
-    render(await DashboardsPage());
-    expect(screen.getByText(/30 of 45 effective relationships exist only through group membership/)).toBeTruthy();
+    const { container } = render(await DashboardsPage());
+    const g = within(cardsIn(container)).getByText("Groups").parentElement?.textContent ?? "";
+    expect(g).toContain("6");
+    expect(g).not.toContain("7");
   });
 
-  it("says a directory is missing instead of rendering six zeros", async () => {
-    // Zeros read as "the product found nothing"; absence reads as "you have not connected anything yet". Different fact.
-    asMock(loadAccessOverview).mockResolvedValue({ ok: false, error: "no_directory" });
+  it("with NO active directory shows onboarding, not a wall of zeros", async () => {
+    // Zeros read as "the product found nothing" — a different and much worse claim than "nothing is connected".
+    asMock(loadConnectorManagement).mockResolvedValue({ ok: true, data: { connectors: [], activeCount: 0, inactiveCount: 0 } });
+    asMock(resolveConnectorScope).mockResolvedValue({ ok: true, scope: { tenantId: "t", active: [], selected: null, connectionId: null, multiple: false } });
+    asMock(loadAccessOverview).mockResolvedValue({ ok: false, error: "forbidden" });
     await baseSaas();
-    render(await DashboardsPage());
-    expect(screen.getByText(/No directory has been discovered yet/)).toBeTruthy();
-    expect(screen.queryByText("Effective access")).toBeNull();
+    const { container } = render(await DashboardsPage());
+    expect(screen.getByText("No directory connected")).toBeTruthy();
+    expect(container.querySelector("#summary-heading"), "no posture metrics without a directory").toBeNull();
   });
 
-  it("does not claim effective access or findings when the graph was too large to evaluate", async () => {
-    // The honesty case: counts are known, the derived graph is not. Showing 0 findings here would be a false all-clear.
+  it("withholds the access distribution when the graph was too large, with no zero all-clear", async () => {
+    withConnectors();
     asMock(loadAccessOverview).mockResolvedValue({
       ok: true,
       data: { status: "too_large", counts: { identities: 90000, groups: 400, applications: 50, memberships: 1, directAssignments: 2, groupAssignments: 3 } },
     });
     await baseSaas();
-    render(await DashboardsPage());
+    const { container } = render(await DashboardsPage());
     expect(screen.getByText("90000")).toBeTruthy();
-    expect(screen.queryByText("High findings"), "no finding count may be shown").toBeNull();
-    expect(screen.queryByText("Effective access")).toBeNull();
-    expect(screen.getByText(/not evaluated within current safety limits/)).toBeTruthy();
+    expect(screen.getByText("Access distribution not evaluated")).toBeTruthy();
+    expect(container.textContent).toMatch(/above the current safety limit/i);
+    expect(within(cardsIn(container)).queryByText("High findings"), "0 findings over an unevaluated graph is a false all-clear").toBeNull();
+    expect(within(cardsIn(container)).getByText("Findings").parentElement?.textContent).toContain("—");
   });
 
-  it("keeps SaaS inventory reachable and labelled as SaaS, not as the headline", async () => {
-    asMock(loadAccessOverview).mockResolvedValue(accessOk);
-    await baseSaas();
+  it("excludes disconnected and superseded connectors from the health panel", async () => {
+    // A retired directory in the health list would count toward "all directories healthy" and misstate the estate.
+    const active = connector({ id: "a", name: "Okta Staging" });
+    const off = connector({ id: "b", name: "Slack DEV", active: false, lifecycle: "disconnected", lifecycleLabel: "Disconnected",
+                            health: { state: "inactive", label: "Disconnected", reason: "Retired." } });
+    const sup = connector({ id: "c", name: "Legacy Okta", active: false, lifecycle: "superseded", lifecycleLabel: "Replaced",
+                            supersededBy: "a", health: { state: "inactive", label: "Replaced", reason: "Replaced." } });
+    asMock(loadConnectorManagement).mockResolvedValue({ ok: true, data: { connectors: [active, off, sup], activeCount: 1, inactiveCount: 2 } });
+    asMock(resolveConnectorScope).mockResolvedValue({ ok: true, scope: { tenantId: "t", active: [active], selected: null, connectionId: null, multiple: false } });
+    asMock(loadAccessOverview).mockResolvedValue(accessOk); await baseSaas();
+    const { container } = render(await DashboardsPage());
+    const health = container.querySelector("#health-heading")!.closest("section") as HTMLElement;
+    expect(within(health).queryByText("Slack DEV"), "a disconnected directory is not part of the estate's health").toBeNull();
+    expect(within(health).queryByText("Legacy Okta"), "nor is a superseded one").toBeNull();
+  });
+
+  it("does NOT render unavailable connector health as green", async () => {
+    // Absence of evidence is not evidence of health — the single most damaging thing an executive dashboard can get wrong.
+    asMock(loadConnectorManagement).mockResolvedValue({ ok: false, error: "query_failed" });
+    asMock(resolveConnectorScope).mockResolvedValue({ ok: true, scope: { tenantId: "t", active: [{ id: "a", label: "Okta", provider: "okta", organization: null }], selected: null, connectionId: null, multiple: false } });
+    asMock(loadAccessOverview).mockResolvedValue(accessOk); await baseSaas();
+    const { container } = render(await DashboardsPage());
+    const health = container.querySelector("#health-heading")!.closest("section") as HTMLElement;
+    expect(health.textContent).toMatch(/could not be loaded/i);
+    expect(health.textContent).toMatch(/not a statement that everything is healthy/i);
+    expect(health.textContent).not.toMatch(/All directories healthy/);
+  });
+
+  it("keeps SaaS inventory reachable and labelled as SaaS", async () => {
+    withConnectors(); asMock(loadAccessOverview).mockResolvedValue(accessOk); await baseSaas();
     render(await DashboardsPage());
     expect(screen.getByText("SaaS inventory")).toBeTruthy();
-    expect(screen.queryByText("Apps visible"), "old SaaS-first framing must be gone").toBeNull();
+    expect(screen.queryByText("Apps visible")).toBeNull();
   });
 });
 
@@ -157,6 +210,7 @@ describe("/dashboards is identity-first", () => {
 // Home card lands where the GO says, and that the graph-derived numbers still go to Access, where they are explained.
 describe("Home identity cards link into the Directory", () => {
   it("sends each count to the surface that owns it", async () => {
+    withConnectors();
     asMock(loadAccessOverview).mockResolvedValue(accessOk);
     asMock(getDashboardSummaryForCurrentUser).mockResolvedValue(summary);
     asMock(getDashboardOverviewForCurrentUser).mockResolvedValue({
