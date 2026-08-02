@@ -185,6 +185,16 @@ do $$ declare f record; begin
     'runner_assert_not_pilot_governed','connector_pilot_ref_is_sensitive')
   loop execute format('revoke execute on function %s from authenticated, anon', f.sig); end loop;
 end $$;
+
+-- 0079: the three `oauth_completer_*` wrappers are the ENTIRE granted surface of the narrow OAuth-completion identity.
+-- The blanket `grant execute on all functions` above hands them to authenticated/service_role, which masks the
+-- migration's revoke completely — the same masking class as the runner_* block above. Re-revoke so the suite reflects
+-- the REAL hosted surface. KEEP IN LOCKSTEP with 0079's grant block.
+do $$ declare f record; begin
+  for f in select p.oid::regprocedure as sig from pg_proc p
+            where p.pronamespace = 'public'::regnamespace and p.proname like 'oauth\_completer\_%'
+  loop execute format('revoke execute on function %s from authenticated, anon, service_role, public', f.sig); end loop;
+end $$;
 SQL
 
 for t in "${tests[@]}"; do

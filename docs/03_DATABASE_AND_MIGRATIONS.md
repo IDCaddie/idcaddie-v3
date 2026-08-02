@@ -9,6 +9,30 @@ links them rather than restating:
 - RLS model: [02_SECURITY_AND_RLS.md](./02_SECURITY_AND_RLS.md)
 - Firestore→Supabase data migration (future): [v3-migration-plan.md](./v3-migration-plan.md)
 
+### 0079 — the `oauth_completer` narrow identity
+
+The least-privilege database role that completes a real Slack OAuth callback from the web tier (docs/83).
+
+Completing a callback needs three capabilities: read the app client-secret **envelope**, consume the single-use
+`oauth_pending` row, and store the returned bot-token **envelope**. The existing code reaches all three as
+`connector_runner_login` — the runner's identity, which can execute every `runner_*` function in the schema. Putting
+that in a public web tier means a request-path bug does not merely leak a token, it lets an attacker fabricate
+directory evidence.
+
+So 0079 creates `oauth_completer`: LOGIN, **no password in the migration** (set out of band), `NOSUPERUSER NOCREATEDB
+NOCREATEROLE NOREPLICATION NOBYPASSRLS`, member of no role, **zero table and sequence privileges**, and EXECUTE on
+exactly three purpose-specific wrappers. Each wrapper pins its provider and purpose, takes no plaintext parameter,
+builds no dynamic SQL, and is `security definer set search_path = ''`.
+
+It also closes an inherited hole: nine `SECURITY DEFINER` RLS predicate helpers were executable by **any** role via
+Postgres's default PUBLIC grant. `authenticated`/`service_role` already held explicit grants and `anon` is re-granted,
+so removing the PUBLIC path changes nothing for existing roles while closing it for new ones.
+
+Two properties cannot be tested against a database here — `scripts/test-rls.sh` blanket-grants EXECUTE and then
+re-revokes named sets (masking a broadened grant), and `connector_app_secrets` constrains provider and secret_kind to
+single values (making those pins unobservable in data). Both are asserted statically by
+`scripts/oauth-completer-migration.test.ts`.
+
 ## Migrations (all `implemented`, `verified-local`, `ci-enforced`, `not-hosted-applied`)
 | File | Purpose | Landed |
 |---|---|---|
