@@ -436,3 +436,82 @@ Scope is unchanged: tenant, optional connector, optional provider, and the exclu
 All-active mode sums distinct connector graphs and deduplicates nothing — two organizations may legitimately contain the same
 person, and collapsing them by name, email or provider external id would erase a real record.
 
+
+## 0081 — The OAuth completion job (Phase 8J)
+
+The web tier cannot complete a Slack OAuth callback. Doc 46 §11 and `scripts/check-app-runtime-imports.sh` keep the app
+repo pg-free and the request surface free of runner internals and the KMS client, so completing the flow — client-secret
+decrypt, token encrypt, atomic consume — belongs to the separately deployed worker. Vercel can only **hand off**.
+
+A hand-off across a process boundary needs somewhere durable to put the request, because the browser has already been
+redirected and the authorization code is valid for minutes. `oauth_completion_jobs` is that place, and nothing more.
+
+**It is not a queue.** No priority, no visibility timeout, no retry loop, no dead-letter. One row is one callback,
+claimed once, resolved once. Working a job confers no capability: `oauth_completer` still holds zero table privileges
+and no `runner_*`/`product_*` grant, so a completion cannot open a run, write a fact, promote evidence or stale an
+account — asserted in `oauth_completion_jobs_test.sql` J7, not assumed.
+
+| bound to | how |
+|---|---|
+| tenant + connector | composite FK `(connector_id, tenant_id) → connectors`, the 0056 pattern |
+| correlation | `unique (correlation_id)` — one authorize can produce at most one job, forever |
+| provider | `check (provider = 'slack')` |
+| redirect | `check (redirect_uri = '…/connectors/oauth/callback')`, the exact URI, byte for byte |
+| workspace | `expected_team_id`, stored at enqueue and re-asserted at exchange |
+| lifetime | `check (expires_at <= created_at + interval '15 minutes')`; the wrapper writes 10 |
+
+### The authorization code
+
+Never stored in plaintext, and there is no column or parameter that could hold one. `protected_payload` is an opaque
+envelope sealed to the **worker's public key** — v3 holds the public half and can only encrypt; only the isolated worker
+holds the private half. The database, including `service_role`, a dashboard session and a backup, holds bytes it cannot
+open. Nothing in the migration parses the envelope, so nothing in the migration can leak part of it.
+
+Every terminal transition — completed, failed, expired — nulls `protected_payload`, `payload_scheme` and `payload_key_id`
+**in the same statement that sets the status**, and a CHECK makes the cleared state the only shape a terminal row can
+have. Clearing in a second UPDATE would pass every behavioural assertion and leave a window; the static guard asserts
+against the migration text for exactly that reason.
+
+### Idempotency: the 0080 lesson, one layer up
+
+0080 established that `aad_digest` is useless as an idempotency key because the lookup already pinned every field it
+covers — a tautology under which two different tokens compare equal. A digest over `(tenant, connector, provider,
+redirect, workspace, correlation)` fails the same way here: the correlation lookup pins all six, so a **substituted
+authorization code** replayed under a live correlation would be accepted as "already done" and reported as success.
+
+So `body_digest` is sha256 over the whole request **including the sealed bytes**, and the wrapper computes it — a caller
+cannot supply it. The consequence is deliberate: re-sealing produces a new request (the ephemeral key and nonce are
+fresh per seal) and is refused. Idempotency here means *the same bytes sent again*, which is what a transport retry is.
+
+An **expired** correlation is refused before the request is even compared. Death outranks identity: a caller retrying its
+own bytes against a dead correlation needs to be told to re-authorize, not that its request looks different.
+
+### The clock belongs to the database
+
+0079's consume takes `p_now`, which is right for a wrapper whose whole job is one atomic UPDATE against context the
+caller already owns. It is wrong here — "short-lived" is *the* security property of this table, and a caller that
+chooses the clock chooses the deadline. Every wrapper reads `now()` itself and accepts no `timestamptz`.
+
+### Claim, and why one statement
+
+The claim is a single UPDATE whose WHERE carries the full trusted context, `status = 'pending'` and `expires_at > now()`.
+Under READ COMMITTED a second concurrent claimer blocks on the row lock, re-evaluates against what the winner wrote, and
+matches nothing. There is no `SELECT … FOR UPDATE` and no window between deciding and writing.
+
+The deadline is in that same WHERE rather than in a preceding statement, so the claim's safety does not depend on
+anything having run first. A job still `pending` after the claim declines it is one whose deadline has passed; it is
+retired **on the discovery path** — whoever finds an expired job is the right moment to clear its sealed code, rather
+than leaving it until the next sweep.
+
+### The granted surface
+
+Five wrappers for `oauth_completer` (enqueue · claim · complete · fail · expire) and **one** for `authenticated`:
+`product_oauth_completion_job_status`, which returns five bounded fields — status and three timestamps and a
+CHECK-constrained terminal reason. No payload, no scheme, no key id, no body digest, no attempt count, no claim time, no
+connector internals, and no raw provider or database error. A caller without owner/admin gets an **empty set** rather
+than an error (the 0061 convention), so a denied read, another tenant's job and a job that does not exist are all the
+same answer.
+
+`oauth_completer` is named in the product read's REVOKE: 0079's blanket revoke loop ran before this function existed, and
+the PUBLIC grant Postgres creates with every function would otherwise have handed it over. The identity that works a job
+does not hold the customer's read.

@@ -208,15 +208,54 @@ else; `crypto.ts` warns that a caller must never treat a match as proof. Keying 
 re-authorizations indistinguishable — the second reported success while its Slack-issued token was silently discarded.
 Idempotency is keyed on `(aead_nonce, aead_tag)`.
 
-### Remaining work — none of it started
+### Remaining work
 
-1. **The completion-job model.** Tenant/connector/correlation-bound, provider pinned to Slack, exact redirect URI,
-   very short expiry, single-use, atomic claim, one terminal transition, authorization code cleared on terminal.
-   V3 must **not** be given KMS merely to encrypt the payload — a worker public-key envelope, or direct authenticated
-   TLS, keeps encryption authority separate from decryption authority.
+1. ~~**The completion-job model.**~~ **DONE — migration 0081 (§7 below).**
 2. **The Vercel OIDC handoff.** Pin issuer, audience, project `prj_l30QMLpF3dNLwKBP2CTG7v9rIon0`, team
    `team_PYYzXw6Wn7HVtPvvcQWNRSlC`, environment identity, body digest, and the job id/nonce. The callback returns a
    truthful pending page and never claims "Connected" at handoff time.
 3. **The worker task**, deployed separately from discovery, with no runner database credential in the process.
 
 Unprovisioned: the ten remaining gate variables, both KMS keys, the OIDC role, and the Slack redirect registration.
+
+---
+
+## 7. The completion job — migration 0081 (Phase 8J, 2026-08-02)
+
+`public.oauth_completion_jobs` is the durable hand-off, and deliberately nothing more. Full model in
+[03 § 0081](03_DATABASE_AND_MIGRATIONS.md); the parts that constrain the next two PRs:
+
+| property | how |
+|---|---|
+| tenant + connector bound | composite FK `(connector_id, tenant_id) → connectors` |
+| correlation bound | `unique (correlation_id)` — one authorize, at most one job, forever |
+| provider / redirect pinned | CHECK on `provider = 'slack'` and the exact callback URI |
+| short-lived | CHECK ceiling of 15 minutes; the wrapper writes **10** |
+| single-use | terminal transitions require `status = 'claimed'`; a terminal row never matches again |
+| atomically claimable | ONE `UPDATE … WHERE status = 'pending' AND expires_at > now()` |
+| code protection | opaque envelope sealed to the **worker public key**; scheme `X25519-HKDF-SHA256-AES-256-GCM` |
+| cleared on terminal | payload/scheme/key nulled in the SAME statement as the status, and a CHECK makes it the only legal terminal shape |
+
+**Idempotency key: `body_digest`, sha256 over the whole enqueue request INCLUDING the sealed bytes**, computed by the
+wrapper and never supplied. This is the 0080 `aad_digest` lesson one layer up — a digest over the bound fields alone is
+a tautology under a correlation lookup, and a substituted authorization code would be accepted as "already done".
+**The practical consequence for PR 3: seal once and retry with the same buffer.** Re-sealing produces fresh ephemeral
+key and nonce bytes, which is a different request and is refused; a caller that has re-sealed should read the job's
+status instead of enqueuing again.
+
+**The clock is the database's.** No wrapper accepts a `timestamptz`. PR 3 must not expect to pass a deadline.
+
+**V3 holds only the public half.** The sealing module does not exist yet and belongs with its first caller in PR 3 —
+`node:crypto` covers X25519 + HKDF-SHA256 + AES-256-GCM with no new dependency, which is why that scheme is the one the
+CHECK constrains. V3 gains **no KMS grant** for this: the encryption authority and the decryption authority stay in
+different processes.
+
+### The granted surface after 0081
+
+`oauth_completer` holds EXECUTE on **nine** purpose-pinned wrappers (four from 0079/0080, five here) and still **zero**
+table and sequence privileges, no `runner_*` and no `product_*` grant. The one browser-facing addition is
+`product_oauth_completion_job_status`, granted to `authenticated` and explicitly revoked from `oauth_completer`; it
+returns status and three timestamps and a CHECK-constrained terminal reason, and denies by returning an empty set.
+
+**V3 still must never hold `OAUTH_COMPLETER_DB_URL`.** Every wrapper above is called by the worker. The web tier's only
+role in this flow is to seal the code and hand it to the worker over the OIDC-authenticated channel PR 3 builds.

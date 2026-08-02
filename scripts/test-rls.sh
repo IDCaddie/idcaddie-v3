@@ -195,6 +195,13 @@ do $$ declare f record; begin
             where p.pronamespace = 'public'::regnamespace and p.proname like 'oauth\_completer\_%'
   loop execute format('revoke execute on function %s from authenticated, anon, service_role, public', f.sig); end loop;
 end $$;
+
+-- 0081: oauth_completion_jobs is a Tier-2 deny-all store (RLS-enabled, ZERO policies, revoke-all from every browser role,
+-- from connector_runner AND from oauth_completer itself — the identity that WORKS a job holds nothing on the table that
+-- holds it). The blanket `grant select/insert/update/delete on all tables` above re-broadens it for authenticated, which
+-- would mask the posture completely. KEEP IN LOCKSTEP with 0081's revoke. oauth_completion_jobs_test J1's exact-zero
+-- privilege arrays are the backstop that fails loudly on drift.
+revoke all on public.oauth_completion_jobs from anon, authenticated, connector_runner, oauth_completer;
 SQL
 
 for t in "${tests[@]}"; do
