@@ -30,12 +30,11 @@ const REDIRECT = "https://app.example.com/connectors/oauth/callback";
 const CORR = "corr-b2c-real-01";
 // Phase 8F: the flag alone no longer enables real mode. The gate is now a POSITIVE environment-identity check, so an
 // "enabled" environment must also prove WHICH environment it is — staging marker, Vercel project, Supabase project,
-// the narrow oauth_completer identity, the exact callback, the workspace and the trusted context.
+// the exact callback, the workspace and the trusted context — and must hold NO completer database credential (8K).
 const ENABLED_ENV = {
   IDCADDIE_ENVIRONMENT: "staging",
   IDCADDIE_VERCEL_PROJECT_ID: "prj_l30QMLpF3dNLwKBP2CTG7v9rIon0",
   NEXT_PUBLIC_SUPABASE_URL: `https://${"ycdpzduxugdsffjqyoai"}.supabase.co`,
-  OAUTH_COMPLETER_DB_URL: `postgresql://oauth_completer_login:not-a-real-token@db.${"ycdpzduxugdsffjqyoai"}.supabase.co/postgres`,
   CONNECTOR_OAUTH_REDIRECT_URI: "https://idcaddie-v3.vercel.app/connectors/oauth/callback",
   CONNECTOR_OAUTH_REAL_EXCHANGE_ENABLED: "1",
   CONNECTOR_OAUTH_EXPECTED_SLACK_TEAM_ID: "T0ABCDEF123",

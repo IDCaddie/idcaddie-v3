@@ -8,6 +8,7 @@ import {
 } from "@/lib/server/connector-vault/oauth-callback-route-handler";
 import { resolveStagingEnvironmentIdentity } from "@/lib/server/connector-vault/staging-environment-identity";
 import { buildRealCallbackRunnerFromEnvironment } from "@/lib/server/connector-vault/real-callback-dependencies";
+import { handleHandoffCallback, handoffErrorRedirect } from "@/lib/server/connector-vault/oauth-callback-handoff";
 
 // The Slack OAuth callback.
 //
@@ -37,30 +38,21 @@ function syntheticRunner() {
   });
 }
 
-// A safe, static redirect carrying only a coarse outcome. `reason` is one of the bounded refusal codes — never an env
-// value, connection string, host, token, code or exception text.
-function refuse(reason: string): Response {
-  return new Response(null, {
-    status: 303,
-    headers: { location: `/connectors?oauth=error&reason=${encodeURIComponent(reason)}`, "cache-control": "no-store" },
-  });
-}
-
 async function handle(request: Request) {
   const identity = resolveStagingEnvironmentIdentity();
 
   // ── REAL MODE ────────────────────────────────────────────────────────────────────────────────────────────────
+  // Real mode does NOT complete the connection here. It validates the state, seals the authorization code to the
+  // completion worker's public key, hands it off over an OIDC-authenticated channel, and sends the browser to a page
+  // that reads the job's real status. "Connected" is a claim only the worker can earn.
   if (identity.ok) {
     const built = buildRealCallbackRunnerFromEnvironment();
     // The real path could not be assembled. Refuse — do NOT fall through to the synthetic handler.
-    if (!built.ok) return refuse(built.reason);
+    if (!built.ok) return handoffErrorRedirect(built.reason);
 
-    return handleSyntheticSlackOAuthCallback(request, {
-      // The handler is mode-agnostic transport (guard → session → parse → orchestrate → safe response). It is named
-      // for the mode it was written for; the runner it is handed is what decides whether anything is synthetic.
-      enabled: true,
+    return handleHandoffCallback(request, {
       resolveSubject: async () => (await getSessionUser())?.id ?? null,
-      runOrchestrator: built.run,
+      run: built.run,
     });
   }
 

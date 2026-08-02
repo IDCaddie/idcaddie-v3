@@ -29,9 +29,17 @@ export const STAGING_VERCEL_PROJECT_ID = "prj_l30QMLpF3dNLwKBP2CTG7v9rIon0";
 export const STAGING_SUPABASE_REF = "ycdpzduxugdsffjqyoai";
 export const PRODUCTION_SUPABASE_REF = "dzbfxulvxchdemcettrx";
 export const STAGING_CALLBACK_URI = "https://idcaddie-v3.vercel.app/connectors/oauth/callback";
-// The narrow database identity from docs/83. The runner's own login must never reach the web tier: it can execute every
-// `runner_*` function in the schema, so a compromised request path could fabricate directory evidence.
+// Two database identities that must never reach this tier, for the same reason with different blast radii.
+//
+// `connector_runner_login` can execute every `runner_*` function in the schema, so a compromised request path could
+// fabricate directory evidence.
+//
+// `oauth_completer` is narrow — nine purpose-pinned wrappers, zero table privileges — but it is still a database
+// credential, and holding one would mean the web tier had a Postgres driver. That is the invariant doc 46 §11 and
+// `scripts/check-app-runtime-imports.sh` enforce, and it is the correction recorded in doc 83 §2: the boundary is about
+// what this tier can DO, not which credential it holds. Its presence here is therefore a REFUSAL, not a requirement.
 export const OAUTH_COMPLETER_ROLE = "oauth_completer";
+export const OAUTH_COMPLETER_DB_URL_VAR = "OAUTH_COMPLETER_DB_URL";
 export const FORBIDDEN_RUNNER_ROLE = "connector_runner_login";
 
 export type EnvironmentRefusal =
@@ -43,7 +51,7 @@ export type EnvironmentRefusal =
   | "supabase_project_mismatch"
   | "production_supabase_ref_present"
   | "runner_credential_present"
-  | "oauth_completer_identity_missing"
+  | "completer_credential_present"
   | "callback_uri_missing"
   | "callback_uri_mismatch"
   | "real_exchange_disabled"
@@ -106,11 +114,17 @@ export function resolveStagingEnvironmentIdentity(env: Env = process.env): Envir
     }
   }
 
-  // ── 6. …and the narrow identity must be the one present. Absence is refusal: falling back to "whatever connection is
-  //       configured" is exactly the failure this whole design exists to prevent.
-  const completerUrl = env.OAUTH_COMPLETER_DB_URL;
-  if (!present(completerUrl) || !completerUrl.includes(OAUTH_COMPLETER_ROLE)) {
-    return { ok: false, reason: "oauth_completer_identity_missing" };
+  // ── 6. …and neither must the narrow one. This check INVERTED in Phase 8K, and the inversion is the whole correction
+  //       in doc 83 §2: an earlier design had the web tier authenticate as `oauth_completer` directly, which required a
+  //       Postgres driver in a public request path and violated doc 46 §11. Completion moved to a worker, so a
+  //       completer connection string here now means someone is rebuilding the rejected design — refuse.
+  //
+  //       Both the variable NAME and any value carrying the role name are checked, because renaming the variable is the
+  //       obvious way around a name-only check.
+  for (const [k, v] of Object.entries(env)) {
+    if (k === OAUTH_COMPLETER_DB_URL_VAR || (typeof v === "string" && v.includes(OAUTH_COMPLETER_ROLE))) {
+      return { ok: false, reason: "completer_credential_present" };
+    }
   }
 
   // ── 7. The callback. Compared as a whole string against the pinned value — not a host check, not a prefix.

@@ -11,7 +11,7 @@
 | State generation / consume / replay denial | **REAL** | Hosted-proven: a replay returned `already_consumed` (docs/52 row 9). |
 | `oauth.v2.access` exchange | **REAL** | `slack-oauth-exchange.ts` — injected HTTP client, no global fetch. Ran once for real (RUN GATE A, 2026-07-04). |
 | Real exchange wiring | **REAL but UNUSED** | `oauth-real-exchange-wiring.ts` assembles every real seam behind `CONNECTOR_OAUTH_REAL_EXCHANGE_ENABLED`. **Zero non-test callers.** |
-| **Callback route** | **SYNTHETIC** | `/connectors/oauth/callback` imports `handleSyntheticSlackOAuthCallback`; production-disabled. **This is the remaining OAuth boundary** — see the Phase 8E note below for what is now built and what still blocks it. |
+| **Callback route** | **REAL (handoff) / SYNTHETIC (elsewhere)** | Phase 8K: under the staging environment identity the route validates the state, **seals the authorization code to the completion worker's public key**, hands it off over Vercel OIDC, and redirects to a truthful pending page. It never claims "Connected" — it cannot, because it does not do the exchange. The synthetic handler remains only for environments the identity gate refuses. **The worker does not exist yet, and the worker-host allowlist is empty in code, so the real path fails closed today.** See the Phase 8K note below and doc [83 §8](83_REAL_OAUTH_COMPLETION_ARCHITECTURE.md). |
 | Secret storage | **REAL** | Envelope (KMS-wrapped DEK + AEAD). Three real `oauth_access` rows for the Slack connector; RUN GATE B proved rotation + revocation. |
 | Verification (`auth.test`) | **REAL** | Manifest endpoint; decrypt/use proven against live Slack (docs/52 row 7). |
 | Discovery manifest | **REAL** | `slack.v1.json`: bearer auth, 18 rps / burst 5, 500-request / 100k-item / 600s budget, cursor pagination (`max_pages` 200), field maps, scopes. |
@@ -118,3 +118,30 @@ mean either a silent fallback to synthetic (forbidden) or a route that always 50
 
 The Slack connector `1575cde3…` is **disconnected** (Phase 5B demo disposition, deliberate). Two active `oauth_access` secrets
 remain from 2026-07-05; whether the token is still valid at Slack is **unverified** — it has not been exercised since.
+
+## Update — Phase 8K (the handoff)
+
+**Boundary 1 is closed, in the shape doc 83 §2 corrected to.** `/connectors/oauth/callback` no longer imports the
+synthetic handler on the real path. Under the staging environment identity it runs `handleHandoffCallback`, which:
+
+1. validates the signed state against server-trusted context, **before** the authorization code is touched;
+2. seals the code to the completion worker's X25519 public key (`node:crypto`, no KMS, no new dependency);
+3. builds the canonical protocol-v1 body and presents a Vercel OIDC assertion read from the environment;
+4. posts once to the pinned worker path and accepts only a two-word acknowledgement;
+5. redirects to `/connectors/oauth/pending`, which reads `product_oauth_completion_job_status` and nothing else.
+
+The Phase 8E blocker is gone by construction rather than by provisioning: `withSlackClientSecret` and
+`createRunnerAppSecretStore` are **not on this path at all**. V3 needs no KMS grant and no database identity for
+completion, and an architecture test asserts it cannot acquire one by accident.
+
+**What still blocks a live run** — none of it code in this repository except the last line:
+
+- the completion worker itself (PR 4), holding the private sealing key and `OAUTH_COMPLETER_DB_URL`;
+- the worker's deployed host, its OIDC audience and Vercel federation, and both KMS keys;
+- the Slack redirect registration;
+- a reviewed change adding the worker host to `WORKER_ALLOWED_HOSTS`, which is **empty in code** so the real path fails
+  closed until then.
+
+`oauth-real-exchange-wiring.ts` and `oauth-callback-real-runner.ts` still have zero non-test callers and are left in
+place: they are the lineage the runner vendors from, not dead app code. Nothing in the callback path can reach them, and
+the architecture test is what says so.

@@ -215,12 +215,12 @@ Idempotency is keyed on `(aead_nonce, aead_tag)`.
 ### Remaining work
 
 1. ~~**The completion-job model.**~~ **DONE — migration 0081 (§7 below).**
-2. **The Vercel OIDC handoff.** Pin issuer, audience, project `prj_l30QMLpF3dNLwKBP2CTG7v9rIon0`, team
-   `team_PYYzXw6Wn7HVtPvvcQWNRSlC`, environment identity, body digest, and the job id/nonce. The callback returns a
-   truthful pending page and never claims "Connected" at handoff time.
-3. **The worker task**, deployed separately from discovery, with no runner database credential in the process.
+2. ~~**The Vercel OIDC handoff.**~~ **DONE — Phase 8K (§8 below).**
+3. **The worker task**, deployed separately from discovery, with no runner database credential in the process. This is
+   the only remaining code, and §8.7 lists exactly what it owes.
 
-Unprovisioned: the ten remaining gate variables, both KMS keys, the OIDC role, and the Slack redirect registration.
+Unprovisioned: the remaining gate variables (§8.6), both KMS keys, the OIDC audience/federation, the worker's sealing
+key pair, the worker host, and the Slack redirect registration.
 
 ---
 
@@ -297,3 +297,187 @@ It seeded **no `auth.users` and no `public.profiles`**, so the `authenticated` h
 run against shared staging (doc [20](20_STAGING_HOSTED_APPLY_AND_CUTOVER_DISCIPLINE.md) forbids exactly that class of
 fixture there). That boundary is proven on hosted by privilege instead, in the read-only pass. Neither pass claims the
 other's ground.
+
+---
+
+## 8. The handoff — Phase 8K (2026-08-02)
+
+The web tier's whole job, in one sentence: **prove the callback is the one it authorized, seal the authorization code so
+only the worker can read it, hand it over, and tell the customer the truth about what has and has not happened.**
+
+It opens no database connection, constructs no KMS client, contacts no Slack endpoint, and cannot decrypt what it just
+sealed. `oauth-handoff-architecture.test.ts` asserts each of those against the source of every file on the path, and
+mutation-tests each rule against a planted violation — the boundary that §2 says was crossed once already is now checked
+by something that has been seen to fail.
+
+### 8.1 The environment gate inverted
+
+`resolveStagingEnvironmentIdentity` used to **require** `OAUTH_COMPLETER_DB_URL`. It now **refuses** when that variable
+exists under any name, or when any value carries the `oauth_completer` role — new reason `completer_credential_present`,
+alongside the existing `runner_credential_present`. That is the §2 correction made operational: the boundary is about
+what this tier can DO, and a database credential here means the rejected design is being rebuilt.
+
+### 8.2 The handoff protocol — version 1
+
+`oauth-handoff-protocol.ts` is the SHARED contract; the worker reads the same file. Canonical JSON, keys written out in
+this order, `JSON.stringify` — the receiver re-serializes and compares, so a non-canonical body that parses to the right
+fields is still refused.
+
+| field | value |
+|---|---|
+| `version` | `1` |
+| `environment` | `"staging"` — the **ID Caddie** environment, not Vercel's channel label |
+| `correlationId` | `oauth_pending.state_jti`, `^[A-Za-z0-9_.:-]{1,64}$` |
+| `tenantId` / `connectorId` | uuid |
+| `provider` | `"slack"` |
+| `redirectUri` | `https://idcaddie-v3.vercel.app/connectors/oauth/callback` |
+| `expectedTeamId` | `^T[A-Z0-9]{2,30}$` |
+| `payloadScheme` | `X25519-HKDF-SHA256-AES-256-GCM` |
+| `payloadKeyId` | `^[A-Za-z0-9_.:-]{1,128}$` |
+| `protectedPayload` | base64 of the sealed envelope, 60–8192 bytes decoded |
+
+Strict: an unknown key is a refusal, not an ignored extra. There is no forward-compatible extension point — `version` is
+how this protocol changes. `POST` to the pinned path `/internal/oauth-completion/handoff`, with headers
+`authorization: Bearer <assertion>`, `x-idcaddie-handoff-version`, `x-idcaddie-correlation-id`, and
+`x-idcaddie-body-digest` (sha256 hex over the exact serialized body — a **header**, because a digest cannot cover
+itself). The acknowledgement is `{ version: 1, status: "accepted" | "duplicate" }` and nothing else: no job id, no
+timestamps, no reason. 200 must carry `accepted`, 409 must carry `duplicate`, and a disagreement between the two is a
+refusal rather than a guess.
+
+### 8.3 What the assertion can and cannot bind — read this before changing anything
+
+A Vercel OIDC token is minted **by Vercel, for a deployment**. A caller cannot add a nonce, a body digest, a tenant or a
+correlation to it. So the binding is split across three mechanisms, each doing only what it can actually do:
+
+1. **The assertion authenticates the CALLER** — issuer, audience, subject, team, project, Vercel environment, bounded
+   lifetime. It answers "is this our staging deployment", and nothing else.
+2. **The AAD of the sealed payload binds the request FIELDS.** AES-GCM authenticates the AAD, so a worker handed a
+   substituted body cannot open the authorization code at all. *This* is the body binding.
+3. **The transport digest binds the exact bytes**, so alteration in the channel is a refusal rather than a partial parse.
+
+Residual, stated plainly: an assertion captured within its lifetime could in principle be paired with a different body.
+TLS prevents the capture; the AAD makes the substituted body useless; and 0081's correlation uniqueness plus the
+`oauth_pending` liveness gate make the replay a refusal. Adding a shared HMAC secret to close the theoretical gap would
+reintroduce exactly the long-lived credential this design removes.
+
+### 8.4 The claims PR 4 must verify
+
+`verifyHandoffAssertion` is implemented **here**, in PR 3, so PR 4 cannot invent a weaker one. It **requires** an injected
+signature verifier and refuses without one: a decoded JWT is not an authenticated JWT, and the type says so.
+`makeJwksSignatureVerifier` does kid resolution and RS256 verification with `node:crypto`; PR 4 supplies the fetched key
+set and nothing else.
+
+| claim | rule |
+|---|---|
+| algorithm | `RS256` only. `none` and every other alg refused **before any claim is read** |
+| signature | over `header.payload`, key resolved by `kid`; absent or unmatched `kid` ⇒ refuse |
+| `iss` | must start `https://oidc.vercel.com/` **and** equal the configured issuer exactly |
+| `aud` | exactly the audience **dedicated to the completion worker** — never Vercel's default `https://vercel.com/<team>`. An array is accepted only when it names exactly one audience |
+| `sub` | exact `owner:<team>:project:<project>:environment:<vercel-environment>` |
+| `owner_id` | exact `team_PYYzXw6Wn7HVtPvvcQWNRSlC` |
+| `project_id` | exact `prj_l30QMLpF3dNLwKBP2CTG7v9rIon0` |
+| `environment` | exact Vercel channel name — **not** the string `staging` (see §8.2) |
+| `exp` | `> now`, with **no** skew grace |
+| `iat` | `<= now + 30s` (issued-in-future refused) and `now - iat <= maxAge` |
+| `nbf` | if present, `<= now + 30s` |
+| `exp - iat` | `<= maxLifetime` |
+
+`maxLifetime` / `maxAge` default to **3600s** and are **parameters, not constants**. That is an assumption, not a
+measurement: Vercel's runtime-injected token lifetime is not observable from this repository, and a ceiling below it
+would refuse every real token. **PR 4 must tighten it to the observed lifetime once a real assertion has been seen.**
+
+Alongside the assertion, `verifyHandoffRequest` checks the version header, the body size, the digest header against the
+received bytes, the strict schema, the correlation header against the body, canonical form, and the payload bounds.
+
+V3 also runs `preflightOwnAssertion` before sending — audience, project, team, expiry. It is **NOT authentication**, it
+verifies no signature, and it is named so nobody can mistake it for one. It exists so a bearer token minted for a
+different relying party never leaves the building. The assertion is read from `process.env.VERCEL_OIDC_TOKEN` **only**;
+an inbound `x-vercel-oidc-token` header is attacker-controlled and would become an outbound `Authorization` header.
+
+### 8.5 Sealing
+
+`oauth-payload-seal.ts`, `node:crypto` only, no new dependency and no KMS.
+
+```
+offset  size  meaning
+0       1     envelope version, 0x01
+1       32    ephemeral X25519 public key, raw
+33      12    AES-GCM nonce
+45      n     ciphertext
+45+n    16    AES-GCM tag
+
+shared = X25519(ephemeral_private, worker_public)
+key    = HKDF-SHA256(ikm=shared, salt=ephemeral_public||worker_public, info=HKDF_INFO, len=32)
+env    = AES-256-GCM(key, nonce, plaintext=authorization code, aad=canonicalSealAad(binding))
+
+HKDF_INFO = "idcaddie:oauth-completion-handoff:v1:X25519-HKDF-SHA256-AES-256-GCM"
+```
+
+The salt binds **both** public keys, so a key-substitution attempt derives a different key. The AAD is newline-joined,
+in this fixed order, and every field's grammar excludes a newline so no value can shift a boundary:
+
+```
+idcaddie:oauth-completion-handoff:v1
+1
+<tenantId>
+<connectorId>
+slack
+<correlationId>
+https://idcaddie-v3.vercel.app/connectors/oauth/callback
+<expectedTeamId>
+<payloadKeyId>
+```
+
+Fresh ephemeral key and fresh nonce every call, with **no injectable seam** for either — a deterministic seal is exactly
+what this envelope must not have. That is why 0081 treats a re-seal as a new request: two seals of one code differ, and
+a caller that re-sealed should read the job's status rather than enqueue again. There is **no transport retry**, so
+"reuse the same sealed buffer" is structurally true rather than a rule to remember, and a 409 `duplicate` is reported as
+pending rather than as failure.
+
+**The configured public key is base64 of the SPKI DER, not the raw 32 bytes**, and that is load-bearing. An X25519 and
+an Ed25519 public key are both exactly 32 raw bytes; told `crv: "X25519"`, Node imports a signing key as a key-agreement
+key without complaint, and the mistake surfaces later as a worker that can never decrypt anything. SPKI carries the
+curve OID, so it is refused at configuration time, where a person can still fix it. *(Found by a test that was written
+expecting the raw form to be rejected and discovered it was not.)*
+
+**There is no opener under `src/`.** The reference decryption lives in `oauth-payload-seal.test.ts`, which proves the
+wire format is real without giving the web tier the capability. PR 4 implements it from the layout above.
+
+### 8.6 Configuration — names only; nothing is set
+
+Added by this PR as **parsing and validation only** (doc 24 §3f):
+
+| variable | rule |
+|---|---|
+| `OAUTH_COMPLETION_WORKER_URL` | exact normalized HTTPS URL, allowlisted host, pinned path, no credentials/query/fragment |
+| `OAUTH_COMPLETION_WORKER_OIDC_AUDIENCE` | the dedicated worker audience |
+| `OAUTH_COMPLETION_WORKER_PUBLIC_KEY` | base64 SPKI of the worker's X25519 public key |
+| `OAUTH_COMPLETION_WORKER_PUBLIC_KEY_ID` | `^[A-Za-z0-9_.:-]{1,128}$` |
+| `VERCEL_OIDC_TOKEN` | injected by Vercel; read from the environment only |
+
+`OAUTH_COMPLETER_DB_URL` is **removed from the V3 contract entirely** and its presence is now a refusal (§8.1).
+
+**`WORKER_ALLOWED_HOSTS` is deliberately EMPTY in code.** The worker is not deployed and its host is not known, so a
+fully-configured staging environment still refuses with `worker_host_not_allowlisted`. Opening it requires a reviewed
+change to the constant — an operator cannot do it from the environment, which is the same discipline as
+`REAL_CALLBACK_URIS` in `connector-oauth-config.ts`. **This is the one code-level unblock PR 4 needs.**
+
+### 8.7 The pending experience, and what PR 4 owes
+
+The callback redirects to `/connectors/oauth/pending?c=<correlationId>`. That page's only source of truth is
+`product_oauth_completion_job_status` — the single 0081 wrapper granted to `authenticated`. Four customer words:
+**Completing your Slack connection · Connection completed · Connection failed · Connection expired**, plus a
+**Retry connection** link on the two a customer can act on. `pending`/`claimed` both read as *completing*; a denied read,
+another tenant's job, and a job that never existed are all *failed* and therefore indistinguishable. Nothing else
+crosses the boundary: no job id, no timestamps, no terminal reason, no attempt count, no digest, no payload. Polling is
+5s × 36 (three minutes; the job's deadline is ten), stops on the first terminal state, and when the budget runs out says
+so truthfully instead of guessing an ending. A refresh renders the durable state on the first paint.
+
+PR 4 owes, and only this:
+
+1. The worker endpoint at `/internal/oauth-completion/handoff`, calling `verifyHandoffRequest` from this repository with
+   a JWKS-backed verifier and a tightened `maxLifetime` (§8.4).
+2. Opening the private half of the sealing key and decrypting the envelope (§8.5).
+3. `oauth_completer_enqueue_oauth_completion_job` → claim → Slack `oauth.v2.access` → workspace binding → 0080 secret
+   ingest → consume the pending row → complete/fail, over `OAUTH_COMPLETER_DB_URL`, in the worker process.
+4. A reviewed change adding the worker host to `WORKER_ALLOWED_HOSTS` (§8.6).

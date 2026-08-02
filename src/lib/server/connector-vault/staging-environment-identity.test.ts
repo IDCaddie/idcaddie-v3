@@ -24,12 +24,12 @@ const CORR = "corr-live-run-1";
 // Supabase host is composed from the exported constant so no literal Supabase URL is committed under src/.
 const COMPLETER_URL = `postgresql://oauth_completer_login:not-a-real-token@db.${STAGING_SUPABASE_REF}.supabase.co:5432/postgres`;
 
-// The exact idcaddie-v3 staging configuration.
+// The exact idcaddie-v3 staging configuration. It holds NO database credential of any kind: after the doc 83 §2
+// correction, completion belongs to a worker and the presence of a completer connection string here is a refusal.
 const VALID: Record<string, string | undefined> = {
   IDCADDIE_ENVIRONMENT: "staging",
   IDCADDIE_VERCEL_PROJECT_ID: STAGING_VERCEL_PROJECT_ID,
   NEXT_PUBLIC_SUPABASE_URL: `https://${STAGING_SUPABASE_REF}.supabase.co`,
-  OAUTH_COMPLETER_DB_URL: COMPLETER_URL,
   CONNECTOR_OAUTH_REDIRECT_URI: STAGING_CALLBACK_URI,
   CONNECTOR_OAUTH_REAL_EXCHANGE_ENABLED: "1",
   CONNECTOR_OAUTH_EXPECTED_SLACK_TEAM_ID: TEAM,
@@ -153,13 +153,24 @@ describe("environment identity — every fact is load-bearing", () => {
     }));
     expect(r).toEqual({ ok: false, reason: "runner_credential_present" });
   });
-  it("refuses when the narrow oauth_completer identity is absent", () => {
-    expect(resolveStagingEnvironmentIdentity(withOut("OAUTH_COMPLETER_DB_URL")))
-      .toEqual({ ok: false, reason: "oauth_completer_identity_missing" });
+  // Phase 8K INVERTED this. An earlier design authenticated the web tier as `oauth_completer` directly, which required
+  // a Postgres driver in a public request path and violated doc 46 §11; the gate REQUIRED the credential. Completion
+  // moved to a worker, so the same variable is now evidence that the rejected design is being rebuilt.
+  it("refuses when a completer connection string is present under its own name", () => {
+    expect(resolveStagingEnvironmentIdentity(withVal({ OAUTH_COMPLETER_DB_URL: COMPLETER_URL })))
+      .toEqual({ ok: false, reason: "completer_credential_present" });
   });
-  it("refuses a completer URL that is not the oauth_completer role", () => {
-    expect(resolveStagingEnvironmentIdentity(withVal({ OAUTH_COMPLETER_DB_URL: `postgresql://postgres:not-a-real-token@db.${STAGING_SUPABASE_REF}.supabase.co:5432/postgres` })))
-      .toEqual({ ok: false, reason: "oauth_completer_identity_missing" });
+  it("refuses when the completer role appears in a value under ANY variable name", () => {
+    // Renaming the variable is the obvious way around a name-only check, so the value is scanned too.
+    expect(resolveStagingEnvironmentIdentity(withVal({ SOME_OTHER_DB_URL: COMPLETER_URL })))
+      .toEqual({ ok: false, reason: "completer_credential_present" });
+  });
+  it("refuses an EMPTY completer variable — the hazard is the variable existing, not its value", () => {
+    expect(resolveStagingEnvironmentIdentity(withVal({ OAUTH_COMPLETER_DB_URL: "" })))
+      .toEqual({ ok: false, reason: "completer_credential_present" });
+  });
+  it("accepts the staging configuration precisely BECAUSE no database credential is present", () => {
+    expect(resolveStagingEnvironmentIdentity(VALID).ok).toBe(true);
   });
 
   it.each(["CONNECTOR_OAUTH_EXPECTED_TENANT_ID", "CONNECTOR_OAUTH_EXPECTED_CONNECTOR_ID", "CONNECTOR_OAUTH_EXPECTED_CORRELATION_ID"])(

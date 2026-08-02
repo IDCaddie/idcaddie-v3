@@ -12,6 +12,56 @@ from PRs verified via `git log` / `gh pr list`.
 > **as of each PR's date** and are historical — where an older entry says "RISK-007 remains OPEN" / "Phase C remains
 > BLOCKED", that was accurate at that entry's date; this banner is the current state.
 
+### feat(vault) — Phase 8K: the OIDC-authenticated handoff, payload sealing, and a truthful pending page · 2026-08-02
+
+- **The web tier's job, in one sentence:** prove the callback is the one it authorized, seal the authorization code so
+  only the completion worker can read it, hand it over, and tell the customer the truth about what has and has not
+  happened. It opens no database connection, constructs no KMS client, contacts no Slack endpoint, and cannot decrypt
+  what it just sealed. Full model in [83 §8](./83_REAL_OAUTH_COMPLETION_ARCHITECTURE.md).
+- **The environment gate INVERTED.** `resolveStagingEnvironmentIdentity` used to *require* `OAUTH_COMPLETER_DB_URL`; it
+  now refuses when that variable exists under any name, or when any value carries the `oauth_completer` role — new
+  reason `completer_credential_present`. That is the doc 83 §2 correction made operational: a database credential here
+  means the rejected design is being rebuilt.
+- **The assertion authenticates the CALLER; it cannot bind the body, and the code does not pretend otherwise.** A Vercel
+  OIDC token is minted by Vercel for a deployment — a caller cannot add a nonce, a digest, a tenant or a correlation to
+  it. So the binding is split three ways, each mechanism doing only what it can: the assertion pins issuer, audience,
+  subject, `team_PYYzXw6Wn7HVtPvvcQWNRSlC`, `prj_l30QMLpF3dNLwKBP2CTG7v9rIon0`, Vercel environment and a bounded
+  lifetime; the sealed payload's **AAD** cryptographically binds every request field, so a substituted body cannot open
+  the code at all; and a transport digest header binds the exact bytes received. The residual and its mitigations are
+  written down rather than glossed over.
+- **`verifyHandoffAssertion` ships HERE, in the repository that owns the protocol**, so PR 4 cannot invent a weaker one.
+  It REQUIRES an injected signature verifier and refuses without one — a decoded JWT is not an authenticated JWT, and
+  the type says so. `alg` is RS256 only and is checked before any claim is read; `exp` gets no skew grace. The lifetime
+  ceiling defaults to one hour and is a **parameter, not a constant**, because Vercel's injected token lifetime is not
+  observable from this repository and a ceiling below it would refuse every real token — flagged as an assumption for
+  PR 4 to tighten.
+- **Sealing is `node:crypto` only** — X25519 → HKDF-SHA256 → AES-256-GCM, the scheme migration 0081's CHECK constrains.
+  Fresh ephemeral key and fresh nonce per call with **no injectable seam**, which is why 0081 treats a re-seal as a new
+  request; there is no transport retry, so "reuse the same sealed buffer" is structurally true rather than a rule to
+  remember, and a 409 `duplicate` is reported as pending rather than failure. **There is no opener under `src/`** — the
+  reference decryption lives in the test file, proving the wire format without giving the web tier the capability.
+- **The configured worker key is base64 SPKI, not raw bytes, and that is load-bearing.** An X25519 and an Ed25519 public
+  key are both exactly 32 raw bytes; told `crv: "X25519"`, Node imports a signing key as a key-agreement key without
+  complaint and the mistake surfaces later as a worker that can never decrypt anything. SPKI carries the curve OID, so
+  it is refused at configuration time. Found by a test written expecting the raw form to be rejected, which discovered
+  it was not.
+- **`WORKER_ALLOWED_HOSTS` is deliberately EMPTY in code.** The worker is not deployed and its host is unknown, so a
+  fully-configured staging environment still refuses with `worker_host_not_allowlisted`. Opening it needs a reviewed
+  change to the constant — an operator cannot do it from the environment. Same discipline as `REAL_CALLBACK_URIS`.
+- **The callback can no longer claim "Connected", because it no longer knows.** It redirects to
+  `/connectors/oauth/pending`, whose only source of truth is `product_oauth_completion_job_status` — the one 0081
+  wrapper granted to `authenticated`. Four customer words, a retry link on the two states a customer can act on, and
+  nothing else across the boundary: no job id, no timestamps, no terminal reason, no attempt count, no digest, no
+  payload. A denied read, another tenant's job and a job that never existed are indistinguishable. Polling is bounded
+  (5s x 36), stops on the first terminal state, and when the budget runs out says so truthfully instead of guessing.
+- **`oauth-handoff-architecture.test.ts`** asserts the whole boundary — no `pg`, no KMS SDK, no runner vault module, no
+  `OAUTH_COMPLETER_DB_URL` read, no `connector_runner_login`, no Slack exchange, no direct job write — as pure rules
+  over file contents, each **mutation-tested against a planted violation**. Doc 83 §2 records that this boundary was
+  crossed once and only caught at the first full gate run; a guard that has never been seen to fail is not a guard.
+- **NO deployment, NO variable set, NO KMS, NO Slack redirect registration, NO OAuth run, NO production touch.** Code
+  and configuration parsing only. Gates: full suite (2407 passed / 22 skipped), typecheck, runner typecheck, lint,
+  auth-safety, no-real-tokens, app-runtime-imports, deploy-templates, migration-safety, RLS suite, docs gate, build.
+
 ### feat(vault) — Phase 8J: migration 0081, the durable one-time OAuth completion job · 2026-08-02
 
 - The web tier cannot complete a Slack OAuth callback — doc 46 §11 and `check-app-runtime-imports.sh` keep the app repo

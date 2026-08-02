@@ -16,14 +16,14 @@ const CORR = "corr-phase-8e-test";
 const REDIRECT = "https://idcaddie-v3.vercel.app/connectors/oauth/callback";
 
 // Phase 8F: the gate is now a POSITIVE environment-identity check, so a valid environment must state which
-// environment it is, which Vercel project, which Supabase project, and that the narrow oauth_completer identity is the
-// one present. "Not production" is no longer a passing answer.
+// environment it is, which Vercel project and which Supabase project. "Not production" is no longer a passing answer.
+// Phase 8K: it must ALSO hold no completer database credential — completion moved to a worker, so one being present
+// here means the rejected design is being rebuilt (doc 83 §2).
 const okEnv = (over: Record<string, string | undefined> = {}) => ({
   NODE_ENV: "test",
   IDCADDIE_ENVIRONMENT: "staging",
   IDCADDIE_VERCEL_PROJECT_ID: "prj_l30QMLpF3dNLwKBP2CTG7v9rIon0",
   NEXT_PUBLIC_SUPABASE_URL: `https://${"ycdpzduxugdsffjqyoai"}.supabase.co`,
-  OAUTH_COMPLETER_DB_URL: `postgresql://oauth_completer_login:not-a-real-token@db.${"ycdpzduxugdsffjqyoai"}.supabase.co/postgres`,
   CONNECTOR_OAUTH_REAL_EXCHANGE_ENABLED: "1",
   CONNECTOR_OAUTH_REDIRECT_URI: REDIRECT,
   CONNECTOR_OAUTH_EXPECTED_SLACK_TEAM_ID: TEAM,
