@@ -212,18 +212,67 @@ describe("0081 — the OAuth completion job", () => {
     for (const w of COMPLETER_WRAPPERS) expect(loop, `${w} must be in the grant loop`).toContain(`public.${w}(`);
   });
 
+  it("has no grant anywhere in the file outside those two, in either form", () => {
+    // The assertion above reads the grant LOOP's format strings. A grant written as a plain SQL statement anywhere else
+    // in the migration would be invisible to it — and invisible to the SQL suite too, because scripts/test-rls.sh
+    // re-revokes the whole `oauth_completer_*` surface. That is exactly the masking class this file exists to close, so
+    // the scan is over the WHOLE migration and matches both the `format('… to %s')` and the literal statement form.
+    const grants = [...SRC81.matchAll(/grant\s+execute\s+on\s+function\s+([^;']+?)\s+to\s+([a-z_, ]+?)\s*(?:'|;)/g)].map(
+      (m) => ({ target: m[1].trim(), grantees: m[2].trim() }),
+    );
+    expect(grants.length, "the migration must contain grants").toBeGreaterThanOrEqual(2);
+    for (const g of grants) {
+      if (g.target === "%s") {
+        expect(g.grantees, "the loop may only grant to oauth_completer").toBe("oauth_completer");
+      } else {
+        expect(g.target, `unexpected literal grant target: ${g.target}`).toContain(PRODUCT_READ);
+        expect(g.grantees, "the customer read may only go to authenticated").toBe("authenticated");
+      }
+    }
+    // And nothing is granted on the table itself, in any form — the wrappers are the only way in.
+    expect(SRC81).not.toMatch(/grant\s+[a-z, ()]*\s*on\s+(table\s+)?public\.oauth_completion_jobs/i);
+  });
+
+  it("closes the inherited PUBLIC grant on definer trigger functions", () => {
+    // 0079 §6 removed the implicit PUBLIC EXECUTE from nine definer RLS predicate helpers but not from TRIGGER
+    // functions, four of which are definer audit writers carrying `=X/postgres` on hosted. CREATE TRIGGER checks EXECUTE
+    // and TEMPORARY is a PUBLIC database privilege, so a role with zero table grants could attach one to a temp table
+    // and forge a public.audit_logs row under postgres's authority.
+    //
+    // This can only be asserted HERE. scripts/test-rls.sh performs the same revoke to un-mask its own blanket grant, so
+    // the SQL suite is green whether or not the migration does it — which is precisely how the gap survived until 0081.
+    const block = SRC81.slice(SRC81.indexOf("-- ══ 10."));
+    expect(block, "0081 must close the trigger-function PUBLIC grant").toMatch(
+      /prorettype = 'pg_catalog\.trigger'::regtype/,
+    );
+    const revoke = block.match(/revoke execute on function %s from ([a-z_, ]+)'/);
+    expect(revoke, "§10 must revoke EXECUTE").not.toBeNull();
+    for (const role of ["public", "anon", "authenticated", "service_role"]) {
+      expect(revoke![1], `§10 must name ${role}`).toContain(role);
+    }
+    // Every trigger function, not the four that happen to be definer today.
+    expect(block).not.toMatch(/prosecdef/);
+  });
+
   it("grants the customer read to authenticated only, and never to the identity that works the job", () => {
-    const line = GRANT_BLOCK.slice(GRANT_BLOCK.indexOf(`revoke execute on function public.${PRODUCT_READ}`));
+    // Matched as the EXACT statement, not as "the word appears somewhere after a `from`". The looser form was killed by
+    // its own mutant until §10 was added, whose prose contains "…removed the implicit PUBLIC EXECUTE from nine … so
+    // `oauth_completer` can execute…" — a comment satisfying a security assertion is the same failure class this file
+    // exists to catch.
+    const stmt = SRC81.match(
+      new RegExp(`revoke execute on function public\\.${PRODUCT_READ}\\(uuid, text\\)\\s*from ([a-z_, ]+);`),
+    );
+    expect(stmt, `0081 must revoke ${PRODUCT_READ}`).not.toBeNull();
+    const revoked = stmt![1].split(",").map((r) => r.trim()).sort();
     // `oauth_completer` is the one that matters: 0079's blanket revoke loop ran before this function existed, and the
     // PUBLIC grant Postgres creates with every function would otherwise hand it over.
-    for (const role of ["public", "anon", "service_role", "connector_runner", "oauth_completer"]) {
-      expect(line, `0081 must revoke ${PRODUCT_READ} from ${role}`).toMatch(
-        new RegExp(`from[^;]*\\b${role}\\b`, "s"),
-      );
-    }
-    const granted = line.match(new RegExp(`grant execute on function public\\.${PRODUCT_READ}\\([^)]*\\) to ([a-z_, ]+);`));
+    expect(revoked).toEqual(["anon", "connector_runner", "oauth_completer", "public", "service_role"]);
+
+    const granted = SRC81.match(
+      new RegExp(`grant execute on function public\\.${PRODUCT_READ}\\(uuid, text\\) to ([a-z_, ]+);`),
+    );
     expect(granted, "the customer read must be granted").not.toBeNull();
-    expect(granted![1].trim()).toBe("authenticated");
+    expect(granted![1].split(",").map((r) => r.trim())).toEqual(["authenticated"]);
   });
 
   it("claims with ONE atomic UPDATE — nothing reads the row before it is written", () => {

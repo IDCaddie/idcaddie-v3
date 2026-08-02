@@ -26,19 +26,38 @@ insert into public.tenant_memberships (tenant_id, user_id, role) values
   ('e5000000-0000-4000-8000-00000000000a', 'e5000000-0000-4000-8000-0000000000f2', 'editor'),
   ('e5000000-0000-4000-8000-00000000000b', 'e5000000-0000-4000-8000-0000000000f3', 'owner') on conflict do nothing;
 
+-- TWO Slack connectors in tenant A. One is not decoration: with a single Slack connector per tenant, "belongs to this
+-- tenant" and "is the connector this correlation was issued for" are the same predicate, and the enqueue's
+-- correlation-to-connector binding cannot be tested at all. 0071/0073 exist precisely because a tenant may hold more
+-- than one connector for a provider.
 insert into public.connectors (id, tenant_id, provider, display_name, status, connection_state) values
   ('e5000000-0000-4000-8000-0000000000c1', 'e5000000-0000-4000-8000-00000000000a', 'slack', 'WS A', 'pending', 'discovered'),
   ('e5000000-0000-4000-8000-0000000000c2', 'e5000000-0000-4000-8000-00000000000a', 'okta',  'Okta A','pending', 'discovered'),
-  ('e5000000-0000-4000-8000-0000000000c3', 'e5000000-0000-4000-8000-00000000000b', 'slack', 'WS B', 'pending', 'discovered');
+  ('e5000000-0000-4000-8000-0000000000c3', 'e5000000-0000-4000-8000-00000000000b', 'slack', 'WS B', 'pending', 'discovered'),
+  ('e5000000-0000-4000-8000-0000000000c4', 'e5000000-0000-4000-8000-00000000000a', 'slack', 'WS A2','pending', 'discovered');
 
--- The authorize half. A completion job may only exist for one of these.
+-- The authorize half. A completion job may only exist for one of these, and only while it is LIVE.
 insert into public.oauth_pending (tenant_id, connector_id, provider, subject, state_jti, nonce_hash, intent, expires_at)
 select 'e5000000-0000-4000-8000-00000000000a', 'e5000000-0000-4000-8000-0000000000c1', 'slack',
        'e5000000-0000-4000-8000-0000000000f1'::uuid, j, 'nh-' || j, 'connect', now() + interval '10 minutes'
   from unnest(array['job-ok','job-fail','job-sweep','job-idem','job-conflict','job-lazy','job-stale']) j;
 insert into public.oauth_pending (tenant_id, connector_id, provider, subject, state_jti, nonce_hash, intent, expires_at)
 values ('e5000000-0000-4000-8000-00000000000b', 'e5000000-0000-4000-8000-0000000000c3', 'slack',
-        'e5000000-0000-4000-8000-0000000000f3'::uuid, 'job-b', 'nh-job-b', 'connect', now() + interval '10 minutes');
+        'e5000000-0000-4000-8000-0000000000f3'::uuid, 'job-b', 'nh-job-b', 'connect', now() + interval '10 minutes'),
+       -- Issued against tenant A's OTHER Slack connector, so an enqueue naming C1 is a correlation/connector mismatch
+       -- and nothing else — the ownership gate cannot answer it.
+       ('e5000000-0000-4000-8000-00000000000a', 'e5000000-0000-4000-8000-0000000000c4', 'slack',
+        'e5000000-0000-4000-8000-0000000000f1'::uuid, 'job-otherconn', 'nh-job-otherconn', 'connect', now() + interval '10 minutes');
+
+-- The two ways an authorization stops being live. Both are on C1, so only liveness distinguishes them from `job-ok`.
+insert into public.oauth_pending
+  (tenant_id, connector_id, provider, subject, state_jti, nonce_hash, intent, expires_at, consumed_at)
+values ('e5000000-0000-4000-8000-00000000000a', 'e5000000-0000-4000-8000-0000000000c1', 'slack',
+        'e5000000-0000-4000-8000-0000000000f1'::uuid, 'job-consumed', 'nh-job-consumed', 'connect',
+        now() + interval '10 minutes', now());
+insert into public.oauth_pending (tenant_id, connector_id, provider, subject, state_jti, nonce_hash, intent, expires_at)
+values ('e5000000-0000-4000-8000-00000000000a', 'e5000000-0000-4000-8000-0000000000c1', 'slack',
+        'e5000000-0000-4000-8000-0000000000f1'::uuid, 'job-pastdue', 'nh-job-pastdue', 'connect', now() - interval '1 minute');
 
 -- A 64-byte stand-in for a sealed envelope. It is opaque to every assertion here, which is the point: nothing in the
 -- migration parses it, so nothing in this suite needs to.
@@ -203,6 +222,32 @@ begin
   exception when others then raised := true; msg := sqlerrm; end;
   assert raised, 'J3 a fabricated correlation must be refused';
   assert msg like '%no live authorization%', 'J3 refused by the authorize gate, got: ' || msg;
+
+  -- CORRELATION BOUND TO ANOTHER CONNECTOR OF THE SAME TENANT. The ownership gate passes here — C1 really is a Slack
+  -- connector of TA — so this is the ONLY case that exercises the authorize lookup's `p.connector_id = p_connector_id`.
+  -- Without a second Slack connector in the fixtures the predicate had no coverage at all: deleting it left the whole
+  -- suite green. The real flow it protects: a tenant authorizes for one Slack connector and the hand-off enqueues
+  -- naming another, which would bind a sealed authorization code to a workspace it was never granted against.
+  raised := false;
+  begin perform public.oauth_completer_enqueue_oauth_completion_job(TA, C1, 'job-otherconn', CB, TM, pg_temp.seal('oc'), SC, KI);
+  exception when others then raised := true; msg := sqlerrm; end;
+  assert raised, 'J3 a correlation issued for another connector must be refused';
+  assert msg like '%no live authorization%',
+    'J3 …by the AUTHORIZE gate, not the ownership gate (they are different messages), got: ' || msg;
+
+  -- LIVENESS, both halves. "and only while that authorization is still live" is the migration's claim; these are the
+  -- only two assertions that make it true.
+  raised := false;
+  begin perform public.oauth_completer_enqueue_oauth_completion_job(TA, C1, 'job-consumed', CB, TM, pg_temp.seal('cs'), SC, KI);
+  exception when others then raised := true; msg := sqlerrm; end;
+  assert raised and msg like '%no live authorization%',
+    'J3 an ALREADY-CONSUMED authorization cannot start a completion job, got: ' || msg;
+
+  raised := false;
+  begin perform public.oauth_completer_enqueue_oauth_completion_job(TA, C1, 'job-pastdue', CB, TM, pg_temp.seal('pd'), SC, KI);
+  exception when others then raised := true; msg := sqlerrm; end;
+  assert raised and msg like '%no live authorization%',
+    'J3 an EXPIRED authorization cannot start a completion job, got: ' || msg;
 
   -- Bounded inputs — each asserted on its exact bounded reason, for the reason above.
   raised := false;
@@ -417,9 +462,41 @@ begin
   assert n = 0, 'J7 …nor touch a connector credential, found ' || n;
   select count(*) into n from public.connector_secret_lifecycle_events where tenant_id = 'e5000000-0000-4000-8000-00000000000a';
   assert n = 0, 'J7 …nor supersede one, found ' || n;
-  -- The authorize half is untouched: consuming it is a separate, separately-granted operation (0079).
-  select count(*) into n from public.oauth_pending where tenant_id = 'e5000000-0000-4000-8000-00000000000a' and consumed_at is not null;
+  -- The authorize half is untouched: consuming it is a separate, separately-granted operation (0079). `job-consumed` is
+  -- seeded already-consumed, so it is excluded rather than counted.
+  select count(*) into n from public.oauth_pending
+   where tenant_id = 'e5000000-0000-4000-8000-00000000000a' and consumed_at is not null and state_jti <> 'job-consumed';
   assert n = 0, 'J7 …nor consume the pending row, found ' || n;
+end $$;
+
+-- ════ J7b: a retry still works AFTER the completion consumed the pending row ══════════════════════════════════════
+-- The enqueue resolves idempotency BEFORE the authorize-half gate, precisely so this works. Swapping the two blocks
+-- passes every other assertion in this file: everywhere else the pending row is still live when a retry happens.
+--
+-- The real sequence: the worker completed `job-ok`, which consumed the state (0079), and only then did the hand-off's
+-- response get lost. Its retry must return the existing job, not be told there is no live authorization.
+update public.oauth_pending set consumed_at = now() where state_jti = 'job-ok';
+
+set role oauth_completer;
+do $$
+declare made boolean; jid uuid;
+begin
+  select job_id, was_created into jid, made from public.oauth_completer_enqueue_oauth_completion_job(
+    'e5000000-0000-4000-8000-00000000000a', 'e5000000-0000-4000-8000-0000000000c1', 'job-ok',
+    'https://idcaddie-v3.vercel.app/connectors/oauth/callback', 'T0FIXTURE01',
+    pg_temp.seal('ok'), 'X25519-HKDF-SHA256-AES-256-GCM', 'worker-staging-1');
+  assert made = false, 'J7b a retry after the state was consumed must return the existing job, not create one';
+  assert jid is not null, 'J7b …and must identify it';
+end $$;
+reset role;
+
+do $$
+declare n int;
+begin
+  select count(*) into n from public.oauth_completion_jobs where correlation_id = 'job-ok';
+  assert n = 1, 'J7b the retry minted nothing, found ' || n;
+  select count(*) into n from public.oauth_completion_jobs where correlation_id = 'job-ok' and status = 'completed';
+  assert n = 1, 'J7b …and did not disturb the terminal state';
 end $$;
 
 -- ════ J8: expiry — unusable, cleared, unrevivable ═════════════════════════════════════════════════════════════════

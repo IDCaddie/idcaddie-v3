@@ -515,3 +515,18 @@ same answer.
 `oauth_completer` is named in the product read's REVOKE: 0079's blanket revoke loop ran before this function existed, and
 the PUBLIC grant Postgres creates with every function would otherwise have handed it over. The identity that works a job
 does not hold the customer's read.
+
+### §10 — the trigger-function `PUBLIC` grant, closed here
+
+0081 also revokes EXECUTE on every trigger-returning `public` function from `public`/`anon`/`authenticated`/`service_role`.
+That is not housekeeping. 0079 §6 closed the implicit `PUBLIC` grant on nine definer RLS predicate helpers but not on
+trigger functions, four of which are definer **audit writers** — and on hosted staging all four carried `=X/postgres`.
+`TEMPORARY` is a `PUBLIC` database privilege and `CREATE TRIGGER` checks EXECUTE, so a role with zero table privileges
+could attach one to a temp table of its own shape and forge an `audit_logs` row for any tenant under the migration
+owner's authority. Full account in [02 §4a](02_SECURITY_AND_RLS.md).
+
+It belongs in 0081 because 0081 is where the assertion "no OTHER security-definer function is reachable by
+`oauth_completer`" first appears (J0), and that assertion was green **only** because `scripts/test-rls.sh` performed the
+revoke itself — a harness statement whose comment claimed to restore a "migration-intended posture" that existed in no
+migration. Shipping a test that certifies a property the database does not have is worse than shipping no test. Firing a
+trigger uses the table owner's rights and never consults the invoker's EXECUTE, so nothing existing changes behaviour.

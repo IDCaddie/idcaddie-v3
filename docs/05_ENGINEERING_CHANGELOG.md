@@ -45,9 +45,50 @@ from PRs verified via `git log` / `gh pr list`.
 - The role's posture is unchanged and re-asserted after the fact: zero table privileges, zero sequence privileges, no
   `runner_*`/`product_*` grant. J7 proves two completed jobs opened no run, wrote no fact, promoted no evidence, touched
   no credential and consumed no pending row.
-- 26 mutants, each killed. The static guard in `scripts/oauth-completer-migration.test.ts` carries the seven that
+- 32 mutants, each killed. The static guard in `scripts/oauth-completer-migration.test.ts` carries the nine that
   `scripts/test-rls.sh`'s blanket grants mask or that no observable result can distinguish — a widened grant, a
   read-then-write claim, a caller-supplied clock, a payload cleared by a second statement.
+- One mutant survived the first pass: deleting the enqueue's redirect check still refused, because the table CHECK
+  caught it downstream — with a constraint name in the message and a different SQLSTATE, which is exactly what the
+  wrapper check exists to prevent. The input assertions now pin the exact bounded reason, not merely that something
+  raised.
+- A **genuine two-session race** (outside the suite, which is single-session) confirms the claim: session A wins with
+  `attempt_count = 1`, session B blocks 3.06s on A's row lock, re-evaluates, and gets `already_claimed`. The suite
+  protects what can regress — the `status = 'pending'` predicate; the race proves the Postgres lock-and-recheck
+  assumption underneath it, once.
+
+#### Adversarial review — 19 findings raised, 14 refuted, 5 confirmed and fixed
+
+- **P1, and the reason this migration grew a §10.** 0079 §6 closed the implicit `PUBLIC` EXECUTE on nine definer RLS
+  predicate helpers but not on **trigger** functions — four of which are definer audit writers. On hosted staging all
+  four carried `=X/postgres`. `TEMPORARY` is a `PUBLIC` database privilege and `CREATE TRIGGER` checks EXECUTE, so a
+  role with **zero table privileges** could attach one to a temp table of its own shape and forge an `audit_logs` row
+  for any tenant, with attacker-chosen `after_json`, under the migration owner's authority. Reproduced end to end, then
+  confirmed on hosted staging by ACL inspection before the fix was written.
+  - The escalation predates 0081 — it has existed since 0079 created the role. What 0081 added was **J0, a test
+    certifying the class closed**, and that test was green only because `scripts/test-rls.sh` performed the revoke
+    itself, under a comment claiming to restore a "migration-intended posture" that existed in no migration. Shipping a
+    test that certifies a property the database does not have is worse than shipping no test, so §10 makes it real.
+  - Removing the harness loop was tried and reverted: the harness's blanket grant runs **after** migrations, so deleting
+    it makes the local database *less* faithful, not more (T0 caught it immediately). The loop stays as a true un-mask;
+    the static guard is what fails if §10 is deleted.
+- **P2 · the authorize-half liveness gate had no test.** `p.consumed_at is null` and `p.expires_at > now()` — the two
+  predicates behind "and only while that authorization is still live" — were asserted nowhere. Both now are.
+- **P2 · the static guard's grantee regex only matched `format()` strings**, so a grant written as a plain statement was
+  invisible to it *and* to the SQL suite (harness re-revoke) — the exact masking class the file exists to close. The
+  scan is now over the whole migration in both forms, plus "no grant on the table, in any form".
+- **P3 · the correlation-to-connector binding had zero coverage.** Tenant A held one Slack connector, so "belongs to
+  this tenant" and "is the connector this correlation was issued for" were the same predicate and deleting the latter
+  left the suite green. A second Slack connector is now in the fixtures — 0071/0073 exist precisely because a tenant may
+  hold more than one.
+- **P3 · "idempotency is resolved BEFORE the authorize gate" had no test.** Every retry in the suite happened while the
+  pending row was still live, so swapping the two blocks was undetectable. J7b now consumes the state first, which is
+  what the real sequence does.
+- Refuted, each with a citation rather than a shrug: a claimed job wedged forever (specified, and triple-pinned); the
+  TTL ceiling being relative to a writable `created_at` (no actor in scope can write it); terminal-row resurrection
+  (same); `now()` being `transaction_timestamp()` and so caller-influenced (the clock can only go *backward*, which is
+  the harmless direction — the removed `p_now` was the one that let it go forward); and the sweep having no caller
+  (true of all five wrappers at this head, and PR 3's business).
 
 ### fix(vault) — Phase 8I: migration 0080, the credential version belongs to the caller · 2026-08-02
 

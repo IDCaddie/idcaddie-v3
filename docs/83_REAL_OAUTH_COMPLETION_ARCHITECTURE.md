@@ -257,5 +257,14 @@ table and sequence privileges, no `runner_*` and no `product_*` grant. The one b
 `product_oauth_completion_job_status`, granted to `authenticated` and explicitly revoked from `oauth_completer`; it
 returns status and three timestamps and a CHECK-constrained terminal reason, and denies by returning an empty set.
 
+**§2's claim was not quite true until 0081.** This document says a fully compromised web tier "cannot read one row of
+customer evidence, cannot write a fact, and cannot stale an account". That held — but it could **forge an audit record**.
+0079 §6 closed the implicit `PUBLIC` EXECUTE on nine definer RLS predicate helpers and not on trigger functions, four of
+which are definer audit writers carrying `=X/postgres` on hosted staging. `TEMPORARY` is a `PUBLIC` database privilege
+and `CREATE TRIGGER` checks EXECUTE, so a role holding no table privilege could attach one to a temp table of its own
+shape and write a fabricated `audit_logs` row for any tenant under the migration owner's authority — polluting the
+append-only trail this design relies on to reconstruct exactly the incident it is modelling. Migration 0081 §10 closes
+it for every trigger-returning function; detail in [02 §4a](02_SECURITY_AND_RLS.md).
+
 **V3 still must never hold `OAUTH_COMPLETER_DB_URL`.** Every wrapper above is called by the worker. The web tier's only
 role in this flow is to seal the code and hand it to the worker over the OIDC-authenticated channel PR 3 builds.

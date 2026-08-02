@@ -510,4 +510,45 @@ revoke execute on function public.product_oauth_completion_job_status(uuid, text
   from public, anon, service_role, connector_runner, oauth_completer;
 grant execute on function public.product_oauth_completion_job_status(uuid, text) to authenticated;
 
+-- ══ 10. CLOSE THE INHERITED `PUBLIC` DEFINER SURFACE ON TRIGGER FUNCTIONS ═════════════════════════════════════════════
+-- 0079 §6 removed the implicit PUBLIC EXECUTE from nine SECURITY DEFINER RLS predicate helpers, because the point of the
+-- narrow role is that its reachable surface is a list you can read in one glance. It did not cover TRIGGER functions,
+-- and four of those are SECURITY DEFINER audit writers. On hosted staging they carry `=X/postgres` — a live PUBLIC
+-- grant — so `oauth_completer` can execute all four today:
+--
+--     audit_contract_write · audit_discovery_fact_review
+--     audit_okta_connector_config_write · audit_okta_capability_evidence_write
+--
+-- That is not theoretical. `TEMPORARY` is a PUBLIC database privilege, a role owns the temp tables it creates and so
+-- holds TRIGGER on them, and CREATE TRIGGER checks EXECUTE on the function. So a role with ZERO table privileges can
+-- attach one of these definer writers to a temp table of its own shape and insert a forged `public.audit_logs` row —
+-- arbitrary tenant, attacker-chosen `after_json` — under `postgres`'s authority. The threat model in doc 83 §2 is
+-- precisely a compromised completion worker, and this lets one pollute the append-only trail that exists to
+-- reconstruct such an incident.
+--
+-- 0081 is where this is fixed because 0081 is where the assertion "no OTHER security-definer function is reachable"
+-- first appears (`oauth_completion_jobs_test.sql` J0). That assertion was green only because `scripts/test-rls.sh`
+-- revoked trigger functions from PUBLIC itself — a harness statement whose comment claimed to restore "the
+-- migration-intended posture", which existed in no migration. Shipping a test that certifies a property the database
+-- does not have is worse than not having the test, so the posture is made real here and the harness line removed.
+--
+-- SAFE BY CONSTRUCTION: a trigger fires with the privileges of the table owner and does NOT consult the invoker's
+-- EXECUTE privilege. Revoking EXECUTE therefore breaks no existing trigger; it only stops an unprivileged role from
+-- CREATING a new trigger that borrows a definer function's authority. `postgres` (the owner) keeps its own grant.
+-- Every trigger-returning function is covered rather than the four definer ones, so a future definer trigger writer
+-- inherits the posture instead of re-opening the hole.
+do $$
+declare f record;
+begin
+  for f in
+    select p.oid::regprocedure as sig
+      from pg_catalog.pg_proc p
+      join pg_catalog.pg_namespace n on n.oid = p.pronamespace
+     where n.nspname = 'public'
+       and p.prorettype = 'pg_catalog.trigger'::regtype
+  loop
+    execute format('revoke execute on function %s from public, anon, authenticated, service_role', f.sig);
+  end loop;
+end $$;
+
 commit;
