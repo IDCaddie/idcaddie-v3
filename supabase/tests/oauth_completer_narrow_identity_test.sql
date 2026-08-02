@@ -31,7 +31,7 @@ begin
   foreach f in array array[
     'public.oauth_completer_read_app_client_secret_envelope(text,uuid,uuid)',
     'public.oauth_completer_consume_oauth_pending(uuid,uuid,text,text,uuid,text,timestamptz)',
-    'public.oauth_completer_store_connector_secret_envelope(uuid,uuid,bytea,bytea,bytea,bytea,text,text,integer,text,text)']
+    'public.oauth_completer_store_connector_secret_envelope(uuid,uuid,integer,bytea,bytea,bytea,bytea,text,text,integer,text,text)']
   loop
     assert has_function_privilege('oauth_completer', f, 'EXECUTE'), 'C0 oauth_completer EXECUTE ' || f;
     -- Every other role is denied, including the runner: it has its own path and must not gain a second one.
@@ -283,37 +283,37 @@ declare id1 uuid; v1 int; created1 boolean; id2 uuid; v2 int; created2 boolean; 
   conn constant uuid := 'c3000000-0000-4000-8000-0000000000c1';
 begin
   select secret_id, version, created into id1, v1, created1 from public.oauth_completer_store_connector_secret_envelope(
-    ten, conn, '\xaa', '\xbb', '\xcc', '\xdd0102030405060708090a0b0c0d0e0f', 'digest-1', 'kek-1', 1, 'AES-256-GCM', 'corr-1');
+    ten, conn, 1, '\xaa', '\xbb', '\xcc', '\xdd0102030405060708090a0b0c0d0e0f', 'digest-1', 'kek-1', 1, 'AES-256-GCM', 'corr-1');
   assert created1, 'C7 the first envelope is created';
   assert v1 = 1, 'C7 versioning starts at 1, got ' || v1;
 
   -- Idempotent: the same digest returns the SAME row, not a second version.
   select secret_id, version, created into id2, v2, created2 from public.oauth_completer_store_connector_secret_envelope(
-    ten, conn, '\xaa', '\xbb', '\xcc', '\xdd0102030405060708090a0b0c0d0e0f', 'digest-1', 'kek-1', 1, 'AES-256-GCM', 'corr-1');
+    ten, conn, 1, '\xaa', '\xbb', '\xcc', '\xdd0102030405060708090a0b0c0d0e0f', 'digest-1', 'kek-1', 1, 'AES-256-GCM', 'corr-1');
   assert not created2 and id2 = id1 and v2 = v1, 'C7 a retry must not mint a second credential';
 
   -- A genuinely new envelope supersedes the previous one and records it.
   select secret_id, version, created into id2, v2, created2 from public.oauth_completer_store_connector_secret_envelope(
-    ten, conn, '\x11', '\x22', '\x33', '\x44f10203040506ff08090a0b0c0d0e0f', 'digest-2', 'kek-1', 1, 'AES-256-GCM', 'corr-2');
+    ten, conn, 2, '\x11', '\x22', '\x33', '\x44f10203040506ff08090a0b0c0d0e0f', 'digest-2', 'kek-1', 1, 'AES-256-GCM', 'corr-2');
   assert created2 and v2 = 2, 'C7 a new envelope is version 2, got ' || v2;
 
   -- Wrong tenant / non-Slack connector are refused.
   raised := false;
   begin perform public.oauth_completer_store_connector_secret_envelope(
-    'c3000000-0000-4000-8000-00000000000b', conn, '\x11','\x22','\x33','\x44f10203040506ff08090a0b0c0d0e0f','digest-x','kek-1',1,'AES-256-GCM','c');
+    'c3000000-0000-4000-8000-00000000000b', conn, 3, '\x11','\x22','\x33','\x44f10203040506ff08090a0b0c0d0e0f','digest-x','kek-1',1,'AES-256-GCM','c');
   exception when others then raised := true; end;
   assert raised, 'C7 wrong tenant must be refused';
 
   raised := false;
   begin perform public.oauth_completer_store_connector_secret_envelope(
-    ten, 'c3000000-0000-4000-8000-0000000000c2', '\x11','\x22','\x33','\x44f10203040506ff08090a0b0c0d0e0f','digest-y','kek-1',1,'AES-256-GCM','c');
+    ten, 'c3000000-0000-4000-8000-0000000000c2', 3, '\x11','\x22','\x33','\x44f10203040506ff08090a0b0c0d0e0f','digest-y','kek-1',1,'AES-256-GCM','c');
   exception when others then raised := true; end;
   assert raised, 'C7 a non-Slack connector must be refused';
 
   -- An incomplete envelope is refused rather than stored as an unopenable credential.
   raised := false;
   begin perform public.oauth_completer_store_connector_secret_envelope(
-    ten, conn, '\x11', null, '\x33','\x44f10203040506ff08090a0b0c0d0e0f','digest-z','kek-1',1,'AES-256-GCM','c');
+    ten, conn, 3, '\x11', null, '\x33','\x44f10203040506ff08090a0b0c0d0e0f','digest-z','kek-1',1,'AES-256-GCM','c');
   exception when others then raised := true; end;
   assert raised, 'C7 an incomplete envelope must be refused';
 end $$;
@@ -366,7 +366,7 @@ begin
   raised := false;
   begin perform public.oauth_completer_store_connector_secret_envelope(
     'c3000000-0000-4000-8000-00000000000b', 'c3000000-0000-4000-8000-0000000000c1',
-    '\x11','\x22','\x33','\x44f10203040506ff08090a0b0c0d0e0f','digest-leak','kek-leak',1,'AES-256-GCM','corr');
+    3, '\x11','\x22','\x33','\x44f10203040506ff08090a0b0c0d0e0f','digest-leak','kek-leak',1,'AES-256-GCM','corr');
   exception when others then raised := true; msg := sqlerrm; end;
   assert raised, 'C9 setup 2';
   assert msg !~* '(digest-leak|kek-leak|xox|ciphertext|aes-|\\\\x)', 'C9 refusal leaked envelope material: ' || msg;
