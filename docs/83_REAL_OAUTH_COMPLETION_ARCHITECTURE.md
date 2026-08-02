@@ -179,3 +179,44 @@ These need no runbook step — they are in `oauth-callback-real-runner.ts` and t
 Move completion to a dedicated worker when any of these becomes true: a second OAuth provider, non-interactive
 re-authorization, or a requirement that the web tier hold no KMS grant at all. At that point the `oauth_completer` role
 moves to the worker unchanged — the narrow grant is the part worth keeping either way.
+
+---
+
+## 6. State as of 2026-08-02 — the canonical handoff
+
+**Applied to staging `ycdpzduxugdsffjqyoai` (head 0080). Nothing deployed; production untouched.**
+
+| | SHA |
+|---|---|
+| v3 #392 — **0079**, the `oauth_completer` role | `bf5bd48f559df153e9aa2f75f2b0f6667e640655` |
+| v3 #394 — **0080**, caller-owned envelope version | `cb613301f0fd06d43fa69ccf0e056baf658de0de` |
+| runner #115 / #117 / #119 — the completer client | `5c09896…` / `55d11bb…` / `aaa4f0b…` |
+
+0080 sha256: `e0e678c76921c40d0d6bb71d3329859c42e2c79266648a0565ecd33415714587`.
+
+`oauth_completer` holds EXECUTE on exactly four purpose-pinned wrappers and **zero** table and sequence privileges,
+verified on hosted. No login role can `SET ROLE` into it — direct authentication is its only path.
+
+### Two things not to re-derive
+
+**The version belongs to the caller.** `canonicalAad` seals it at encrypt time, so a database that derives its own
+produces a row whose version disagrees with the sealed one — an unopenable credential, with the working one already
+superseded, reported as success. 0080 fixes this and drops the deriving signature.
+
+**`aad_digest` is not envelope identity.** It is sha256 over `(tenant, connector, secret_kind, version)` and nothing
+else; `crypto.ts` warns that a caller must never treat a match as proof. Keying idempotency on it made two concurrent
+re-authorizations indistinguishable — the second reported success while its Slack-issued token was silently discarded.
+Idempotency is keyed on `(aead_nonce, aead_tag)`.
+
+### Remaining work — none of it started
+
+1. **The completion-job model.** Tenant/connector/correlation-bound, provider pinned to Slack, exact redirect URI,
+   very short expiry, single-use, atomic claim, one terminal transition, authorization code cleared on terminal.
+   V3 must **not** be given KMS merely to encrypt the payload — a worker public-key envelope, or direct authenticated
+   TLS, keeps encryption authority separate from decryption authority.
+2. **The Vercel OIDC handoff.** Pin issuer, audience, project `prj_l30QMLpF3dNLwKBP2CTG7v9rIon0`, team
+   `team_PYYzXw6Wn7HVtPvvcQWNRSlC`, environment identity, body digest, and the job id/nonce. The callback returns a
+   truthful pending page and never claims "Connected" at handoff time.
+3. **The worker task**, deployed separately from discovery, with no runner database credential in the process.
+
+Unprovisioned: the ten remaining gate variables, both KMS keys, the OIDC role, and the Slack redirect registration.
