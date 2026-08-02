@@ -136,6 +136,22 @@ describe("polling is bounded and stops on terminal", () => {
     await advance(POLL_INTERVAL_MS * 5);
     expect(poll.mock.calls.length).toBe(before);
   });
+
+  // The case `clearTimeout` alone cannot cover: a poll already IN FLIGHT when the component goes away. Its resolution
+  // must not schedule the next one. Mutation testing is what surfaced this — the two cancellation checks the component
+  // used to carry each masked the other's removal, so neither was actually under test.
+  it("a poll in flight at unmount does not schedule another", async () => {
+    let release: (s: ConnectionStatus) => void = () => {};
+    const poll = vi.fn(() => new Promise<ConnectionStatus>((resolve) => { release = resolve; }));
+    const { unmount } = render(<PendingStatus correlationId={CORR} initial={completing} poll={poll} />);
+    await advance(POLL_INTERVAL_MS);
+    expect(poll).toHaveBeenCalledTimes(1);
+
+    unmount();
+    await act(async () => { release(completing); });
+    await advance(POLL_INTERVAL_MS * 5);
+    expect(poll).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("a refresh shows the durable truth", () => {

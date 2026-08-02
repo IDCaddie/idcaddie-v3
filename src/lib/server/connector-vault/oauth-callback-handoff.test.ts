@@ -124,11 +124,20 @@ describe("the handoff callback runner", () => {
     expect(await run({ state: validState(), code: "code with spaces", subject: SUBJECT })).toEqual({ ok: false, reason: "authorization_code_invalid" });
   });
 
-  it("refuses when the configured callback is not the pinned one", async () => {
+  it("refuses when the configured callback is not the pinned one, even with a state that agrees with it", async () => {
+    // The state is minted for the SAME non-pinned URI, so `validateOAuthState` would be perfectly happy: this proves the
+    // pinning check itself, not the state binding underneath it. Without the check the body would be sealed with the
+    // pinned redirect while the code was actually issued against a different one — an envelope the worker can open and
+    // a job the database would then reject. Mutation testing found the earlier version of this test unable to tell the
+    // two apart, because both paths return the same reason code.
+    const other = "https://staging.idcaddie.com/connectors/oauth/callback";
+    const fetchImpl = vi.fn(accepted);
     const r = await makeHandoffCallbackRunner(deps({
-      expected: { tenantId: TENANT, connectorId: CONNECTOR, correlationId: CORR, expectedTeamId: TEAM, redirectUri: "https://staging.idcaddie.com/connectors/oauth/callback" },
-    }))({ state: validState(), code: CODE, subject: SUBJECT });
+      fetchImpl,
+      expected: { tenantId: TENANT, connectorId: CONNECTOR, correlationId: CORR, expectedTeamId: TEAM, redirectUri: other },
+    }))({ state: validState({ redirectUri: other }), code: CODE, subject: SUBJECT });
     expect(r).toEqual({ ok: false, reason: "redirect_uri_mismatch" });
+    expect(fetchImpl).not.toHaveBeenCalled();
   });
 
   it("refuses without an OIDC assertion, and hands nothing off", async () => {

@@ -56,23 +56,30 @@ export function PendingStatus({
   const [status, setStatus] = useState<ConnectionStatus>(initial);
   const [exhausted, setExhausted] = useState(false);
 
+  // The dependency is the INITIAL terminality, not the live one. Depending on `status.terminal` would restart the whole
+  // effect on every poll and leave "stop on terminal" resting on React's teardown timing rather than on a line of code
+  // — which is exactly how a guard ends up untestable. Here the `next.terminal` return below is the only thing that
+  // stops the loop, so removing it is observable.
   useEffect(() => {
-    if (status.terminal) return;
+    if (initial.terminal) return;
     let cancelled = false;
     let polls = 0;
 
     const tick = async () => {
-      if (cancelled) return;
       polls += 1;
+      let next: ConnectionStatus | null = null;
       try {
-        const next = await poll(correlationId);
-        if (cancelled) return;
-        setStatus(next);
-        if (next.terminal) return;
+        next = await poll(correlationId);
       } catch {
         // A failed poll is not a failed connection. Keep the current state and try again until the budget runs out.
       }
+      // ONE cancellation check, placed after the only await. Anything before it is already covered by `clearTimeout`,
+      // and a second copy after it would make both untestable — each would mask the other's removal.
       if (cancelled) return;
+      if (next) {
+        setStatus(next);
+        if (next.terminal) return;
+      }
       if (polls >= MAX_POLLS) {
         setExhausted(true);
         return;
@@ -85,7 +92,7 @@ export function PendingStatus({
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [correlationId, poll, status.terminal]);
+  }, [correlationId, poll, initial.terminal]);
 
   const copy = COPY[status.state];
   return (

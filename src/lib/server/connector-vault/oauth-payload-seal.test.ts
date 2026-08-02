@@ -258,6 +258,24 @@ describe("sealing", () => {
     }
   });
 
+  // The catch-all in `sealAuthorizationCode` converts an unexpected failure into a bounded reason. Reaching it needs a
+  // `WorkerSealKey` that passes the type guard and still breaks downstream — a malformed `raw`, which
+  // `parseWorkerSealKey` never produces but a hand-built key could carry. Without this the branch had no test at all,
+  // which mutation testing found by replacing the bounded reason with the caught error's text and staying green.
+  it("converts an unexpected failure into a bounded reason, carrying none of the original", () => {
+    const wrong = { key: key().key, keyId: KEY_ID, raw: "LEAKME-not-a-buffer" as unknown as Buffer };
+    try {
+      sealAuthorizationCode(CODE, wrong, BINDING);
+      throw new Error("expected a refusal");
+    } catch (e) {
+      const err = e as PayloadSealError;
+      expect(err).toBeInstanceOf(PayloadSealError);
+      expect(err.reason).toBe("seal_failed");
+      expect(err.message).toBe("seal_failed");
+      expect(`${err.message}${err.stack?.split("\n")[0] ?? ""}`).not.toMatch(/LEAKME|1234567890123/);
+    }
+  });
+
   it("never places the code or key material in a thrown error", () => {
     const attempts = [
       () => sealAuthorizationCode(CODE, key(), { ...BINDING, tenantId: `LEAKME-${CODE}` }),

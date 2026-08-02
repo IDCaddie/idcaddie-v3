@@ -81,6 +81,12 @@ describe("a denied read is indistinguishable from a job that does not exist", ()
 
   it("every one of them produces the SAME terminal failure and nothing else", async () => {
     for (const [name, setup] of cases) {
+      // Each case starts from a HEALTHY baseline. Without this the first case's `gate.mockResolvedValue({ ok: false })`
+      // would still be in force for every case after it, and they would all pass through the access gate rather than
+      // through the thing they claim to test. Mutation testing found exactly that: replacing the empty-set branch with
+      // "completed" left this test green.
+      gate.mockResolvedValue({ ok: true, tenantId: TENANT });
+      rpc.mockResolvedValue({ data: [row("pending")], error: null });
       setup();
       const r = await getSlackConnectionStatus(CORR);
       expect(r, name).toEqual({ state: "failed", terminal: true });
