@@ -12,6 +12,22 @@ from PRs verified via `git log` / `gh pr list`.
 > **as of each PR's date** and are historical — where an older entry says "RISK-007 remains OPEN" / "Phase C remains
 > BLOCKED", that was accurate at that entry's date; this banner is the current state.
 
+### feat(vault) — Phase 8G: migration 0079, the `oauth_completer` narrow identity · 2026-08-01
+
+- Creates the least-privilege role that completes a real Slack OAuth callback: LOGIN, **no password in the migration**,
+  every restrictive attribute, member of no role, **zero table and sequence privileges**, and EXECUTE on exactly three
+  purpose-specific wrappers. The alternative — giving the web tier `connector_runner_login` — would let a request-path
+  bug fabricate directory evidence, not merely leak a token.
+- Each wrapper pins provider and purpose, takes **no plaintext parameter**, builds no dynamic SQL, and is
+  `security definer set search_path = ''`. The store wrapper is retry-safe (same digest → same row), supersedes rather
+  than overwrites, and records the supersession.
+- Closes an inherited hole: nine SECURITY DEFINER RLS predicate helpers were executable by any role via Postgres's
+  default PUBLIC grant. Existing roles already held explicit grants, so the PUBLIC path is removed with no behaviour
+  change.
+- Nine mutants each fail the suite. Two properties are harness-masked or data-unobservable and are asserted statically
+  in `scripts/oauth-completer-migration.test.ts` — mutation-testing is what revealed both gaps.
+- The callback route is NOT switched here, no Vercel variable changed, no Slack contact, production untouched.
+
 ### feat(oauth) — Phase 8F: environment-identity gate replaces the production-label refusal; the callback route goes real · 2026-08-01
 
 - **The old gate was the wrong shape twice.** `VERCEL_ENV !== "production"` is a NEGATIVE check — satisfied by every

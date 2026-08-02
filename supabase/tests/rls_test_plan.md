@@ -486,3 +486,13 @@ never deduplicates: two connectors holding the same external id, login and email
 stale → current without changing total evidence. K6 a `review_required` row is reported as `other`, never inflating `stale` or
 `current`, and the invariant still holds with a third state present. K7 an editor still gets no counts at all.
 
+## oauth_completer_narrow_identity_test.sql (0079)
+
+C0 the granted surface is exactly three wrappers, and no OTHER security-definer function is reachable · C1 zero table
+and sequence privileges, named table-by-table for the vault and evidence tables · C2 role attributes and membership in
+no role · C3 no plaintext parameter exists · C4 the app-secret read is envelope-only, newest-active-version, and
+tenant/connector/provider bound · C5 direct table access denied even holding the role, including opening a run or
+writing a discovery fact · C6 consume is single-use with full trusted context; redirect mismatch, wrong tenant,
+connector, subject, expiry and replay each refused with a bounded code · C7 store is envelope-only, versioned,
+superseding and retry-safe · C8 exactly one active credential, the supersession audited, and **no** evidence created ·
+C9 no refusal carries a secret, ciphertext, host, email or environment value.
