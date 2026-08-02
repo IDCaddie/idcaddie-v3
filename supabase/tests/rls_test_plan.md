@@ -496,3 +496,31 @@ writing a discovery fact · C6 consume is single-use with full trusted context; 
 connector, subject, expiry and replay each refused with a bounded code · C7 store is envelope-only, versioned,
 superseding and retry-safe · C8 exactly one active credential, the supersession audited, and **no** evidence created ·
 C9 no refusal carries a secret, ciphertext, host, email or environment value.
+
+## oauth_completion_jobs_test.sql (0081)
+
+J0 the granted surface: five completion wrappers for `oauth_completer` only, one customer read for `authenticated` only,
+nine `oauth_completer_*` wrappers in total, and no OTHER security-definer function reachable — including the new product
+read · J1 the job table is Tier-2 deny-all (RLS on, zero policies, zero grants for anon/authenticated/connector_runner
+**and** `oauth_completer`), and the role still holds zero table and sequence privileges after a new table exists ·
+J2 no column or parameter can name a plaintext authorization code, and the payload is opaque `bytea` · J3 every binding
+refused before a row exists — cross-tenant, wrong connector, non-Slack provider, foreign redirect, fabricated
+correlation, a correlation issued for the tenant's OTHER Slack connector, an already-consumed authorization, an expired
+authorization, malformed workspace, unsupported scheme, undersized and missing payload, out-of-grammar correlation —
+each asserted on its exact bounded reason (a table CHECK would otherwise refuse anyway, from the wrong layer), and not
+one refusal left a row · J4 idempotency is keyed on the REQUEST: identical bytes return the same job, a substituted
+payload or a changed workspace or worker key under the same correlation is rejected · J5 claim is bound to tenant,
+connector and correlation, hands back the sealed payload exactly once, counts the attempt, and denies the duplicate ·
+J6 terminal only from claimed — pending completes and fails as `not_claimed`, a terminal row cannot transition again by
+either wrapper, a free-form reason is refused, and only the deadline may say `expired` · J7 both terminal rows hold no
+sealed material, and two completed jobs opened no run, wrote no fact, promoted no evidence, touched no credential and
+consumed no pending row · J7b a retry AFTER the completion consumed the state still returns the existing job, which is
+the only assertion that pins idempotency being resolved before the authorize-half gate · J8 expiry: an expired job is
+unclaimable and uncompletable, the discovery path retires it and
+clears its code, the sweep takes the rest, a stale CLAIM keeps its status but loses its sealed code, and an expired
+correlation is never revived · J9 the constraints, not the wrappers — a terminal row cannot regain a payload, a job
+cannot outlive the ceiling, one correlation cannot hold two jobs, and a cross-tenant connector, foreign redirect and
+non-Slack provider are all impossible to insert directly · J10 the customer read declares exactly five bounded fields
+and none protected; an owner sees status, an editor and another tenant's owner see nothing, and an authenticated session
+can neither read nor write the table nor claim a job · J11 no refusal echoes a redirect, workspace, worker key, sealed
+bytes or the caller's own reason string.

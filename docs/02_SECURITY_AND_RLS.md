@@ -79,6 +79,36 @@ Proven by T31 (allowed writes audit once, correct dynamic actor; denied/failed w
 audit) and T32 (catalog: contracts 0 DELETE / 0 `FOR ALL`; `audit_logs` no write policy; the
 function is SECURITY DEFINER; the trigger is `AFTER INSERT OR UPDATE`).
 
+#### The definer trigger function itself is a privilege — closed in `0081` (2026-08-02)
+
+The reasoning above says "an audit row can only be appended by a trusted path", and until `0081`
+that was **false for any role holding a direct Postgres connection**. Postgres grants EXECUTE on
+every new function to `PUBLIC`, and no migration removed it from trigger functions: on hosted
+staging, `audit_contract_write`, `audit_discovery_fact_review`, `audit_okta_connector_config_write`
+and `audit_okta_capability_evidence_write` all carried `=X/postgres`.
+
+That is enough to forge audit records. `TEMPORARY` is a `PUBLIC` **database** privilege, a role
+owns the temp tables it creates and therefore holds `TRIGGER` on them, and `CREATE TRIGGER` checks
+`EXECUTE` on the function — so a role with **zero table privileges** could attach a definer audit
+writer to a temp table of matching shape and insert a fabricated `audit_logs` row, for any tenant,
+with attacker-chosen `after_json`, under the migration owner's authority. `actor_user_id` is
+nullable, so the null `auth.uid()` on a direct connection does not stop it.
+
+`0081` §10 revokes EXECUTE on **every** trigger-returning `public` function from `public`, `anon`,
+`authenticated` and `service_role`. Firing a trigger uses the table owner's rights and never
+consults the invoker's EXECUTE, so no existing trigger is affected — only the ability of an
+unprivileged role to *create* one that borrows a definer's authority.
+
+Browser roles were never the practical reach here (PostgREST issues no `CREATE TEMP TABLE`); the
+role that made it real is `oauth_completer`, whose whole design premise is that a compromised
+completion worker can do nothing but complete an OAuth flow (doc [83](./83_REAL_OAUTH_COMPLETION_ARCHITECTURE.md) §2).
+Found by adversarial review of `0081` and reproduced end to end before the fix was written.
+
+**Note on where this is asserted.** `scripts/test-rls.sh` performs the same revoke to un-mask its
+own blanket grant, so the SQL suite is green whether or not the migration does it — which is
+exactly how the gap survived. The migration's revoke is pinned by the static guard in
+`scripts/oauth-completer-migration.test.ts` instead.
+
 ## 4b. No hard-delete of core evidence (destructive-delete hardening)
 `0004` removes normal authenticated **hard-delete** from the core business/evidence tables —
 `organizations`, `apps`, `contracts`, `app_contracts`, `people`, `app_users`. `0001`/`0002` had

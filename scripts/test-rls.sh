@@ -124,6 +124,17 @@ begin
            -- TRIGGER functions are invoked BY a trigger and never called directly; a browser role holding EXECUTE on one is
            -- meaningless at best and, for the SECURITY DEFINER audit writers, a forgery surface. The blanket grant above hands
            -- them out, masking the migration-intended posture exactly as it did for runner_* (0068 caught this).
+           --
+           -- UNTIL 0081 THIS LINE'S COMMENT WAS A LIE: no migration revoked trigger functions from PUBLIC, so the loop was
+           -- not un-masking a hosted truth, it was MANUFACTURING one — and on hosted, four SECURITY DEFINER audit writers
+           -- really did carry `=X/postgres`, reachable by every role including `oauth_completer` (adversarial review of 0081
+           -- reproduced the forgery: temp table + CREATE TRIGGER + insert -> a fabricated public.audit_logs row written under
+           -- postgres's authority). 0081 §10 now performs the revoke for real, so this is once again what it claims to be:
+           -- an un-mask of the blanket grant above, not a substitute for a migration.
+           --
+           -- The migration's revoke can therefore never be OBSERVED here — this loop would hide its removal. The static guard
+           -- (scripts/oauth-completer-migration.test.ts, "closes the inherited PUBLIC grant on definer trigger functions") is
+           -- what fails if 0081 §10 is deleted. Same division of labour as every other grant in this file.
            or p.prorettype = 'pg_catalog.trigger'::regtype)
   loop
     execute format('revoke all on function %s from authenticated, anon, service_role, public', f.sig);
@@ -195,6 +206,13 @@ do $$ declare f record; begin
             where p.pronamespace = 'public'::regnamespace and p.proname like 'oauth\_completer\_%'
   loop execute format('revoke execute on function %s from authenticated, anon, service_role, public', f.sig); end loop;
 end $$;
+
+-- 0081: oauth_completion_jobs is a Tier-2 deny-all store (RLS-enabled, ZERO policies, revoke-all from every browser role,
+-- from connector_runner AND from oauth_completer itself — the identity that WORKS a job holds nothing on the table that
+-- holds it). The blanket `grant select/insert/update/delete on all tables` above re-broadens it for authenticated, which
+-- would mask the posture completely. KEEP IN LOCKSTEP with 0081's revoke. oauth_completion_jobs_test J1's exact-zero
+-- privilege arrays are the backstop that fails loudly on drift.
+revoke all on public.oauth_completion_jobs from anon, authenticated, connector_runner, oauth_completer;
 SQL
 
 for t in "${tests[@]}"; do
