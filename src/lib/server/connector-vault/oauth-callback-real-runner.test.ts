@@ -15,8 +15,15 @@ const CONNECTOR = "1575cde3-0000-4000-8000-00000000bbbb";
 const CORR = "corr-phase-8e-test";
 const REDIRECT = "https://idcaddie-v3.vercel.app/connectors/oauth/callback";
 
+// Phase 8F: the gate is now a POSITIVE environment-identity check, so a valid environment must state which
+// environment it is, which Vercel project, which Supabase project, and that the narrow oauth_completer identity is the
+// one present. "Not production" is no longer a passing answer.
 const okEnv = (over: Record<string, string | undefined> = {}) => ({
   NODE_ENV: "test",
+  IDCADDIE_ENVIRONMENT: "staging",
+  IDCADDIE_VERCEL_PROJECT_ID: "prj_l30QMLpF3dNLwKBP2CTG7v9rIon0",
+  NEXT_PUBLIC_SUPABASE_URL: `https://${"ycdpzduxugdsffjqyoai"}.supabase.co`,
+  OAUTH_COMPLETER_DB_URL: `postgresql://oauth_completer_login:not-a-real-token@db.${"ycdpzduxugdsffjqyoai"}.supabase.co/postgres`,
   CONNECTOR_OAUTH_REAL_EXCHANGE_ENABLED: "1",
   CONNECTOR_OAUTH_REDIRECT_URI: REDIRECT,
   CONNECTOR_OAUTH_EXPECTED_SLACK_TEAM_ID: TEAM,
@@ -67,44 +74,67 @@ describe("buildRealCallbackRunner — fail-closed assembly", () => {
     expect(r).toEqual({ ok: false, reason: "real_exchange_disabled" });
   });
 
-  it("refuses in production even with the flag explicitly on", () => {
-    for (const prod of [{ NODE_ENV: "production" }, { VERCEL_ENV: "production" }]) {
-      const r = buildRealCallbackRunner(deps(), okEnv(prod));
-      expect(r).toEqual({ ok: false, reason: "real_exchange_disabled" });
+  // Phase 8F: idcaddie-v3.vercel.app IS our staging environment, served on Vercel's "Production" channel. The label
+  // describes a deployment channel, not a database, so the gate is indifferent to it — and instead refuses on the
+  // identity facts, which a copy of this configuration to another project cannot satisfy.
+  it("is indifferent to the Vercel channel label", () => {
+    for (const label of [{ VERCEL_ENV: "production" }, { VERCEL_ENV: "preview" }, { NODE_ENV: "production" }]) {
+      expect(buildRealCallbackRunner(deps(), okEnv(label)).ok, JSON.stringify(label)).toBe(true);
     }
+  });
+
+  it("refuses when the environment does not identify itself as staging", () => {
+    expect(buildRealCallbackRunner(deps(), okEnv({ IDCADDIE_ENVIRONMENT: undefined })))
+      .toEqual({ ok: false, reason: "environment_marker_missing" });
+  });
+
+  it("refuses when copied to a different Vercel project", () => {
+    expect(buildRealCallbackRunner(deps(), okEnv({ IDCADDIE_VERCEL_PROJECT_ID: "prj_ANOTHERPROJECT000000000" })))
+      .toEqual({ ok: false, reason: "vercel_project_mismatch" });
+  });
+
+  it("refuses when pointed at a different Supabase project", () => {
+    expect(buildRealCallbackRunner(deps(), okEnv({ NEXT_PUBLIC_SUPABASE_URL: `https://${"otherproject"}.supabase.co` })))
+      .toEqual({ ok: false, reason: "supabase_project_mismatch" });
+  });
+
+  it("refuses when the runner's own credential is present in this tier", () => {
+    expect(buildRealCallbackRunner(deps(), okEnv({ SOME_DB_URL: "postgresql://connector_runner_login:not-a-real-token@h/db" })))
+      .toEqual({ ok: false, reason: "runner_credential_present" });
   });
 
   it("refuses a callback host that is not on the allowlist, rather than falling back to the default", () => {
     const r = buildRealCallbackRunner(deps(), okEnv({ CONNECTOR_OAUTH_REDIRECT_URI: "https://evil.example/connectors/oauth/callback" }));
-    expect(r).toEqual({ ok: false, reason: "callback_host_not_allowlisted" });
+    // The identity gate pins the exact callback and runs first, so this is refused before the allowlist is consulted.
+    expect(r).toEqual({ ok: false, reason: "callback_uri_mismatch" });
   });
 
   it("refuses when no workspace is configured — unset must not mean 'any workspace'", () => {
     const r = buildRealCallbackRunner(deps(), okEnv({ CONNECTOR_OAUTH_EXPECTED_SLACK_TEAM_ID: undefined }));
-    expect(r).toEqual({ ok: false, reason: "missing_expected_workspace" });
+    expect(r).toEqual({ ok: false, reason: "expected_workspace_missing" });
   });
 
   it("refuses a malformed workspace id", () => {
     const r = buildRealCallbackRunner(deps(), okEnv({ CONNECTOR_OAUTH_EXPECTED_SLACK_TEAM_ID: "not-a-team" }));
-    expect(r).toEqual({ ok: false, reason: "missing_expected_workspace" });
+    expect(r).toEqual({ ok: false, reason: "expected_workspace_missing" });
   });
 
   it.each(["CONNECTOR_OAUTH_EXPECTED_TENANT_ID", "CONNECTOR_OAUTH_EXPECTED_CONNECTOR_ID", "CONNECTOR_OAUTH_EXPECTED_CORRELATION_ID"])(
     "refuses when %s is missing — there is no default tenant, connector or correlation",
     (key) => {
       const r = buildRealCallbackRunner(deps(), okEnv({ [key]: undefined }));
-      expect(r).toEqual({ ok: false, reason: "missing_expected_context" });
+      expect(r).toEqual({ ok: false, reason: "expected_context_missing" });
     },
   );
 
   it("refuses a missing client id", () => {
     const r = buildRealCallbackRunner(deps(), okEnv({ SLACK_CLIENT_ID: undefined }));
-    expect(r).toEqual({ ok: false, reason: "missing_client_id" });
+    expect(r).toEqual({ ok: false, reason: "slack_client_id_missing" });
   });
 
   it("refuses if the production project ref appears in any real-run input", () => {
     const r = buildRealCallbackRunner(deps(), okEnv({ CONNECTOR_OAUTH_EXPECTED_TENANT_ID: "dzbfxulvxchdemcettrx" }));
-    expect(r).toEqual({ ok: false, reason: "production_ref" });
+    expect(r).toEqual({ ok: false, reason: "production_supabase_ref_present" });
   });
 
   it("assembles when every server-trusted input is present", () => {

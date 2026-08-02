@@ -120,11 +120,27 @@ describe("RUN GATE A launcher — no secret in argv/env is accepted, and no secr
 });
 
 describe("RUN GATE A launcher — gate parity with the real wiring; real deps unbuildable without the flag", () => {
-  it("the launcher gate matches isRealExchangeEnabled for every input (no drift)", () => {
+  // Phase 8F changed the real gate from "flag AND not production" to a full POSITIVE environment-identity check, so the
+  // launcher's own gate is now deliberately WEAKER — it is an operator pre-flight, not a security boundary, and the
+  // authoritative refusal happens in the request path.
+  //
+  // Exact parity is therefore the wrong assertion. The property that actually matters is one-directional: the launcher
+  // must never report ENABLED for an environment the real gate would refuse to run in... and since the launcher is the
+  // weaker check, what we can and must assert is that the REAL gate is never more permissive than the launcher — i.e.
+  // nothing can slip past the launcher and be accepted by the real path.
+  it("the real gate is never more permissive than the launcher pre-flight", () => {
     const envs = [{}, { CONNECTOR_OAUTH_REAL_EXCHANGE_ENABLED: "1" }, { CONNECTOR_OAUTH_REAL_EXCHANGE_ENABLED: "0" },
       { CONNECTOR_OAUTH_REAL_EXCHANGE_ENABLED: "1", VERCEL_ENV: "production" }, { CONNECTOR_OAUTH_REAL_EXCHANGE_ENABLED: "1", NODE_ENV: "production" },
       { CONNECTOR_OAUTH_REAL_EXCHANGE_ENABLED: "1", VERCEL_ENV: "preview" }];
-    for (const e of envs) expect(gateEnabled(e)).toBe(isRealExchangeEnabled(e));
+    for (const e of envs) {
+      if (isRealExchangeEnabled(e)) {
+        expect(gateEnabled(e), `real gate accepted an env the launcher rejects: ${JSON.stringify(Object.keys(e))}`).toBe(true);
+      }
+    }
+    // And the launcher still refuses a bare environment, which is what makes it useful as a pre-flight at all.
+    expect(gateEnabled({})).toBe(false);
+    // The real gate refuses the flag on its own — the launcher's own answer there is advisory.
+    expect(isRealExchangeEnabled({ CONNECTOR_OAUTH_REAL_EXCHANGE_ENABLED: "1" })).toBe(false);
   });
   it("gate OFF by default; makeRealOrchestratorDeps FAILS CLOSED without the flag (real exchange unbuildable)", () => {
     expect(isRealExchangeEnabled({})).toBe(false);

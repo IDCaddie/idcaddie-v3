@@ -12,6 +12,27 @@ from PRs verified via `git log` / `gh pr list`.
 > **as of each PR's date** and are historical — where an older entry says "RISK-007 remains OPEN" / "Phase C remains
 > BLOCKED", that was accurate at that entry's date; this banner is the current state.
 
+### feat(oauth) — Phase 8F: environment-identity gate replaces the production-label refusal; the callback route goes real · 2026-08-01
+
+- **The old gate was the wrong shape twice.** `VERCEL_ENV !== "production"` is a NEGATIVE check — satisfied by every
+  preview deployment, every local run, and any environment where the variable is unset, so it passed by accident. And it
+  was wrong for this deployment: `idcaddie-v3.vercel.app` IS our staging environment, served on Vercel's "Production"
+  channel, so the old check refused the one environment we want.
+- **Replaced by a positive, conjunctive identity check** (`staging-environment-identity.ts`): staging marker, Vercel
+  project `prj_l30…`, Supabase project `ycdpz…`, the production ref absent from every variable *and every variable name*,
+  the narrow `oauth_completer` identity present, `connector_runner_login` absent anywhere, the exact callback URI, the
+  explicit opt-in, the Slack workspace, and the trusted tenant/connector/correlation. **Absence is refusal** — there is
+  no `||`, no fallback and no default in the file.
+- **The callback route is now real.** When the gate passes, a failed assembly REFUSES with a bounded reason; it never
+  falls through to the synthetic handler. A silent fallback would let a customer complete a Slack consent screen, land on
+  a success page, and have connected nothing.
+- `real-callback-dependencies.ts` is the single place environment becomes concrete objects. `oauth_completer` is not yet
+  provisioned (docs/83 §3.1), so it **throws** rather than returning a placeholder — the route reports
+  `dependency_construction_failed`, which is the truthful answer.
+- **41 new tests** covering all ten required scenarios. Every refusal is asserted to carry a snake_case reason code and
+  nothing else — no password, host, project id, connection string, ARN or ref.
+- Recurring sync remains disabled.
+
 ### feat(saas) — Phase 9: canonical SaaS account reads, the first identity matcher, and a customer-language pass · 2026-08-01
 
 - **Migration 0078** — `product_app_accounts` / `_groups` / `_counts` / `product_connector_capabilities`. 0076 built the

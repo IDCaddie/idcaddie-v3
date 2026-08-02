@@ -28,7 +28,22 @@ const TENANT = "11111111-1111-1111-1111-111111111111";
 const CONNECTOR = "17000000-0000-0000-0000-0000000000a1";
 const REDIRECT = "https://app.example.com/connectors/oauth/callback";
 const CORR = "corr-b2c-real-01";
-const ENABLED_ENV = { CONNECTOR_OAUTH_REAL_EXCHANGE_ENABLED: "1" };
+// Phase 8F: the flag alone no longer enables real mode. The gate is now a POSITIVE environment-identity check, so an
+// "enabled" environment must also prove WHICH environment it is — staging marker, Vercel project, Supabase project,
+// the narrow oauth_completer identity, the exact callback, the workspace and the trusted context.
+const ENABLED_ENV = {
+  IDCADDIE_ENVIRONMENT: "staging",
+  IDCADDIE_VERCEL_PROJECT_ID: "prj_l30QMLpF3dNLwKBP2CTG7v9rIon0",
+  NEXT_PUBLIC_SUPABASE_URL: `https://${"ycdpzduxugdsffjqyoai"}.supabase.co`,
+  OAUTH_COMPLETER_DB_URL: `postgresql://oauth_completer_login:not-a-real-token@db.${"ycdpzduxugdsffjqyoai"}.supabase.co/postgres`,
+  CONNECTOR_OAUTH_REDIRECT_URI: "https://idcaddie-v3.vercel.app/connectors/oauth/callback",
+  CONNECTOR_OAUTH_REAL_EXCHANGE_ENABLED: "1",
+  CONNECTOR_OAUTH_EXPECTED_SLACK_TEAM_ID: "T0ABCDEF123",
+  CONNECTOR_OAUTH_EXPECTED_TENANT_ID: "aaaa1111-1111-1111-1111-111111111111",
+  CONNECTOR_OAUTH_EXPECTED_CONNECTOR_ID: "1575cde3-0000-4000-8000-00000000bbbb",
+  CONNECTOR_OAUTH_EXPECTED_CORRELATION_ID: "corr-live-run-1",
+  SLACK_CLIENT_ID: "1234.5678",
+};
 
 const signer = () => createHmacStateSigner("test-only-b2c-real-secret-NOT-real", "test");
 const stateCtx = (over: Partial<OAuthStateContext> = {}): OAuthStateContext => ({
@@ -88,11 +103,16 @@ const composed = (over: Partial<OrchestratorDeps> = {}, consumer?: OAuthPendingC
 });
 
 describe("B2c real-exchange wiring — GATED, fail-closed, replay-protected, envelope-only, no-leak", () => {
-  it("GATE: default OFF; flag ON enables; never in production", () => {
+  it("GATE: default OFF; the FULL staging identity enables; the Vercel channel label is irrelevant", () => {
     expect(isRealExchangeEnabled({})).toBe(false);
+    // The flag on its own is no longer enough — that was the weakness of a negative check.
+    expect(isRealExchangeEnabled({ CONNECTOR_OAUTH_REAL_EXCHANGE_ENABLED: "1" })).toBe(false);
     expect(isRealExchangeEnabled(ENABLED_ENV)).toBe(true);
-    expect(isRealExchangeEnabled({ ...ENABLED_ENV, VERCEL_ENV: "production" })).toBe(false);
-    expect(isRealExchangeEnabled({ ...ENABLED_ENV, NODE_ENV: "production" })).toBe(false);
+    // idcaddie-v3.vercel.app IS our staging environment, served on Vercel's "Production" channel.
+    expect(isRealExchangeEnabled({ ...ENABLED_ENV, VERCEL_ENV: "production" })).toBe(true);
+    expect(isRealExchangeEnabled({ ...ENABLED_ENV, NODE_ENV: "production" })).toBe(true);
+    // …but the production DATABASE ref appearing anywhere still refuses.
+    expect(isRealExchangeEnabled({ ...ENABLED_ENV, NOTE: "dzbfxulvxchdemcettrx" })).toBe(false);
   });
 
   it("makeRealOrchestratorDeps FAILS CLOSED without the flag; assembles the real seams WITH the flag", () => {

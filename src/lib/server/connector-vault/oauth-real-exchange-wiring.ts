@@ -21,6 +21,7 @@ import type { ClientSecretProvider, SlackHttpClient } from "./slack-oauth-exchan
 import { withSlackClientSecret, type AppSecretEnvelopeStore } from "./slack-client-secret-store";
 import type { ConnectorVaultKeyProvider } from "./crypto";
 import type { StagingConnectorSecretIngestDeps } from "./connector-secret-ingest";
+import { isRealSlackOAuthEnabled } from "./staging-environment-identity";
 
 // Runtime server-only sentinel — throw if evaluated in a browser.
 if (typeof (globalThis as { window?: unknown }).window !== "undefined") {
@@ -31,11 +32,18 @@ export class RealExchangeWiringError extends Error {
   constructor(message: string) { super(message); this.name = "RealExchangeWiringError"; }
 }
 
-// THE GATE. Real exchange is assembled ONLY on an explicit opt-in AND never in production (belt-and-braces with the
-// downstream ingest/prod guards). Default OFF. CI/agent never set the flag.
+// THE GATE — now the POSITIVE environment-identity check in `staging-environment-identity.ts`.
+//
+// This used to be `VERCEL_ENV !== "production" && flag === "1"`. That was the wrong shape: "not production" is
+// satisfied by every preview deployment, every local run, and any environment where the variable is simply unset, so it
+// passed by accident. And on this deployment it was actively wrong — `idcaddie-v3.vercel.app` is our staging
+// environment served on Vercel's "Production" channel, so the old check refused the one environment we want.
+//
+// The replacement requires every identity fact to be present AND to match: the environment marker, the Vercel project,
+// the Supabase project, the absence of the production ref anywhere, the narrow `oauth_completer` identity, the exact
+// callback, the opt-in, the workspace, and the trusted context. Absence is refusal.
 export function isRealExchangeEnabled(env: Record<string, string | undefined> = process.env): boolean {
-  if (env.VERCEL_ENV === "production" || env.NODE_ENV === "production") return false; // never in prod
-  return env.CONNECTOR_OAUTH_REAL_EXCHANGE_ENABLED === "1"; // explicit opt-in required (default off)
+  return isRealSlackOAuthEnabled(env);
 }
 
 // Adapt the DB atomic single-use consume into the orchestrator's `pendingConsume(payload)` REPLAY gate. Maps ONLY the
