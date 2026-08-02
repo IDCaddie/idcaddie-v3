@@ -12,6 +12,24 @@ from PRs verified via `git log` / `gh pr list`.
 > **as of each PR's date** and are historical — where an older entry says "RISK-007 remains OPEN" / "Phase C remains
 > BLOCKED", that was accurate at that entry's date; this banner is the current state.
 
+### fix(vault) — Phase 8I: migration 0080, the credential version belongs to the caller · 2026-08-02
+
+- `canonicalAad` seals `version` into the AEAD additional data at ENCRYPT time. 0079's store derived its own
+  (`max(version)+1`), which agreed by luck on a first store and diverged on every **re-authorization** — sealing with
+  version 1, writing the row as version 2, and superseding the working credential in the same statement. The result was
+  a connector whose only active token could never be opened, reported as success.
+- 0080 makes the caller's version authoritative, adds `oauth_completer_next_connector_secret_version` so the worker can
+  learn it before encrypting, and **drops** the version-deriving store rather than leaving it beside the new one.
+- Ordering is the safety property: the new row is inserted FIRST and only a successful insert supersedes the previous
+  credential, so any failure leaves the working token active.
+- A UNIQUE index on `(tenant_id, connector_id, secret_kind, version)` handles the race where a reservation scheme would
+  have needed a placeholder-row lifecycle and a `status` vocabulary change. Both designs compute `max+1`, so neither can
+  permanently block a connector — the reservation buys nothing and costs a state machine. Reasoning recorded in 0080.
+- Idempotent on retry (same version + same digest returns the existing row); a DIFFERENT envelope at a taken version is
+  refused rather than silently overwriting whatever was sealed against it.
+- Six mutants each fail the suite. V8 is the assertion that actually pins the defect: storing at a version the database
+  would never have chosen, and asserting the row holds that number.
+
 ### feat(vault) — Phase 8G: migration 0079, the `oauth_completer` narrow identity · 2026-08-01
 
 - Creates the least-privilege role that completes a real Slack OAuth callback: LOGIN, **no password in the migration**,

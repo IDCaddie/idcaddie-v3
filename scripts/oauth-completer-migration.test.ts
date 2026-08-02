@@ -99,3 +99,46 @@ describe("0079 — wrapper hardening", () => {
     expect(SRC).not.toMatch(/encrypted password/i);
   });
 });
+
+// ── 0080: the caller owns the version, and ordering is the safety property ──────────────────────────────────────
+describe("0080 — caller-supplied envelope version", () => {
+  const SRC80 = readFileSync("supabase/migrations/0080_connector_secret_caller_version.sql", "utf8");
+  const STORE = SRC80.slice(SRC80.indexOf("create or replace function public.oauth_completer_store_connector_secret_envelope("));
+
+  it("stores the caller's version verbatim, never a derived one", () => {
+    expect(STORE).toMatch(/'oauth_access', p_version, true, p_ciphertext/);
+    // The insert must not recompute the number the caller already sealed into the AAD.
+    const insert = STORE.slice(STORE.indexOf("insert into public.connector_secrets"), STORE.indexOf("returning id into v_id"));
+    expect(insert).not.toMatch(/max\(/);
+  });
+
+  it("supersedes ONLY after the insert has succeeded", () => {
+    // Not reachable behaviourally: every failure path raises before the supersede, and forcing a failure AT the insert
+    // needs real concurrency. Asserted on the source instead, because the ordering is the whole reason a failed store
+    // cannot disarm a working credential.
+    const insertAt = STORE.indexOf("insert into public.connector_secrets");
+    const supersedeAt = STORE.indexOf("set is_active = false");
+    expect(insertAt).toBeGreaterThan(-1);
+    expect(supersedeAt).toBeGreaterThan(-1);
+    expect(supersedeAt, "the supersede must come after the insert").toBeGreaterThan(insertAt);
+  });
+
+  it("drops the version-deriving store rather than leaving it beside the new one", () => {
+    expect(SRC80).toMatch(/drop function if exists public\.oauth_completer_store_connector_secret_envelope\(\s*uuid, uuid, bytea/);
+  });
+
+  it("enforces version uniqueness in the database, not only in the wrapper", () => {
+    expect(SRC80).toMatch(/create unique index[^;]*connector_secrets \(tenant_id, connector_id, secret_kind, version\)/);
+  });
+
+  it("grants the new functions to oauth_completer and to no other role", () => {
+    const block = SRC80.slice(SRC80.indexOf("-- ══ 4. LEAST PRIVILEGE"));
+    const grants = [...block.matchAll(/grant execute on function[^;]*?to ([a-z_, ]+)'/g)].map((m) => m[1].trim());
+    expect(grants.length).toBeGreaterThan(0);
+    for (const g of grants) expect(g).toBe("oauth_completer");
+    const revoke = block.match(/revoke execute on function %s from ([a-z_, ]+)'/);
+    for (const role of ["public", "anon", "authenticated", "service_role", "connector_runner"]) {
+      expect(revoke![1]).toContain(role);
+    }
+  });
+});
