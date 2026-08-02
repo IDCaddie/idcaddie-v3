@@ -184,18 +184,22 @@ moves to the worker unchanged — the narrow grant is the part worth keeping eit
 
 ## 6. State as of 2026-08-02 — the canonical handoff
 
-**Applied to staging `ycdpzduxugdsffjqyoai` (head 0080). Nothing deployed; production untouched.**
+**Applied to staging `ycdpzduxugdsffjqyoai` (head 0081). Nothing deployed; production `dzbfxulvxchdemcettrx` untouched.**
 
 | | SHA |
 |---|---|
 | v3 #392 — **0079**, the `oauth_completer` role | `bf5bd48f559df153e9aa2f75f2b0f6667e640655` |
 | v3 #394 — **0080**, caller-owned envelope version | `cb613301f0fd06d43fa69ccf0e056baf658de0de` |
+| v3 #396 — **0081**, the completion job (+ the §10 trigger-grant fix) | `ac2c66c7af2e441325050358c245a156ff9b0bac` |
 | runner #115 / #117 / #119 — the completer client | `5c09896…` / `55d11bb…` / `aaa4f0b…` |
 
 0080 sha256: `e0e678c76921c40d0d6bb71d3329859c42e2c79266648a0565ecd33415714587`.
+0081 sha256: `00a410273b7c8298e6b13b23ecdad0e5e4576d7e7678edd29bfda33532849f93`.
 
-`oauth_completer` holds EXECUTE on exactly four purpose-pinned wrappers and **zero** table and sequence privileges,
-verified on hosted. No login role can `SET ROLE` into it — direct authentication is its only path.
+`oauth_completer` holds EXECUTE on exactly **nine** purpose-pinned wrappers and **zero** table and sequence privileges,
+verified on hosted. No login role can `SET ROLE` into it — direct authentication is its only path. As of 0081 it can
+also reach **no** other SECURITY DEFINER function at all, trigger functions included; before 0081 it could reach four
+definer audit writers through Postgres's implicit `PUBLIC` grant.
 
 ### Two things not to re-derive
 
@@ -268,3 +272,28 @@ it for every trigger-returning function; detail in [02 §4a](02_SECURITY_AND_RLS
 
 **V3 still must never hold `OAUTH_COMPLETER_DB_URL`.** Every wrapper above is called by the worker. The web tier's only
 role in this flow is to seal the code and hand it to the worker over the OIDC-authenticated channel PR 3 builds.
+
+### Hosted apply — staging, 2026-08-02
+
+Applied to `ycdpzduxugdsffjqyoai` after checksum and preflight (head was 0080, table absent, role present with four
+wrappers). Head is now **0081**. Verified on hosted, positively rather than by absence of error — a deliberately false
+assertion through the same path returns `P0004`, so a silent no-op is ruled out:
+
+| | before | after |
+|---|---|---|
+| `oauth_completer_*` wrappers | 4 | **9** |
+| other SECURITY DEFINER functions reachable by `oauth_completer` | 4 | **0** |
+| trigger functions holding a `PUBLIC` EXECUTE grant | 4 | **0** |
+| `oauth_completer` table / sequence privileges | 0 / 0 | **0 / 0** |
+| `oauth_completion_jobs` RLS / policies | — | **on / 0** |
+| `product_oauth_completion_job_status` for `authenticated` / `oauth_completer` | — | **yes / no** |
+
+The full lifecycle then ran against hosted PG 17.6 inside one transaction that **rolled back** — enqueue, identical
+retry, substituted-payload rejection, wrong-connector rejection, bounded refusal, claim, duplicate-claim denial,
+terminal-once, payload cleared, terminal row unable to regain a payload, sweep, and zero runs/facts/evidence/credentials
+touched. Zero fixture rows survived the rollback, confirmed by count afterwards.
+
+It seeded **no `auth.users` and no `public.profiles`**, so the `authenticated` half of the suite was deliberately not
+run against shared staging (doc [20](20_STAGING_HOSTED_APPLY_AND_CUTOVER_DISCIPLINE.md) forbids exactly that class of
+fixture there). That boundary is proven on hosted by privilege instead, in the read-only pass. Neither pass claims the
+other's ground.
