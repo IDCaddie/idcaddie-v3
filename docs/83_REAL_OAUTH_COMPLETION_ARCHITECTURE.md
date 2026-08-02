@@ -32,11 +32,26 @@ was given.
 
 ## 2. The decision
 
-> **A new least-privilege database identity, `oauth_completer`, that can execute exactly three functions and nothing
-> else. No dedicated worker.**
+> **CORRECTED 2026-08-02 — a dedicated OAuth-completion worker in the runner repo, using a new least-privilege
+> database identity, `oauth_completer`, that can execute exactly three functions and nothing else.**
+>
+> The original decision recorded here was "no dedicated worker" — the narrow role used directly from the Vercel
+> request path. That was **wrong**, and this document is the reason it got as far as an implementation.
+>
+> `scripts/check-app-runtime-imports.sh` enforces, with doc 46 §11 behind it, that *the app repo stays pg-free and the
+> request/route surface holds no runner internals or KMS client*. A narrow role does not help if reaching it requires
+> putting a Postgres driver and a KMS client in a public web tier — the boundary is about what the tier can DO, not
+> which credential it holds. That invariant predates this work; it was not checked before the option was chosen, and
+> the check caught the violation at the first full gate run.
+>
+> The role and its three wrappers (migration 0079) are unaffected and correct. What changed is **where the client
+> lives**: the runner is a separate deployable that already owns `pg` and the KMS adapters. Vercel validates the
+> signed state and hands off; it opens no database connection and constructs no KMS client.
 
-This is option 2 of the two offered. Option 1 (a separate OAuth-completion worker, with Vercel handing off a validated
-one-time job) was considered and rejected **for now**:
+The reasoning below is retained as the record of why option 1 was *initially* rejected. Each point still stands on its
+own terms — the worker really does move the credential rather than remove it, and really does add a hop and a job store.
+What the reasoning missed is that doc 46 §11 had already decided the question: those costs are the ones the boundary
+chose to pay. Kept rather than deleted, because the argument is sound and only the conclusion was wrong:
 
 - It does not remove the credential — it **moves** it. The worker still needs KMS and a database identity; we would
   still have to decide what that identity may do, which is this same question with an extra queue in front of it.
