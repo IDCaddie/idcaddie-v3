@@ -613,6 +613,19 @@ That `already_consumed` rule is the whole of the idempotent recovery: it is succ
 OURS could have been the one that consumed the row. On a clean first attempt it stays a refusal, so a genuine replay is
 still denied.
 
+**The most likely real instance is `expired`, and it is worth naming.** `oauth_pending` lives 600s from AUTHORIZE, not
+from callback. A customer who lingers on Slack's consent screen for nine and a half minutes leaves seconds of TTL for
+claim -> KMS decrypt -> Slack exchange -> GenerateDataKey -> store, and 0081's enqueue only proves the row was live at
+ENQUEUE time. So the row can expire between the store and the consume. This is the case store-first pays for: under
+consume-first it would have refused before writing anything, leaving the previous token untouched.
+
+What makes it acceptable is that the outcome is still safe and still recoverable without an operator. The token that
+was stored IS valid — Slack issued it and the workspace was verified — so the customer's connection genuinely works;
+what failed is the bookkeeping, and the job honestly refuses to claim completion. The previous version is superseded by
+ordinary 0080 versioning rather than destroyed, and a retry supersedes again. The alternative — marking the job
+completed with the pending row unconsumed — is the one outcome that is never acceptable, and it is the invariant §9.5
+exists to hold.
+
 When the job ends `state_consume_failed`:
 
 - **The stored token is left completely alone.** It is valid and active, and revoking or overwriting it would destroy a
