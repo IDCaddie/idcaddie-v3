@@ -31,8 +31,13 @@ const COPY: Record<ConnectionState, Copy> = {
     retry: false,
   },
   failed: {
+    // NOT "Nothing was changed". Migration 0081's failure vocabulary includes `store_failed`, which is reached only
+    // AFTER Slack's token exchange succeeded — at which point the ID Caddie app is installed in the customer's
+    // workspace and a live bot token exists that we could not persist. The terminal reason deliberately never crosses
+    // this boundary, so this screen cannot tell that apart from "we never started", and must therefore claim neither.
+    // (Found in adversarial review of PR #398.)
     heading: "Connection failed",
-    body: "We could not complete this Slack connection. Nothing was changed.",
+    body: "We could not complete this Slack connection. You can try connecting again.",
     retry: true,
   },
   expired: {
@@ -99,7 +104,10 @@ export function PendingStatus({
     <section className="max-w-lg space-y-4" aria-live="polite">
       <h1 className="text-xl font-semibold">{copy.heading}</h1>
       <p className="text-sm text-zinc-600 dark:text-zinc-400">{copy.body}</p>
-      {!status.terminal && exhausted ? (
+      {/* Only meaningful while we are actually reporting progress. A non-terminal `failed` (the "we could not read the
+          status" bucket) is still polled, but telling someone it "is taking longer than usual" under a heading that
+          says the connection failed would be two contradictory sentences. */}
+      {!status.terminal && exhausted && status.state === "completing" ? (
         <p className="text-sm text-zinc-600 dark:text-zinc-400">{STILL_WORKING}</p>
       ) : null}
       <div className="flex gap-3 text-sm">

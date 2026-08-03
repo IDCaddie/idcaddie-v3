@@ -312,10 +312,22 @@ by something that has been seen to fail.
 
 ### 8.1 The environment gate inverted
 
-`resolveStagingEnvironmentIdentity` used to **require** `OAUTH_COMPLETER_DB_URL`. It now **refuses** when that variable
-exists under any name, or when any value carries the `oauth_completer` role — new reason `completer_credential_present`,
-alongside the existing `runner_credential_present`. That is the §2 correction made operational: the boundary is about
-what this tier can DO, and a database credential here means the rejected design is being rebuilt.
+`resolveStagingEnvironmentIdentity` used to **require** `OAUTH_COMPLETER_DB_URL`. It now **refuses** it — new reason
+`completer_credential_present`, alongside `runner_credential_present`. That is the §2 correction made operational: the
+boundary is about what this tier can DO, and a database credential here means the rejected design is being rebuilt.
+
+**A credential is a connection string, not a mention of one.** The first version of this check scanned every
+environment *value* for the role name as a substring, and that was a live outage waiting to happen: Vercel injects
+`VERCEL_GIT_COMMIT_MESSAGE` into the runtime environment, and every commit in this phase discusses `oauth_completer`,
+so a deploy cut from one would have refused on the grounds that a credential was present, taken the not-pinned branch,
+and served a bare 404 to every real Slack callback. The rule is now the dedicated variable **name**, or a value that is
+actually a Postgres URI — which is *stricter* than the substring test, because this tier is pg-free and any connection
+string here is a refusal regardless of which role it names.
+
+The gate also now checks the **grammars** the seal, the protocol schema and 0081's CHECKs all enforce (uuid, correlation
+id, `^T[A-Z0-9]{2,30}$`) — reason `expected_context_malformed`. A value that passed the gate and failed downstream gave
+a deployment that looked configured and then refused every callback with a reason naming the crypto rather than the
+misconfiguration; an uppercase UUID was enough.
 
 ### 8.2 The handoff protocol — version 1
 
@@ -465,9 +477,23 @@ change to the constant — an operator cannot do it from the environment, which 
 ### 8.7 The pending experience, and what PR 4 owes
 
 The callback redirects to `/connectors/oauth/pending?c=<correlationId>`. That page's only source of truth is
-`product_oauth_completion_job_status` — the single 0081 wrapper granted to `authenticated`. Four customer words:
+`product_oauth_completion_job_status` — the single 0081 wrapper granted to `authenticated`, read under the
+**server-pinned tenant**, not the session's active one. Those are different questions with different answers: there is
+no tenant switcher, so `activeTenant` is simply the alphabetically-first membership, and a user who belongs to more
+than one tenant would have queried the wrong one and been told the connection failed while it was completing. It does
+not widen access — the wrapper gates on `has_tenant_role(p_tenant_id, owner|admin)` itself.
+
+**A read we could not make is not a job that failed.** Denied / foreign / absent / RPC-error all render *identically*
+to a real failure — that is what keeps them indistinguishable — but none of them is **terminal**, so the poller keeps
+going. Only the wrapper's own `failed` stops it. One transient statement timeout on the first server render would
+otherwise have pinned the screen to "Connection failed" forever with polling disabled while the worker went on to store
+a live Slack token. Four customer words:
 **Completing your Slack connection · Connection completed · Connection failed · Connection expired**, plus a
-**Retry connection** link on the two a customer can act on. `pending`/`claimed` both read as *completing*; a denied read,
+**Retry connection** link on the two a customer can act on. The failure copy does **not** say "nothing was changed":
+0081's vocabulary includes `store_failed`, reached only *after* Slack's exchange succeeded — at which point the app is
+installed in the customer's workspace — and the terminal reason deliberately never crosses this boundary, so the screen
+cannot tell that apart from "we never started" and must claim neither. Refusals that never reach a job land on
+`/connectors?oauth=error`, which now renders a bounded banner rather than returning the customer silently. `pending`/`claimed` both read as *completing*; a denied read,
 another tenant's job, and a job that never existed are all *failed* and therefore indistinguishable. Nothing else
 crosses the boundary: no job id, no timestamps, no terminal reason, no attempt count, no digest, no payload. Polling is
 5s × 36 (three minutes; the job's deadline is ten), stops on the first terminal state, and when the budget runs out says

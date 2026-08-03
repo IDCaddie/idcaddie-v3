@@ -52,13 +52,26 @@ const RUNNER_VAULT_MODULES = [
   "slack-client-secret-store",
   "connector-secret-store",
   "connector-secret-ingest",
+  "connector-secret-decrypt-use",
   "kms-key-provider",
   "aws-kms-client",
   "aws-kms-sdk-sender",
+  // The two that grant the capabilities these rules exist to deny, and that the first version of this list omitted:
+  // `crypto` is envelope decryption, and consuming the pending row is the worker's single-use gate — V3 doing it
+  // itself would make the job the worker later claims find the row already consumed. SLASH-ANCHORED so `./crypto` and
+  // `@/lib/server/connector-vault/crypto` fire while the legitimate `node:crypto` these modules are built on does not.
+  // (Found in adversarial review of PR #398.)
+  "/crypto",
+  "oauth-pending-consume",
+  "oauth-pending-executor",
 ];
 
 /** The files that make up the OAuth completion path in the web tier. Every one is covered by every rule below. */
 const COMPLETION_PATH = [
+  // The state validator IS on the completion path — the callback's first act is to call it — and omitting it left it
+  // as the one file where a Slack exchange could have been added with every rule still reporting green.
+  // (Found in adversarial review of PR #398.)
+  "lib/server/connector-vault/oauth-state.ts",
   "lib/server/connector-vault/oauth-handoff-protocol.ts",
   "lib/server/connector-vault/oauth-payload-seal.ts",
   "lib/server/connector-vault/oauth-handoff-client.ts",
@@ -108,8 +121,15 @@ export const RULES: Rule[] = [
     violates: (code) => /connector_runner_login|CONNECTOR_RUNNER_DB_URL/.test(code),
   },
   {
-    label: "a Slack exchange reachable from the V3 callback path",
-    applies: onCompletionPath,
+    // DIRECT imports only, and the label says so. `route.ts` legitimately imports the SYNTHETIC handler, which
+    // transitively pulls the orchestrator and the exchange module into the same bundle — so a transitive version of
+    // this rule would be red today for a path that has no egress (the exchange takes an INJECTED http client and the
+    // only one wired in that graph is the synthetic in-memory stub). What stops the REAL branch reaching any of it is
+    // asserted separately, by slicing the real branch out of the route in real-callback-dependencies.test.ts.
+    // Naming the rule accurately is the fix; claiming more than it checks was the defect.
+    // (Found in adversarial review of PR #398.)
+    label: "a Slack exchange DIRECTLY imported by an OAuth completion-path module",
+    applies: (f) => onCompletionPath(f) && !f.rel.endsWith(path.join("callback", "route.ts")),
     violates: (code) =>
       /slack\.com|oauth\.v2\.access/.test(code) ||
       ["slack-oauth-exchange", "slack-http-client", "oauth-callback-orchestrator", "oauth-real-exchange-wiring", "oauth-callback-real-runner"]
@@ -168,19 +188,22 @@ describe("the OAuth completion path holds no capability it must not", () => {
 // ── MUTATION TESTS ───────────────────────────────────────────────────────────────────────────────────────────────────
 // Each rule gets a planted violation. A rule that cannot be made to fire is not protecting anything.
 describe("every rule actually fires", () => {
-  const onPath: string = COMPLETION_PATH[0];
+  const onPath: string = COMPLETION_PATH.find((p) => p.endsWith("oauth-callback-handoff.ts")) as string;
   const plants: Array<[string, SourceFile]> = [
     ["pg / postgres imported under src/", { rel: "lib/anything.ts", source: `import { Pool } from "pg";` }],
     ["pg / postgres imported under src/", { rel: "lib/anything.ts", source: `const p = await import("postgres");` }],
     ["a KMS SDK reachable from the OAuth completion path", { rel: onPath, source: `import { KMSClient } from "@aws-sdk/client-kms";` }],
     ["a runner-internal vault module reachable from the OAuth completion path", { rel: onPath, source: `import { x } from "./runner-db-client";` }],
     ["a runner-internal vault module reachable from the OAuth completion path", { rel: onPath, source: `import { y } from "@/lib/server/connector-vault/kms-key-provider";` }],
+    ["a runner-internal vault module reachable from the OAuth completion path", { rel: onPath, source: `import { decryptAppSecret } from "./crypto";` }],
+    ["a runner-internal vault module reachable from the OAuth completion path", { rel: onPath, source: `import { d } from "@/lib/server/connector-vault/crypto";` }],
+    ["a runner-internal vault module reachable from the OAuth completion path", { rel: onPath, source: `import { consumeOAuthPending } from "./oauth-pending-consume";` }],
     ["OAUTH_COMPLETER_DB_URL read as configuration", { rel: "lib/anything.ts", source: `const u = process.env.OAUTH_COMPLETER_DB_URL;` }],
     ["OAUTH_COMPLETER_DB_URL read as configuration", { rel: "lib/anything.ts", source: `const u = env["OAUTH_COMPLETER_DB_URL"];` }],
     ["OAUTH_COMPLETER_DB_URL read as configuration", { rel: "lib/anything.ts", source: `const { OAUTH_COMPLETER_DB_URL } = process.env;` }],
     ["the connector_runner credential referenced under src/", { rel: "lib/anything.ts", source: `const role = "connector_runner_login";` }],
-    ["a Slack exchange reachable from the V3 callback path", { rel: onPath, source: `await fetch("https://slack.com/api/oauth.v2.access");` }],
-    ["a Slack exchange reachable from the V3 callback path", { rel: onPath, source: `import { exchange } from "./slack-oauth-exchange";` }],
+    ["a Slack exchange DIRECTLY imported by an OAuth completion-path module", { rel: onPath, source: `await fetch("https://slack.com/api/oauth.v2.access");` }],
+    ["a Slack exchange DIRECTLY imported by an OAuth completion-path module", { rel: onPath, source: `import { exchange } from "./slack-oauth-exchange";` }],
     ["a direct completion-job database write from V3", { rel: "lib/anything.ts", source: `await rpc("oauth_completer_enqueue_oauth_completion_job", {});` }],
     ["a direct completion-job database write from V3", { rel: "lib/anything.ts", source: `await supabase.from("oauth_completion_jobs").select("*");` }],
     ["the OAuth completion path consuming the pending row itself", { rel: onPath, source: `await rpc("runner_consume_oauth_pending", {});` }],

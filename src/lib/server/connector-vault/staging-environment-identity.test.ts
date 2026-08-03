@@ -165,6 +165,33 @@ describe("environment identity — every fact is load-bearing", () => {
     expect(resolveStagingEnvironmentIdentity(withVal({ SOME_OTHER_DB_URL: COMPLETER_URL })))
       .toEqual({ ok: false, reason: "completer_credential_present" });
   });
+  // THE OUTAGE THIS ALMOST SHIPPED. The first version scanned every environment VALUE for the role name as a
+  // substring. Vercel injects VERCEL_GIT_COMMIT_MESSAGE at runtime, and every commit in this phase discusses
+  // `oauth_completer` — so a deploy cut from one would have refused, taken the not-pinned branch, and served a bare
+  // 404 to every real Slack callback. Prose about a role is not a grant of it.
+  // (Found in adversarial review of PR #398.)
+  it("does NOT refuse because git metadata happens to discuss the roles", () => {
+    for (const message of [
+      "Phase 8K: the oauth_completer identity moves to the worker",
+      "revert: connector_runner_login must never reach the web tier",
+      "docs(83): oauth_completer holds nine wrappers and zero table privileges",
+    ]) {
+      expect(resolveStagingEnvironmentIdentity(withVal({ VERCEL_GIT_COMMIT_MESSAGE: message })).ok, message).toBe(true);
+    }
+  });
+
+  it("refuses ANY Postgres connection string, whatever it is called and whatever role it names", () => {
+    for (const [k, v] of [
+      ["SOME_UNRELATED_URL", "postgresql://someone:not-a-real-token@db.example.com:5432/postgres"],
+      ["DATABASE_URL", "postgres://postgres:not-a-real-token@db.example.com:5432/postgres"],
+      ["X", "  POSTGRESQL://x:not-a-real-token@db.example.com/postgres"],
+    ] as const) {
+      const r = resolveStagingEnvironmentIdentity(withVal({ [k]: v }));
+      expect(r.ok, `${k}`).toBe(false);
+      expect((r as { reason: string }).reason).toMatch(/^(completer|runner)_credential_present$/);
+    }
+  });
+
   it("refuses an EMPTY completer variable — the hazard is the variable existing, not its value", () => {
     expect(resolveStagingEnvironmentIdentity(withVal({ OAUTH_COMPLETER_DB_URL: "" })))
       .toEqual({ ok: false, reason: "completer_credential_present" });
@@ -177,6 +204,35 @@ describe("environment identity — every fact is load-bearing", () => {
     "refuses when %s is absent — there is no default trusted context",
     (k) => { expect(resolveStagingEnvironmentIdentity(withOut(k))).toEqual({ ok: false, reason: "expected_context_missing" }); },
   );
+
+  // A value that passes the gate but fails a downstream grammar produces a deployment that LOOKS configured, takes the
+  // real branch with no synthetic fallback, and then refuses every callback with a reason naming the crypto
+  // (`seal_binding_invalid`) rather than the misconfiguration. An uppercase UUID pasted from a generator was enough.
+  // (Found in adversarial review of PR #398.)
+  it("refuses a trusted context whose shape the seal and migration 0081 would reject", () => {
+    const bad: Array<[string, string]> = [
+      ["CONNECTOR_OAUTH_EXPECTED_TENANT_ID", "AAAA1111-1111-1111-1111-111111111111"], // uppercase
+      ["CONNECTOR_OAUTH_EXPECTED_TENANT_ID", "aaaa1111-1111-1111-1111-11111111111"],  // one short
+      ["CONNECTOR_OAUTH_EXPECTED_TENANT_ID", "not-a-uuid"],
+      ["CONNECTOR_OAUTH_EXPECTED_CONNECTOR_ID", "1575CDE3-0000-4000-8000-00000000BBBB"],
+      ["CONNECTOR_OAUTH_EXPECTED_CONNECTOR_ID", "{1575cde3-0000-4000-8000-00000000bbbb}"],
+      ["CONNECTOR_OAUTH_EXPECTED_CORRELATION_ID", "corr with spaces"],
+      ["CONNECTOR_OAUTH_EXPECTED_CORRELATION_ID", "corr\nnewline"],
+      ["CONNECTOR_OAUTH_EXPECTED_CORRELATION_ID", "x".repeat(65)],
+    ];
+    for (const [k, v] of bad) {
+      expect(resolveStagingEnvironmentIdentity(withVal({ [k]: v })), `${k}=${JSON.stringify(v)}`)
+        .toEqual({ ok: false, reason: "expected_context_malformed" });
+    }
+  });
+
+  it("refuses a workspace id longer than the database column allows", () => {
+    // 0081's CHECK is `^T[A-Z0-9]{2,30}$`; the gate used to stop at `{2,}` and would have passed a value the job
+    // insert then rejected.
+    expect(resolveStagingEnvironmentIdentity(withVal({ CONNECTOR_OAUTH_EXPECTED_SLACK_TEAM_ID: `T${"A".repeat(31)}` })))
+      .toEqual({ ok: false, reason: "expected_workspace_missing" });
+    expect(resolveStagingEnvironmentIdentity(withVal({ CONNECTOR_OAUTH_EXPECTED_SLACK_TEAM_ID: `T${"A".repeat(30)}` })).ok).toBe(true);
+  });
 
   it("refuses a missing Slack client id", () => {
     expect(resolveStagingEnvironmentIdentity(withOut("SLACK_CLIENT_ID")))

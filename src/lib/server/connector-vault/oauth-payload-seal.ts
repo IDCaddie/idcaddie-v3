@@ -21,6 +21,9 @@
 //   key      = HKDF-SHA256(ikm = shared, salt = ephemeral_public || worker_public, info = HKDF_INFO, length = 32)
 //   envelope = AES-256-GCM(key, nonce, plaintext = authorization code, aad = canonicalSealAad(binding))
 //
+// The version byte at offset 0 is INSIDE the AAD (see `canonicalSealAad`), so an opener that reads it and then
+// authenticates cannot be steered onto the wrong parse path: a flipped version byte fails the tag.
+//
 // The salt binds BOTH public keys, so a key-substitution attempt derives a different key rather than the same one. The
 // AAD binds every field of the handoff request that must not change between sealing and completion — a worker handed a
 // substituted body cannot open the code at all, which is the real body binding in this protocol (see
@@ -158,6 +161,12 @@ export function canonicalSealAad(binding: SealBinding): Buffer {
     [
       AAD_DOMAIN,
       String(HANDOFF_PROTOCOL_VERSION),
+      // THE ENVELOPE VERSION IS AUTHENTICATED. Byte 0 of the envelope sits outside the ciphertext and outside the tag,
+      // so without this line it is the one field an attacker who can rewrite `oauth_completion_jobs.protected_payload`
+      // could flip undetected — and the moment a v2 layout exists, flipping it forces a v2 envelope down a v1 parse
+      // path. Binding it here means a flipped byte derives a different AAD and the tag simply does not verify.
+      // (Found in adversarial review of PR #398.)
+      String(ENVELOPE_VERSION),
       binding.tenantId,
       binding.connectorId,
       HANDOFF_PROVIDER,

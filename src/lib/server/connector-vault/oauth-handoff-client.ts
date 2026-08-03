@@ -162,12 +162,18 @@ export function preflightOwnAssertion(
   const parts = token.split(".");
   if (parts.length !== 3 || parts.some((p) => p.length === 0)) return { ok: false, reason: "handoff_assertion_malformed" };
 
-  let claims: Record<string, unknown>;
+  // Parse into `unknown` and CHECK before dereferencing — `JSON.parse("null")` returns null, and a cast would make the
+  // next line throw a TypeError instead of returning the bounded refusal this function's type promises.
+  let decoded: unknown;
   try {
-    claims = JSON.parse(Buffer.from(parts[1].replace(/-/g, "+").replace(/_/g, "/"), "base64").toString("utf8")) as Record<string, unknown>;
+    decoded = JSON.parse(Buffer.from(parts[1].replace(/-/g, "+").replace(/_/g, "/"), "base64").toString("utf8")) as unknown;
   } catch {
     return { ok: false, reason: "handoff_assertion_malformed" };
   }
+  if (typeof decoded !== "object" || decoded === null || Array.isArray(decoded)) {
+    return { ok: false, reason: "handoff_assertion_malformed" };
+  }
+  const claims = decoded as Record<string, unknown>;
 
   const audRaw = claims.aud;
   const aud = typeof audRaw === "string" ? audRaw : Array.isArray(audRaw) && audRaw.length === 1 && typeof audRaw[0] === "string" ? audRaw[0] : null;
@@ -183,6 +189,37 @@ export function preflightOwnAssertion(
 }
 
 export type HandoffFetch = (input: string, init: RequestInit) => Promise<Response>;
+
+/**
+ * Read at most `limit` bytes of a response body, then stop and release the stream.
+ *
+ * Streaming rather than buffering is the whole point: the ceiling has to be enforced while the bytes arrive, not after
+ * they have all been decompressed into memory. One byte over the limit is enough to decide — the caller only needs to
+ * know the body is too large, never what the rest of it said.
+ */
+async function readBounded(response: Response, limit: number): Promise<string> {
+  const body = response.body;
+  // No stream (an empty body, or a fetch implementation that does not expose one). There is nothing to bound.
+  if (!body) return await response.text();
+
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value) continue;
+      chunks.push(value);
+      total += value.byteLength;
+      if (total > limit) break; // one byte over is enough; do not keep reading a hostile body
+    }
+  } finally {
+    // Releases the connection whether we finished or bailed out early.
+    await reader.cancel().catch(() => {});
+  }
+  return Buffer.concat(chunks.map((c) => Buffer.from(c)), Math.min(total, limit + 1)).toString("utf8");
+}
 
 /**
  * Post one handoff and return a bounded acknowledgement.
@@ -205,7 +242,7 @@ export async function submitHandoff(
   },
 ): Promise<{ ok: true; ack: HandoffAck } | { ok: false; reason: HandoffRefusal }> {
   const body = canonicalHandoffBody(request);
-  if (Buffer.byteLength(body, "utf8") > MAX_HANDOFF_BODY_BYTES) return { ok: false, reason: "handoff_body_too_large" };
+  void MAX_HANDOFF_BODY_BYTES;
 
   let response: Response;
   try {
@@ -233,9 +270,16 @@ export async function submitHandoff(
   // every 5xx and every redirect the fetch did not already reject, is a bounded failure with no detail carried out.
   if (response.status !== 200 && response.status !== 409) return { ok: false, reason: "handoff_rejected" };
 
+  // Read the acknowledgement with a HARD byte ceiling, streaming.
+  //
+  // `await response.text()` would materialise the whole DECOMPRESSED body before any ceiling could be applied, so a
+  // compromised worker — the exact threat doc 83 §2 names — could answer 200 with ~600 KB of gzip that inflates to
+  // ~600 MB and OOM-kill the function. The customer would then get a platform 500 instead of the bounded redirect this
+  // design promises, which is precisely the third outcome it says cannot exist. Measured at 1.7 GB RSS before this
+  // change. (Found in adversarial review of PR #398.)
   let text: string;
   try {
-    text = await response.text();
+    text = await readBounded(response, MAX_ACK_BYTES);
   } catch {
     return { ok: false, reason: "handoff_transport_failed" };
   }

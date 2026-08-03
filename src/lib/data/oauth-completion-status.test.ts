@@ -8,9 +8,16 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const rpc = vi.fn();
-const gate = vi.fn();
+const identity = vi.fn();
 vi.mock("@/lib/supabase/server", () => ({ createClient: async () => ({ rpc }) }));
-vi.mock("./access-repository", () => ({ accessGate: () => gate() }));
+// The tenant comes from the SERVER-PINNED environment identity, not from the session's active tenant — the job was
+// written under the pinned one, and `activeTenant` is merely the alphabetically-first membership.
+// Partial: `oauth-handoff-protocol.ts` re-exports real constants from this module, so a full replacement would break
+// the grammar this file's own correlation-id assertions depend on.
+vi.mock("@/lib/server/connector-vault/staging-environment-identity", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/server/connector-vault/staging-environment-identity")>()),
+  resolveStagingEnvironmentIdentity: () => identity(),
+}));
 
 import { CONNECTION_STATES, getSlackConnectionStatus } from "./oauth-completion-status";
 
@@ -26,13 +33,13 @@ const row = (job_status: string) => ({
 
 beforeEach(() => {
   rpc.mockReset();
-  gate.mockReset();
-  gate.mockResolvedValue({ ok: true, tenantId: TENANT });
+  identity.mockReset();
+  identity.mockReturnValue({ ok: true, tenantId: TENANT });
   rpc.mockResolvedValue({ data: [row("pending")], error: null });
 });
 
 describe("mapping the job to a customer state", () => {
-  it("calls the bounded product wrapper with the gate's tenant, never a caller-supplied one", async () => {
+  it("calls the bounded product wrapper with the SERVER-PINNED tenant, never the session's active one", async () => {
     await getSlackConnectionStatus(CORR);
     expect(rpc).toHaveBeenCalledWith("product_oauth_completion_job_status", { p_tenant_id: TENANT, p_correlation_id: CORR });
   });
@@ -69,8 +76,9 @@ describe("mapping the job to a customer state", () => {
 });
 
 describe("a denied read is indistinguishable from a job that does not exist", () => {
-  const cases: Array<[string, () => void]> = [
-    ["no active tenant", () => gate.mockResolvedValue({ ok: false })],
+  // "We could not get an authoritative answer." Every one renders identically to a real failure — that is what keeps
+  // denied / foreign / absent inseparable — but none of them is TERMINAL, because none of them is the job speaking.
+  const nonAuthoritative: Array<[string, () => void]> = [
     ["empty set — denied, foreign, or absent", () => rpc.mockResolvedValue({ data: [], error: null })],
     ["null data", () => rpc.mockResolvedValue({ data: null, error: null })],
     ["an rpc error", () => rpc.mockResolvedValue({ data: null, error: { message: "permission denied for function LEAKME" } })],
@@ -79,25 +87,51 @@ describe("a denied read is indistinguishable from a job that does not exist", ()
     ["a row that is not a row", () => rpc.mockResolvedValue({ data: ["completed"], error: null })],
   ];
 
-  it("every one of them produces the SAME terminal failure and nothing else", async () => {
-    for (const [name, setup] of cases) {
-      // Each case starts from a HEALTHY baseline. Without this the first case's `gate.mockResolvedValue({ ok: false })`
-      // would still be in force for every case after it, and they would all pass through the access gate rather than
-      // through the thing they claim to test. Mutation testing found exactly that: replacing the empty-set branch with
-      // "completed" left this test green.
-      gate.mockResolvedValue({ ok: true, tenantId: TENANT });
-      rpc.mockResolvedValue({ data: [row("pending")], error: null });
-      setup();
+  const fresh = () => {
+    // Each case starts from a HEALTHY baseline. Without this the first case's mock would still be in force for every
+    // case after it, and they would all refuse for the first case's reason rather than for their own. Mutation testing
+    // found exactly that: replacing the empty-set branch with "completed" left this test green.
+    identity.mockReturnValue({ ok: true, tenantId: TENANT });
+    rpc.mockResolvedValue({ data: [row("pending")], error: null });
+  };
+
+  it("every one renders IDENTICALLY, and carries nothing", async () => {
+    for (const [name, setup] of nonAuthoritative) {
+      fresh(); setup();
       const r = await getSlackConnectionStatus(CORR);
-      expect(r, name).toEqual({ state: "failed", terminal: true });
+      expect(r.state, name).toBe("failed");
+      expect(Object.keys(r).sort(), name).toEqual(["state", "terminal"]);
       expect(JSON.stringify(r), name).not.toContain("LEAKME");
     }
   });
 
-  it("refuses a malformed correlation id without ever reaching the database", async () => {
+  // The load-bearing half. One transient statement timeout on the first server render must not pin the screen to
+  // "Connection failed" forever with polling disabled while the worker goes on to store a live Slack token.
+  // (Found in adversarial review of PR #398.)
+  it("none of them is TERMINAL — a read we could not make is not a job that failed", async () => {
+    for (const [name, setup] of nonAuthoritative) {
+      fresh(); setup();
+      expect((await getSlackConnectionStatus(CORR)).terminal, name).toBe(false);
+    }
+  });
+
+  it("…while the wrapper's OWN 'failed' is terminal — that one really is the job speaking", async () => {
+    fresh();
+    rpc.mockResolvedValue({ data: [row("failed")], error: null });
+    expect(await getSlackConnectionStatus(CORR)).toEqual({ state: "failed", terminal: true });
+  });
+
+  it("refuses a malformed correlation id, terminally, without ever reaching the database", async () => {
     for (const c of [null, undefined, "", "corr with spaces", "x".repeat(65), "corr/../other"]) {
+      // Terminal on purpose: a malformed id can never name a job, so there is nothing to wait for.
       expect(await getSlackConnectionStatus(c), String(c)).toEqual({ state: "failed", terminal: true });
     }
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
+  it("refuses terminally outside the pinned staging environment — no job can exist there", async () => {
+    identity.mockReturnValue({ ok: false, reason: "real_exchange_disabled" });
+    expect(await getSlackConnectionStatus(CORR)).toEqual({ state: "failed", terminal: true });
     expect(rpc).not.toHaveBeenCalled();
   });
 

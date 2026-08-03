@@ -135,4 +135,19 @@ describe("the route has no synthetic fallback in real mode", () => {
     // The real branch's only success destination is the pending page, which reads the job's real status.
     expect(src).not.toMatch(/oauth=success/);
   });
+
+  // The session subject is what `validateOAuthState` compares the signed state against — it is the check that stops
+  // user B completing user A's callback. Nothing asserted that the route actually resolves it from the session, so
+  // hardcoding a constant subject was a change the entire suite tolerated.
+  // (Found in adversarial review of PR #398.)
+  it("resolves the subject from the SESSION, in both branches", () => {
+    const src = routeSource();
+    const resolvers = src.match(/resolveSubject: async \(\) => [^,\n]+/g) ?? [];
+    expect(resolvers.length, "both the real and the synthetic branch supply a resolver").toBe(2);
+    for (const r of resolvers) {
+      expect(r, r).toMatch(/\(await getSessionUser\(\)\)\?\.id \?\? null/);
+    }
+    // …and the only source of a subject anywhere in the route is that session call — never the request.
+    expect(src).not.toMatch(/searchParams\.get\(\s*["'](sub|subject|user)/);
+  });
 });

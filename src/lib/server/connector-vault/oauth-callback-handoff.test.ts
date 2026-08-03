@@ -14,6 +14,7 @@ import {
   handleHandoffCallback,
   makeHandoffCallbackRunner,
   type HandoffCallbackDeps,
+  type HandoffCallbackRunner,
 } from "./oauth-callback-handoff";
 import { STAGING_VERCEL_PROJECT_ID, STAGING_VERCEL_TEAM_ID } from "./oauth-handoff-protocol";
 
@@ -184,7 +185,32 @@ const callbackUrl = (params: Record<string, string>) =>
   `https://idcaddie-v3.vercel.app/connectors/oauth/callback?${new URLSearchParams(params).toString()}`;
 
 describe("the callback handler", () => {
-  const runOk = async () => ({ ok: true as const, correlationId: CORR, outcome: "accepted" as const });
+  const runOk: HandoffCallbackRunner = async () => ({ ok: true, correlationId: CORR, outcome: "accepted" });
+
+  // WHAT THE HANDLER HANDS THE RUNNER. Every other test in this block stubs `run` with a function that ignores its
+  // argument, so the parse-and-forward step was entirely unproven: forwarding a request-supplied `?sub=` instead of the
+  // resolved session subject would defeat the state's subject binding — user B completing user A's callback — and no
+  // test would have noticed. (Found in adversarial review of PR #398.)
+  it("forwards the parsed query and the RESOLVED session subject, and nothing else", async () => {
+    const run = vi.fn(runOk);
+    const state = validState();
+    await handleHandoffCallback(
+      // `sub` and `subject` are decoys: nothing request-supplied may become the authenticated subject.
+      new Request(callbackUrl({ code: CODE, state, error: "access_denied", sub: "99999999-9999-9999-9999-999999999999", subject: "attacker" })),
+      { resolveSubject: async () => SUBJECT, run },
+    );
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(run.mock.calls[0][0]).toEqual({ state, code: CODE, providerError: "access_denied", subject: SUBJECT });
+  });
+
+  it("forwards absent query parameters as undefined rather than inventing them", async () => {
+    const run = vi.fn(runOk);
+    await handleHandoffCallback(new Request("https://idcaddie-v3.vercel.app/connectors/oauth/callback"), {
+      resolveSubject: async () => SUBJECT,
+      run,
+    });
+    expect(run.mock.calls[0][0]).toEqual({ state: undefined, code: undefined, providerError: undefined, subject: SUBJECT });
+  });
 
   it("sends the browser to the PENDING page — never to a success page", async () => {
     const res = await handleHandoffCallback(new Request(callbackUrl({ code: CODE, state: validState() })), {

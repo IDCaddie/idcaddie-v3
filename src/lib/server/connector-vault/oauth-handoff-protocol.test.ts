@@ -185,6 +185,18 @@ describe("OIDC assertion — the pinned claim contract", () => {
       .toEqual({ ok: false, reason: "assertion_lifetime_too_long" });
   });
 
+  // `JSON.parse("null")` returns null, and a payload that is a scalar or an array is not a claim set either. Each must
+  // return the bounded refusal this function's type promises — in PR 4's worker endpoint an unhandled TypeError is a
+  // 500 with a stack where the contract advertises a refusal. (Found in adversarial review of PR #398.)
+  it("refuses a payload that is not a claims OBJECT rather than throwing on it", () => {
+    for (const payload of ["null", "5", '"a string"', "[]", '[{"iss":"x"}]', "true"]) {
+      const token = `${b64url(JSON.stringify({ alg: "RS256", kid: KID }))}.${b64url(payload)}`;
+      const signed = `${token}.${createSign("sha256").update(token).sign(rsa.privateKey, "base64url")}`;
+      expect(() => verify(signed), payload).not.toThrow();
+      expect(verify(signed), payload).toEqual({ ok: false, reason: "assertion_malformed" });
+    }
+  });
+
   it("refuses a token missing any pinned claim rather than defaulting it", () => {
     for (const k of ["iss", "aud", "sub", "owner_id", "project_id", "environment", "iat", "exp"]) {
       const claims: Record<string, unknown> = { ...CLAIMS };
@@ -194,11 +206,25 @@ describe("OIDC assertion — the pinned claim contract", () => {
   });
 
   it("the JWKS verifier refuses a non-RSA, mis-alg'd or use-mismatched key", () => {
-    const input = { signingInput: "a.b", signature: Buffer.alloc(8), algorithm: "RS256", keyId: KID };
-    expect(makeJwksSignatureVerifier([{ ...jwks[0], kty: "oct" }])(input)).toBe(false);
-    expect(makeJwksSignatureVerifier([{ ...jwks[0], alg: "RS512" }])(input)).toBe(false);
-    expect(makeJwksSignatureVerifier([{ ...jwks[0], use: "enc" }])(input)).toBe(false);
-    expect(makeJwksSignatureVerifier([])(input)).toBe(false);
+    // The fixture is REALLY SIGNED, so the baseline accepts and the metadata guard is the only difference between the
+    // accept case and each refuse case. With an unsigned fixture every case returned false and all three guards could
+    // be deleted with this test still green. (Found in adversarial review of PR #398.)
+    const signingInput = "a.b";
+    const input = {
+      signingInput,
+      signature: createSign("sha256").update(signingInput).sign(rsa.privateKey),
+      algorithm: "RS256",
+      keyId: KID,
+    };
+    expect(makeJwksSignatureVerifier(jwks)(input), "baseline: the correct key must ACCEPT this fixture").toBe(true);
+
+    expect(makeJwksSignatureVerifier([{ ...jwks[0], kty: "oct" }])(input), "kty").toBe(false);
+    expect(makeJwksSignatureVerifier([{ ...jwks[0], alg: "RS512" }])(input), "alg").toBe(false);
+    expect(makeJwksSignatureVerifier([{ ...jwks[0], use: "enc" }])(input), "use").toBe(false);
+    expect(makeJwksSignatureVerifier([{ ...jwks[0], kid: "another-kid" }])(input), "kid").toBe(false);
+    expect(makeJwksSignatureVerifier([])(input), "empty key set").toBe(false);
+    // A key set entry missing its modulus must return false, not throw.
+    expect(makeJwksSignatureVerifier([{ kid: KID, kty: "RSA", e: "AQAB" }])(input), "no n").toBe(false);
   });
 
   it("never places the assertion or a claim value in a refusal", () => {
@@ -369,6 +395,31 @@ describe("handoff request — the envelope PR 4 verifies", () => {
       expect(r.ok, String(size)).toBe(false);
       expect(["handoff_payload_bounds_invalid", "handoff_request_invalid"]).toContain((r as { reason: string }).reason);
     }
+  });
+
+  // `verifyHandoffRequest` forwards the three lifetime options to `verifyHandoffAssertion`. That forwarding is the
+  // whole reason those options exist as parameters (doc 83 §8.4 says PR 4 must tighten them), and nothing exercised it:
+  // dropping all three, or swapping maxAge and maxLifetime, left the suite green — so PR 4 could pass a tightened
+  // ceiling, watch its tests pass, and ship a worker silently applying the 1-hour default.
+  // (Found in adversarial review of PR #398.)
+  it("FORWARDS the assertion lifetime options rather than silently applying the defaults", () => {
+    // Well inside the 3600s defaults, so only a forwarded tighter ceiling can reject these.
+    const old = () => envelope(REQUEST, { headers: {} });
+    const withToken = (over: Record<string, unknown>) => ({ ...old(), token: token(over) });
+
+    // 600s old, 900s claimed lifetime — accepted under the defaults.
+    const aged = withToken({ iat: NOW - 600, nbf: NOW - 600, exp: NOW + 300 });
+    expect(verifyHandoffRequest(aged).ok, "accepted under the defaults").toBe(true);
+
+    // …and refused once PR 4 tightens the AGE ceiling to 300s.
+    expect(verifyHandoffRequest({ ...aged, maxAgeSeconds: 300 })).toEqual({ ok: false, reason: "assertion_too_old" });
+    // …and refused once PR 4 tightens the LIFETIME ceiling to 300s. These are two different ceilings, so a swap of the
+    // two parameters is caught as well.
+    expect(verifyHandoffRequest({ ...aged, maxLifetimeSeconds: 300 })).toEqual({ ok: false, reason: "assertion_lifetime_too_long" });
+    // …and the skew is forwarded too: a token 20s in the future passes the 30s default and fails a 5s ceiling.
+    const future = withToken({ iat: NOW + 20, nbf: NOW + 20, exp: NOW + 620 });
+    expect(verifyHandoffRequest(future).ok, "20s drift accepted under the 30s default").toBe(true);
+    expect(verifyHandoffRequest({ ...future, clockSkewSeconds: 5 })).toEqual({ ok: false, reason: "assertion_issued_in_future" });
   });
 
   it("matches headers case-insensitively", () => {

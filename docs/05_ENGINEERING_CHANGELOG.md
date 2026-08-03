@@ -12,6 +12,49 @@ from PRs verified via `git log` / `gh pr list`.
 > **as of each PR's date** and are historical — where an older entry says "RISK-007 remains OPEN" / "Phase C remains
 > BLOCKED", that was accurate at that entry's date; this banner is the current state.
 
+### fix(vault) — Phase 8K adversarial review: twenty findings reconciled · 2026-08-02
+
+Seventy-two agents reviewed PR #398 across six dimensions, each finding then faced with two independent skeptics
+prompted to kill it. Twenty survived. **The most valuable ones were not in the feature — they were in the guards
+that were supposed to be watching it.**
+
+- **An outage this almost shipped.** The inverted completer check scanned every environment VALUE for the role name as
+  a substring. Vercel injects `VERCEL_GIT_COMMIT_MESSAGE` at runtime, and every commit in this phase discusses
+  `oauth_completer` — so a deploy cut from one would have refused, taken the not-pinned branch, and served a bare 404
+  to every real Slack callback, with the only diagnostic naming a connection string that does not exist. A credential
+  is a connection string, not a mention of one: the rule is now the variable NAME or an actual Postgres URI, which is
+  stricter than the substring test rather than weaker.
+- **The pending page asked the wrong tenant.** It read under the session's active tenant while the job was written
+  under the server-pinned one. There is no tenant switcher, so `activeTenant` is the alphabetically-first membership —
+  a user belonging to two tenants would have been told the connection failed while it was completing.
+- **A read we could not make was reported as a job that failed, terminally.** One transient statement timeout on the
+  first server render pinned the screen to "Connection failed" with polling disabled, while the worker went on to store
+  a live Slack token. The client poller already refused to make that mistake; the server render did the opposite. The
+  non-authoritative branches now render identically and are NOT terminal, so indistinguishability is untouched.
+- **"Nothing was changed" was not always true.** 0081's failure vocabulary includes `store_failed`, reached only after
+  Slack's exchange succeeded — at which point the app IS installed in the customer's workspace. The reason deliberately
+  never crosses the boundary, so the screen cannot tell that apart from "we never started" and now claims neither.
+- **The envelope version byte was unauthenticated** — the one field outside both the ciphertext and the tag. It is now
+  in the AAD, so a flipped byte fails the tag instead of steering a future v2 envelope down a v1 parse path.
+- **The ack read was bounded in time but not in size.** `await response.text()` materialised the whole decompressed
+  body before the ceiling could apply; a compromised worker answering 200 with ~600 KB of gzip inflated to 1.7 GB RSS
+  and OOM-killed the function — a platform 500 where the design promises a bounded redirect. Now read streaming, with
+  the ceiling enforced as the bytes arrive.
+- **Guards that were not guarding.** `COMPLETION_PATH` omitted `oauth-state.ts`, so a Slack exchange could have been
+  added to the state validator with the architecture suite entirely green. `RUNNER_VAULT_MODULES` omitted `crypto` and
+  `oauth-pending-consume` — the two modules granting exactly the capabilities those rules exist to deny. The JWKS
+  `kty`/`alg`/`use` guards were asserted by a test that also passed with the correct key, so all three were deletable.
+  The handler's request→runner wiring had zero assertions: forwarding a request-supplied `?sub=` as the authenticated
+  subject would have defeated the state's subject binding and no test would have noticed. The route's session
+  resolution, the pending page's server half, the assertion-lifetime forwarding and the 8-second timeout were all
+  unpinned.
+- Also fixed: JSON-`null` assertion payloads threw a TypeError where the contract promises a bounded refusal (both in
+  the preflight and in the function PR 4 will run as an HTTP endpoint); the gate accepted tenant/connector/correlation
+  values the downstream grammars reject; and callback refusals redirected to a page that rendered nothing about them.
+- **Mutation testing: 85 mutations of the load-bearing checks, 85 caught** (up from 72). Gates: full suite 2442 passed
+  / 22 skipped, typecheck, runner typecheck, lint, auth-safety, no-real-tokens, app-runtime-imports, deploy-templates,
+  migration-safety, RLS suite, docs gate, build.
+
 ### feat(vault) — Phase 8K: the OIDC-authenticated handoff, payload sealing, and a truthful pending page · 2026-08-02
 
 - **The web tier's job, in one sentence:** prove the callback is the one it authorized, seal the authorization code so

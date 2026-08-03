@@ -24,6 +24,7 @@ import {
   type HandoffRequest,
 } from "./oauth-handoff-protocol";
 import {
+  HANDOFF_TIMEOUT_MS,
   WORKER_ALLOWED_HOSTS,
   preflightOwnAssertion,
   readVercelOidcAssertion,
@@ -164,6 +165,19 @@ describe("the OIDC assertion source", () => {
       .toEqual({ ok: false, reason: "handoff_assertion_expired" });
   });
 
+  // A payload that is not a claims OBJECT must refuse, not throw. `JSON.parse("null")` returns null, and dereferencing
+  // it would escape this function's declared result union — the callback's blanket catch would then report the failure
+  // as `seal_failed`, blaming the crypto for an assertion problem. (Found in adversarial review of PR #398.)
+  it("refuses a payload that is not a claims object rather than throwing on it", () => {
+    const b64 = (s: string) => Buffer.from(s).toString("base64url");
+    for (const payload of ["null", "5", '"a string"', "[]", "true"]) {
+      const token = `${b64(JSON.stringify({ alg: "RS256", kid: "k" }))}.${b64(payload)}.${b64("sig")}`;
+      expect(() => preflightOwnAssertion(token, { audience: AUDIENCE, nowSeconds: NOW_S }), payload).not.toThrow();
+      expect(preflightOwnAssertion(token, { audience: AUDIENCE, nowSeconds: NOW_S }), payload)
+        .toEqual({ ok: false, reason: "handoff_assertion_malformed" });
+    }
+  });
+
   it("does not claim the preflight is authentication", () => {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const src = (require("node:fs") as typeof import("node:fs")).readFileSync("src/lib/server/connector-vault/oauth-handoff-client.ts", "utf8");
@@ -211,7 +225,47 @@ describe("submitting the handoff", () => {
     // A 30x on this endpoint would forward the assertion wherever it points; a cached response would be a replayed ack.
     expect(init.redirect).toBe("error");
     expect(init.cache).toBe("no-store");
-    expect(init.signal).toBeDefined();
+    // The bound is PINNED, not merely "a signal exists": a customer's browser waits on this, and so does the function.
+    // (Found in adversarial review of PR #398 — 8s could have become ten minutes undetected.)
+    expect(init.signal).toBeInstanceOf(AbortSignal);
+    expect(HANDOFF_TIMEOUT_MS).toBeLessThanOrEqual(10_000);
+    expect(HANDOFF_TIMEOUT_MS).toBeGreaterThan(0);
+  });
+
+  it("actually aborts a worker that never answers", async () => {
+    const started = Date.now();
+    const r = await submitHandoff(REQUEST, {
+      endpoint: ENDPOINT,
+      assertion: ASSERTION,
+      timeoutMs: 25,
+      fetchImpl: (_url, init) =>
+        new Promise((_resolve, reject) => {
+          (init.signal as AbortSignal).addEventListener("abort", () => reject(new Error("aborted")));
+        }),
+    });
+    expect(r).toEqual({ ok: false, reason: "handoff_transport_failed" });
+    expect(Date.now() - started).toBeLessThan(5_000);
+  });
+
+  // `await response.text()` would materialise the whole decompressed body before any ceiling could apply, so a
+  // compromised worker could answer 200 with a decompression bomb and OOM the function — a platform 500 instead of the
+  // bounded redirect this design promises. (Found in adversarial review of PR #398.)
+  it("stops reading a hostile body at the ceiling instead of buffering all of it", async () => {
+    let emitted = 0;
+    const chunk = new Uint8Array(64 * 1024).fill(0x41);
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        // 64 MB if anything ever drains it to completion; the reader must give up long before that.
+        if (emitted >= 1024) return controller.close();
+        emitted += 1;
+        controller.enqueue(chunk);
+      },
+    });
+    const r = await submit(async () => new Response(body, { status: 200 }));
+    expect(r).toEqual({ ok: false, reason: "handoff_ack_invalid" });
+    // Enough to cross the ceiling, and nowhere near enough to have drained the stream.
+    expect(emitted).toBeGreaterThan(0);
+    expect(emitted).toBeLessThan(1024);
   });
 
   it("treats a 409 duplicate as a real outcome, not a failure", async () => {

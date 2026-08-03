@@ -217,7 +217,40 @@ describe("sealing", () => {
     expect(aad).toContain(BINDING.expectedTeamId);
     expect(aad).toContain(BINDING.payloadKeyId);
     // Newline-delimited, and every field's grammar excludes a newline — so no value can shift a field boundary.
-    expect(aad.split("\n")).toHaveLength(10);
+    expect(aad.split("\n")).toHaveLength(11);
+  });
+
+  // Byte 0 of the envelope sits outside the ciphertext and outside the tag, so unless it is in the AAD it is the one
+  // field an attacker who can rewrite `oauth_completion_jobs.protected_payload` could flip undetected — and the moment
+  // a v2 layout exists, flipping it forces a v2 envelope down a v1 parse path. This asserts the binding directly rather
+  // than through an opener that checks the version itself, because the previous version of the "altered version byte"
+  // case passed on its own helper's assertion rather than on AEAD authentication.
+  // (Found in adversarial review of PR #398.)
+  it("AUTHENTICATES the envelope version byte — a flipped version fails the tag, not merely a helper's check", () => {
+    expect(canonicalSealAad(BINDING).toString("utf8").split("\n")[2]).toBe(String(ENVELOPE_VERSION));
+
+    const sealed = sealAuthorizationCode(CODE, key(), BINDING).protectedPayload;
+    const flipped = Buffer.from(sealed);
+    flipped[0] = ENVELOPE_VERSION + 1;
+
+    // An opener that does NOT check the version at all — the only thing that can reject this is the AEAD tag.
+    const openIgnoringVersion = (envelope: Buffer) => {
+      const ephemeralRaw = envelope.subarray(1, 1 + X25519_PUBLIC_KEY_BYTES);
+      const nonce = envelope.subarray(1 + X25519_PUBLIC_KEY_BYTES, 1 + X25519_PUBLIC_KEY_BYTES + AES_GCM_NONCE_BYTES);
+      const rest = envelope.subarray(1 + X25519_PUBLIC_KEY_BYTES + AES_GCM_NONCE_BYTES);
+      const ephemeralPublic = createPublicKey({ key: { kty: "OKP", crv: "X25519", x: ephemeralRaw.toString("base64url") }, format: "jwk" });
+      const shared = diffieHellman({ privateKey: worker.privateKey, publicKey: ephemeralPublic });
+      const derived = Buffer.from(hkdfSync("sha256", shared, Buffer.concat([ephemeralRaw, rawPublic(worker.publicKey)]), Buffer.from(HKDF_INFO, "utf8"), DERIVED_KEY_BYTES));
+      const decipher = createDecipheriv("aes-256-gcm", derived, nonce);
+      // The AAD is rebuilt from the envelope's OWN version byte, which is what a v2-aware opener would do.
+      const aad = Buffer.from(canonicalSealAad(BINDING).toString("utf8").split("\n").map((l, i) => (i === 2 ? String(envelope[0]) : l)).join("\n"), "utf8");
+      decipher.setAAD(aad);
+      decipher.setAuthTag(rest.subarray(rest.length - AES_GCM_TAG_BYTES));
+      return Buffer.concat([decipher.update(rest.subarray(0, rest.length - AES_GCM_TAG_BYTES)), decipher.final()]).toString("utf8");
+    };
+
+    expect(() => openIgnoringVersion(flipped)).toThrow();
+    expect(openIgnoringVersion(Buffer.from(sealed))).toBe(CODE); // and the unflipped one still opens
   });
 
   it("refuses a binding whose key id does not name the key being sealed to", () => {

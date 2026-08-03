@@ -275,12 +275,19 @@ export function verifyHandoffAssertion(
   });
   if (signatureOk !== true) return { ok: false, reason: "assertion_bad_signature" };
 
-  let raw: Record<string, unknown>;
+  // Parse into `unknown` and CHECK before dereferencing. `JSON.parse("null")` returns null, and a cast would let the
+  // very next line throw a TypeError instead of returning the bounded refusal this function's type promises — in PR 4
+  // that is a 500 with a stack where the contract advertises a refusal. (Found in adversarial review of PR #398.)
+  let parsed: unknown;
   try {
-    raw = JSON.parse(b64urlDecode(payloadPart).toString("utf8")) as Record<string, unknown>;
+    parsed = JSON.parse(b64urlDecode(payloadPart).toString("utf8")) as unknown;
   } catch {
     return { ok: false, reason: "assertion_malformed" };
   }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    return { ok: false, reason: "assertion_malformed" };
+  }
+  const raw = parsed as Record<string, unknown>;
 
   const str = (v: unknown): string | null => (typeof v === "string" && v.length > 0 ? v : null);
   const num = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
