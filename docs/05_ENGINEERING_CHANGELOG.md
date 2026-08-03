@@ -12,6 +12,18 @@ from PRs verified via `git log` / `gh pr list`.
 > **as of each PR's date** and are historical — where an older entry says "RISK-007 remains OPEN" / "Phase C remains
 > BLOCKED", that was accurate at that entry's date; this banner is the current state.
 
+### chore(vault) — remove a review agent's scratch probe that rode in on #398 · 2026-08-02
+
+`zz-scratch-version-probe.test.ts` was written into the working tree by an agent during the #398 adversarial review to
+demonstrate the unauthenticated envelope-version byte, and was swept into the commit by a `git add -A` I did not audit
+first. It passes and it is harmless, but it is scratch: it duplicates coverage the real
+`oauth-payload-seal.test.ts` now owns properly (the "AUTHENTICATES the envelope version byte" case), and a file named
+`zz-scratch-…` in a reviewed vault directory is exactly the kind of thing that gets read as intentional a year later.
+Deleted; no behavior change, no coverage change.
+
+**The process lesson, recorded rather than quietly fixed:** a review that runs agents in the working tree can leave
+files there, and `git add -A` after one is not safe. Audit `git status` before staging when agents have been running.
+
 ### fix(vault) — Phase 8K adversarial review: twenty findings reconciled · 2026-08-02
 
 Seventy-two agents reviewed PR #398 across six dimensions, each finding then faced with two independent skeptics
