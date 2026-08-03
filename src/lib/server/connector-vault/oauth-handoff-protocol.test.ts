@@ -251,6 +251,8 @@ const REQUEST: HandoffRequest = {
   payloadKeyId: "worker-seal-v1",
   // 61 bytes: one over the floor the database and this module both enforce.
   protectedPayload: Buffer.alloc(MIN_PROTECTED_PAYLOAD_BYTES + 1, 7).toString("base64"),
+  nonceHash: "a3f1c0de5b7248e9a1b2c3d4e5f60718293a4b5c6d7e8f9012345678abcdef01",
+  subject: "7f3e1c22-0000-4000-8000-0000000000aa",
 };
 
 const envelope = (request: HandoffRequest = REQUEST, over: Partial<{ body: string; headers: Record<string, string | undefined> }> = {}) => {
@@ -285,7 +287,7 @@ describe("handoff request — the envelope PR 4 verifies", () => {
   });
 
   it("refuses a wrong or absent protocol version header", () => {
-    for (const v of [undefined, "", "2", "1.0", " 1"]) {
+    for (const v of [undefined, "", "1", "3", "2.0", " 2"]) {
       expect(verifyHandoffRequest(envelope(REQUEST, { headers: { [HANDOFF_VERSION_HEADER]: v } })), String(v))
         .toEqual({ ok: false, reason: "handoff_version_header_mismatch" });
     }
@@ -324,7 +326,7 @@ describe("handoff request — the envelope PR 4 verifies", () => {
       { payloadScheme: "AES-256-CBC" as never },
       { correlationId: "corr-some-other-run" },
       { environment: "production" as never },
-      { version: 2 as never },
+      { version: 1 as never },
       { expectedTeamId: "T9ZZZZZZZZZ" },
       { payloadKeyId: "worker-seal-v2" },
       { protectedPayload: Buffer.alloc(MIN_PROTECTED_PAYLOAD_BYTES + 1, 9).toString("base64") },
@@ -344,7 +346,7 @@ describe("handoff request — the envelope PR 4 verifies", () => {
       { redirectUri: "https://attacker.example/connectors/oauth/callback" as never },
       { payloadScheme: "AES-256-CBC" as never },
       { environment: "production" as never },
-      { version: 2 as never },
+      { version: 1 as never },
       { tenantId: "not-a-uuid" as never },
       { expectedTeamId: "not-a-team" as never },
       { correlationId: "corr with spaces" as never },
@@ -458,9 +460,10 @@ describe("protocol constants and shapes", () => {
   });
 
   it("the acknowledgement vocabulary is exactly two words and carries nothing else", () => {
-    expect(handoffAckSchema.safeParse({ version: 1, status: "accepted" }).success).toBe(true);
-    expect(handoffAckSchema.safeParse({ version: 1, status: "duplicate" }).success).toBe(true);
-    expect(handoffAckSchema.safeParse({ version: 1, status: "completed" }).success).toBe(false);
+    expect(handoffAckSchema.safeParse({ version: HANDOFF_PROTOCOL_VERSION, status: "accepted" }).success).toBe(true);
+    expect(handoffAckSchema.safeParse({ version: HANDOFF_PROTOCOL_VERSION, status: "duplicate" }).success).toBe(true);
+    expect(handoffAckSchema.safeParse({ version: HANDOFF_PROTOCOL_VERSION, status: "completed" }).success).toBe(false)
+    expect(handoffAckSchema.safeParse({ version: 1, status: "accepted" }).success).toBe(false);
     // No job id, no timestamps, no reason — an acknowledgement is not a status report.
     expect(handoffAckSchema.safeParse({ version: 1, status: "accepted", jobId: "x" }).success).toBe(false);
   });

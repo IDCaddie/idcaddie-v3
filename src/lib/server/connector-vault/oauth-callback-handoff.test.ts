@@ -8,7 +8,7 @@ import { describe, it, expect, vi } from "vitest";
 import { generateKeyPairSync, type KeyObject } from "node:crypto";
 import { createHmacStateSigner, createOAuthState, type OAuthStateContext } from "./oauth-state";
 import { parseWorkerSealKey } from "./oauth-payload-seal";
-import { HANDOFF_REDIRECT_URI, canonicalHandoffBody, handoffRequestSchema } from "./oauth-handoff-protocol";
+import { HANDOFF_PROTOCOL_VERSION, HANDOFF_REDIRECT_URI, canonicalHandoffBody, handoffRequestSchema } from "./oauth-handoff-protocol";
 import {
   PENDING_PATH,
   handleHandoffCallback,
@@ -51,7 +51,7 @@ const stateContext = (over: Partial<OAuthStateContext> = {}): OAuthStateContext 
 const validState = (over: Partial<OAuthStateContext> = {}) =>
   createOAuthState(stateContext(over), { signer, ttlSeconds: 600, now: NOW }).state;
 
-const accepted = async () => new Response(JSON.stringify({ version: 1, status: "accepted" }), { status: 200 });
+const accepted = async () => new Response(JSON.stringify({ version: HANDOFF_PROTOCOL_VERSION, status: "accepted" }), { status: 200 });
 
 function deps(over: Partial<HandoffCallbackDeps> = {}): HandoffCallbackDeps {
   return {
@@ -83,7 +83,7 @@ describe("the handoff callback runner", () => {
 
   it("reports a duplicate as a real outcome — the job exists, so the browser belongs on the pending page", async () => {
     const r = await makeHandoffCallbackRunner(deps({
-      fetchImpl: async () => new Response(JSON.stringify({ version: 1, status: "duplicate" }), { status: 409 }),
+      fetchImpl: async () => new Response(JSON.stringify({ version: HANDOFF_PROTOCOL_VERSION, status: "duplicate" }), { status: 409 }),
     }))({ state: validState(), code: CODE, subject: SUBJECT });
     expect(r).toEqual({ ok: true, correlationId: CORR, outcome: "duplicate" });
   });

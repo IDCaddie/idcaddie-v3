@@ -41,8 +41,37 @@ if (typeof (globalThis as { window?: unknown }).window !== "undefined") {
 
 // ── The pinned protocol ──────────────────────────────────────────────────────────────────────────────────────────────
 
-/** Bumping this is a coordinated change on both sides; a mismatched version is a refusal, never a downgrade. */
-export const HANDOFF_PROTOCOL_VERSION = 1 as const;
+/**
+ * Bumping this is a coordinated change on both sides; a mismatched version is a refusal, never a downgrade.
+ *
+ * ── VERSION 2 (Phase 8M): `nonceHash` and `subject` ──────────────────────────────────────────────────────────────
+ * Version 1 could not complete an OAuth flow correctly, and the defect was structural rather than a bug in either
+ * half. `oauth_completer_consume_oauth_pending` (migration 0079) matches its row on
+ *
+ *     state_jti = p_state_jti AND nonce_hash = p_nonce_hash AND tenant_id = p_tenant_id
+ *     AND provider = 'slack' AND connector_id IS NOT DISTINCT FROM p_connector_id
+ *     AND subject IS NOT DISTINCT FROM p_subject AND consumed_at IS NULL AND expires_at > p_now
+ *
+ * and additionally refuses outright when `p_nonce_hash` is null or empty. Version 1 carried NEITHER `nonce_hash` NOR
+ * `subject`, and the worker holds no table grant with which to look either up — so no value reachable from the worker
+ * could satisfy that WHERE, and the single-use consume was simply never performed. The `oauth_pending` row was left to
+ * expire on its own.
+ *
+ * Version 2 carries exactly those two values and nothing else. They are the MINIMUM the existing wrapper requires:
+ * every other column in its WHERE (`state_jti`, `tenant_id`, `connector_id`, the pinned provider, and the redirect the
+ * wrapper re-checks) was already in version 1.
+ *
+ * WHAT IS DELIBERATELY NOT CARRIED: the raw nonce (only its sha256 — the raw value is a live CSRF secret and the
+ * database itself has never stored it, doc 42 §32.3), the authorization code (that is what the sealed payload is for),
+ * any token, the state signing secret, and any human-readable identifier such as an email. `subject` is the `auth.uid()`
+ * UUID the authorize half already bound into the signed state — an opaque identifier, and the only thing the row can be
+ * matched on.
+ *
+ * THERE IS NO NEGOTIATION AND NO DOWNGRADE. A version-1 body fails the strict schema, and a version-1 header fails the
+ * header comparison before the body is even parsed, so a v1 caller cannot reach live completion. That is the intended
+ * backward compatibility: v1 is refused, not tolerated.
+ */
+export const HANDOFF_PROTOCOL_VERSION = 2 as const;
 /** The ID Caddie environment identity, carried explicitly. It is NOT the Vercel `environment` claim: staging is served
  *  on Vercel's Production channel (see `staging-environment-identity.ts`), so the two disagree on purpose. */
 export const HANDOFF_ENVIRONMENT = STAGING_ENVIRONMENT_MARKER;
@@ -74,6 +103,8 @@ export const SLACK_TEAM_ID_RE = /^T[A-Z0-9]{2,30}$/;
 export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const BASE64_RE = /^[A-Za-z0-9+/]+={0,2}$/;
 const SHA256_HEX_RE = /^[0-9a-f]{64}$/;
+/** `oauth_pending.nonce_hash` is `sha256(nonce)` in lowercase hex — the RAW nonce is never stored and never sent. */
+export const NONCE_HASH_RE = SHA256_HEX_RE;
 
 // ── The request ──────────────────────────────────────────────────────────────────────────────────────────────────────
 // STRICT: an unknown key is a refusal, not an ignored extra. There is no forward-compatible extension point on purpose —
@@ -91,6 +122,12 @@ export const handoffRequestSchema = z.strictObject({
   payloadKeyId: z.string().regex(PAYLOAD_KEY_ID_RE),
   /** base64 of the sealed envelope. Opaque here: nothing in this file parses it, so nothing here can leak part of it. */
   protectedPayload: z.string().regex(BASE64_RE),
+  /** v2. `sha256(nonce)` hex — what `oauth_pending.nonce_hash` actually holds. NEVER the raw nonce. */
+  nonceHash: z.string().regex(NONCE_HASH_RE),
+  /** v2. The initiating `auth.uid()`, exactly as the authorize half bound it into the signed state and the pending
+   *  row. Required rather than nullable: `slack-authorize-pending` refuses to create a row without a subject, so a
+   *  null here could only ever describe a row this flow cannot produce. */
+  subject: z.string().regex(UUID_RE),
 });
 export type HandoffRequest = z.infer<typeof handoffRequestSchema>;
 
@@ -119,6 +156,11 @@ export function canonicalHandoffBody(request: HandoffRequest): string {
     payloadScheme: request.payloadScheme,
     payloadKeyId: request.payloadKeyId,
     protectedPayload: request.protectedPayload,
+    // v2, appended rather than interleaved: the transport digest covers the whole body either way, and appending
+    // keeps the v1 prefix legible in a diff. Both halves write this order out by hand for the same reason the rest of
+    // it is written out — so the bytes cannot drift with an object literal's shape.
+    nonceHash: request.nonceHash,
+    subject: request.subject,
   });
 }
 

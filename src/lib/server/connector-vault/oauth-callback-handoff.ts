@@ -18,6 +18,7 @@
 // callback route may import it from src/app).
 
 import { validateOAuthState, type OAuthStateReason, type OAuthStateSigner } from "./oauth-state";
+import { hashOAuthValue } from "./oauth-pending";
 import {
   HANDOFF_ENVIRONMENT,
   HANDOFF_PROTOCOL_VERSION,
@@ -111,6 +112,23 @@ export function makeHandoffCallbackRunner(deps: HandoffCallbackDeps): HandoffCal
 
     if (typeof code !== "string" || code.length === 0) return { ok: false, reason: "authorization_code_missing" };
 
+    // 1b. PROTOCOL v2 — the two trusted values the worker needs to consume the pending row, taken from the state that
+    //     was just AUTHENTICATED above and from nowhere else.
+    //
+    //     THE RAW NONCE NEVER LEAVES THIS PROCESS. `hashOAuthValue` is the same sha256 the authorize half used to
+    //     write `oauth_pending.nonce_hash`, so what travels is the value the database already holds — the hash of a
+    //     single-use CSRF secret, not the secret. The database has never stored the raw nonce either (doc 42 §32.3).
+    //
+    //     `sub` is the `auth.uid()` the state binds, and `validateOAuthState` has just compared it against the live
+    //     session, so it cannot be widened by a request: a callback presenting another user's state was refused above.
+    //     It is an opaque UUID — never an email, a name, or anything a person reads.
+    const nonceHash = hashOAuthValue(validated.payload.nonce);
+    const boundSubject = validated.payload.sub;
+    // `slack-authorize-pending` refuses to create a row without a subject, so a null here describes a row this flow
+    // cannot have produced. Refused rather than sent as null, which 0079's `is not distinct from` would happily match
+    // against some OTHER subject-less row.
+    if (typeof boundSubject !== "string" || boundSubject.length === 0) return { ok: false, reason: "session_required" };
+
     // 2. Seal. From here the plaintext exists only inside `sealAuthorizationCode`, and only for the length of one call.
     let sealed;
     try {
@@ -120,6 +138,8 @@ export function makeHandoffCallbackRunner(deps: HandoffCallbackDeps): HandoffCal
         correlationId: deps.expected.correlationId,
         expectedTeamId: deps.expected.expectedTeamId,
         payloadKeyId: deps.config.workerKey.keyId,
+        nonceHash,
+        subject: boundSubject,
       });
     } catch (error) {
       return { ok: false, reason: error instanceof PayloadSealError ? error.reason : "seal_failed" };
@@ -137,6 +157,8 @@ export function makeHandoffCallbackRunner(deps: HandoffCallbackDeps): HandoffCal
       payloadScheme: sealed.payloadScheme,
       payloadKeyId: sealed.payloadKeyId,
       protectedPayload: sealed.protectedPayload.toString("base64"),
+      nonceHash,
+      subject: boundSubject,
     };
 
     // 3. The assertion, sanity-checked against our own configuration before it leaves. The worker is the authority on

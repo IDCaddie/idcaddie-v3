@@ -200,6 +200,8 @@ const REQUEST: HandoffRequest = {
   payloadScheme: HANDOFF_PAYLOAD_SCHEME,
   payloadKeyId: "worker-seal-v1",
   protectedPayload: Buffer.alloc(MIN_PROTECTED_PAYLOAD_BYTES + 1, 7).toString("base64"),
+  nonceHash: "a3f1c0de5b7248e9a1b2c3d4e5f60718293a4b5c6d7e8f9012345678abcdef01",
+  subject: "7f3e1c22-0000-4000-8000-0000000000aa",
 };
 const ENDPOINT = `https://${HOST}${HANDOFF_PATH}`;
 const ackResponse = (status: number, body: unknown) =>
@@ -209,9 +211,9 @@ const submit = (fetchImpl: Parameters<typeof submitHandoff>[1]["fetchImpl"]) =>
 
 describe("submitting the handoff", () => {
   it("posts the canonical body with the assertion and both binding headers", async () => {
-    const fetchImpl = vi.fn(async () => ackResponse(200, { version: 1, status: "accepted" }));
+    const fetchImpl = vi.fn(async () => ackResponse(200, { version: HANDOFF_PROTOCOL_VERSION, status: "accepted" }));
     const r = await submit(fetchImpl);
-    expect(r).toEqual({ ok: true, ack: { version: 1, status: "accepted" } });
+    expect(r).toEqual({ ok: true, ack: { version: HANDOFF_PROTOCOL_VERSION, status: "accepted" } });
 
     const [url, init] = fetchImpl.mock.calls[0] as unknown as [string, RequestInit];
     const headers = init.headers as Record<string, string>;
@@ -219,7 +221,7 @@ describe("submitting the handoff", () => {
     expect(init.method).toBe("POST");
     expect(init.body).toBe(canonicalHandoffBody(REQUEST));
     expect(headers.authorization).toBe(`Bearer ${ASSERTION}`);
-    expect(headers[HANDOFF_VERSION_HEADER]).toBe("1");
+    expect(headers[HANDOFF_VERSION_HEADER]).toBe(String(HANDOFF_PROTOCOL_VERSION));
     expect(headers[HANDOFF_CORRELATION_HEADER]).toBe(REQUEST.correlationId);
     expect(headers[HANDOFF_DIGEST_HEADER]).toBe(handoffBodyDigest(canonicalHandoffBody(REQUEST)));
     // A 30x on this endpoint would forward the assertion wherever it points; a cached response would be a replayed ack.
@@ -269,18 +271,18 @@ describe("submitting the handoff", () => {
   });
 
   it("treats a 409 duplicate as a real outcome, not a failure", async () => {
-    const r = await submit(async () => ackResponse(409, { version: 1, status: "duplicate" }));
-    expect(r).toEqual({ ok: true, ack: { version: 1, status: "duplicate" } });
+    const r = await submit(async () => ackResponse(409, { version: HANDOFF_PROTOCOL_VERSION, status: "duplicate" }));
+    expect(r).toEqual({ ok: true, ack: { version: HANDOFF_PROTOCOL_VERSION, status: "duplicate" } });
   });
 
   it("refuses when the HTTP status and the acknowledgement disagree", async () => {
-    expect(await submit(async () => ackResponse(200, { version: 1, status: "duplicate" }))).toEqual({ ok: false, reason: "handoff_ack_invalid" });
-    expect(await submit(async () => ackResponse(409, { version: 1, status: "accepted" }))).toEqual({ ok: false, reason: "handoff_ack_invalid" });
+    expect(await submit(async () => ackResponse(200, { version: HANDOFF_PROTOCOL_VERSION, status: "duplicate" }))).toEqual({ ok: false, reason: "handoff_ack_invalid" });
+    expect(await submit(async () => ackResponse(409, { version: HANDOFF_PROTOCOL_VERSION, status: "accepted" }))).toEqual({ ok: false, reason: "handoff_ack_invalid" });
   });
 
   it("refuses every other status", async () => {
     for (const status of [201, 202, 301, 400, 401, 403, 404, 429, 500, 502, 503]) {
-      expect(await submit(async () => ackResponse(status, { version: 1, status: "accepted" })), String(status))
+      expect(await submit(async () => ackResponse(status, { version: HANDOFF_PROTOCOL_VERSION, status: "accepted" })), String(status))
         .toEqual({ ok: false, reason: "handoff_rejected" });
     }
     // 204 cannot carry a body at all, so it is refused for the same reason: it is not an acknowledgement.
@@ -290,9 +292,11 @@ describe("submitting the handoff", () => {
   it("refuses an acknowledgement that is not one", async () => {
     for (const body of [
       "not json",
-      { version: 1, status: "completed" },
-      { version: 2, status: "accepted" },
-      { version: 1, status: "accepted", jobId: "9f1c2f5a-0000-4000-8000-000000000001" },
+      { version: HANDOFF_PROTOCOL_VERSION, status: "completed" },
+      // ANY other protocol version, the superseded v1 included: an acknowledgement claiming one is not ours.
+      { version: 1, status: "accepted" },
+      { version: 3, status: "accepted" },
+      { version: HANDOFF_PROTOCOL_VERSION, status: "accepted", jobId: "9f1c2f5a-0000-4000-8000-000000000001" },
       { status: "accepted" },
       "x".repeat(5000),
     ]) {
