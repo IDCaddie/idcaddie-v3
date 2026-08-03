@@ -12,6 +12,35 @@ from PRs verified via `git log` / `gh pr list`.
 > **as of each PR's date** and are historical — where an older entry says "RISK-007 remains OPEN" / "Phase C remains
 > BLOCKED", that was accurate at that entry's date; this banner is the current state.
 
+### feat(vault) — Phase 8M: handoff protocol v2 carries `nonceHash` and `subject` · 2026-08-03
+
+**Protocol v1 could not complete an OAuth flow correctly, and the defect was structural rather than a bug in either
+half.** `oauth_completer_consume_oauth_pending` (migration 0079) matches its row on
+`state_jti AND nonce_hash AND tenant_id AND provider AND connector_id AND subject`, and refuses outright when
+`p_nonce_hash` is null or empty. **v1 carried neither `nonce_hash` nor `subject`**, and the worker holds no table grant
+with which to look either up — so no value reachable from the worker could satisfy that WHERE. The completion worker
+(connector-runner #120) therefore never consumed the pending row at all; it documented the gap and relied on migration
+0081's unique correlation, digest-over-sealed-bytes and atomic claim for single-use instead. That is genuinely
+sufficient against replay, but it left the authorize half's own single-use gate unused, and the row simply expired.
+
+v2 carries **exactly those two values and nothing else** — the minimum the existing wrapper needs, since every other
+column in its WHERE was already in v1.
+
+**What is deliberately still not carried:** the raw nonce (only its sha256 — the raw value is a live CSRF secret, and
+the database has never stored it either, doc 42 §32.3), the authorization code (that is what the sealed payload is
+for), any token, the state signing secret, and any human-readable identifier. `subject` is the `auth.uid()` UUID the
+authorize half already bound into the signed state — opaque, and the only thing the row can be matched on.
+
+Both new fields are bound into the canonical serialization, the transport digest, **and the seal AAD** — so a
+substituted `nonceHash` cannot point the consume at a different pending row without making the authorization code
+unopenable. `AAD_DOMAIN` and `HKDF_INFO` derive from the protocol version, so a v1 envelope can never be opened as a
+v2 one.
+
+**No negotiation and no downgrade.** A v1 body fails the strict schema; a v1 header fails the header comparison before
+the body is parsed. v1 is refused, not tolerated — asserted in `oauth-handoff-protocol-v2.test.ts`, which also asserts
+the raw nonce appears in no body, digest input or AAD, and that the schema has no field that could carry an email, a
+name, a token or the code.
+
 ### chore(vault) — remove a review agent's scratch probe that rode in on #398 · 2026-08-02
 
 `zz-scratch-version-probe.test.ts` was written into the working tree by an agent during the #398 adversarial review to

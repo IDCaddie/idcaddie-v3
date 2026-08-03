@@ -72,6 +72,10 @@ const COMPLETION_PATH = [
   // as the one file where a Slack exchange could have been added with every rule still reporting green.
   // (Found in adversarial review of PR #398.)
   "lib/server/connector-vault/oauth-state.ts",
+  // `hashOAuthValue` is imported by the callback for protocol v2, which puts this file on the completion path
+  // too. Adding an import without adding it here would have silently dropped every rule below for it.
+  // (Found in adversarial review of PR #400.)
+  "lib/server/connector-vault/oauth-pending.ts",
   "lib/server/connector-vault/oauth-handoff-protocol.ts",
   "lib/server/connector-vault/oauth-payload-seal.ts",
   "lib/server/connector-vault/oauth-handoff-client.ts",

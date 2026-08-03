@@ -26,6 +26,7 @@ import {
 } from "./oauth-payload-seal";
 import {
   HANDOFF_PAYLOAD_SCHEME,
+  HANDOFF_PROTOCOL_VERSION,
   MAX_PROTECTED_PAYLOAD_BYTES,
   MIN_PROTECTED_PAYLOAD_BYTES,
 } from "./oauth-handoff-protocol";
@@ -44,6 +45,8 @@ const BINDING: SealBinding = {
   correlationId: "corr-live-run-1",
   expectedTeamId: "T0ABCDEF123",
   payloadKeyId: KEY_ID,
+  nonceHash: "a3f1c0de5b7248e9a1b2c3d4e5f60718293a4b5c6d7e8f9012345678abcdef01",
+  subject: "7f3e1c22-0000-4000-8000-0000000000aa",
 };
 // A Slack-shaped authorization code. Not a token and not a secret — Slack codes are single-use and expire in minutes —
 // but it is the value the whole envelope exists to protect, so the assertions below hunt for it everywhere.
@@ -208,7 +211,9 @@ describe("sealing", () => {
 
   it("the AAD pins the protocol version, provider and redirect that no caller supplies", () => {
     const aad = canonicalSealAad(BINDING).toString("utf8");
-    expect(aad).toContain("idcaddie:oauth-completion-handoff:v1");
+    // Derived from the constant rather than restated: a version bump must not need this test edited to keep passing,
+    // or the assertion is about the test's memory rather than about the code.
+    expect(aad).toContain(`idcaddie:oauth-completion-handoff:v${HANDOFF_PROTOCOL_VERSION}`);
     expect(aad).toContain("slack");
     expect(aad).toContain("https://idcaddie-v3.vercel.app/connectors/oauth/callback");
     expect(aad).toContain(BINDING.tenantId);
@@ -216,8 +221,55 @@ describe("sealing", () => {
     expect(aad).toContain(BINDING.correlationId);
     expect(aad).toContain(BINDING.expectedTeamId);
     expect(aad).toContain(BINDING.payloadKeyId);
+    // v2 — the two values the worker needs in order to consume the pending row are inside the tag.
+    expect(aad).toContain(BINDING.nonceHash);
+    expect(aad).toContain(BINDING.subject);
     // Newline-delimited, and every field's grammar excludes a newline — so no value can shift a field boundary.
-    expect(aad.split("\n")).toHaveLength(11);
+    // Written out in full, so a field silently disappearing is a failure rather than merely a smaller number.
+    expect(aad.split("\n")).toEqual([
+      `idcaddie:oauth-completion-handoff:v${HANDOFF_PROTOCOL_VERSION}`,
+      String(HANDOFF_PROTOCOL_VERSION),
+      String(ENVELOPE_VERSION),
+      BINDING.tenantId,
+      BINDING.connectorId,
+      "slack",
+      BINDING.correlationId,
+      "https://idcaddie-v3.vercel.app/connectors/oauth/callback",
+      BINDING.expectedTeamId,
+      BINDING.payloadKeyId,
+      BINDING.nonceHash,
+      BINDING.subject,
+      "",
+    ]);
+  });
+
+  it("v2: a malformed nonce hash or subject is refused rather than joined into the AAD", () => {
+    for (const over of [
+      { nonceHash: "" },
+      { nonceHash: "not-hex" },
+      { nonceHash: BINDING.nonceHash.toUpperCase() },   // uppercase hex is a different string to the database
+      { nonceHash: `${BINDING.nonceHash}0` },           // 65 chars
+      { nonceHash: BINDING.nonceHash.slice(0, 63) },
+      { subject: "" },
+      { subject: "not-a-uuid" },
+      { subject: BINDING.subject.toUpperCase() },
+    ]) {
+      expect(() => canonicalSealAad({ ...BINDING, ...over }), JSON.stringify(over)).toThrow(PayloadSealError);
+    }
+  });
+
+  it("v2: changing the nonce hash or the subject makes the envelope unopenable", () => {
+    const sealed = sealAuthorizationCode(CODE, key(), BINDING).protectedPayload;
+    for (const over of [
+      { nonceHash: "b4f1c0de5b7248e9a1b2c3d4e5f60718293a4b5c6d7e8f9012345678abcdef01" },
+      { subject: "8f3e1c22-0000-4000-8000-0000000000bb" },
+    ]) {
+      expect(() =>
+        openEnvelope(sealed, worker.privateKey, rawPublic(worker.publicKey), canonicalSealAad({ ...BINDING, ...over })),
+      ).toThrow();
+    }
+    // …and the unaltered binding still opens it.
+    expect(openEnvelope(sealed, worker.privateKey, rawPublic(worker.publicKey), canonicalSealAad(BINDING))).toBe(CODE);
   });
 
   // Byte 0 of the envelope sits outside the ciphertext and outside the tag, so unless it is in the AAD it is the one

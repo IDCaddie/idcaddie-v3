@@ -46,6 +46,7 @@ import {
   HANDOFF_PROTOCOL_VERSION,
   HANDOFF_PROVIDER,
   HANDOFF_REDIRECT_URI,
+  NONCE_HASH_RE,
   PAYLOAD_KEY_ID_RE,
   SLACK_TEAM_ID_RE,
   UUID_RE,
@@ -96,6 +97,12 @@ export type SealBinding = {
   correlationId: string;
   expectedTeamId: string;
   payloadKeyId: string;
+  /** v2. `sha256(nonce)` hex. Bound because it is the single-use key of the `oauth_pending` row the worker will
+   *  consume: a substituted nonce hash would let a valid-looking handoff point the consume at a DIFFERENT pending row,
+   *  and AES-GCM authenticating it means such a body cannot open the authorization code at all. */
+  nonceHash: string;
+  /** v2. The initiating `auth.uid()`. Bound for the same reason — it is half of the row's identity in 0079's WHERE. */
+  subject: string;
 };
 
 export type SealedPayload = {
@@ -174,6 +181,11 @@ export function canonicalSealAad(binding: SealBinding): Buffer {
       HANDOFF_REDIRECT_URI,
       binding.expectedTeamId,
       binding.payloadKeyId,
+      // v2. Appended after the v1 fields; the AAD's first two lines already carry the protocol version, so a v1 and a
+      // v2 AAD can never collide even before these are read. Both are grammar-checked below, and neither grammar
+      // admits a newline, so no value can shift a field boundary.
+      binding.nonceHash,
+      binding.subject,
       "",
     ].join("\n"),
     "utf8",
@@ -188,7 +200,9 @@ function assertBinding(binding: SealBinding): void {
     !UUID_RE.test(binding.connectorId ?? "") ||
     !CORRELATION_ID_RE.test(binding.correlationId ?? "") ||
     !SLACK_TEAM_ID_RE.test(binding.expectedTeamId ?? "") ||
-    !PAYLOAD_KEY_ID_RE.test(binding.payloadKeyId ?? "")
+    !PAYLOAD_KEY_ID_RE.test(binding.payloadKeyId ?? "") ||
+    !NONCE_HASH_RE.test(binding.nonceHash ?? "") ||
+    !UUID_RE.test(binding.subject ?? "")
   ) {
     throw new PayloadSealError("seal_binding_invalid");
   }

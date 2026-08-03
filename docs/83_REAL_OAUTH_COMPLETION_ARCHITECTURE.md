@@ -335,6 +335,10 @@ misconfiguration; an uppercase UUID was enough.
 this order, `JSON.stringify` — the receiver re-serializes and compares, so a non-canonical body that parses to the right
 fields is still refused.
 
+> **SUPERSEDED BY PROTOCOL v2 — see §9.** The table below is the v1 shape. v2 adds `nonceHash` and `subject`, and
+> **v1 is refused**, because v1 could not complete a flow correctly: it carried neither of the two values migration
+> 0079's consume wrapper matches its row on.
+
 | field | value |
 |---|---|
 | `version` | `1` |
@@ -507,3 +511,131 @@ PR 4 owes, and only this:
 3. `oauth_completer_enqueue_oauth_completion_job` → claim → Slack `oauth.v2.access` → workspace binding → 0080 secret
    ingest → consume the pending row → complete/fail, over `OAUTH_COMPLETER_DB_URL`, in the worker process.
 4. A reviewed change adding the worker host to `WORKER_ALLOWED_HOSTS` (§8.6).
+
+---
+
+## 9. Protocol v2 — the fields that make the consume possible (Phase 8M, 2026-08-03)
+
+§8's protocol was version 1, and **it could not complete an OAuth flow correctly.** The defect was structural rather
+than a bug in either half, and neither half could have found it alone: V3 sent a well-formed request, the worker
+accepted it, and the step that could not run was in a third place.
+
+`oauth_completer_consume_oauth_pending` (migration 0079) matches its row on
+
+```sql
+where p.state_jti = p_state_jti
+  and p.nonce_hash = p_nonce_hash
+  and p.tenant_id = p_tenant_id
+  and p.provider = 'slack'
+  and p.connector_id is not distinct from p_connector_id
+  and p.subject   is not distinct from p_subject
+  and p.consumed_at is null
+  and p.expires_at > p_now
+```
+
+and refuses outright when `p_nonce_hash` is null or empty. **Version 1 carried neither `nonce_hash` nor `subject`.**
+The worker holds no table grant with which to look either up, so no value reachable from that process could satisfy
+this WHERE. Runner PR #120 shipped with the consume deliberately NOT called, documented at length, because calling it
+would have returned `not_found` on every completion — and mapping that to failure would have failed every real
+connection after its token was stored, while mapping it to success would have been a single-use gate that always
+passes.
+
+### 9.1 What v2 adds, and what it still refuses to carry
+
+| field | value | why it is safe to send |
+|---|---|---|
+| `nonceHash` | `sha256(nonce)`, lowercase hex | exactly what `oauth_pending.nonce_hash` already holds. The RAW nonce is a live CSRF secret and is never sent — the database has never stored it either (doc [42](42_SECURITY_THREAT_MODEL.md) §32.3) |
+| `subject` | the initiating `auth.uid()` uuid | the value the authorize half already bound into the signed state and the row. Opaque — never an email, a name, or anything a person reads |
+
+These are the **minimum** the existing wrapper requires: every other column in its WHERE (`state_jti` = the
+correlation, `tenant_id`, `connector_id`, the pinned provider, and the redirect the wrapper re-checks) was already in
+v1. Nothing else was added, and in particular the handoff still carries no raw nonce, no authorization code outside the
+sealed envelope, no token, no state signing secret, and no human-readable identifier.
+
+`subject` is REQUIRED rather than nullable. `slack-authorize-pending` refuses to create a pending row without one, so a
+null could only ever describe a row this flow cannot produce — and sending null would let `is not distinct from` match
+some OTHER subject-less row.
+
+### 9.2 Where the new fields are bound
+
+All three places, because each answers a different question:
+
+- **canonical serialization + transport digest** — alteration in the channel is a refusal rather than a partial parse.
+- **the seal AAD** — and this is the load-bearing one. A substituted `nonceHash` would otherwise let a valid-looking
+  handoff point the consume at a *different* pending row; binding it into AES-GCM's AAD means such a body cannot open
+  the authorization code at all.
+- `AAD_DOMAIN` and `HKDF_INFO` both derive from the protocol version, so a v1 envelope can never be opened as a v2 one
+  even before a single field is compared.
+
+### 9.3 There is no negotiation and no downgrade
+
+A v1 body fails the strict schema (`version` is a literal, and the two new fields are required); a v1 *header* fails the
+header comparison before the body is parsed at all. **v1 is refused, not tolerated** — that is the intended backward
+compatibility, and it is what stops a stale deployment completing a real flow through the old, unconsumed path.
+
+### 9.4 The consequence for the worker's ordering
+
+With v2 the worker can finally perform the consume. The ordering is:
+
+1. verify handoff and OIDC · 2. open the protected code · 3. enqueue and claim · 4. read/decrypt the app secret ·
+5. exchange with Slack · 6. verify the exact `team.id` · 7. allocate the version · 8. encrypt and store the token ·
+9. **atomically consume the exact `oauth_pending` row** · 10. mark the job completed.
+
+Two notes on that list, because it is a list of EFFECTS and one of them is not in execution order:
+
+- **The version is READ before the exchange and APPLIED after it.** `exchangeSlackOAuthCode` takes `version` in its
+  input and seals it into the AAD at encrypt time, so the allocating read (a `stable` function, no side effect) has to
+  precede the call. What step 7 pins is that the version a token is ENCRYPTED under is allocated for this completion and
+  is the one written to the row — the 0080 lesson — not that the read happens after Slack answers.
+- **Store precedes consume**, which REVERSES the ordering connector-runner #120 chose and documented. That change is
+  deliberate and is recorded here rather than silently applied. #120 argued consume-first on the grounds that
+  store-first's failure case is "the token was written, then the single-use gate said this authorization was already
+  used" — a replay that has already rotated a working credential. Under migration 0081 that case is not reachable: the
+  enqueue requires an unconsumed pending row, `correlation_id` is unique forever, and the claim is atomic, so between
+  our enqueue and our consume there is no second party who could have consumed the row. What store-first buys in
+  exchange is real: a consume failure then leaves a VALID, PERSISTED credential rather than a spent authorization and
+  nothing at all.
+
+### 9.5 The partial-failure boundary between store and consume
+
+**The job is never marked `completed` unless BOTH the store and the consume succeeded.** The interesting case is a
+store that succeeds followed by a consume that does not.
+
+| consume outcome | what it means | what the worker does |
+|---|---|---|
+| `consumed` | the row was ours and is now spent | mark the job `completed` |
+| throws (ambiguous) | the UPDATE may or may not have committed | retry, bounded — see below |
+| `already_consumed`, on a retry after an ambiguous attempt | almost certainly OUR earlier attempt | treat as consumed; the row is spent either way |
+| `already_consumed`, with no prior ambiguous attempt | somebody else spent it — a replay signal | `state_consume_failed` |
+| `expired` / `not_found` / `redirect_uri_mismatch` | the authorization is not consumable | `state_consume_failed` |
+
+That `already_consumed` rule is the whole of the idempotent recovery: it is success ONLY when a previous attempt of
+OURS could have been the one that consumed the row. On a clean first attempt it stays a refusal, so a genuine replay is
+still denied.
+
+**The most likely real instance is `expired`, and it is worth naming.** `oauth_pending` lives 600s from AUTHORIZE, not
+from callback. A customer who lingers on Slack's consent screen for nine and a half minutes leaves seconds of TTL for
+claim -> KMS decrypt -> Slack exchange -> GenerateDataKey -> store, and 0081's enqueue only proves the row was live at
+ENQUEUE time. So the row can expire between the store and the consume. This is the case store-first pays for: under
+consume-first it would have refused before writing anything, leaving the previous token untouched.
+
+What makes it acceptable is that the outcome is still safe and still recoverable without an operator. The token that
+was stored IS valid — Slack issued it and the workspace was verified — so the customer's connection genuinely works;
+what failed is the bookkeeping, and the job honestly refuses to claim completion. The previous version is superseded by
+ordinary 0080 versioning rather than destroyed, and a retry supersedes again. The alternative — marking the job
+completed with the pending row unconsumed — is the one outcome that is never acceptable, and it is the invariant §9.5
+exists to hold.
+
+When the job ends `state_consume_failed`:
+
+- **The stored token is left completely alone.** It is valid and active, and revoking or overwriting it would destroy a
+  working credential to tidy up a bookkeeping failure. `auth.revoke` is outside this worker's Slack surface anyway.
+- The `oauth_pending` row is left to expire. It cannot be reused: its correlation is bound to a terminal job, so
+  0081's enqueue refuses any further handoff for it.
+- **The customer is not told the connection is unusable, and is not told it succeeded either.** The terminal reason
+  never crosses the product boundary; the pending page's `failed` copy already says "We could not complete this Slack
+  connection. You can try connecting again." and deliberately does NOT say "nothing was changed" — precisely because
+  `store_failed` (and now `state_consume_failed`) are reachable with a live token in existence.
+- **Recovery needs no operator.** "Retry connection" starts a fresh authorize with a fresh correlation, nonce and
+  pending row; the completion stores a new version and 0080 supersedes the previous one in the same statement. That is
+  ordinary re-authorization, not a repair.
