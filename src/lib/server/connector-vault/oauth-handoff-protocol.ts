@@ -14,8 +14,10 @@
 //   1. The ASSERTION authenticates the CALLER — issuer, audience, subject, team, project, Vercel environment, and a
 //      bounded lifetime. It answers "is this our staging deployment", and nothing else.
 //   2. The AAD of the sealed payload (`oauth-payload-seal.ts`) cryptographically binds the request FIELDS — protocol
-//      version, tenant, connector, provider, correlation, redirect and workspace. A substituted body cannot open the
-//      authorization code, because AES-GCM authenticates the AAD. This is the real body binding.
+//      version, envelope version, tenant, connector, provider, correlation, redirect, workspace, payload key id, and
+//      as of v2 the NONCE HASH and SUBJECT. A substituted body cannot open the authorization code, because AES-GCM
+//      authenticates the AAD. This is the real body binding — and binding the v2 fields is what stops a valid-looking
+//      handoff pointing the pending-row consume at a different row.
 //   3. The TRANSPORT DIGEST header binds the exact serialized bytes the worker received, so truncation or alteration in
 //      the channel is a refusal rather than a partially-parsed request.
 //

@@ -43,6 +43,10 @@ if (typeof (globalThis as { window?: unknown }).window !== "undefined") {
 export const PENDING_PATH = "/connectors/oauth/pending" as const;
 const ERROR_PATH = "/connectors" as const;
 
+/** `oauth_pending.subject` is a uuid column and the protocol schema requires the same shape. Checked here so a
+ *  malformed subject is refused at the source rather than as a late schema failure at the worker. */
+const SUBJECT_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
 export type HandoffCallbackRefusal =
   | OAuthStateReason
   | SealRefusal
@@ -124,10 +128,15 @@ export function makeHandoffCallbackRunner(deps: HandoffCallbackDeps): HandoffCal
     //     It is an opaque UUID — never an email, a name, or anything a person reads.
     const nonceHash = hashOAuthValue(validated.payload.nonce);
     const boundSubject = validated.payload.sub;
-    // `slack-authorize-pending` refuses to create a row without a subject, so a null here describes a row this flow
-    // cannot have produced. Refused rather than sent as null, which 0079's `is not distinct from` would happily match
-    // against some OTHER subject-less row.
-    if (typeof boundSubject !== "string" || boundSubject.length === 0) return { ok: false, reason: "session_required" };
+    // The GRAMMAR, not merely presence. `validateOAuthState` already guarantees `sub` is a non-empty string (it
+    // returns `malformed_state` otherwise), so an emptiness check here would be dead code reading as a live guard.
+    // What it does NOT guarantee is that the value is a UUID — and `oauth_pending.subject` is a uuid column, so a
+    // non-UUID subject would fail the protocol schema at the worker as a late, confusing refusal instead of here as a
+    // precise one. Refused rather than sent as null, too: `is not distinct from` would happily match null against some
+    // OTHER subject-less row. (Found in adversarial review of PR #400.)
+    if (typeof boundSubject !== "string" || !SUBJECT_UUID_RE.test(boundSubject)) {
+      return { ok: false, reason: "malformed_state" };
+    }
 
     // 2. Seal. From here the plaintext exists only inside `sealAuthorizationCode`, and only for the length of one call.
     let sealed;

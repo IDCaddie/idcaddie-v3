@@ -575,14 +575,54 @@ compatibility, and it is what stops a stale deployment completing a real flow th
 
 ### 9.4 The consequence for the worker's ordering
 
-With v2 the worker can finally perform the consume, and the ordering is:
+With v2 the worker can finally perform the consume. The ordering is:
 
 1. verify handoff and OIDC · 2. open the protected code · 3. enqueue and claim · 4. read/decrypt the app secret ·
 5. exchange with Slack · 6. verify the exact `team.id` · 7. allocate the version · 8. encrypt and store the token ·
 9. **atomically consume the exact `oauth_pending` row** · 10. mark the job completed.
 
-**The job is never `completed` unless BOTH the store and the consume succeeded.** The partial-failure boundary between
-steps 8 and 9 is the interesting one and is specified in the connector-runner's `completion.ts`: a store that succeeds
-followed by a consume that fails is `state_consume_failed`, the stored token is left ALONE (it is valid, and revoking
-or overwriting it would destroy a working credential), and the consume is retried under a bounded, idempotent rule
-before the job is failed.
+Two notes on that list, because it is a list of EFFECTS and one of them is not in execution order:
+
+- **The version is READ before the exchange and APPLIED after it.** `exchangeSlackOAuthCode` takes `version` in its
+  input and seals it into the AAD at encrypt time, so the allocating read (a `stable` function, no side effect) has to
+  precede the call. What step 7 pins is that the version a token is ENCRYPTED under is allocated for this completion and
+  is the one written to the row — the 0080 lesson — not that the read happens after Slack answers.
+- **Store precedes consume**, which REVERSES the ordering connector-runner #120 chose and documented. That change is
+  deliberate and is recorded here rather than silently applied. #120 argued consume-first on the grounds that
+  store-first's failure case is "the token was written, then the single-use gate said this authorization was already
+  used" — a replay that has already rotated a working credential. Under migration 0081 that case is not reachable: the
+  enqueue requires an unconsumed pending row, `correlation_id` is unique forever, and the claim is atomic, so between
+  our enqueue and our consume there is no second party who could have consumed the row. What store-first buys in
+  exchange is real: a consume failure then leaves a VALID, PERSISTED credential rather than a spent authorization and
+  nothing at all.
+
+### 9.5 The partial-failure boundary between store and consume
+
+**The job is never marked `completed` unless BOTH the store and the consume succeeded.** The interesting case is a
+store that succeeds followed by a consume that does not.
+
+| consume outcome | what it means | what the worker does |
+|---|---|---|
+| `consumed` | the row was ours and is now spent | mark the job `completed` |
+| throws (ambiguous) | the UPDATE may or may not have committed | retry, bounded — see below |
+| `already_consumed`, on a retry after an ambiguous attempt | almost certainly OUR earlier attempt | treat as consumed; the row is spent either way |
+| `already_consumed`, with no prior ambiguous attempt | somebody else spent it — a replay signal | `state_consume_failed` |
+| `expired` / `not_found` / `redirect_uri_mismatch` | the authorization is not consumable | `state_consume_failed` |
+
+That `already_consumed` rule is the whole of the idempotent recovery: it is success ONLY when a previous attempt of
+OURS could have been the one that consumed the row. On a clean first attempt it stays a refusal, so a genuine replay is
+still denied.
+
+When the job ends `state_consume_failed`:
+
+- **The stored token is left completely alone.** It is valid and active, and revoking or overwriting it would destroy a
+  working credential to tidy up a bookkeeping failure. `auth.revoke` is outside this worker's Slack surface anyway.
+- The `oauth_pending` row is left to expire. It cannot be reused: its correlation is bound to a terminal job, so
+  0081's enqueue refuses any further handoff for it.
+- **The customer is not told the connection is unusable, and is not told it succeeded either.** The terminal reason
+  never crosses the product boundary; the pending page's `failed` copy already says "We could not complete this Slack
+  connection. You can try connecting again." and deliberately does NOT say "nothing was changed" — precisely because
+  `store_failed` (and now `state_consume_failed`) are reachable with a live token in existence.
+- **Recovery needs no operator.** "Retry connection" starts a fresh authorize with a fresh correlation, nonce and
+  pending row; the completion stores a new version and 0080 supersedes the previous one in the same statement. That is
+  ordinary re-authorization, not a repair.
