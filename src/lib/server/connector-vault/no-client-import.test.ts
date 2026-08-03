@@ -226,6 +226,55 @@ describe("connector vault oauth-state is server-only (only the inert callback ro
   });
 });
 
+// Phase 8K — the OAuth-completion handoff chain is server-only. It holds the sealing key, the OIDC assertion source and
+// the worker endpoint; a "use client" file importing any of it would put all three in a browser bundle. The ONLY src/app
+// file that may import it is the callback route, which is server code.
+//
+// `oauth-handoff-protocol` is deliberately NOT in this list: `src/lib/data/oauth-completion-status.ts` imports one
+// regular expression from it, and that module is server-only for its own reasons (it opens a user-scoped Supabase
+// client). The guard below still forbids any "use client" file from reaching it.
+const HANDOFF_REL_HINTS = [
+  "connector-vault/oauth-payload-seal", "server/connector-vault/oauth-payload-seal", "lib/server/connector-vault/oauth-payload-seal",
+  "connector-vault/oauth-handoff-client", "server/connector-vault/oauth-handoff-client", "lib/server/connector-vault/oauth-handoff-client",
+  "connector-vault/oauth-callback-handoff", "server/connector-vault/oauth-callback-handoff", "lib/server/connector-vault/oauth-callback-handoff",
+  "connector-vault/real-callback-dependencies", "server/connector-vault/real-callback-dependencies", "lib/server/connector-vault/real-callback-dependencies",
+  "connector-vault/staging-environment-identity", "server/connector-vault/staging-environment-identity", "lib/server/connector-vault/staging-environment-identity",
+];
+
+describe("the OAuth completion handoff chain is server-only (only the callback route may import it)", () => {
+  const files = walk(SRC).filter((f) => !f.includes(path.join("server", "connector-vault")) && !/\.test\.(ts|tsx)$/.test(f));
+  const importsHandoff = (src: string) =>
+    HANDOFF_REL_HINTS.some((h) => src.includes(h)) || src.includes("connector-vault/oauth-handoff-protocol");
+
+  it("no \"use client\" file imports any part of the handoff chain", () => {
+    const offenders = files.filter((f) => {
+      const src = fs.readFileSync(f, "utf8");
+      return /^\s*["']use client["']/m.test(src) && importsHandoff(src);
+    });
+    expect(offenders).toEqual([]);
+  });
+
+  it("the ONLY src/app file importing the handoff chain is the callback route", () => {
+    const appDir = path.join(SRC, "app");
+    const offenders = files
+      .filter((f) => f.startsWith(appDir))
+      .filter((f) => HANDOFF_REL_HINTS.some((h) => fs.readFileSync(f, "utf8").includes(h)))
+      .filter((f) => f !== CALLBACK_ROUTE);
+    expect(offenders).toEqual([]);
+  });
+
+  it("every handoff module declares its server-only runtime sentinel", () => {
+    for (const m of [
+      "oauth-handoff-protocol", "oauth-payload-seal", "oauth-handoff-client", "oauth-callback-handoff",
+      "real-callback-dependencies", "staging-environment-identity",
+    ]) {
+      const src = fs.readFileSync(path.join(SRC, "lib", "server", "connector-vault", `${m}.ts`), "utf8");
+      expect(src, m).toMatch(/server-only/);
+      expect(src, m).toMatch(/globalThis[^\n]*window/);
+    }
+  });
+});
+
 // P5E18b — the dormant Okta live-connection foundation (okta-live/) is server-only. NO "use client" file may import it, and the
 // ONLY src/app file that may import it is the dedicated, provider-selecting Okta OAuth callback route (a route.ts is server code,
 // never client/browser code, and stops before token exchange while certificationOnly).

@@ -29,10 +29,19 @@ export const STAGING_VERCEL_PROJECT_ID = "prj_l30QMLpF3dNLwKBP2CTG7v9rIon0";
 export const STAGING_SUPABASE_REF = "ycdpzduxugdsffjqyoai";
 export const PRODUCTION_SUPABASE_REF = "dzbfxulvxchdemcettrx";
 export const STAGING_CALLBACK_URI = "https://idcaddie-v3.vercel.app/connectors/oauth/callback";
-// The narrow database identity from docs/83. The runner's own login must never reach the web tier: it can execute every
-// `runner_*` function in the schema, so a compromised request path could fabricate directory evidence.
+// Two database identities that must never reach this tier, for the same reason with different blast radii.
+//
+// `connector_runner_login` can execute every `runner_*` function in the schema, so a compromised request path could
+// fabricate directory evidence.
+//
+// `oauth_completer` is narrow — nine purpose-pinned wrappers, zero table privileges — but it is still a database
+// credential, and holding one would mean the web tier had a Postgres driver. That is the invariant doc 46 §11 and
+// `scripts/check-app-runtime-imports.sh` enforce, and it is the correction recorded in doc 83 §2: the boundary is about
+// what this tier can DO, not which credential it holds. Its presence here is therefore a REFUSAL, not a requirement.
 export const OAUTH_COMPLETER_ROLE = "oauth_completer";
+export const OAUTH_COMPLETER_DB_URL_VAR = "OAUTH_COMPLETER_DB_URL";
 export const FORBIDDEN_RUNNER_ROLE = "connector_runner_login";
+export const FORBIDDEN_RUNNER_DB_URL_VAR = "CONNECTOR_RUNNER_DB_URL";
 
 export type EnvironmentRefusal =
   | "environment_marker_missing"
@@ -43,12 +52,13 @@ export type EnvironmentRefusal =
   | "supabase_project_mismatch"
   | "production_supabase_ref_present"
   | "runner_credential_present"
-  | "oauth_completer_identity_missing"
+  | "completer_credential_present"
   | "callback_uri_missing"
   | "callback_uri_mismatch"
   | "real_exchange_disabled"
   | "expected_workspace_missing"
   | "expected_context_missing"
+  | "expected_context_malformed"
   | "slack_client_id_missing";
 
 export type EnvironmentIdentity =
@@ -59,9 +69,18 @@ type Env = Record<string, string | undefined>;
 
 const present = (v: unknown): v is string => typeof v === "string" && v.trim().length > 0;
 
-// Slack team ids are `T` + uppercase alphanumerics. A malformed value is treated as absent: half a workspace id is not
-// a weaker constraint, it is an unconfigured one.
-const isTeamId = (v: string) => /^T[A-Z0-9]{2,}$/.test(v);
+// The grammars every downstream layer enforces — `oauth-payload-seal.ts`'s AAD, `oauth-handoff-protocol.ts`'s schema,
+// and migration 0081's CHECKs. They are re-stated here rather than imported because oauth-handoff-protocol.ts imports
+// THIS module, and the cycle would leave these constants in the temporal dead zone.
+//
+// Checking them at the GATE is the point. A value that passes here and fails downstream produces a deployment that
+// looks configured, takes the real branch with no synthetic fallback, and then refuses every single callback with a
+// reason naming the crypto (`seal_binding_invalid`) rather than the misconfiguration — an uppercase UUID pasted from a
+// generator was enough. A malformed value is treated as absent: half a workspace id is not a weaker constraint, it is
+// an unconfigured one. (Found in adversarial review of PR #398.)
+const isTeamId = (v: string) => /^T[A-Z0-9]{2,30}$/.test(v);
+const isUuid = (v: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(v);
+const isCorrelationId = (v: string) => /^[A-Za-z0-9_.:-]{1,64}$/.test(v);
 
 /**
  * Decide whether this process is the pinned staging environment and is fully configured for a real OAuth exchange.
@@ -97,20 +116,28 @@ export function resolveStagingEnvironmentIdentity(env: Env = process.env): Envir
     }
   }
 
-  // ── 5. The runner's own credential must never be present in this tier (docs/83 §1-2). Checked by scanning for the
-  //       role name rather than by inspecting one named variable, because the hazard is the credential existing here at
-  //       all — under any name.
-  for (const v of Object.values(env)) {
-    if (typeof v === "string" && v.includes(FORBIDDEN_RUNNER_ROLE)) {
-      return { ok: false, reason: "runner_credential_present" };
+  // ── 5/6. NO DATABASE CREDENTIAL OF ANY KIND MAY BE PRESENT IN THIS TIER (doc 83 §1-2, §8.1).
+  //
+  //       A credential is a CONNECTION STRING, not a mention of one. The first version of this check scanned every
+  //       environment value for the role NAME as a substring, and that is a live outage: Vercel injects
+  //       `VERCEL_GIT_COMMIT_MESSAGE` into the runtime environment, and a deploy cut from a commit whose message
+  //       discusses `oauth_completer` or `connector_runner_login` — every commit in this phase does — would refuse on
+  //       the grounds that a credential was present, take the not-pinned branch, and serve a bare 404 to every real
+  //       Slack callback. Prose about a role is not a grant of it. (Found in adversarial review of PR #398.)
+  //
+  //       So the rule is: the dedicated variable name, or a value that is actually a Postgres URI. The URI test is
+  //       STRICTER than the old substring test, not weaker — this tier is pg-free, so ANY Postgres connection string
+  //       here is a refusal regardless of which role it names or what the variable is called. Renaming the variable no
+  //       longer helps, and neither does using a role this file has never heard of.
+  const isPostgresUri = (v: string) => /^\s*postgres(?:ql)?:\/\//i.test(v);
+  for (const [k, v] of Object.entries(env)) {
+    if (typeof v === "string" && isPostgresUri(v)) {
+      // Which role it names decides only WHICH reason is reported; either way it does not belong here.
+      return { ok: false, reason: v.includes(FORBIDDEN_RUNNER_ROLE) ? "runner_credential_present" : "completer_credential_present" };
     }
-  }
-
-  // ── 6. …and the narrow identity must be the one present. Absence is refusal: falling back to "whatever connection is
-  //       configured" is exactly the failure this whole design exists to prevent.
-  const completerUrl = env.OAUTH_COMPLETER_DB_URL;
-  if (!present(completerUrl) || !completerUrl.includes(OAUTH_COMPLETER_ROLE)) {
-    return { ok: false, reason: "oauth_completer_identity_missing" };
+    if (k === OAUTH_COMPLETER_DB_URL_VAR || k === FORBIDDEN_RUNNER_DB_URL_VAR) {
+      return { ok: false, reason: k === OAUTH_COMPLETER_DB_URL_VAR ? "completer_credential_present" : "runner_credential_present" };
+    }
   }
 
   // ── 7. The callback. Compared as a whole string against the pinned value — not a host check, not a prefix.
@@ -132,6 +159,11 @@ export function resolveStagingEnvironmentIdentity(env: Env = process.env): Envir
   const correlationId = env.CONNECTOR_OAUTH_EXPECTED_CORRELATION_ID;
   if (!present(tenantId) || !present(connectorId) || !present(correlationId)) {
     return { ok: false, reason: "expected_context_missing" };
+  }
+  // …and each must be the shape everything downstream requires, or this deployment is configured to fail every
+  // callback rather than to run one.
+  if (!isUuid(tenantId.trim()) || !isUuid(connectorId.trim()) || !isCorrelationId(correlationId.trim())) {
+    return { ok: false, reason: "expected_context_malformed" };
   }
 
   const clientId = env.SLACK_CLIENT_ID;

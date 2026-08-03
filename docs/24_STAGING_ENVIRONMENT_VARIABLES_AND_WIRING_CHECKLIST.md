@@ -83,6 +83,24 @@ never the browser) · **staging-only** (set per-environment) · **future/deferre
 |---|---|---|---|---|
 | *(connector tokens / OAuth secrets / service-account JSON / vault key)* | **server-only SECRET** | **future/deferred — BLOCKED** | Connector credentials + the encrypted-vault key. **BLOCKED by [19](./19_CONNECTOR_CREDENTIAL_VAULT_DESIGN.md) / RISK-007 until the vault is implemented + tested + reviewed.** **Never collect, request, paste, or set any of these now** (doc 18/19/22 forbid it). | **blocked — do not set** |
 
+### 3g. OAuth-completion handoff variables — parsed in code, NOT set (Phase 8K)
+
+Names and validation rules only. Nothing here is configured anywhere, and setting them would not enable real mode on its
+own: `WORKER_ALLOWED_HOSTS` is empty **in code**, so the handoff refuses until a reviewed change adds the worker host.
+Full model in [83 §8.6](./83_REAL_OAUTH_COMPLETION_ARCHITECTURE.md).
+
+| Variable | Class | Purpose | Refuses unless |
+|---|---|---|---|
+| `OAUTH_COMPLETION_WORKER_URL` | server-only, **not secret** | The completion worker's handoff endpoint | exact normalized HTTPS URL, allowlisted host, pinned path `/internal/oauth-completion/handoff`, no credentials/query/fragment |
+| `OAUTH_COMPLETION_WORKER_OIDC_AUDIENCE` | server-only, **not secret** | The audience **dedicated** to the completion worker | present; never Vercel's default team audience |
+| `OAUTH_COMPLETION_WORKER_PUBLIC_KEY` | server-only, **not secret** (public half) | Seals the authorization code to the worker | base64 **SPKI DER** of an X25519 public key — raw 32 bytes are refused, because they cannot be told apart from Ed25519 |
+| `OAUTH_COMPLETION_WORKER_PUBLIC_KEY_ID` | server-only, **not secret** | Names the key the bytes were sealed to | `^[A-Za-z0-9_.:-]{1,128}$` |
+| `VERCEL_OIDC_TOKEN` | **injected by Vercel** | The handoff assertion | read from the environment ONLY — never from a request header |
+
+**`OAUTH_COMPLETER_DB_URL` is NOT a V3 variable and must never be set on this project.** Since Phase 8K its presence —
+under that name or any other name carrying the `oauth_completer` role — makes the environment gate refuse with
+`completer_credential_present`. It belongs to the completion worker's process and nowhere else ([83 §8.1](./83_REAL_OAUTH_COMPLETION_ARCHITECTURE.md)).
+
 ---
 
 ## 4. Redaction rules

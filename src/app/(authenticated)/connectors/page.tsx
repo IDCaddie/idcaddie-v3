@@ -16,7 +16,31 @@ export const metadata = { title: "Connectors · ID Caddie" };
 // and instance lifecycle stay separate: "Preview" describes what ID Caddie supports, "Configuration saved" describes what this
 // workspace has. Both can be true at once, and a synthetic Entra connector is exactly that case.
 
-export default async function ConnectorsPage() {
+// Phase 8K: the OAuth callback's failure destination is `/connectors?oauth=error&reason=<bounded code>`, and until now
+// nothing rendered it — a customer who clicked "Allow" at Slack and hit any refusal was returned to the ordinary
+// marketplace with no indication the flow had failed, unable to tell it apart from silent success.
+// (Found in adversarial review of PR #398.)
+//
+// The reason code is an ENGINEERING code, not customer language, so it is never displayed. It is used only to choose
+// between two sentences, and anything unrecognised falls to the generic one.
+function oauthBanner(oauth: string | undefined, reason: string | undefined): string | null {
+  if (oauth !== "error") return null;
+  if (reason === "expired" || reason === "replayed") {
+    return "That Slack connection request is no longer valid. Please start the connection again.";
+  }
+  return "We could not complete your Slack connection. Nothing was connected. Please try again.";
+}
+
+export default async function ConnectorsPage({
+  searchParams,
+}: {
+  searchParams?: Promise<{ [key: string]: string | string[] | undefined }>;
+} = {}) {
+  const sp = (await searchParams) ?? {};
+  const banner = oauthBanner(
+    typeof sp.oauth === "string" ? sp.oauth : undefined,
+    typeof sp.reason === "string" ? sp.reason : undefined,
+  );
   const connectors = listCustomerConnectors();
 
   // Owner/admin-gated, like every other read of tenant connector state. A forbidden result is NOT the same as "no instances":
@@ -45,6 +69,15 @@ export default async function ConnectorsPage() {
           what the product can do; each connector below shows what your workspace has actually set up.
         </p>
       </header>
+
+      {banner ? (
+        <p
+          role="alert"
+          className="rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200"
+        >
+          {banner}
+        </p>
+      ) : null}
 
       <ConnectorMarketplace connectors={connectors} instances={instances} instanceState={instanceState} />
 

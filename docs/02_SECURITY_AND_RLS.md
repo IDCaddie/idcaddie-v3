@@ -269,3 +269,10 @@ unchanged; a planted FK-bypassed corrupt cross-tenant link is now denied — pro
 - **New tenant-scoped child/link table** ⇒ give referenced parents `UNIQUE (id, tenant_id)` and the child a composite FK `(parent_ref, tenant_id) → parent(id, tenant_id)` so cross-tenant references fail at the constraint layer (`0005`, §5b) — RLS alone only hides them, it doesn't prevent the write.
 - Never weaken RLS, never filter for security in the client, never use the service-role
   key in a request path. Reviewer enforcement: [07_P0_REVIEW_CHECKLIST.md](./07_P0_REVIEW_CHECKLIST.md).
+- **The web tier holds no database credential — including a narrow one.** `oauth_completer` is a least-privilege role
+  and it still must never reach Vercel: the boundary (doc [46 §11](46_HOSTED_RUNNER_INGEST_ENTRYPOINT_SPEC.md)) is about
+  what the tier can DO, not which credential it holds, and reaching any role requires a Postgres driver in a public
+  request path. Since Phase 8K the environment gate **refuses** when `OAUTH_COMPLETER_DB_URL` exists under any name, or
+  when any value carries the role name — the same shape as the existing `connector_runner_login` refusal.
+  `oauth-handoff-architecture.test.ts` asserts it across every file of the OAuth completion path and mutation-tests each
+  rule against a planted violation. Full model: doc [83 §8](83_REAL_OAUTH_COMPLETION_ARCHITECTURE.md).

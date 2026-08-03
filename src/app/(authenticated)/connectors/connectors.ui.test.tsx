@@ -182,3 +182,47 @@ describe("filters", () => {
     expect(container.textContent).toContain("Salesforce");
   });
 });
+
+// Phase 8K — the OAuth callback's FAILURE destination is this page (`?oauth=error&reason=<bounded code>`), and until
+// the review of PR #398 nothing here rendered it: a customer who clicked "Allow" at Slack and hit any refusal was
+// returned to the ordinary marketplace with no indication the flow had failed, unable to tell it apart from success.
+describe("the OAuth failure destination says something, in customer language", () => {
+  const renderWith = async (sp: Record<string, string | string[] | undefined>) =>
+    render(await ConnectorsPage({ searchParams: Promise.resolve(sp) }));
+
+  it("renders a bounded alert for oauth=error", async () => {
+    await renderWith({ oauth: "error", reason: "handoff_transport_failed" });
+    const alert = screen.getByRole("alert");
+    expect(alert.textContent).toContain("We could not complete your Slack connection");
+    expect(alert.textContent).toContain("Nothing was connected");
+  });
+
+  it("NEVER displays the engineering reason code", async () => {
+    for (const reason of [
+      "handoff_transport_failed", "worker_host_not_allowlisted", "assertion_audience_mismatch",
+      "seal_binding_invalid", "completer_credential_present", "subject_mismatch",
+    ]) {
+      cleanup();
+      await renderWith({ oauth: "error", reason });
+      const body = document.body.textContent ?? "";
+      expect(body, reason).not.toContain(reason);
+      // …nor any of the vocabulary those codes are built from.
+      for (const word of ["assertion", "seal", "handoff", "worker", "allowlist", "credential", "OIDC"]) {
+        expect(body.toLowerCase(), `${reason}: ${word}`).not.toContain(word.toLowerCase());
+      }
+    }
+  });
+
+  it("says nothing at all when the flow did not fail", async () => {
+    for (const sp of [{}, { oauth: "success" }, { reason: "handoff_transport_failed" }, { oauth: ["error", "error"] }]) {
+      cleanup();
+      await renderWith(sp);
+      expect(screen.queryByRole("alert"), JSON.stringify(sp)).toBeNull();
+    }
+  });
+
+  it("tells an expired request apart, because that one has a different next step", async () => {
+    await renderWith({ oauth: "error", reason: "expired" });
+    expect(screen.getByRole("alert").textContent).toContain("no longer valid");
+  });
+});
