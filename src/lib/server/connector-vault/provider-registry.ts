@@ -76,7 +76,16 @@ export type ConnectorProviderDefinition = {
   status: ConnectorProviderStatus;
   reviewGate: string; // the gate that must clear before this provider can do anything real
   riskLevel: "low" | "medium" | "high";
-  requiredScopes: readonly string[]; // DISPLAY-ONLY — never used to build an OAuth request here
+  // NOT display-only, whatever this comment used to say. `buildSlackAuthorizeUrl` defaults to
+  // `getConnectorProvider(id)?.requiredScopes` when no explicit scopes are passed, and NO caller passes any — not the
+  // runner's live authorize wiring, not `prepareRunGateAAuthorize`, not `persistSlackAuthorizePending`. So for every
+  // provider whose authorize URL this codebase builds, this field IS the scope set Slack is asked for.
+  //
+  // The old comment ("DISPLAY-ONLY — never used to build an OAuth request here") is why the Slack entry was one scope
+  // short for months without anyone reading it as a bug: a field believed to be a label does not get checked against
+  // the manifest. `provider-registry-scopes.test.ts` now checks it, per provider, against what the manifest declares
+  // it will actually call.
+  requiredScopes: readonly string[];
   helpCopy: string;
   enabled: boolean; // default false — an inert skeleton is never enabled
 };
@@ -94,7 +103,12 @@ const SLACK: ConnectorProviderDefinition = {
   status: "skeleton",
   reviewGate: "provider-specific-reviewed-pr", // real token storage stays gated behind this
   riskLevel: "low",
-  requiredScopes: ["users:read", "usergroups:read"], // display-only metadata
+  // EXACTLY the union of what slack.v1.json's endpoints declare they need, and exactly the reviewed set in doc 83 §3.4.
+  // `users:read.email` was missing: `users.list` declares it, the `normalized_email` matcher is the ONLY automatic
+  // identity-matching method Slack has (0076 permits `manual` and `normalized_email` and nothing else), and a token
+  // granted without it returns members with no email — so discovery would have "succeeded" and matched nobody.
+  // No write scope, no `channels:*`, no `chat:write`. Adding one here changes what a customer is asked to consent to.
+  requiredScopes: ["users:read", "users:read.email", "usergroups:read"],
   helpCopy:
     "Coming soon — not connected. Slack is a skeleton provider entry only: no credentials are stored and " +
     "connecting/sync are not built. A later reviewed PR adds the real OAuth + token storage behind the vault.",
