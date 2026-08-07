@@ -168,12 +168,17 @@ describe("granted-scope gate — REFUSES a short grant, before the store", () =>
 });
 
 // The case both suites were missing. The gate refuses through TWO independent checks — a membership loop over the
-// required set, then a cardinality comparison — and every refusal fixture until now had the wrong SIZE. So the extras
-// check alone accounted for all of them, and deleting the membership loop broke nothing anywhere.
+// required set, then a cardinality comparison — and every refusal fixture until now had the wrong SIZE.
 //
-// It is not a theoretical gap. With the loop deleted, `users:read,usergroups:read,chat:write` passes the size check
-// (3 === 3) and is stored: a token that cannot read an email address and CAN post to the workspace, with the job marked
-// completed. That is the exact outcome this gate exists to prevent, plus a write capability nobody reviewed.
+// Be precise about what that did and did not leave uncovered, because the obvious summary is wrong: deleting the
+// membership loop on main already failed TEN tests. It did not survive. But all ten failed on a REASON MISMATCH —
+// `granted_scopes_unexpected` where `granted_scopes_insufficient` was expected — and in every one of them the token
+// still stayed out of the vault, because the size check caught the wrong-size grant.
+//
+// What no test could see was the case where deleting the loop lets a token through. `users:read,usergroups:read,
+// chat:write` passes the size check (3 === 3) and is STORED: a token that cannot read an email address and CAN post to
+// the workspace, with the job marked completed. A wrong reason string and a persisted over-privileged credential are
+// not the same class of failure, and only the second was invisible.
 describe("granted-scope gate — a WRONG set of the RIGHT size", () => {
   const SAME_SIZE_WRONG = "users:read,usergroups:read,chat:write"; // 3 scopes: email MISSING, chat:write UNEXPECTED
 
@@ -206,13 +211,40 @@ describe("granted-scope gate — a WRONG set of the RIGHT size", () => {
     ]) {
       const r = await run(p);
       expect(r.result, `permutation ${p}`).toEqual({ ok: false, reason: "granted_scopes_insufficient" });
-      expect(r.captured, `permutation ${p}`).toHaveLength(0);
+      storedNothing(r);
     }
   });
 
   it("three scopes with NONE of the required ones is refused, not merely counted", async () => {
     const r = await run("channels:read,chat:write,files:read");
     expect(r.result).toEqual({ ok: false, reason: "granted_scopes_insufficient" });
+    storedNothing(r);
+  });
+
+  // DUPLICATE COLLAPSE. `granted` is a Set, so `granted.size` counts DISTINCT scopes — which is the only reason
+  // comparing it against `REQUIRED_SLACK_BOT_SCOPES.length` means anything. Nothing pinned that: a plausible
+  // "just compare the raw token count" refactor survived the entire suite, and it fails in the direction the parser
+  // comment calls expensive — refusing a perfectly good authorization AFTER the app is installed.
+  it("a repeated scope is the SAME grant: the reviewed three plus a duplicate still succeed", async () => {
+    for (const s of [
+      "users:read,users:read.email,usergroups:read,users:read",
+      "users:read,users:read,users:read.email,users:read.email,usergroups:read,usergroups:read",
+    ]) {
+      const r = await run(s);
+      expect(r.result, `duplicated grant: ${s}`).toEqual({ ok: true, ref: { secretId: "sec-1" } });
+      expect(r.captured, `duplicated grant: ${s}`).toHaveLength(1);
+    }
+  });
+
+  it("duplicates cannot pad a short grant up to the required count", async () => {
+    const r = await run("users:read,users:read,users:read"); // three tokens, ONE distinct scope
+    expect(r.result).toEqual({ ok: false, reason: "granted_scopes_insufficient" });
+    storedNothing(r);
+  });
+
+  it("duplicates do not mask a real extra", async () => {
+    const r = await run("users:read,users:read,users:read.email,usergroups:read,chat:write");
+    expect(r.result).toEqual({ ok: false, reason: "granted_scopes_unexpected" });
     storedNothing(r);
   });
 
