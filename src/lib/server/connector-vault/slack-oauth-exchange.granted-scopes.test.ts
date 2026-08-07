@@ -225,9 +225,90 @@ describe("granted-scope gate — ordering against the other pre-store checks", (
     expect(captured).toHaveLength(0);
   });
 
-  it("a bad scope refuses even when the workspace is correct — the gate is not reachable-only-on-failure", async () => {
-    const r = await run("users:read");
+  // THE BYPASS THIS FILE DID NOT COVER. `expectedTeamId` is optional — the synthetic path has no workspace to check —
+  // so the gate sits next to a block that IS conditional on it. Folding the scope check into that conditional makes it
+  // skippable by per-deployment configuration, and every other test here sets `expectedTeamId`, so the whole suite
+  // stayed green under exactly that mutation. An adversarial review demonstrated it. These two assert the gate is
+  // unconditional, which is the property the module comment claims.
+  it("refuses a short grant with expectedTeamId UNSET — the gate is not nested in the workspace check", async () => {
+    const { store, captured } = captureStore();
+    const result = await exchangeSlackOAuthCode(input({ expectedTeamId: undefined }), {
+      clientId: "11111.22222", clientSecret: okSecret(), store,
+      httpClient: httpReturning(body("users:read,usergroups:read")),
+    });
+    expect(result).toEqual({ ok: false, reason: "granted_scopes_insufficient" });
+    expect(captured).toHaveLength(0);
+  });
+
+  it("refuses extra scopes with expectedTeamId UNSET", async () => {
+    const { store, captured } = captureStore();
+    const result = await exchangeSlackOAuthCode(input({ expectedTeamId: undefined }), {
+      clientId: "11111.22222", clientSecret: okSecret(), store,
+      httpClient: httpReturning(body("users:read,users:read.email,usergroups:read,chat:write")),
+    });
+    expect(result).toEqual({ ok: false, reason: "granted_scopes_unexpected" });
+    expect(captured).toHaveLength(0);
+  });
+
+  it("still SUCCEEDS with expectedTeamId unset when the grant is exactly right", async () => {
+    const { store, captured } = captureStore();
+    const result = await exchangeSlackOAuthCode(input({ expectedTeamId: undefined }), {
+      clientId: "11111.22222", clientSecret: okSecret(), store,
+      httpClient: httpReturning(body("users:read,users:read.email,usergroups:read")),
+    });
+    expect(result).toEqual({ ok: true, ref: { secretId: "sec-1" } });
+    expect(captured).toHaveLength(1);
+  });
+});
+
+describe("granted-scope gate — separator and shape tolerance", () => {
+  // RFC 6749 §5.1 is space-delimited; Slack's comma form is the deviation. A space-separated grant must not be refused.
+  it("accepts the RFC space-delimited form as well as Slack's commas", async () => {
+    for (const s of [
+      "users:read users:read.email usergroups:read",
+      "users:read,users:read.email usergroups:read",
+      "users:read\tusers:read.email\nusergroups:read",
+    ]) {
+      expect((await run(s)).result, `separator form: ${JSON.stringify(s)}`).toEqual({ ok: true, ref: { secretId: "sec-1" } });
+    }
+  });
+
+  it("a space-separated SHORT grant is still refused (the looser split does not weaken the check)", async () => {
+    const r = await run("users:read usergroups:read");
     refused(r, "granted_scopes_insufficient");
     storedNothing(r);
+  });
+
+  it("a space-separated grant with an extra is still refused", async () => {
+    const r = await run("users:read users:read.email usergroups:read chat:write");
+    refused(r, "granted_scopes_unexpected");
+    storedNothing(r);
+  });
+});
+
+describe("granted-scope gate — the response fields it newly reads never reach a log or a reason", () => {
+  // The module header claims the raw body is never logged. This PR made the gate read TWO more fields, and the existing
+  // sentinels covered neither — a review proved `console.warn(b.scope, b.team.name)` passed the entire suite. These
+  // sentinels are marker-carrying values planted in exactly those fields.
+  const SCOPE_MARKER = "MUSTNOTLEAK-scope-marker:read";
+  const TEAM_NAME_MARKER = "MUSTNOTLEAK-workspace-display-name";
+
+  it("neither the granted scope string nor the workspace NAME appears in a result, error or log", async () => {
+    for (const scope of [
+      `users:read,users:read.email,usergroups:read,${SCOPE_MARKER}`, // over-scoped
+      `users:read,${SCOPE_MARKER}`,                                  // short
+      `${SCOPE_MARKER}`,                                             // malformed-ish: present but wrong
+    ]) {
+      const r = await run(scope, { team: { id: TEAM, name: TEAM_NAME_MARKER } });
+      expect(r.dump).not.toContain(SCOPE_MARKER);
+      expect(r.dump).not.toContain(TEAM_NAME_MARKER);
+      expect(r.captured).toHaveLength(0);
+    }
+  });
+
+  it("a SUCCESSFUL exchange also logs neither field", async () => {
+    const r = await run("users:read,users:read.email,usergroups:read", { team: { id: TEAM, name: TEAM_NAME_MARKER } });
+    expect(r.result).toEqual({ ok: true, ref: { secretId: "sec-1" } });
+    expect(r.dump).not.toContain(TEAM_NAME_MARKER);
   });
 });

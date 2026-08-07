@@ -89,15 +89,23 @@ export type SlackExchangeReason =
 // per-deployment configuration; the required capability set is not — it is a property of what the discovery code will
 // call. Making it injectable would create an "unset ⇒ accept anything" path, which is the wildcard doc 81 says a
 // refusal must never be. There is no way to skip this check from configuration.
-export const REQUIRED_SLACK_BOT_SCOPES: readonly string[] = ["users:read", "users:read.email", "usergroups:read"];
+// Frozen, not merely `readonly`. `readonly string[]` erases at runtime, and this array is exported and imported by
+// SOURCE — one `(REQUIRED_SLACK_BOT_SCOPES as string[]).push(...)` anywhere in the process would widen what the gate
+// requires AND move the `.length` the extras check compares against. Freezing makes the claim structural.
+export const REQUIRED_SLACK_BOT_SCOPES: readonly string[] = Object.freeze(["users:read", "users:read.email", "usergroups:read"]);
 
-// Slack returns the granted BOT scopes as a comma-separated string in the top-level `scope`. We read that and never
-// `authed_user.scope` — that is the USER-token grant, a different principal with a different token we neither request
-// nor store. Splitting on comma and trimming tolerates whitespace; ordering is not significant to Slack and is not
-// significant here.
+// Slack returns the granted BOT scopes in the top-level `scope`. We read that and never `authed_user.scope` — that is
+// the USER-token grant, a different principal with a different token we neither request nor store.
+//
+// Split on whitespace OR comma. Slack documents a comma-separated list, but RFC 6749 §5.1 specifies a SPACE-delimited
+// `scope` and Slack's form is the deviation. Accepting both is strictly safer and weakens nothing: RFC 6749 §3.3
+// restricts a scope token to %x21 / %x23-5B / %x5D-7E, so no legal scope can contain whitespace or a comma, and there
+// is no string this admits that the comma-only version would have been right to reject. Getting this wrong fails in the
+// expensive direction — a space-separated grant would parse as ONE scope, refuse a perfectly good authorization, and
+// reach the operator as a bare `exchange_failed` after the app was already installed.
 function parseGrantedBotScopes(raw: unknown): ReadonlySet<string> | null {
   if (typeof raw !== "string") return null;
-  const parts = raw.split(",").map((s) => s.trim()).filter((s) => s.length > 0);
+  const parts = raw.split(/[\s,]+/).map((s) => s.trim()).filter((s) => s.length > 0);
   return parts.length > 0 ? new Set(parts) : null;
 }
 
@@ -209,9 +217,15 @@ export async function exchangeSlackOAuthCode(
   //         exists to raise — a bot token that can do more than the review approved is not a smaller problem than one
   //         that can do less.
   //       * The known way extras arise is Slack's union-on-reinstall: re-authorizing a workspace that already granted a
-  //         set yields the union. On this staging workspace the prior grant was `users:read` + `usergroups:read`, a
-  //         SUBSET of the three, so the union is still exactly three and equality holds. A union that exceeds three
-  //         would mean the workspace carries a broader historical grant, and stopping is the right answer.
+  //         set yields the union. The prior grant on the staging workspace is INFERRED to be `users:read` +
+  //         `usergroups:read` — a SUBSET of the three, making the union exactly three — but that is an inference from
+  //         the code path, NOT an observation: `granted_scopes_safe` was never written (doc 52), and doc 81 classifies
+  //         the Slack app's scopes as "External; exists per operator. Not verifiable from the repo." The inference
+  //         holds for the code-driven authorize, which passed no scopes and therefore used the then-two registry set;
+  //         it does NOT cover a manual "Install to Workspace" from api.slack.com, which grants the app's CONFIGURED
+  //         scopes instead. That matters here because the app is ALREADY installed. So: confirm the app's declared
+  //         scopes on its Slack settings page before the first live authorize. A union that exceeds three means the
+  //         workspace carries a broader historical grant, and stopping is the right answer.
   //       * Cost of being wrong is bounded and visible: the exchange has already succeeded, so the app IS installed in
   //         the workspace, but no token is stored. Recovery is to uninstall/revoke in Slack and re-authorize — an
   //         operator action on a disposable DEV workspace, not customer-visible, because no customer-initiated flow
