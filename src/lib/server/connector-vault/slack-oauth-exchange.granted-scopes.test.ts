@@ -167,6 +167,70 @@ describe("granted-scope gate — REFUSES a short grant, before the store", () =>
   });
 });
 
+// The case both suites were missing. The gate refuses through TWO independent checks — a membership loop over the
+// required set, then a cardinality comparison — and every refusal fixture until now had the wrong SIZE. So the extras
+// check alone accounted for all of them, and deleting the membership loop broke nothing anywhere.
+//
+// It is not a theoretical gap. With the loop deleted, `users:read,usergroups:read,chat:write` passes the size check
+// (3 === 3) and is stored: a token that cannot read an email address and CAN post to the workspace, with the job marked
+// completed. That is the exact outcome this gate exists to prevent, plus a write capability nobody reviewed.
+describe("granted-scope gate — a WRONG set of the RIGHT size", () => {
+  const SAME_SIZE_WRONG = "users:read,usergroups:read,chat:write"; // 3 scopes: email MISSING, chat:write UNEXPECTED
+
+  it("refuses it and stores nothing", async () => {
+    const r = await run(SAME_SIZE_WRONG);
+    expect(r.result).toEqual({ ok: false, reason: "granted_scopes_insufficient" });
+    storedNothing(r);
+  });
+
+  // The single reason names the MISSING side, because the membership loop returns before the cardinality check is
+  // reached. Both defects are real and both are caught — but they are caught by different checks, so proving it takes
+  // decomposing the input rather than reading one reason and claiming it says two things.
+  it("the missing scope is what refuses it: drop the extra and it is STILL refused", async () => {
+    const r = await run("users:read,usergroups:read"); // email still missing, nothing unexpected
+    expect(r.result).toEqual({ ok: false, reason: "granted_scopes_insufficient" });
+    storedNothing(r);
+  });
+
+  it("the extra is independently caught: supply the missing scope and it refuses as UNEXPECTED", async () => {
+    const r = await run("users:read,users:read.email,usergroups:read,chat:write");
+    expect(r.result).toEqual({ ok: false, reason: "granted_scopes_unexpected" });
+    storedNothing(r);
+  });
+
+  it("order is irrelevant to a same-size wrong set too", async () => {
+    for (const p of [
+      "chat:write,users:read,usergroups:read",
+      "usergroups:read,chat:write,users:read",
+      "users:read,chat:write,usergroups:read",
+    ]) {
+      const r = await run(p);
+      expect(r.result, `permutation ${p}`).toEqual({ ok: false, reason: "granted_scopes_insufficient" });
+      expect(r.captured, `permutation ${p}`).toHaveLength(0);
+    }
+  });
+
+  it("three scopes with NONE of the required ones is refused, not merely counted", async () => {
+    const r = await run("channels:read,chat:write,files:read");
+    expect(r.result).toEqual({ ok: false, reason: "granted_scopes_insufficient" });
+    storedNothing(r);
+  });
+
+  // The control. Without this the suite could pass by refusing everything, which is the other way to make a gate
+  // useless.
+  it("the exact reviewed three still succeed, in any order", async () => {
+    for (const p of [
+      "users:read,users:read.email,usergroups:read",
+      "usergroups:read,users:read.email,users:read",
+      "users:read.email,users:read,usergroups:read",
+    ]) {
+      const r = await run(p);
+      expect(r.result, `permutation ${p}`).toEqual({ ok: true, ref: { secretId: "sec-1" } });
+      expect(r.captured, `permutation ${p}`).toHaveLength(1);
+    }
+  });
+});
+
 describe("granted-scope gate — REFUSES extra scopes (exact equality, a documented judgement)", () => {
   it("the three PLUS an extra → granted_scopes_unexpected, nothing stored", async () => {
     const r = await run("users:read,users:read.email,usergroups:read,chat:write");
