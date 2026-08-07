@@ -30,7 +30,7 @@ const ctx = (over: Partial<OAuthStateContext> = {}): OAuthStateContext => ({
 });
 const mintState = (over: Partial<OAuthStateContext> = {}) => createOAuthState(ctx(over), { signer: signer(), ttlSeconds: TTL, now: NOW }).state;
 
-const botResponse = (over: Record<string, unknown> = {}) => ({ ok: true, access_token: TOKEN_SENTINEL, token_type: "bot", scope: "channels:read", ...over });
+const botResponse = (over: Record<string, unknown> = {}) => ({ ok: true, access_token: TOKEN_SENTINEL, token_type: "bot", scope: "users:read,users:read.email,usergroups:read", ...over });
 const httpReturning = (body: unknown, opts: { ok?: boolean; status?: number; throwNetwork?: boolean } = {}) => {
   const calls: { url: string; body: string }[] = [];
   const client: SlackHttpClient = async (url, init) => {
