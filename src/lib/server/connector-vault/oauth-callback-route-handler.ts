@@ -22,6 +22,7 @@ import {
   type OrchestratorResult,
 } from "./oauth-callback-orchestrator";
 import type { OAuthStateSigner } from "./oauth-state";
+import { REQUIRED_SLACK_BOT_SCOPES } from "./slack-oauth-exchange";
 import type { SlackHttpClient, SlackHttpResponse, ExchangeStoreHandoff } from "./slack-oauth-exchange";
 
 // Runtime server-only sentinel — throw if evaluated in a browser.
@@ -110,9 +111,23 @@ const SYNTHETIC_CLIENT_SECRET = "MUSTNOTLEAK-synthetic-route-client-secret";
 
 // The synthetic Slack http client — returns the sentinel bot token WITHOUT any network. There is no global `fetch`
 // here and no fallback, so the route can never reach slack.com.
+//
+// It grants the REVIEWED scope set, and that is not decoration. A synthetic response that omits `scope` would model a
+// grant the real gate refuses, so the synthetic path would exercise a DIFFERENT contract from the real one — which is
+// how a synthetic harness stops being evidence about anything. Built from the constant rather than a literal so the two
+// cannot drift apart.
 function syntheticSlackHttpClient(): SlackHttpClient {
   return async () => {
-    const resp: SlackHttpResponse = { ok: true, status: 200, json: async () => ({ ok: true, access_token: SYNTHETIC_BOT_TOKEN, token_type: "bot" }) };
+    const resp: SlackHttpResponse = {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        ok: true,
+        access_token: SYNTHETIC_BOT_TOKEN,
+        token_type: "bot",
+        scope: REQUIRED_SLACK_BOT_SCOPES.join(","),
+      }),
+    };
     return resp;
   };
 }

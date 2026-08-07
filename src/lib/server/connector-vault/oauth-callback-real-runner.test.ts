@@ -219,7 +219,7 @@ describe("real-mode state binding is not weakened", () => {
 const exchangeDeps = (over: Partial<{ body: unknown; httpOk: boolean; store: ExchangeStoreHandoff; throws: Error }> = {}) => {
   const httpClient: SlackHttpClient = async () => {
     if (over.throws) throw over.throws;
-    return { ok: over.httpOk ?? true, status: 200, json: async () => over.body ?? { ok: true, access_token: "xoxb-fake", token_type: "bot", team: { id: TEAM, name: "Controlled" } } };
+    return { ok: over.httpOk ?? true, status: 200, json: async () => over.body ?? { ok: true, access_token: "xoxb-fake", token_type: "bot", scope: "users:read,users:read.email,usergroups:read", team: { id: TEAM, name: "Controlled" } } };
   };
   return {
     httpClient,

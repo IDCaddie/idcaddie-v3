@@ -54,7 +54,13 @@ const captureStore = (opts: { fail?: boolean } = {}) => {
   };
   return { store, captured };
 };
-const botResponse = (over: Record<string, unknown> = {}) => ({ ok: true, access_token: TOKEN_SENTINEL, token_type: "bot", scope: "channels:read", bot_user_id: "U123", extra_field: "ignored", ...over });
+// The default granted-scope string is the REVIEWED set. It used to be `channels:read` — a scope this app never requests
+// and one doc 83 §3.4 explicitly forbids ("no write scope, no `channels:*`, no `chat:write`"), carrying none of the
+// three the manifest needs. Every happy-path assertion in this file therefore proved the exchange would accept a token
+// that could not do the job, and would have kept passing while a real run stored exactly that. Fixed here rather than
+// worked around, because a fixture that cannot fail is the thing this whole PR exists to remove.
+const GRANTED_SCOPES = "users:read,users:read.email,usergroups:read";
+const botResponse = (over: Record<string, unknown> = {}) => ({ ok: true, access_token: TOKEN_SENTINEL, token_type: "bot", scope: GRANTED_SCOPES, bot_user_id: "U123", extra_field: "ignored", ...over });
 
 // Capture EVERYTHING a leak could ride out on: the result, any thrown error, and every console call.
 let consoleDump: string[];

@@ -75,7 +75,31 @@ export type SlackExchangeReason =
   | "unexpected_token_type"
   | "missing_workspace" // the response named no team, so the workspace cannot be proven
   | "workspace_mismatch" // the token belongs to a DIFFERENT Slack workspace than the one authorized
+  | "granted_scopes_malformed" // the response carried no usable bot `scope` string at all
+  | "granted_scopes_insufficient" // Slack granted FEWER capabilities than the reviewed manifest needs
+  | "granted_scopes_unexpected" // Slack granted MORE than was reviewed — see §"extra scopes" below
   | "store_failed";
+
+// ── THE GRANTED-SCOPE CONTRACT ───────────────────────────────────────────────────────────────────────────────────────
+//
+// The capabilities `slack.v1.json` declares its endpoints need, and exactly the reviewed set in doc 83 §3.4.
+// `slack-oauth-exchange.granted-scopes.test.ts` pins this to the manifest's own union, so the two cannot drift.
+//
+// A CONSTANT, not an input, and deliberately so. `expectedTeamId` is optional-if-unset because the approved workspace is
+// per-deployment configuration; the required capability set is not — it is a property of what the discovery code will
+// call. Making it injectable would create an "unset ⇒ accept anything" path, which is the wildcard doc 81 says a
+// refusal must never be. There is no way to skip this check from configuration.
+export const REQUIRED_SLACK_BOT_SCOPES: readonly string[] = ["users:read", "users:read.email", "usergroups:read"];
+
+// Slack returns the granted BOT scopes as a comma-separated string in the top-level `scope`. We read that and never
+// `authed_user.scope` — that is the USER-token grant, a different principal with a different token we neither request
+// nor store. Splitting on comma and trimming tolerates whitespace; ordering is not significant to Slack and is not
+// significant here.
+function parseGrantedBotScopes(raw: unknown): ReadonlySet<string> | null {
+  if (typeof raw !== "string") return null;
+  const parts = raw.split(",").map((s) => s.trim()).filter((s) => s.length > 0);
+  return parts.length > 0 ? new Set(parts) : null;
+}
 
 export type SlackExchangeResult =
   | { ok: true; ref: { secretId?: string } } // REDACTED: a non-secret reference only — never the token
@@ -169,6 +193,39 @@ export async function exchangeSlackOAuthCode(
     if (typeof teamId !== "string" || teamId.length === 0) return { ok: false, reason: "missing_workspace" };
     if (teamId !== input.expectedTeamId) return { ok: false, reason: "workspace_mismatch" };
   }
+
+  // 4c) GRANTED-SCOPE BINDING. The authorize URL says what we ASKED for; this response says what Slack GRANTED, and
+  //     they are not the same fact. Slack answers `users.list` WITHOUT the email field rather than refusing, so a token
+  //     short of `users:read.email` exchanges, stores, passes `auth.test`, completes discovery — and matches nobody,
+  //     because `normalized_email` is the only automatic identity-matching method Slack has (0076 permits `manual` and
+  //     `normalized_email` and nothing else). That failure surfaces days later and nowhere near its cause, which is why
+  //     it is checked HERE, before the store, on the same principle as the workspace binding above: a token that
+  //     reached the vault is a token that will be used.
+  //
+  //     EXTRA SCOPES ARE REFUSED — exact set equality, not "superset is fine". Recorded because it is a judgement, not
+  //     an obvious default:
+  //       * The app's declared scopes are operator-configured to exactly the reviewed three. Anything beyond them means
+  //         the installed app is broader than what was reviewed, which is precisely the governance signal this gate
+  //         exists to raise — a bot token that can do more than the review approved is not a smaller problem than one
+  //         that can do less.
+  //       * The known way extras arise is Slack's union-on-reinstall: re-authorizing a workspace that already granted a
+  //         set yields the union. On this staging workspace the prior grant was `users:read` + `usergroups:read`, a
+  //         SUBSET of the three, so the union is still exactly three and equality holds. A union that exceeds three
+  //         would mean the workspace carries a broader historical grant, and stopping is the right answer.
+  //       * Cost of being wrong is bounded and visible: the exchange has already succeeded, so the app IS installed in
+  //         the workspace, but no token is stored. Recovery is to uninstall/revoke in Slack and re-authorize — an
+  //         operator action on a disposable DEV workspace, not customer-visible, because no customer-initiated flow
+  //         exists yet.
+  //     If Slack is ever observed adding a scope nobody asked for, relaxing this to a superset check is a REVIEWED code
+  //     change here — not a configuration switch, for the same reason the required set is a constant.
+  const granted = parseGrantedBotScopes(b.scope);
+  if (granted === null) return { ok: false, reason: "granted_scopes_malformed" };
+  for (const required of REQUIRED_SLACK_BOT_SCOPES) {
+    if (!granted.has(required)) return { ok: false, reason: "granted_scopes_insufficient" };
+  }
+  // Direction matters to whoever has to fix it: under-scoped and over-scoped have opposite remedies, so they get
+  // separate bounded reasons even though 0081's terminal CHECK collapses both to `exchange_failed`.
+  if (granted.size !== REQUIRED_SLACK_BOT_SCOPES.length) return { ok: false, reason: "granted_scopes_unexpected" };
 
   // 5) hand the bot token STRAIGHT to the store/encrypt path — its only destination. Never returned/logged.
   let stored: Awaited<ReturnType<ExchangeStoreHandoff>>;

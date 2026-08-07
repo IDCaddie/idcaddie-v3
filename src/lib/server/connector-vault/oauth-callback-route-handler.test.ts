@@ -39,7 +39,7 @@ const realRunner = (httpClient: SlackHttpClient): SyntheticCallbackHandlerDeps["
       { state, code },
       { expectedContext: { subject, redirectIntent: "connect", ...EXPECTED }, signer: signer(), now: NOW + 1000, clientId: "c", clientSecret: { read: async () => CLIENT_SECRET_SENTINEL }, httpClient, store: async () => ({ ok: true, ref: { secretId: "s" } }), version: 1 },
     );
-const botHttp = () => { const calls: string[] = []; const client: SlackHttpClient = async (url) => { calls.push(url); return { ok: true, status: 200, json: async () => ({ ok: true, access_token: TOKEN_SENTINEL, token_type: "bot" }) }; }; return { client, calls }; };
+const botHttp = () => { const calls: string[] = []; const client: SlackHttpClient = async (url) => { calls.push(url); return { ok: true, status: 200, json: async () => ({ ok: true, access_token: TOKEN_SENTINEL, token_type: "bot", scope: "users:read,users:read.email,usergroups:read" }) }; }; return { client, calls }; };
 
 const reqWith = (params: Record<string, string>) => new Request(`https://app.example.com/connectors/oauth/callback?${new URLSearchParams(params).toString()}`);
 
