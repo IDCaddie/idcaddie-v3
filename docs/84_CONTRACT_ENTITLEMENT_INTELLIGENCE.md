@@ -163,3 +163,20 @@ backfill.
 
 **Not before a source exists** — anything that claims billable or active. Those stay `unavailable` until a licensing or
 usage feed is built, and no finding may imply them.
+
+## 9. One thing found on the way, for another workstream
+
+`src/lib/database.types.ts` is **stale**: it predates migrations 0076–0081 and is missing `app_accounts`,
+`connector_run_resource_discovery`, `oauth_completion_jobs`, and every `product_app_account_*` /
+`product_oauth_completion_job_status` / `runner_promote_saas_*` signature.
+
+Regenerating it with `scripts/gen-types-local.sh` — the documented, correct way — **breaks two assertions in**
+`src/lib/server/connector-vault/oauth-handoff-architecture.test.ts`, because the regenerated file names the nine
+`oauth_completer_*` functions and that guard treats any `src/` mention of them as a capability violation. The guard is
+scanning a file that describes the database rather than reaching into it, so this is a guard-scope question for the
+OAuth workstream to settle, not something this phase should decide.
+
+**This phase therefore did not ship the regeneration.** It added only the `contract_entitlements` block, taken verbatim
+from the generated output and spliced in at its alphabetical position, leaving the rest of the file byte-identical
+(135 lines added, nothing changed). Anyone regenerating the file for another reason will hit the same two failures and
+should read this section first.

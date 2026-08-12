@@ -184,6 +184,45 @@ here instead of silently doubling every proposal.
 confirmed load-bearing by mutation rather than assumed: deleting the bot filter from the person-creation pass fails P2
 with `got 4`, and making the person join case-sensitive fails P12 with `got 0`. `scripts/test-rls.sh` re-revokes the new table in lockstep with the migration so the suite mirrors the real
 deny-all surface. **Not applied to hosted Supabase; nothing deployed. No risk opened or closed.**
+### feat(commercial) — Phase 10: the commercial read layer and findings engine over 0083 · 2026-08-12
+
+**The reconciliation refuses to turn "we cannot know" into a zero.** `reconcileEntitlement` returns a `Measure` per
+quantity whose `value` exists in exactly ONE variant — `measured` — so a caller cannot render a number for a concept
+that has none; the other three states (`not_recorded`, `not_measured`, `unavailable`) carry the sentence that explains
+them. `billable` and `active` resolve through the Phase-7B capability model rather than a hardcoded "Slack cannot do
+this", so the day a licensing or usage feed is built the support matrix changes and this file does not.
+
+**`account_status = 'active'` is never used as the `active` quantity.** It is the provider's lifecycle bucket, and
+using it as usage would be the most misleading thing available here. It surfaces separately as
+`inactive_provisioned_accounts` — a count with **no money attached**, because whether a suspended account is still
+charged for is a vendor billing rule and no billing source exists to answer it.
+
+**The only savings claim is arithmetic anyone can check.** Purchased less what the connector found, valued at the
+recorded unit price × cadence, stopped at the contracted minimum, and reported per currency — never summed across
+currencies, because there is no FX source and a single total would be a conversion nobody performed. A price with no
+cadence yields `not_estimable`, not an assumed annual. Every money figure carries its `basis` string; the presenter
+test asserts money and basis are inseparable.
+
+**Ten rules, and the three that were asked for but cannot be evidenced are absent by design** — "assigned > active",
+"billable > active", and any per-person reclaim list all need sources that do not exist. **Confidence is capped by
+provenance:** the same subtraction over a hand-entered figure yields a low-confidence finding, asserted in
+`evaluate.test.ts`. The engine is pure and clock-free (`now` / `detectedAt` injected), so identical input yields
+identical findings, ids and order.
+
+**The copy boundary is machine-checked, and it is a DIFFERENT boundary from the access one.** docs/71 forbids access
+prose from mentioning cost or savings; commercial prose may, and is instead forbidden from claiming usage, activity,
+"unused", billable, or any removal instruction. `commercial-presenter.test.ts` scans the exhaustive `RULE_PROSE` record
+for all of it, with the one educational-disclaimer exception listed literally and asserted to still exist so the
+carve-out cannot become a loophole. Severity→tone is borrowed from the governance presenter rather than re-declared.
+
+Also: `daysUntil` is now exported from `contract-attention.ts` so notice deadlines use the same arithmetic as the
+renewal buckets — one implementation, not two. 56 new tests; full suite 2620 passing, lint clean.
+
+**`src/lib/database.types.ts` was NOT regenerated.** It is stale (predates 0076–0081), and `gen-types-local.sh` breaks
+two assertions in `oauth-handoff-architecture.test.ts` by naming the `oauth_completer_*` functions in a file that
+merely describes the schema. That is a guard-scope question for the OAuth workstream, not this phase's to settle — so
+only the generated `contract_entitlements` block was spliced in, leaving the rest byte-identical. See docs/84 §9.
+
 ### feat(commercial) — Phase 10: migration 0083, `contract_entitlements` — the purchased side of the graph · 2026-08-12
 
 **v3 could state a commitment and an observation but never whether they agreed.** `contracts` holds one `total_cost` —

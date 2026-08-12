@@ -4,7 +4,9 @@
 // renewal buckets (30/90 days).
 
 const DAY_MS = 86_400_000;
-function daysUntil(dateStr: string, now: Date): number {
+// Exported so the Phase-10 commercial engine measures notice deadlines with the SAME arithmetic the renewal buckets use. A second
+// implementation of "how many days until" is exactly how two surfaces come to disagree about whether something renews this month.
+export function daysUntil(dateStr: string, now: Date): number {
   const target = Date.parse(`${dateStr}T00:00:00Z`);
   const today = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
   return Math.round((target - today) / DAY_MS);

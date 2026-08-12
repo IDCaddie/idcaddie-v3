@@ -2542,6 +2542,141 @@ export type Database = {
           },
         ]
       }
+      contract_entitlements: {
+        Row: {
+          app_id: string | null
+          app_product_id: string | null
+          billing_frequency: string | null
+          confidence: string
+          contract_id: string
+          created_at: string
+          currency: string | null
+          evidence_file_id: string | null
+          evidence_note: string | null
+          id: string
+          measured_by_connection_id: string | null
+          minimum_quantity: number | null
+          plan_name: string | null
+          purchased_quantity: number | null
+          quantity_unit: string
+          sku: string | null
+          source: string
+          tenant_id: string
+          term_end: string | null
+          term_start: string | null
+          unit_amount: number | null
+          updated_at: string
+          vendor_id: string | null
+        }
+        Insert: {
+          app_id?: string | null
+          app_product_id?: string | null
+          billing_frequency?: string | null
+          confidence?: string
+          contract_id: string
+          created_at?: string
+          currency?: string | null
+          evidence_file_id?: string | null
+          evidence_note?: string | null
+          id?: string
+          measured_by_connection_id?: string | null
+          minimum_quantity?: number | null
+          plan_name?: string | null
+          purchased_quantity?: number | null
+          quantity_unit?: string
+          sku?: string | null
+          source?: string
+          tenant_id: string
+          term_end?: string | null
+          term_start?: string | null
+          unit_amount?: number | null
+          updated_at?: string
+          vendor_id?: string | null
+        }
+        Update: {
+          app_id?: string | null
+          app_product_id?: string | null
+          billing_frequency?: string | null
+          confidence?: string
+          contract_id?: string
+          created_at?: string
+          currency?: string | null
+          evidence_file_id?: string | null
+          evidence_note?: string | null
+          id?: string
+          measured_by_connection_id?: string | null
+          minimum_quantity?: number | null
+          plan_name?: string | null
+          purchased_quantity?: number | null
+          quantity_unit?: string
+          sku?: string | null
+          source?: string
+          tenant_id?: string
+          term_end?: string | null
+          term_start?: string | null
+          unit_amount?: number | null
+          updated_at?: string
+          vendor_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "contract_entitlements_app_same_tenant"
+            columns: ["app_id", "tenant_id"]
+            isOneToOne: false
+            referencedRelation: "apps"
+            referencedColumns: ["id", "tenant_id"]
+          },
+          {
+            foreignKeyName: "contract_entitlements_connection_same_tenant"
+            columns: ["measured_by_connection_id", "tenant_id"]
+            isOneToOne: false
+            referencedRelation: "connectors"
+            referencedColumns: ["id", "tenant_id"]
+          },
+          {
+            foreignKeyName: "contract_entitlements_contract_id_fkey"
+            columns: ["contract_id"]
+            isOneToOne: false
+            referencedRelation: "contracts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "contract_entitlements_contract_same_tenant"
+            columns: ["contract_id", "tenant_id"]
+            isOneToOne: false
+            referencedRelation: "contracts"
+            referencedColumns: ["id", "tenant_id"]
+          },
+          {
+            foreignKeyName: "contract_entitlements_evidence_file_same_tenant"
+            columns: ["evidence_file_id", "tenant_id"]
+            isOneToOne: false
+            referencedRelation: "files"
+            referencedColumns: ["id", "tenant_id"]
+          },
+          {
+            foreignKeyName: "contract_entitlements_product_same_tenant"
+            columns: ["app_product_id", "tenant_id"]
+            isOneToOne: false
+            referencedRelation: "app_products"
+            referencedColumns: ["id", "tenant_id"]
+          },
+          {
+            foreignKeyName: "contract_entitlements_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "contract_entitlements_vendor_same_tenant"
+            columns: ["vendor_id", "tenant_id"]
+            isOneToOne: false
+            referencedRelation: "vendors"
+            referencedColumns: ["id", "tenant_id"]
+          },
+        ]
+      }
       contracts: {
         Row: {
           auto_renew: boolean
