@@ -546,4 +546,7 @@ account match carries a person across two differing addresses, and it does so by
 for one account is refused by the index rather than by convention, and a human's rejection survives the next proposal
 run · **P9** a provider disappearing temporarily does not unmake a judgement: an accepted link survives its account
 going stale, and recovery re-proposes nothing · **P10** deleting the account removes the link and **keeps the person** —
-the point of the node · **P11** the endpoint is exactly one: neither zero nor two.
+the point of the node · **P11** the endpoint is exactly one: neither zero nor two ·
+**P12** one person per `(tenant, lowered address)` is a DATABASE guarantee, not a convention of this function — a second
+`people` row differing only in case is refused by 0036 `people_tenant_email_lower_key` — and an address a tenant already
+has is REUSED case-insensitively rather than duplicated beside it, with the same person chosen on every re-run.

@@ -115,12 +115,12 @@ begin
     raise exception 'not authorized for tenant %', p_tenant_id using errcode = '42501';
   end if;
 
-  -- `people` carries no unique on (tenant_id, primary_email) — legacy rows predate this path and may already duplicate an
-  -- address, so adding one could fail on real data. Serialize per tenant instead: two concurrent proposals cannot both
-  -- decide a person is missing and create it twice.
-  perform pg_advisory_xact_lock(hashtextextended(p_tenant_id::text, 0));
-
   -- ── 1. Every distinct address in the estate that has no person yet ──────────────────────────────────────────────────
+  -- `people_tenant_email_lower_key` (migration 0036) already makes one person per (tenant, lowered address) a DATABASE
+  -- guarantee — 0036 even refused to create the index while duplicates existed. So the conflict clause below, not a lock
+  -- and not a read-then-write race, is what makes this idempotent under concurrency: two simultaneous proposals both
+  -- attempt the insert, one wins, the other does nothing. The same index serves the `lower(primary_email)` joins that
+  -- follow, so no additional index is needed.
   with addr as (
     select i.normalized_email as email
       from public.identity_accounts i
@@ -134,9 +134,7 @@ begin
     insert into public.people (tenant_id, primary_email, source)
     select p_tenant_id, addr.email, 'identity_graph'
       from addr
-     where not exists (
-       select 1 from public.people p
-        where p.tenant_id = p_tenant_id and lower(p.primary_email) = addr.email)
+    on conflict (tenant_id, lower(primary_email)) do nothing
     returning 1)
   select count(*) into v_people_created from created;
 

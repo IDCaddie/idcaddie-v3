@@ -299,6 +299,55 @@ begin
   end;
 end $$;
 
+-- ════ P12: ONE PERSON PER ADDRESS IS A DATABASE GUARANTEE, AND AN EXISTING PERSON IS REUSED ═══════════════════════
+-- The proposer joins accounts to people on `lower(primary_email)`. If a tenant could hold two `people` rows for one
+-- address, that join would fan out and hand a reviewer the same account twice under two names. It cannot: migration
+-- 0036 created `people_tenant_email_lower_key` and refused to create it while any duplicate existed. This asserts the
+-- guarantee the proposer LEANS ON, so that deleting it elsewhere fails here rather than silently doubling proposals.
+do $$
+declare r jsonb; n int; pid uuid; pid2 uuid;
+begin
+  insert into public.tenants (id, name, slug) values ('c3000000-0000-4000-8000-00000000000c', 'Person C', 'person-c');
+  insert into public.connectors (id, tenant_id, provider, display_name, status, connection_state)
+  values ('c3000000-0000-4000-8000-0000000000c4', 'c3000000-0000-4000-8000-00000000000c', 'okta', 'Okta C', 'pending', 'discovered');
+
+  -- A person this tenant already had, from the legacy importer rather than from this path.
+  insert into public.people (id, tenant_id, primary_email, full_name, source)
+  values ('c3000000-0000-4000-8000-0000000000d1', 'c3000000-0000-4000-8000-00000000000c', 'Legacy@Example.Test', 'Legacy One', 'import');
+
+  -- A second row for the same address, differing only in case, is refused by the database — not by this function.
+  begin
+    insert into public.people (tenant_id, primary_email, source)
+    values ('c3000000-0000-4000-8000-00000000000c', 'legacy@example.test', 'import');
+    assert false, 'P12 two people for one address must be impossible (0036 people_tenant_email_lower_key)';
+  exception when unique_violation then null;
+  end;
+
+  insert into public.identity_accounts
+    (id, tenant_id, connection_id, provider, external_id, login, normalized_login, email, normalized_email, display_name, is_active, sync_status)
+  values ('c3000000-0000-4000-8000-0000000000e6', 'c3000000-0000-4000-8000-00000000000c', 'c3000000-0000-4000-8000-0000000000c4',
+          'okta', 'I6', 'legacy', 'legacy', 'legacy@example.test', 'legacy@example.test', 'Legacy', true, 'current');
+
+  r := public.product_propose_person_links('c3000000-0000-4000-8000-00000000000c');
+  -- The existing person is REUSED, case-insensitively, rather than a second one created beside it.
+  assert (r ->> 'people_created')::int = 0, 'P12 an address that already has a person creates none, got ' || (r ->> 'people_created');
+  select count(*) into n from public.person_account_links
+   where identity_account_id = 'c3000000-0000-4000-8000-0000000000e6';
+  assert n = 1, 'P12 one account yields one link, got ' || n;
+  select person_id into pid from public.person_account_links
+   where identity_account_id = 'c3000000-0000-4000-8000-0000000000e6';
+  assert pid = 'c3000000-0000-4000-8000-0000000000d1', 'P12 and it is the person the tenant already had';
+
+  -- Re-running is a no-op rather than a second person or a second link.
+  r := public.product_propose_person_links('c3000000-0000-4000-8000-00000000000c');
+  select count(*) into n from public.person_account_links
+   where identity_account_id = 'c3000000-0000-4000-8000-0000000000e6';
+  assert n = 1, 'P12 re-running still yields one link, got ' || n;
+  select person_id into pid2 from public.person_account_links
+   where identity_account_id = 'c3000000-0000-4000-8000-0000000000e6';
+  assert pid2 = pid, 'P12 and the same person — the proposal is a function of the data, not of scan order';
+end $$;
+
 -- P7 seeded an `app_account_identity_matches` row to prove the transitive path. Every suite shares one database, and
 -- saas_evidence_product_reads_test asserts a GLOBAL count on that table (an unfiltered "a refused call wrote nothing"),
 -- so this file's fixture would fail a later file's assertion. Clean up our own tenant's rows rather than weaken theirs.

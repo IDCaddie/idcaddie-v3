@@ -565,9 +565,12 @@ Partial unique indexes carry the invariants: **one accepted person per provider 
 unconstrained, which is the whole point of the node — and one row per `(person, account)` pair, which is what makes
 re-proposal idempotent and a human's rejection permanent.
 
-**`product_propose_person_links(tenant)`** is deterministic and never accepts anything. It serializes per tenant with
-`pg_advisory_xact_lock` (rather than a unique index on `people (tenant_id, primary_email)`, which could fail on legacy
-rows that predate this path), then runs two passes: **address** — every *current* account carrying a `normalized_email`
+**`product_propose_person_links(tenant)`** is deterministic and never accepts anything. One person per
+`(tenant, lowered address)` is already a **database** guarantee — `people_tenant_email_lower_key`, migration **0036**,
+which refused to create itself while any duplicate existed — so the proposer leans on that index rather than holding a
+lock: the person insert is `on conflict (tenant_id, lower(primary_email)) do nothing`, which makes concurrent proposals
+idempotent by construction, and the same index serves the `lower(primary_email)` joins. It then runs two passes:
+**address** — every *current* account carrying a `normalized_email`
 is proposed against the person for that address, creating the person if the tenant has none; and **transitive** — a SaaS
 account whose 0076 match a human already **accepted** belongs to that identity's person, which is the only path by which
 two *different* addresses ever become one person. **`product_decide_person_link(tenant, link, decision)`** takes
@@ -586,4 +589,5 @@ suite reflects the real deny-all surface. Proven by **P0–P11** in `supabase/te
 
 **Verified local: full `scripts/test-rls.sh` suite passed (`==> RLS migration tests passed`, 33 test files, exit 0), and
 the suite was confirmed load-bearing by mutation — removing the bot filter from the person-creation pass fails P2 with
-`one person per resolvable address (ada@, dup@, ada.l@), got 4`. NOT applied to hosted Supabase.**
+`one person per resolvable address (ada@, dup@, ada.l@), got 4`, and making the person join case-sensitive fails P12
+with `one account yields one link, got 0`. NOT applied to hosted Supabase.**

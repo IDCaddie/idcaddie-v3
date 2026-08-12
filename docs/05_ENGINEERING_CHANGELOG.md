@@ -37,9 +37,18 @@ pass in which a human-accepted 0076 match — and only that — carries a person
 sole alias path, and it rests on a human decision rather than a string. No display-name matching, no domain matching, no
 auto-acceptance.
 
+**Review correction, before merge.** The first cut serialized person creation with `pg_advisory_xact_lock`, justified by
+"`people` carries no unique on (tenant, address)". That justification was **false**: migration **0036** created
+`people_tenant_email_lower_key` and refused to create itself while any duplicate existed. The probe written to
+demonstrate the supposed fan-out failed with `duplicate key value violates unique constraint` — the database had
+guaranteed the property all along. The lock is gone; the person insert is now `on conflict (tenant_id,
+lower(primary_email)) do nothing`, which is idempotent under concurrency by construction rather than by procedure, and
+the same 0036 index serves the join. P12 now pins the guarantee the proposer leans on, so removing it elsewhere fails
+here instead of silently doubling every proposal.
+
 **Verified local: full `scripts/test-rls.sh` passed (`==> RLS migration tests passed`, 33 files, exit 0).** The suite was
 confirmed load-bearing by mutation rather than assumed: deleting the bot filter from the person-creation pass fails P2
-with `got 4`. `scripts/test-rls.sh` re-revokes the new table in lockstep with the migration so the suite mirrors the real
+with `got 4`, and making the person join case-sensitive fails P12 with `got 0`. `scripts/test-rls.sh` re-revokes the new table in lockstep with the migration so the suite mirrors the real
 deny-all surface. **Not applied to hosted Supabase; nothing deployed. No risk opened or closed.**
 
 ### feat(vault) — Phase 8M: handoff protocol v2 carries `nonceHash` and `subject` · 2026-08-03
