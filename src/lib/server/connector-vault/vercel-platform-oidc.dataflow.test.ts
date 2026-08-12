@@ -4,6 +4,7 @@ import { dirname, join, resolve } from "node:path";
 import ts from "typescript";
 import { exchangeForDedicatedAudience } from "./vercel-platform-oidc";
 import { acquireDedicatedAudienceAssertion, HANDOFF_OIDC_AUDIENCE } from "./oauth-handoff-client";
+import { withPlatform } from "./platform-context.testkit";
 
 // ── THE PLATFORM-TOKEN DATAFLOW BOUNDARY ─────────────────────────────────────────────────────────────────────────────
 //
@@ -180,64 +181,114 @@ describe("platform-token dataflow, rooted at the real callback route closure", (
     // The assertion has exactly ONE construction path: the approved module's exported operation, called directly.
     // There is no injectable producer to substitute — a review previously swapped `readAssertion` for a helper
     // returning an inbound Authorization bearer and the whole suite stayed green.
-    expect(runner).toMatch(/const acquired = await acquireDedicatedAudienceAssertion\(deps\.config\.audience, deps\.exchange\)/);
+    expect(runner).toMatch(/const acquired = await acquireDedicatedAudienceAssertion\(deps\.config\.audience\);/);
     expect(runner).toMatch(/const assertion = acquired\.token/);
     // The seam is gone, not merely unused. Code forms only — both files name it in prose to explain why it was removed,
     // and that documentation is worth more than the convenience of a bare-word match.
-    const seam = /\.readAssertion|readAssertion\s*[(:?]/;
-    expect(runner).not.toMatch(seam);
-    expect(readFileSync(join(HERE, "real-callback-dependencies.ts"), "utf8")).not.toMatch(seam);
+    // Over CODE, with comments stripped: both files name the removed seams in prose to record why they are gone, and
+    // that documentation is worth more than the convenience of matching a bare word.
+    const stripComments = (src: string) => src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^[ \t]*\/\/.*$/gm, "");
+    const seam = /\.readAssertion|readAssertion\s*[(:?]|\bexchange\s*[:?]|ExchangeDeps/;
+    for (const rel of ["oauth-callback-handoff.ts", "real-callback-dependencies.ts"]) {
+      expect(stripComments(readFileSync(join(HERE, rel), "utf8")), rel).not.toMatch(seam);
+    }
   });
 
-  // (5) BEHAVIOURAL: caller-controlled input cannot supply or override the assertion. `acquireDedicatedAudienceAssertion` takes an
-  //     audience and injection points — there is no parameter through which a request value could arrive.
-  it("no exported signature accepts a caller-supplied assertion", async () => {
-    let exchanged = 0;
-    const r = await acquireDedicatedAudienceAssertion(HANDOFF_OIDC_AUDIENCE, {
-      readContext: () => ({ headers: {} }),                       // no platform token
-      fetchImpl: (async () => { exchanged++; return new Response("{}"); }) as unknown as typeof fetch,
-    });
-    // With no platform token there is nothing to exchange, and no way for a caller to supply one instead.
-    expect(r).toEqual({ ok: false, reason: "handoff_assertion_missing" });
-    expect(exchanged).toBe(0);
+  // (5) STRUCTURAL: the exchange has NO INJECTABLE DEPENDENCIES.
+  //
+  // This is the rule that was missing, and its absence cost two rounds. `exchangeForDedicatedAudience` used to take
+  // `deps: { fetchImpl?, readContext? }`. A caller supplying `fetchImpl` received the RAW PLATFORM TOKEN in the
+  // request body, and by returning a `Response` of its choosing decided the assertion that went to the worker. The
+  // guards in force at the time all passed: rule (4) pinned the call site, the seam regex looked for `readAssertion`,
+  // the capability scan found no `Symbol.for`, and the leak test below only ever examined the RETURN value. The
+  // capability was in an ARGUMENT, so watching returns and call sites could not see it.
+  //
+  // Pinning the parameter list is what closes that: a dependency cannot be injected into a function that takes none.
+  const paramsOf = (rel: string, fn: string): string[] => {
+    const sf = parse(readFileSync(join(HERE, rel), "utf8"));
+    let found: string[] | null = null;
+    const visit = (n: ts.Node): void => {
+      if (ts.isFunctionDeclaration(n) && n.name?.text === fn) {
+        found = n.parameters.map((prm) => `${(prm.name as ts.Identifier).text}: ${prm.type ? prm.type.getText() : "?"}`);
+      }
+      ts.forEachChild(n, visit);
+    };
+    visit(sf);
+    if (found === null) throw new Error(`${fn} not found in ${rel} — the guard has lost its subject`);
+    return found;
+  };
+
+  it("the exchange takes an audience and a timeout, and nothing else", () => {
+    expect(paramsOf("vercel-platform-oidc.ts", "exchangeForDedicatedAudience"))
+      .toEqual(["audience: string", "timeoutMs: number"]);
+    expect(paramsOf("oauth-handoff-client.ts", "acquireDedicatedAudienceAssertion"))
+      .toEqual(["audience: string", "timeoutMs: number"]);
   });
 
+  it("no parameter on the acquisition path can carry a function, an object, or a token", () => {
+    for (const [rel, fn] of [
+      ["vercel-platform-oidc.ts", "exchangeForDedicatedAudience"],
+      ["oauth-handoff-client.ts", "acquireDedicatedAudienceAssertion"],
+    ] as const) {
+      for (const p of paramsOf(rel, fn)) {
+        const type = p.split(": ").slice(1).join(": ");
+        // Primitives only. A function type is an injectable I/O seam; an object type can hide one in a field.
+        expect(["string", "number", "boolean"], `${fn}(${p})`).toContain(type);
+      }
+    }
+  });
+
+  // (6) STRUCTURAL: the callback runner's dependency surface is a CLOSED, pinned set. Adding an injectable — under any
+  //     name — fails here, which is what `readAssertion` and then `exchange` each needed and did not have.
+  it("HandoffCallbackDeps exposes exactly the reviewed fields", () => {
+    const sf = parse(readFileSync(join(HERE, "oauth-callback-handoff.ts"), "utf8"));
+    let members: string[] | null = null;
+    const visit = (n: ts.Node): void => {
+      if (ts.isTypeAliasDeclaration(n) && n.name.text === "HandoffCallbackDeps" && ts.isTypeLiteralNode(n.type)) {
+        members = n.type.members.map((m) => (m.name as ts.Identifier)?.text).filter(Boolean).sort();
+      }
+      ts.forEachChild(n, visit);
+    };
+    visit(sf);
+    expect(members, "HandoffCallbackDeps not found — the guard has lost its subject").not.toBeNull();
+    // `fetchImpl` carries the SEALED payload to the worker; it cannot influence the assertion. Everything else is
+    // configuration or a clock. No member may supply, exchange for, or observe the platform token.
+    expect(members).toEqual(["config", "expected", "fetchImpl", "now", "signer"]);
+  });
+
+  // (7) BEHAVIOURAL: with the doubles on the REAL globals — the only place they can now live — the platform token does
+  //     not appear in the result, and no caller-reachable surface ever sees it.
   it("the exchange returns ONLY an exchanged token, never the platform one", async () => {
     const PLATFORM = "platform-token-must-not-escape";
-    const r = await exchangeForDedicatedAudience(HANDOFF_OIDC_AUDIENCE, {
-      readContext: () => ({ headers: { "x-vercel-oidc-token": PLATFORM } }),
-      fetchImpl: (async () => new Response(JSON.stringify({ token: "exchanged.jwt.value" }))) as unknown as typeof fetch,
-    });
-    expect(r).toEqual({ ok: true, token: "exchanged.jwt.value" });
-    expect(JSON.stringify(r)).not.toContain(PLATFORM);
-  });
-});
-
-// ── THE BYPASS THAT DEFEATED THE PATH-BASED GUARDS ───────────────────────────────────────────────────────────────────
-// A malicious helper OUTSIDE any maintained list, reached through the route's real import closure. The closure-rooted
-// rule sees it because it follows imports; the old array-based rules did not, because the file was simply not listed.
-describe("the four bypasses a review used are all caught by the capability boundary", () => {
-  const cases: [string, string][] = [
-    ["Object.getOwnPropertySymbols evasion", `
-      const s = Object.getOwnPropertySymbols(globalThis).find((x) => x.description?.endsWith("/request-context"));
-      export const steal = () => (globalThis as never)[s as never];`],
-    ["process.env.VERCEL_OIDC_TOKEN", `export const steal = () => process.env.VERCEL_OIDC_TOKEN;`],
-    ["computed Symbol.for key", `const k = ["@vercel", "request-context"].join("/"); export const steal = () => Symbol.for(k);`],
-    ["computed globalThis index", `const K = "@vercel/request-context"; export const steal = () => (globalThis as never)[Symbol.for(K) as never];`],
-  ];
-  for (const [name, src] of cases) {
-    it(`detects: ${name}`, () => expect(platformCapabilities(src).length, src).toBeGreaterThan(0));
-  }
-
-  it("does NOT fire on the legitimate uses that already exist in the closure", () => {
-    expect(platformCapabilities(`class X { [Symbol.for("nodejs.util.inspect.custom")]() { return "[redacted]"; } }`)).toEqual([]);
-    expect(platformCapabilities(`import { cookies } from "next/headers"; export const c = () => cookies();`)).toEqual([]);
+    let sentBody = "";
+    const restore = withPlatform(PLATFORM, (async (_u: string, init: { body?: string }) => {
+      sentBody = String(init?.body ?? "");
+      return new Response(JSON.stringify({ token: "exchanged.jwt.value" }));
+    }) as never);
+    try {
+      const r = await exchangeForDedicatedAudience(HANDOFF_OIDC_AUDIENCE);
+      expect(r).toEqual({ ok: true, token: "exchanged.jwt.value" });
+      expect(JSON.stringify(r)).not.toContain(PLATFORM);
+    } finally {
+      restore();
+    }
+    // The token IS on the wire to Vercel — that is the protocol. What matters is that observing it required stubbing a
+    // global, which no production signature exposes.
+    expect(sentBody).toContain(PLATFORM);
   });
 
-  it("a helper importing next/headers is only a violation when it ALSO holds a platform capability", () => {
-    const benign = `import { cookies } from "next/headers"; export const c = () => cookies();`;
-    const hostile = `import { headers } from "next/headers"; export const s = () => process.env.VERCEL_OIDC_TOKEN;`;
-    expect(importsRequestAccessors(benign) && platformCapabilities(benign).length > 0).toBe(false);
-    expect(importsRequestAccessors(hostile) && platformCapabilities(hostile).length > 0).toBe(true);
+  it("with no platform token there is nothing to exchange, and no caller can supply one instead", async () => {
+    const prev = process.env.VERCEL_OIDC_TOKEN;
+    delete process.env.VERCEL_OIDC_TOKEN;
+    let exchanged = 0;
+    const restore = withPlatform(undefined, (async () => { exchanged++; return new Response("{}"); }) as never);
+    try {
+      expect(await acquireDedicatedAudienceAssertion(HANDOFF_OIDC_AUDIENCE))
+        .toEqual({ ok: false, reason: "handoff_assertion_missing" });
+      expect(exchanged).toBe(0);
+    } finally {
+      restore();
+      if (prev !== undefined) process.env.VERCEL_OIDC_TOKEN = prev;
+    }
   });
 });

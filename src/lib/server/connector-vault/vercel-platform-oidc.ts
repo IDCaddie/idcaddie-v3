@@ -12,11 +12,19 @@
 // runtime context, and the audience is still a real exchange against Vercel's service.
 //
 // ── THE TRUST RULE ───────────────────────────────────────────────────────────────────────────────────────────────────
-// `readPlatformToken` is NOT exported. The raw platform token never leaves this module: the only export takes an
-// audience and returns an EXCHANGED token. There is therefore no seam through which application input — a body, query,
-// cookie, or an inbound `Authorization` — could supply or override it, and no caller can obtain the platform token to
-// forward it somewhere else. That is a dataflow property, not a naming convention, and
-// `vercel-platform-oidc.dataflow.test.ts` proves it by injection rather than by forbidding a string.
+// `readPlatformToken` is NOT exported, and THE EXCHANGE TAKES NO INJECTABLE DEPENDENCIES. The raw platform token never
+// leaves this module: the only export takes an audience and returns an EXCHANGED token.
+//
+// IT USED TO TAKE `deps: { fetchImpl?, readContext? }`, and that was the same defect as the `readAssertion` seam it
+// replaced, in a new spelling and strictly worse. A caller supplying `fetchImpl` received the RAW PLATFORM TOKEN in
+// `init.body` — the module header claimed a dataflow property while handing the value to caller-supplied code before
+// any exchange happened — and, by returning a `Response` of its choosing, could also decide the assertion that went on
+// the wire to the worker. A review demonstrated both. Neither the dataflow guard nor the construction-site pin caught
+// it: both watched the RETURN value and the CALL SITE, and the leak was in the argument.
+//
+// So there is no seam at all now. The token comes from the platform context, the network is the global `fetch`, and
+// tests drive the REAL globals (`Symbol.for("@vercel/request-context")`, `vi.stubGlobal("fetch")`) exactly as the
+// runtime does — a test double installed on the global cannot be reached through a production signature.
 //
 // The platform value is INFRASTRUCTURE METADATA supplied by the runtime, not application input. Vercel documents
 // `x-vercel-oidc-token` on the function's request context as the delivery mechanism; we read it only through that
@@ -26,13 +34,11 @@
 const VERCEL_REQUEST_CONTEXT = Symbol.for("@vercel/request-context");
 
 type RequestContext = { headers?: Record<string, string | undefined> };
-/** Injectable ONLY so tests can drive it; production always reads the real global. */
-export type PlatformContextReader = () => RequestContext;
 
-const defaultContextReader: PlatformContextReader = () => {
+function readContext(): RequestContext {
   const g = globalThis as Record<symbol, { get?: () => RequestContext } | undefined>;
   return g[VERCEL_REQUEST_CONTEXT]?.get?.() ?? {};
-};
+}
 
 /**
  * Read the platform token. Module-private on purpose — see the trust rule above.
@@ -40,7 +46,7 @@ const defaultContextReader: PlatformContextReader = () => {
  * The env var is the BUILD and LOCAL-DEVELOPMENT path and is kept as a fallback for exactly those, matching Vercel's
  * documented behaviour and the SDK's own precedence. In a deployed Function the context header is what answers.
  */
-function readPlatformToken(readContext: PlatformContextReader): string | null {
+function readPlatformToken(): string | null {
   const fromContext = readContext().headers?.["x-vercel-oidc-token"];
   const token = typeof fromContext === "string" && fromContext.length > 0 ? fromContext : process.env.VERCEL_OIDC_TOKEN;
   return typeof token === "string" && token.length > 0 ? token : null;
@@ -59,8 +65,6 @@ export type ExchangeResult =
 
 import { readBounded } from "./read-bounded";
 
-export type ExchangeDeps = { fetchImpl?: typeof fetch; readContext?: PlatformContextReader };
-
 /**
  * Exchange the platform token for one whose `aud` is exactly `audience`.
  *
@@ -70,9 +74,8 @@ export type ExchangeDeps = { fetchImpl?: typeof fetch; readContext?: PlatformCon
  * cannot carry the bearer to another origin, `cache: "no-store"`, an `AbortController` ceiling, a bounded read, and a
  * bounded parse. The provider's error body is DISCARDED rather than surfaced — it can echo the token we just sent.
  */
-export async function exchangeForDedicatedAudience(audience: string, deps: ExchangeDeps = {}, timeoutMs: number = EXCHANGE_TIMEOUT_MS): Promise<ExchangeResult> {
-  const doFetch = deps.fetchImpl ?? fetch;
-  const platformToken = readPlatformToken(deps.readContext ?? defaultContextReader);
+export async function exchangeForDedicatedAudience(audience: string, timeoutMs: number = EXCHANGE_TIMEOUT_MS): Promise<ExchangeResult> {
+  const platformToken = readPlatformToken();
   if (platformToken === null) return { ok: false, reason: "platform_token_missing" };
 
   // ONE DEADLINE COVERS THE WHOLE EXCHANGE — fetch, headers, the streamed body read, and the parse.
@@ -87,7 +90,7 @@ export async function exchangeForDedicatedAudience(audience: string, deps: Excha
   try {
     let response: Response;
     try {
-      response = await doFetch(VERCEL_TOKEN_EXCHANGE_URL, {
+      response = await fetch(VERCEL_TOKEN_EXCHANGE_URL, {
         method: "POST",
         headers: { "content-type": "application/json", accept: "application/json" },
         body: JSON.stringify({ token: platformToken, aud: audience }),

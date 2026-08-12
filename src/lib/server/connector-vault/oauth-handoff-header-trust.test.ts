@@ -28,7 +28,10 @@ function walkFiles(dir: string, acc: string[] = []): string[] {
   for (const n of readdirSync(dir)) {
     const p = join(dir, n);
     if (statSync(p).isDirectory()) walkFiles(p, acc);
-    else if (/\.tsx?$/.test(n) && !/\.test\.tsx?$/.test(n)) acc.push(p);
+    // `.testkit.ts` files are test-only fixtures — they install doubles on the real platform globals, which is the
+    // only place doubles can now live. They are excluded here and their exclusion is not a loophole: a separate
+    // assertion below proves no production module imports one, so nothing in a shipped path can reach them.
+    else if (/\.tsx?$/.test(n) && !/\.test\.tsx?$/.test(n) && !/\.testkit\.tsx?$/.test(n)) acc.push(p);
   }
   return acc;
 }
@@ -124,6 +127,11 @@ describe("the header trust boundary, over the AST", () => {
       .filter((f) => stringValues(parse(f.src)).some((v) => v.toLowerCase().includes(HEADER)))
       .map((f) => f.rel);
     expect(namers).toEqual([APPROVED_OIDC_MODULE]);
+  });
+
+  it("no production module imports a testkit — the scan's exclusion is not a loophole", () => {
+    const importers = files.filter((f) => /from\s+["'][^"']*\.testkit["']/.test(f.src)).map((f) => f.rel);
+    expect(importers).toEqual([]);
   });
 
   it("the approved module does not export the raw platform token — only an exchanged one", () => {

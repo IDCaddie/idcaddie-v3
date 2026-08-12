@@ -35,7 +35,7 @@ import {
   type HandoffRequest,
 } from "./oauth-handoff-protocol";
 import { PayloadSealError, parseWorkerSealKey, type WorkerSealKey } from "./oauth-payload-seal";
-import { exchangeForDedicatedAudience, type ExchangeDeps } from "./vercel-platform-oidc";
+import { exchangeForDedicatedAudience } from "./vercel-platform-oidc";
 import { readBounded } from "./read-bounded";
 
 if (typeof (globalThis as { window?: unknown }).window !== "undefined") {
@@ -216,10 +216,9 @@ export type AcquiredAssertion =
  */
 export async function acquireDedicatedAudienceAssertion(
   audience: string = HANDOFF_OIDC_AUDIENCE,
-  deps: ExchangeDeps = {},
   timeoutMs?: number,
 ): Promise<AcquiredAssertion> {
-  const exchanged = await exchangeForDedicatedAudience(audience, deps, timeoutMs);
+  const exchanged = await exchangeForDedicatedAudience(audience, timeoutMs);
   if (exchanged.ok) return { ok: true, token: exchanged.token };
   return {
     ok: false,
