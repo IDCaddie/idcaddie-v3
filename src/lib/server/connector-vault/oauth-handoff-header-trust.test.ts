@@ -47,6 +47,13 @@ const parse = (src: string) => ts.createSourceFile("f.ts", src, ts.ScriptTarget.
 function importDeclarations(sf: ts.SourceFile): { module: string; typeOnly: boolean }[] {
   const out: { module: string; typeOnly: boolean }[] = [];
   for (const s of sf.statements) {
+    // RE-EXPORTS COUNT. `export * from "./vercel-platform-oidc"` in a barrel, then importing the barrel, gave a review
+    // a second consumer able to mint a token for ANY audience — invisible because this walked only ImportDeclaration.
+    // A re-export is a value edge unless it is `export type`.
+    if (ts.isExportDeclaration(s) && s.moduleSpecifier && ts.isStringLiteral(s.moduleSpecifier)) {
+      out.push({ module: s.moduleSpecifier.text, typeOnly: s.isTypeOnly });
+      continue;
+    }
     if (!ts.isImportDeclaration(s) || !ts.isStringLiteral(s.moduleSpecifier)) continue;
     const clause = s.importClause;
     const named = clause?.namedBindings;
@@ -140,6 +147,16 @@ describe("the header trust boundary, over the AST", () => {
     expect(src).not.toMatch(/export\s+(?:async\s+)?function\s+readPlatformToken/); // and is NOT exported
     // The only exported way to obtain a token returns the EXCHANGED one.
     expect(src).toMatch(/export async function exchangeForDedicatedAudience/);
+  });
+
+  it("no module re-exports the approved module — a barrel would launder a second consumer", () => {
+    const barrels = files
+      .filter((f) => f.rel !== APPROVED_OIDC_MODULE)
+      .filter((f) => parse(f.src).statements.some((s) =>
+        ts.isExportDeclaration(s) && !s.isTypeOnly && s.moduleSpecifier && ts.isStringLiteral(s.moduleSpecifier)
+        && /vercel-platform-oidc$/.test(s.moduleSpecifier.text)))
+      .map((f) => f.rel);
+    expect(barrels).toEqual([]);
   });
 
   it("only the handoff client consumes the approved module at runtime", () => {

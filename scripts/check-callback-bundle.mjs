@@ -79,10 +79,50 @@ for (const f of traced) {
 // its wire protocol was demonstrably in the bundle. Turbopack still emits a sourcemap per chunk whose `sources` name
 // the original module paths, so provenance survives inlining even when identifiers do not.
 const routeJs = tracePath.replace(/\.nft\.json$/, "");
-const chunkRefs = existsSync(routeJs)
-  ? [...readFileSync(routeJs, "utf8").matchAll(/["'](server\/chunks\/[^"']+)["']/g)].map((m) => join(SERVER, m[1].replace(/^server\//, "")))
-  : [];
+
+// THE CHUNK CLOSURE IS TRANSITIVE, NOT ONE LEVEL DEEP.
+//
+// It used to be exactly the `server/chunks/...` strings appearing inside `route.js`. A review defeated all three
+// signals by changing one keyword: `await import("@aws-sdk/client-kms")` instead of a static import. A dynamically
+// imported package lands in its OWN chunk, referenced from a sibling chunk rather than from `route.js`, so the scan
+// never opened it — and the script printed OK while `client-kms` and `node:child_process` sat in the deployed lambda.
+// Verified: with the bypass applied, `.next/server/chunks/[externals]_node_child_process_*.js` exists and is traced,
+// and the guard passed.
+//
+// So the walk follows references until closure. A capability one lazy hop away is still in the function.
+if (!existsSync(routeJs)) {
+  // Absence is a FAILURE, never a skip — the same rule the header states for a missing build. Previously the
+  // zero-chunks check was itself gated on this file existing, so a renamed build output would have silently disabled
+  // signals 2 and 3 and still exited 0.
+  fail(`no route loader at ${routeJs.slice(SERVER.length + 1)} — the chunk signals cannot run, and that is a failure`);
+}
+const chunkRefs = [];
+{
+  const seen = new Set();
+  const queue = existsSync(routeJs) ? [routeJs] : [];
+  while (queue.length) {
+    const f = queue.pop();
+    if (seen.has(f) || !existsSync(f)) continue;
+    seen.add(f);
+    if (f !== routeJs) chunkRefs.push(f);
+    for (const m of readFileSync(f, "utf8").matchAll(/["'](server\/chunks\/[^"']+?\.js)["']/g)) {
+      const next = join(SERVER, m[1].replace(/^server\//, ""));
+      if (!seen.has(next)) queue.push(next);
+    }
+  }
+}
 if (existsSync(routeJs) && chunkRefs.length === 0) fail("the route loader references ZERO chunks — the closure cannot be proving anything");
+
+// Turbopack names a vendored chunk `node_modules_<pkg>_<hash>.js` — with UNDERSCORES. The package-path checks below
+// look for the `node_modules/` slash form, which a chunk FILENAME never has, so a whole class of vendored capability
+// was invisible to them. Read the chunk names themselves as an additional package signal.
+for (const c of chunkRefs) {
+  const base = c.slice(c.lastIndexOf("/") + 1);
+  const m = base.match(/node_modules_(.+?)_[a-z0-9-]+\._?\.?js$/) ?? base.match(/node_modules_(.+)\.js$/);
+  if (m) packagesSeen.add(m[1].replace(/_/g, "/"));
+  const ext = base.match(/^\[externals\]_(.+?)_[a-z0-9]+\._?\.?js$/);
+  if (ext) packagesSeen.add(ext[1].replace(/_/g, ":").replace(/^node:/, "node:"));
+}
 
 let mapped = 0;
 for (const c of chunkRefs) {

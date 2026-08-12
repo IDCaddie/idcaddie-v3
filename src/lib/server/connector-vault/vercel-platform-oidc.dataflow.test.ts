@@ -27,6 +27,7 @@ const APPROVED = resolve(HERE, "vercel-platform-oidc.ts");
 const parse = (src: string) => ts.createSourceFile("f.ts", src, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 
 /** Relative-import closure from an entry file: every first-party module the route can actually reach. */
+const unresolvable: string[] = [];
 function importClosure(entry: string): string[] {
   const seen = new Set<string>();
   const queue = [entry];
@@ -36,15 +37,24 @@ function importClosure(entry: string): string[] {
     seen.add(f);
     const sf = parse(readFileSync(f, "utf8"));
     const visit = (n: ts.Node): void => {
+      // A dynamic import whose specifier is NOT a plain string literal cannot be resolved here, so the module it
+      // reaches would silently leave the closure. A review used exactly that — a template literal — to hide a module
+      // holding `process.env.VERCEL_OIDC_TOKEN`. Unresolvable is recorded and asserted on, never skipped.
+      if (ts.isCallExpression(n) && n.expression.kind === ts.SyntaxKind.ImportKeyword
+        && n.arguments[0] && !ts.isStringLiteral(n.arguments[0])) {
+        unresolvable.push(`${f.slice(process.cwd().length + 5)}: import(${n.arguments[0].getText().slice(0, 40)})`);
+      }
       const spec =
         (ts.isImportDeclaration(n) || ts.isExportDeclaration(n)) && n.moduleSpecifier && ts.isStringLiteral(n.moduleSpecifier)
           ? n.moduleSpecifier.text
-          : ts.isCallExpression(n) && n.expression.kind === ts.SyntaxKind.ImportKeyword && ts.isStringLiteral(n.arguments[0])
+          : ts.isCallExpression(n) && n.expression.kind === ts.SyntaxKind.ImportKeyword && n.arguments[0] && ts.isStringLiteral(n.arguments[0])
             ? (n.arguments[0] as ts.StringLiteral).text
             : null;
       if (spec) {
         const base = spec.startsWith(".") ? resolve(dirname(f), spec) : spec.startsWith("@/") ? join(process.cwd(), "src", spec.slice(2)) : null;
-        if (base) for (const c of [`${base}.ts`, `${base}.tsx`, join(base, "index.ts")]) if (existsSync(c) && !seen.has(c)) queue.push(c);
+        // `index.tsx` was missing from this list, and a review put a module holding the crudest possible violation
+        // behind exactly that filename. Every extension Next resolves must be probed or the closure is a fiction.
+        if (base) for (const c of [`${base}.ts`, `${base}.tsx`, join(base, "index.ts"), join(base, "index.tsx")]) if (existsSync(c) && !seen.has(c)) queue.push(c);
       }
       ts.forEachChild(n, visit);
     };
@@ -73,6 +83,18 @@ function importClosure(entry: string): string[] {
 function platformCapabilities(src: string): string[] {
   const sf = parse(src);
   const hits: string[] = [];
+  // Names bound directly to `globalThis` — an alias is the same capability under a different identifier.
+  const globalAliases = new Set<string>();
+  const collectAliases = (n: ts.Node): void => {
+    if (ts.isVariableDeclaration(n) && ts.isIdentifier(n.name) && n.initializer) {
+      const u = (e: ts.Expression): ts.Expression =>
+        ts.isAsExpression(e) || ts.isParenthesizedExpression(e) || ts.isSatisfiesExpression(e) || ts.isTypeAssertionExpression(e) ? u(e.expression) : e;
+      const init = u(n.initializer);
+      if (ts.isIdentifier(init) && (init.text === "globalThis" || globalAliases.has(init.text))) globalAliases.add(n.name.text);
+    }
+    ts.forEachChild(n, collectAliases);
+  };
+  collectAliases(sf);
   const visit = (n: ts.Node): void => {
     // 1a. `Symbol.for(...)` reaching the request context. A STATIC literal that is demonstrably some other well-known
     //     symbol is fine — `Symbol.for("nodejs.util.inspect.custom")` is a redaction hook, the opposite of a leak. A
@@ -87,13 +109,40 @@ function platformCapabilities(src: string): string[] {
     // 1b. enumerating globalThis's symbols — no legitimate use in this closure, and the evasion the regex missed.
     if (ts.isCallExpression(n) && ts.isPropertyAccessExpression(n.expression)
       && n.expression.name.text === "getOwnPropertySymbols") hits.push("Object.getOwnPropertySymbols");
-    // 1c. a computed index into globalThis, however the key is built.
-    if (ts.isElementAccessExpression(n) && ts.isIdentifier(n.expression) && n.expression.text === "globalThis") {
-      hits.push("globalThis[computed]");
+    // 1c. a computed index into globalThis, however the key is built AND however the callee is spelled.
+    //
+    // This rule used to require a bare `globalThis` Identifier as the callee — a form that does not typecheck in this
+    // project, because indexing it needs a cast, and the cast makes the callee an AsExpression. So the rule could not
+    // fire on any shippable spelling: it was decoration. Unwrap casts, parentheses and `satisfies`, and follow a
+    // single-level alias (`const g = globalThis as never; g[k]`), which is how a review spelled it.
+    if (ts.isElementAccessExpression(n)) {
+      const unwrap = (e: ts.Expression): ts.Expression =>
+        ts.isAsExpression(e) || ts.isParenthesizedExpression(e) || ts.isSatisfiesExpression(e) || ts.isTypeAssertionExpression(e)
+          ? unwrap(e.expression) : e;
+      const callee = unwrap(n.expression);
+      if (ts.isIdentifier(callee) && (callee.text === "globalThis" || globalAliases.has(callee.text))) hits.push("globalThis[computed]");
     }
+    // 1d. any enumeration of an object's own keys that can yield SYMBOLS — `Reflect.ownKeys` returns them too, and a
+    //     review used it precisely because the rule named only `Object.getOwnPropertySymbols`.
+    if (ts.isCallExpression(n) && ts.isPropertyAccessExpression(n.expression)
+      && ts.isIdentifier(n.expression.expression) && n.expression.expression.text === "Reflect"
+      && n.expression.name.text === "ownKeys") hits.push("Reflect.ownKeys");
     // 2. the OIDC env var, in any form.
     if ((ts.isStringLiteral(n) || ts.isNoSubstitutionTemplateLiteral(n)) && n.text.includes("VERCEL_OIDC_TOKEN")) hits.push("VERCEL_OIDC_TOKEN");
     if (ts.isIdentifier(n) && n.text === "VERCEL_OIDC_TOKEN") hits.push("VERCEL_OIDC_TOKEN");
+    // Built by `+` from pieces — `"VERCEL_OIDC" + "_TOKEN"` was a review's bypass of the literal check above.
+    if (ts.isBinaryExpression(n) && n.operatorToken.kind === ts.SyntaxKind.PlusToken) {
+      const lit = (e: ts.Expression): string =>
+        ts.isStringLiteral(e) ? e.text : ts.isBinaryExpression(e) ? lit(e.left) + lit(e.right) : "\u0000";
+      if (lit(n).includes("VERCEL_OIDC_TOKEN")) hits.push("VERCEL_OIDC_TOKEN");
+    }
+    // …or joined from an array of pieces, the same trick one call deeper.
+    if (ts.isCallExpression(n) && ts.isPropertyAccessExpression(n.expression) && n.expression.name.text === "join"
+      && ts.isArrayLiteralExpression(n.expression.expression)) {
+      const sep = n.arguments[0] && ts.isStringLiteral(n.arguments[0]) ? n.arguments[0].text : ",";
+      const joined = n.expression.expression.elements.map((e) => (ts.isStringLiteral(e) ? e.text : "\u0000")).join(sep);
+      if (joined.includes("VERCEL_OIDC_TOKEN") || joined.includes("vercel-oidc-token")) hits.push("VERCEL_OIDC_TOKEN");
+    }
     ts.forEachChild(n, visit);
   };
   visit(sf);
@@ -121,7 +170,56 @@ function importsRequestAccessors(src: string): boolean {
 
 const closure = importClosure(ROUTE);
 
+/**
+ * THE REVIEWED CALLBACK CLOSURE.
+ *
+ * Every capability scan in this file is a predicate over the modules the route can reach, and a review defeated three
+ * of them the same way each time: not by evading a predicate, but by ADDING A MODULE the predicate had no reason to
+ * suspect — `Reflect.ownKeys` instead of `getOwnPropertySymbols`, a concatenated env key instead of a literal, an
+ * `index.tsx`, a template-literal `import()`. Detecting arbitrary obfuscation in source is not a winnable game.
+ *
+ * So membership itself is the boundary. This list is the set of modules a human has reviewed for the callback path.
+ * A new module in the closure fails this test, whatever it contains and however it is spelled — which converts an
+ * undecidable question ("is this obfuscated read of the platform token?") into a decidable one ("was this module
+ * reviewed?"). Adding an entry here is the deliberate act of accepting a module into the public callback path.
+ */
+const REVIEWED_CLOSURE = [
+  "app/(authenticated)/connectors/oauth/callback/route.ts",
+  "lib/auth/session.ts",
+  "lib/database.types.ts",
+  "lib/server/connector-vault/connector-oauth-config.ts",
+  "lib/server/connector-vault/connector-secret-ingest.ts",
+  "lib/server/connector-vault/crypto.ts",
+  "lib/server/connector-vault/oauth-callback-handoff.ts",
+  "lib/server/connector-vault/oauth-callback-orchestrator.ts",
+  "lib/server/connector-vault/oauth-callback-route-handler.ts",
+  "lib/server/connector-vault/oauth-handoff-client.ts",
+  "lib/server/connector-vault/oauth-handoff-protocol.ts",
+  "lib/server/connector-vault/oauth-payload-seal.ts",
+  "lib/server/connector-vault/oauth-pending.ts",
+  "lib/server/connector-vault/oauth-state.ts",
+  "lib/server/connector-vault/read-bounded.ts",
+  "lib/server/connector-vault/real-callback-dependencies.ts",
+  "lib/server/connector-vault/run-lifecycle.ts",
+  "lib/server/connector-vault/secret-audit.ts",
+  "lib/server/connector-vault/secret-vault.ts",
+  "lib/server/connector-vault/slack-oauth-exchange.ts",
+  "lib/server/connector-vault/staging-environment-identity.ts",
+  "lib/server/connector-vault/vercel-platform-oidc.ts",
+  "lib/supabase/env.ts",
+  "lib/supabase/server.ts",
+];
+
 describe("platform-token dataflow, rooted at the real callback route closure", () => {
+  it("the callback closure contains exactly the reviewed modules — no new module enters unreviewed", () => {
+    const actual = closure.map((f) => f.slice(process.cwd().length + 5)).sort();
+    expect(actual).toEqual([...REVIEWED_CLOSURE].sort());
+  });
+
+  it("every import on the path is statically resolvable — an unresolvable one hides a module", () => {
+    expect(unresolvable).toEqual([]);
+  });
+
   it("the closure is real — it reaches the approved module and a plausible number of files", () => {
     expect(existsSync(ROUTE)).toBe(true);
     expect(closure.length).toBeGreaterThan(5);
@@ -138,7 +236,11 @@ describe("platform-token dataflow, rooted at the real callback route closure", (
 
   it("the approved module's capabilities are the expected ones, and no more", () => {
     const caps = platformCapabilities(readFileSync(APPROVED, "utf8")).sort();
-    expect(caps).toEqual(["Symbol.for(request-context)", "VERCEL_OIDC_TOKEN"]);
+    // `globalThis[computed]` appears here now and did not before. That is the point: the rule used to require a bare
+    // `globalThis` identifier as the index callee, which does not typecheck in this project, so it could not fire on
+    // the approved module's OWN `(globalThis as Record<symbol, …>)[VERCEL_REQUEST_CONTEXT]`. A rule blind to the one
+    // real instance of the thing it names was decoration.
+    expect(caps).toEqual(["Symbol.for(request-context)", "VERCEL_OIDC_TOKEN", "globalThis[computed]"]);
   });
 
   // `next/headers` is allowed elsewhere (Supabase auth reads cookies). Holding it TOGETHER with a platform capability
@@ -171,11 +273,40 @@ describe("platform-token dataflow, rooted at the real callback route closure", (
 
   // (4) every producer of the outbound Authorization traces to the exchange.
   it("the outbound worker Authorization is built only from the exchanged token", () => {
-    const client = readFileSync(join(HERE, "oauth-handoff-client.ts"), "utf8");
-    // The one place a Bearer is constructed.
-    const bearers = [...client.matchAll(/authorization:\s*`Bearer \$\{([^}]+)\}`/g)].map((m) => m[1].trim());
-    expect(bearers.length).toBeGreaterThan(0);
-    for (const b of bearers) expect(b).toMatch(/assertion/);
+    // OVER THE WHOLE CLOSURE AND OVER THE AST, not one file and one spelling.
+    //
+    // The old rule read `oauth-handoff-client.ts` for `` authorization: `Bearer ${x}` `` and required the matches IT
+    // HAPPENED TO FIND to mention `assertion`. A review defeated it twice: a second Bearer in the same file built with
+    // `h.set("authorization", "Bearer " + supplied)`, and a new closure module calling `submitHandoff` with a bearer
+    // taken from the inbound request. A rule that only inspects the matches it finds cannot see the one it missed.
+    const bearerProducers: { file: string; expr: string }[] = [];
+    for (const f of closure) {
+      const sf = parse(readFileSync(f, "utf8"));
+      const rel = f.slice(process.cwd().length + 5);
+      const visit = (n: ts.Node): void => {
+        // Any expression whose literal parts contain "Bearer ", however assembled.
+        const literalOf = (e: ts.Node): string =>
+          ts.isStringLiteral(e) || ts.isNoSubstitutionTemplateLiteral(e) ? e.text
+          : ts.isTemplateExpression(e) ? e.head.text + e.templateSpans.map((sp) => sp.literal.text).join("")
+          : ts.isBinaryExpression(e) && e.operatorToken.kind === ts.SyntaxKind.PlusToken ? literalOf(e.left) + literalOf(e.right)
+          : "";
+        if ((ts.isTemplateExpression(n) || ts.isBinaryExpression(n) || ts.isStringLiteral(n)) && /bearer /i.test(literalOf(n))) {
+          bearerProducers.push({ file: rel, expr: n.getText().replace(/\s+/g, " ").slice(0, 120) });
+        }
+        ts.forEachChild(n, visit);
+      };
+      visit(sf);
+    }
+    expect(bearerProducers.length, "no Bearer is constructed anywhere — this rule has lost its subject").toBeGreaterThan(0);
+    for (const b of bearerProducers) expect(b.expr, `${b.file}: ${b.expr}`).toMatch(/assertion/);
+
+    // …and `submitHandoff`, which takes the assertion as an ordinary parameter, has exactly ONE caller. Otherwise a
+    // module could pass a bearer of its own choosing without ever constructing the string itself.
+    const callers = closure.filter((f) => {
+      if (f.endsWith("oauth-handoff-client.ts")) return false;                      // its definition
+      return /\bsubmitHandoff\s*\(/.test(readFileSync(f, "utf8"));
+    }).map((f) => f.slice(process.cwd().length + 5));
+    expect(callers).toEqual(["lib/server/connector-vault/oauth-callback-handoff.ts"]);
     // …and `assertion` on the runner comes from `acquireDedicatedAudienceAssertion`, which has no parameter for one.
     const runner = readFileSync(join(HERE, "oauth-callback-handoff.ts"), "utf8");
     // The assertion has exactly ONE construction path: the approved module's exported operation, called directly.
