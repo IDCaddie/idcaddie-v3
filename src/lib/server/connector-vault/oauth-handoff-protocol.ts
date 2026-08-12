@@ -184,7 +184,14 @@ export { STAGING_VERCEL_PROJECT_ID };
 const PERMITTED_ALG = "RS256" as const;
 
 /**
- * Ceilings on the assertion's own timestamps. THE reviewed lifetime contract — one value, used by both repositories.
+ * Ceilings on the assertion's own timestamps. THE reviewed lifetime contract.
+ *
+ * IT IS NOT YET ONE VALUE USED BY BOTH REPOSITORIES, and an earlier version of this line said it was. The runner
+ * vendors this file byte-pinned to a v3 commit that PREDATES the 3600 -> 7200 change, so its copy still declares 3600
+ * and `vendor:verify` passes against that pin. The live worker path is unaffected — `handleHandoff` passes
+ * `maxLifetimeSeconds`/`maxAgeSeconds` explicitly from its own config, so the vendored defaults are dead code there —
+ * but any future caller that omits them would silently get the ceiling this change exists to remove. The runner vendor
+ * re-sync is a REQUIRED follow-up to merging this, not an optional tidy-up.
  *
  * CITED, not assumed. This was 3600 with a comment saying the lifetime "is not something this repository can observe".
  * It is documented:
