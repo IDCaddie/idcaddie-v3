@@ -104,13 +104,23 @@ export async function exchangeForDedicatedAudience(audience: string, timeoutMs: 
       return { ok: false, reason: timedOut() ? "exchange_timeout" : "exchange_failed" };
     }
 
-    if (!response.ok) return { ok: false, reason: "exchange_failed" };
+    // The body is CANCELLED on every path that does not read it. Without this the deadline is cleared by the `finally`
+    // below while the provider's stream stays open, held until GC — an idle connection per refusal on a hot path.
+    if (!response.ok) {
+      void response.body?.cancel().catch(() => {});
+      return { ok: false, reason: "exchange_failed" };
+    }
 
     // BOUNDED READ. A declared length over the ceiling is refused without reading a byte — but `Content-Length` can be
-    // absent, wrong, or describe the COMPRESSED size, so the stream is capped as it arrives too. `readBounded` stops at
-    // the limit rather than draining a hostile body, and the deadline above is still armed while it does.
+    // absent, wrong, or describe the COMPRESSED size, so the stream is capped as it arrives too. `readBounded` stops one
+    // byte PAST the limit rather than draining a hostile body — one byte, because stopping exactly AT it would return a
+    // truncated body that the `> limit` check below cannot distinguish from a legitimate one. The deadline stays armed
+    // throughout: `readBounded` races each read against the same signal, so a trickled body cannot outlast it.
     const declared = Number(response.headers.get("content-length") ?? "0");
-    if (Number.isFinite(declared) && declared > EXCHANGE_MAX_RESPONSE_BYTES) return { ok: false, reason: "exchange_response_invalid" };
+    if (Number.isFinite(declared) && declared > EXCHANGE_MAX_RESPONSE_BYTES) {
+      void response.body?.cancel().catch(() => {});
+      return { ok: false, reason: "exchange_response_invalid" };
+    }
     let body: string;
     try {
       body = await readBounded(response, EXCHANGE_MAX_RESPONSE_BYTES, controller.signal);
