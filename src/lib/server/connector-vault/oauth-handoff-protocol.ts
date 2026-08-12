@@ -186,12 +186,12 @@ const PERMITTED_ALG = "RS256" as const;
 /**
  * Ceilings on the assertion's own timestamps. THE reviewed lifetime contract.
  *
- * IT IS NOT YET ONE VALUE USED BY BOTH REPOSITORIES, and an earlier version of this line said it was. The runner
- * vendors this file byte-pinned to a v3 commit that PREDATES the 3600 -> 7200 change, so its copy still declares 3600
- * and `vendor:verify` passes against that pin. The live worker path is unaffected — `handleHandoff` passes
- * `maxLifetimeSeconds`/`maxAgeSeconds` explicitly from its own config, so the vendored defaults are dead code there —
- * but any future caller that omits them would silently get the ceiling this change exists to remove. The runner vendor
- * re-sync is a REQUIRED follow-up to merging this, not an optional tidy-up.
+ * ONE VALUE, USED BY BOTH REPOSITORIES — and it is worth saying how that is actually held, because for one merge it
+ * was not true. The runner does not import this file; it vendors a BYTE-PINNED copy, checked by `vendor:verify`
+ * against the pinned v3 SHA. So between #404 landing here and the runner's vendor re-sync, v3 declared 7200 while the
+ * runner's copy still declared 3600 and its gate stayed green, because the gate compares against the PIN rather than
+ * against v3 tip. That window is closed by the re-sync; the mechanism that allowed it is inherent to vendoring, so the
+ * rule it leaves behind is: a change to this block is not complete until the runner pin moves with it.
  *
  * CITED, not assumed. This was 3600 with a comment saying the lifetime "is not something this repository can observe".
  * It is documented:
