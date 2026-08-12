@@ -100,6 +100,10 @@ revoke all on public.app_account_identity_matches from anon, authenticated, conn
 revoke all on public.connector_capability_state from anon, authenticated, connector_runner;
 -- 0077 adds one more (per-resource run completeness). Same posture, same lockstep rule.
 revoke all on public.connector_run_resource_discovery from anon, authenticated, connector_runner;
+-- 0082's person<->account link table is the same Tier-2 posture (RLS on, ZERO policies; reads and decisions go through the
+-- product RPCs, and the runner has no business writing a human judgement). Same lockstep rule; the person_identity_graph_test
+-- P0 zero-privilege assertions are the backstop.
+revoke all on public.person_account_links from anon, authenticated, connector_runner;
 grant update (upload_status) on public.files to authenticated;
 
 -- The `runner_*` functions are TRUSTED-PRODUCER ONLY: their migrations grant EXECUTE to `connector_runner` and to nobody else,

@@ -524,3 +524,26 @@ non-Slack provider are all impossible to insert directly · J10 the customer rea
 and none protected; an owner sees status, an editor and another tenant's owner see nothing, and an authenticated session
 can neither read nor write the table nor claim a job · J11 no refusal echoes a redirect, workspace, worker key, sealed
 bytes or the caller's own reason string.
+
+### `person_identity_graph_test.sql` — 0082, the person layer
+
+The property this suite protects: a person link must never cross a tenant, never be guessed from a name or a domain,
+never accept itself, and never disappear because a connector had a bad morning.
+
+**P0** `person_account_links` is RLS-enabled with zero policies, `authenticated` holds no direct SELECT and
+`connector_runner` no INSERT, both RPCs pin `search_path` and are EXECUTE-able by `authenticated` alone ·
+**P1** the tenant-role gate refuses an unauthorized caller and the refused call writes neither a link nor a person ·
+**P2** resolution is deterministic: one person per resolvable address, three directory links and two application links
+from the fixture, **nothing auto-accepted**, and a stale account, an address-less account and a bot are each absent —
+no evidence, no link · **P3** re-running proposes the same graph rather than a second copy (idempotent in both the
+person and the link count) · **P4** cross-tenant isolation: a second tenant holding the *same* address gets no person
+and no link, its identity never enters the first tenant's graph, and the composite FK makes a cross-tenant endpoint
+**impossible to insert directly**, not merely unused · **P5** two accounts sharing one address resolve to **one** person
+while each keeps its own link row — the duplicate-account signal is preserved rather than collapsed · **P6** ambiguity
+stays ambiguous: `ada@` and `ada.l@` are not joined by name similarity · **P7** aliases: only a human-**accepted** 0076
+account match carries a person across two differing addresses, and it does so by evidence rather than by string ·
+**P8** a decision is final — re-deciding a decided row is a no-op that keeps its decision, a second `accepted` person
+for one account is refused by the index rather than by convention, and a human's rejection survives the next proposal
+run · **P9** a provider disappearing temporarily does not unmake a judgement: an accepted link survives its account
+going stale, and recovery re-proposes nothing · **P10** deleting the account removes the link and **keeps the person** —
+the point of the node · **P11** the endpoint is exactly one: neither zero nor two.

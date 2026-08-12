@@ -12,6 +12,36 @@ from PRs verified via `git log` / `gh pr list`.
 > **as of each PR's date** and are historical — where an older entry says "RISK-007 remains OPEN" / "Phase C remains
 > BLOCKED", that was accurate at that entry's date; this banner is the current state.
 
+### feat(governance) — Phase 16: migration 0082, the person layer · 2026-08-12
+
+**The estate could describe every provider account and no human.** `identity_accounts` (0053) holds the IdP side,
+`app_accounts` (0076) holds the SaaS side, and 0078's matcher already links a SaaS account to one IdP identity by
+verified address while refusing ambiguity. But that link is **pairwise**, so two Okta orgs holding one person stayed two
+unrelated rows, two SaaS accounts with no IdP between them had no path at all, and "this person left and still holds a
+licence" had no subject it could be a finding about. The cross-source governance questions are all *about a human*, and
+there was no node for one.
+
+0082 adds exactly that node's edge — `public.person_account_links` — and nothing else: no second account model, no
+finding, no connector change. Its endpoint is a real FK to one of the two account tables (exactly one, by
+`num_nonnulls` CHECK) rather than a polymorphic pair, because a polymorphic reference cannot carry the same-tenant
+composite FK that makes a cross-tenant link *impossible* rather than merely unused — P4 asserts that as a
+`foreign_key_violation`, not as an absence.
+
+**Why not `identity_accounts.person_id`.** That nullable FK has shipped since 0001 and nothing has ever written it. It
+carries no method, no confidence, no author and no way to say *proposed* — and a person link is a judgement, the same
+reasoning that made 0075 and 0076 tables rather than joins: **declare, never infer**. It is left untouched and unwritten;
+two writers for one fact is how you get two answers.
+
+The proposer is deterministic and accepts nothing: an **address** pass over *current* accounts only, and a **transitive**
+pass in which a human-accepted 0076 match — and only that — carries a person across two differing addresses. That is the
+sole alias path, and it rests on a human decision rather than a string. No display-name matching, no domain matching, no
+auto-acceptance.
+
+**Verified local: full `scripts/test-rls.sh` passed (`==> RLS migration tests passed`, 33 files, exit 0).** The suite was
+confirmed load-bearing by mutation rather than assumed: deleting the bot filter from the person-creation pass fails P2
+with `got 4`. `scripts/test-rls.sh` re-revokes the new table in lockstep with the migration so the suite mirrors the real
+deny-all surface. **Not applied to hosted Supabase; nothing deployed. No risk opened or closed.**
+
 ### feat(vault) — Phase 8M: handoff protocol v2 carries `nonceHash` and `subject` · 2026-08-03
 
 **Protocol v1 could not complete an OAuth flow correctly, and the defect was structural rather than a bug in either
