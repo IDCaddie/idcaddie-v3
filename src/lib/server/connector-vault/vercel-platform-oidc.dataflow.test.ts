@@ -228,6 +228,22 @@ describe("platform-token dataflow, rooted at the real callback route closure", (
     expect(unresolvable).toEqual([]);
   });
 
+  // FRAMEWORK ENTRIES SHARE THE PROCESS WITH NO IMPORT EDGE.
+  //
+  // `importClosure` is rooted at `route.ts`, so it can only see modules something imports. Next also loads
+  // `instrumentation.ts` and `middleware.ts` into the SAME server process by CONVENTION — nothing imports them, so
+  // they were outside this pin, outside the header sweep, and outside the bundle guard (which walks `route.js`'s
+  // chunks). A review put a `globalThis.fetch` wrapper in `instrumentation.ts` and every control stayed green.
+  //
+  // They do not exist in this repository. That is the enforced state: if one is ever added it must be reviewed for the
+  // callback path and listed here deliberately, exactly like a closure member.
+  it("no unreviewed framework entry shares the callback's process", () => {
+    const entries = ["instrumentation.ts", "instrumentation.tsx", "instrumentation.js", "instrumentation.node.ts",
+      "instrumentation-client.ts", "middleware.ts", "middleware.js"];
+    const present = entries.filter((e) => existsSync(join(process.cwd(), "src", e)) || existsSync(join(process.cwd(), e)));
+    expect(present, "a Next framework entry exists and is not reviewed for the callback path").toEqual([]);
+  });
+
   it("the closure is real — it reaches the approved module and a plausible number of files", () => {
     expect(existsSync(ROUTE)).toBe(true);
     expect(closure.length).toBeGreaterThan(5);

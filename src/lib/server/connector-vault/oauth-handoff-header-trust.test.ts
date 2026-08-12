@@ -183,9 +183,13 @@ describe("the header trust boundary, over the AST", () => {
   });
 
   it("only the handoff client consumes the approved module at runtime", () => {
-    // The invariant is about RUNTIME capability, so it is stated over value imports. `import type` is erased by the
-    // compiler and carries none: the callback runner takes `ExchangeDeps` as a type to plumb test fakes through, which
-    // cannot yield a token. Both halves are asserted so the distinction can't be used as a hiding place.
+    // The invariant is about RUNTIME capability, so it is stated over value imports: `import type` is erased by the
+    // compiler and carries none. Both halves are asserted anyway, so the distinction cannot become a hiding place.
+    //
+    // This comment used to say the runner "takes `ExchangeDeps` as a type to plumb test fakes through". It does not —
+    // that parameter was deleted in this branch because it handed the raw platform token to caller-supplied code, and
+    // `vercel-platform-oidc.dataflow.test.ts` now asserts the identifier is absent from code in both files. Left
+    // uncorrected it read as licence to re-add the very seam these rules exist to prevent.
     const importsFrom = (f: { src: string }) =>
       importDeclarations(parse(f.src)).filter((d) => /vercel-platform-oidc$/.test(d.module));
     const others = files.filter((f) => f.rel !== APPROVED_OIDC_MODULE && importsFrom(f).length > 0);

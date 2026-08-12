@@ -36,9 +36,13 @@
 // that, because a module running in the function can read `process.env` and the request context directly anyway.
 //
 // The control for that threat is therefore not a signature but MEMBERSHIP: `vercel-platform-oidc.dataflow.test.ts`
-// pins the callback route's entire import closure by name, across every extension the runtime resolves. A new module
-// fails that test whatever it contains. The boundary is "no unreviewed module runs in the callback", not "hostile code
-// in the callback cannot reach the token" — the second is not achievable and is not claimed.
+// pins the callback route's entire import closure by name, across every extension the runtime resolves, and separately
+// asserts that no Next framework entry (`instrumentation.ts`, `middleware.ts`) exists — those share the process by
+// CONVENTION rather than by import, so the closure walk cannot see them and a review used exactly that gap.
+//
+// Both halves are needed and neither is a claim about arbitrary code: what is enforced is that no module enters the
+// callback's process without a human adding it to a reviewed list. It is not "hostile code in the callback cannot
+// reach the token" — that is not achievable and is not claimed.
 //
 // The platform value is INFRASTRUCTURE METADATA supplied by the runtime, not application input. Vercel documents
 // `x-vercel-oidc-token` on the function's request context as the delivery mechanism; we read it only through that

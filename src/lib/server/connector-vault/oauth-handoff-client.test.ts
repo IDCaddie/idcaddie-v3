@@ -273,9 +273,14 @@ describe("the OIDC assertion source — request context in, exchanged token out"
     for (const secret of [PLATFORM, "boom", "~token"]) expect(dump).not.toContain(secret);
   });
 
-  // DATAFLOW, not string prohibition: `acquireDedicatedAudienceAssertion` takes an AUDIENCE and injection points for the context
-  // reader and fetch. There is NO parameter through which a caller could supply an assertion, and the raw platform
-  // token is never returned — only the exchanged one. That is the boundary, expressed as a type.
+  // DATAFLOW, not string prohibition: `acquireDedicatedAudienceAssertion(audience, timeoutMs?)` takes PRIMITIVES ONLY.
+  // There is no parameter through which a caller could supply an assertion, and the raw platform token is never
+  // returned — only the exchanged one.
+  //
+  // This comment used to describe "injection points for the context reader and fetch". Those existed, and they were
+  // the defect: a caller-supplied `fetchImpl` received the raw platform token in the request body and chose the
+  // returned assertion. `vercel-platform-oidc.dataflow.test.ts` now pins the parameter list to primitives, so the
+  // shape this comment describes cannot come back — but the comment described it as intended design.
   it("offers no seam for a caller-supplied assertion", async () => {
     const r = await acquireWith(HANDOFF_OIDC_AUDIENCE, {
       readContext: ctx(PLATFORM),
