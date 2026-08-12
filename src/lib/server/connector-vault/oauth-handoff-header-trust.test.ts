@@ -5,8 +5,9 @@ import ts from "typescript";
 
 // ── THE HEADER TRUST BOUNDARY, ENFORCED OVER THE AST ─────────────────────────────────────────────────────────────────
 //
-// Doc 83 §8.4 (Option B) permits exactly one source for the handoff assertion: the official `@vercel/oidc` SDK, which
-// reads the platform-injected token from Vercel's own request context. It forbids application code from reading
+// Doc 83 §8.4 permits exactly one source for the handoff assertion: the ONE approved module
+// (`vercel-platform-oidc.ts`), which reads Vercel's request context directly — there is no `@vercel/oidc` dependency.
+// It forbids application code from reading
 // `x-vercel-oidc-token` itself, and forbids any caller-supplied value becoming the outbound `Authorization`.
 //
 // The first version of these rules was regex over source text, and an adversarial review broke both in the form a

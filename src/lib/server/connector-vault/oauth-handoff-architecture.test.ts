@@ -119,11 +119,11 @@ export const RULES: Rule[] = [
       || /\{[^}]*\bOAUTH_COMPLETER_DB_URL\b[^}]*\}\s*=\s*(?:process\.)?env/.test(code),
   },
   {
-    // OPTION B TRUST RULE (doc 83 §8.4, revised). The official `@vercel/oidc` SDK may read the platform-injected token
-    // from Vercel's own request context — that is the documented Function path. What no file may do is read
-    // `x-vercel-oidc-token` off a request ITSELF, because a value we pull out of a request is a value a caller can
-    // shape, and it becomes an outbound `Authorization` header. The SDK import is the permitted source; the header name
-    // appearing in code that touches a request is the violation.
+    // TRUST RULE (doc 83 §8.4). The platform token is read from Vercel's request context by ONE approved module
+    // (`vercel-platform-oidc.ts`) — there is no `@vercel/oidc` dependency. What no file may do is read
+    // `x-vercel-oidc-token` off a request ITSELF, because a value pulled out of a request is a value a caller can
+    // shape, and it becomes an outbound `Authorization`. The authoritative control is the closure-rooted
+    // `vercel-platform-oidc.dataflow.test.ts`; this rule is a cheap second net, not the boundary.
     label: "x-vercel-oidc-token read from a request by application code",
     applies: everywhere,
     violates: (code) => {

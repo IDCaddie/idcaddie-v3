@@ -433,42 +433,95 @@ V3 also runs `preflightOwnAssertion` before sending — audience, project, team,
 verifies no signature, and it is named so nobody can mistake it for one. It exists so a bearer token minted for a
 different relying party never leaves the building.
 
-> **CORRECTED (Phase 8R) — the assertion comes from the official `@vercel/oidc` SDK, not from `process.env`.**
+> **CORRECTED (Phase 8R) — the assertion comes from Vercel's request context, via one isolated module, and there is
+> no `@vercel/oidc` production dependency.**
 >
 > This section used to say the assertion is read from `process.env.VERCEL_OIDC_TOKEN` **only**, on the grounds that an
 > inbound `x-vercel-oidc-token` header is attacker-controlled. The trust reasoning was right; the conclusion named the
 > wrong source. Vercel documents `VERCEL_OIDC_TOKEN` as the **build** and **local-development** path, while **in Vercel
-> Functions the platform supplies the token through the function's request context** (`x-vercel-oidc-token`). An
-> env-only read is therefore empty in the runtime this actually runs in, and the handoff could never have
-> authenticated — a defect that would have surfaced as a bare refusal on the first real callback.
+> Functions the platform supplies the token through the function's request context**. An env-only read is empty in the
+> runtime this actually runs in.
+>
+> An interim revision of this section adopted the official `@vercel/oidc` SDK. **That is not what ships.** The package
+> has exactly one supported entry — a CommonJS barrel that eagerly requires `@vercel/cli-exec` → `execa` →
+> `child_process`, plus `@vercel/cli-config`'s keyring credential store — and CJS re-exports cannot be tree-shaken by
+> name, so importing it at all put a process-spawning credential store in the public callback path. A build
+> module-graph walk showed the synchronous edge from the route entry to `child_process`. The dependency was removed.
+>
+> **What ships instead**, in `src/lib/server/connector-vault/vercel-platform-oidc.ts` — the ONE approved module:
+>
+> | | |
+> |---|---|
+> | platform token | read from `globalThis[Symbol.for("@vercel/request-context")].get().headers["x-vercel-oidc-token"]`, with a `VERCEL_OIDC_TOKEN` fallback for build/local-dev only |
+> | raw token | `readPlatformToken` is **not exported** — the raw value never leaves the module |
+> | exchange | direct `POST https://oidc.vercel.com/~token`, body `{ token, aud }`, response `{ token }` |
+> | exported operation | `exchangeForDedicatedAudience(audience, deps)` — returns only the EXCHANGED token |
+> | audience | exactly `https://idcaddie.com/oauth-completion-worker` |
+> | bound | `EXCHANGE_TIMEOUT_MS` = **3000ms**, enforced by an `AbortController` |
+> | transport | exact pinned URL, `redirect: "error"`, `cache: "no-store"`, `Content-Length` pre-check **and** a streaming ceiling via `readBounded` (`EXCHANGE_MAX_RESPONSE_BYTES`) |
+> | errors | provider body and thrown error discarded; only a bounded reason escapes |
 >
 > The rule, restated so it constrains TRUST rather than transport:
 >
 > 1. Application code **must never** read `x-vercel-oidc-token` off a request itself, and must never treat any
->    caller-supplied header or body value as an assertion. A value we do not control must not become an outbound
->    `Authorization`.
-> 2. The **only** permitted source is the official `@vercel/oidc` SDK, via `getVercelOidcTokenSync()`, which reads the
->    platform-injected token from Vercel's own trusted request context. We never see, parse, or choose the raw header.
-> 4. **No CLI refresh path.** `getVercelOidcToken` is deliberately NOT used: it unconditionally loads `token-util.js` +
->    `token.js`, which pull `@vercel/cli-exec` -> `execa` -> `child_process` and `@vercel/cli-config`'s keyring, and it
->    CALLS `refreshToken()` whenever the token is missing or expired — reachable in production, where it would read
->    `~/.vercel` and try to spawn a CLI that is not in the bundle. A missing platform token is a plain refusal instead.
->    `oauth-handoff-runtime-closure.test.ts` walks the actual require graph of the two primitives we do use and proves
->    none of those capabilities is reachable — with a control asserting the walker DOES find them in the wrapper.
+>    caller-supplied header, body, query or cookie value as an assertion.
+> 2. **Exactly one module** may touch the platform value, and it does not hand the raw token out.
 > 3. An inbound `Authorization` is never forwarded to the worker.
 >
-> All three are enforced against the source of every file on the path by `oauth-handoff-architecture.test.ts`, and each
-> rule is mutation-tested against a planted violation — a rule that cannot be made to fire is not protecting anything.
+> Enforced by `vercel-platform-oidc.dataflow.test.ts`, which computes the callback route's **real import closure** and
+> asserts exactly one module in it reads the request context. It is rooted at the route rather than at a maintained file
+> list because a review defeated the list-based version with a helper module that simply was not listed. A planted
+> helper anywhere in the closure now fails it.
+>
+> The build itself is checked by `scripts/check-callback-bundle.mjs`, which reads the callback route's `.nft.json`
+> trace and its chunk closure and fails on `pg`/`postgres`, `child_process`, `execa`, `@vercel/cli-exec`,
+> `@vercel/cli-config`, `cross-spawn`, keytar/keyring or the AWS KMS client. It runs in CI **after** `next build`, and a
+> missing build is a **failure, never a skip** — the previous version was a vitest skip that never once inspected a
+> bundle on a PR.
 
-**The audience is a dedicated one, and obtaining it is an EXCHANGE.** `exchangeVercelOidcToken({ token, audience })` exchanges the
+**The decoded preflight is NOT signature verification.** `preflightOwnAssertion` base64-decodes the payload and pins six
+claims — `aud` (exactly one audience; a multi-audience array is refused even when ours is in it), `iss`, `sub`,
+`owner_id`, `project_id`, `environment` — plus `exp` liveness. It verifies no signature and cannot. It exists so a token
+minted for another project, team or channel is never PRESENTED. **The worker's JWKS verification remains
+authoritative.**
+
+### §8.4a — first-live timing evidence
+
+The first staging callback records **four integers and nothing else**: `iat`, `exp`, `exp - iat`, and `act.iat` if
+present. `assertionTimingEvidence` in the runner returns exactly that shape and is asserted to carry no token, no
+signature, and none of `aud` / `iss` / `sub` / `owner_id` / `project_id` / correlation — timestamps cannot identify a
+customer, a workspace or a tenant. **The JWT itself is never logged.**
+
+`act.iat` is the one that matters: it is the only claim revealing the true end-to-end age, because the exchange
+refreshes `iat`. Once observed, `OAUTH_COMPLETION_WORKER_OIDC_MAX_AGE_SECONDS` can be tightened from the environment
+with no code change — the knob is downward-only by construction.
+
+Alongside the assertion, `verifyHandoffRequest` checks the version header, the body size, the digest header against the
+received bytes, the strict schema, the correlation header against the body, canonical form, and the payload bounds.
+
+V3 also runs `preflightOwnAssertion` before sending — audience, project, team, expiry. It is **NOT authentication**, it
+verifies no signature, and it is named so nobody can mistake it for one. It exists so a bearer token minted for a
+different relying party never leaves the building.
+
+> **CORRECTED (Phase 8R).** This section used to say the assertion is read from `process.env.VERCEL_OIDC_TOKEN` only.
+> That named the wrong source: `VERCEL_OIDC_TOKEN` is the build/local-dev path, and in Functions the platform supplies
+> the token through the request context. An interim revision then adopted the `@vercel/oidc` SDK, which is **also not
+> what ships** — its single CJS entry drags `child_process` and a keyring into the request path.
+>
+> **The full, current description is in §8.4 above** (the approved module, the direct exchange, the bounds, and the
+> controls that enforce them). It is not repeated here so the two cannot drift.
+
+**The audience is a dedicated one, and obtaining it is an EXCHANGE.** `exchangeForDedicatedAudience(audience)` exchanges the
 platform token, PER REQUEST, for one whose `aud` is exactly `https://idcaddie.com/oauth-completion-worker`. It is not a dashboard
 setting and there is nothing to configure in the project. Vercel's default `aud` is `https://vercel.com/<team-slug>`,
 which **every** relying party in the team receives — accepting it would mean a token minted for any of them
 authenticates a handoff, so the worker refuses it by name (`oidc_audience_is_vercel_default`) and V3 never requests it.
-The exchange is BOUNDED by `OIDC_EXCHANGE_TIMEOUT_MS` (3s) enforced by a race, because it is a third-party POST with no
-signal of its own inside the request the browser is blocked on, and a hang is not a rejection that `try/catch` can see.
-Three distinct bounded reasons — `handoff_assertion_missing`, `..._exchange_failed`, `..._exchange_timeout`. The SDK's
-error is discarded rather than wrapped, because it can embed the token, the exchange URL and the response body.
+The exchange is BOUNDED by `EXCHANGE_TIMEOUT_MS` (3s) enforced by an `AbortController`, because it is a third-party POST
+inside the request the browser is blocked on. Its response is read through `readBounded` — a streaming ceiling, not a
+`response.text()` followed by a length check, which buffers the whole body before any limit can apply. Three distinct
+bounded reasons — `handoff_assertion_missing`, `..._exchange_failed`, `..._exchange_timeout`. The provider's error body
+and any thrown error are discarded rather than wrapped, because they can embed the token, the exchange URL and the
+response body.
 
 **V3 enforces the audience itself, at config time.** `resolveWorkerHandoffConfig` refuses any `vercel.com`-origin value
 (`worker_audience_is_vercel_default`, normalized for whitespace/case/port/trailing dot) and then requires exact equality
@@ -535,7 +588,7 @@ Added by this PR as **parsing and validation only** (doc 24 §3f):
 | `OAUTH_COMPLETION_WORKER_OIDC_AUDIENCE` | the dedicated worker audience |
 | `OAUTH_COMPLETION_WORKER_PUBLIC_KEY` | base64 SPKI of the worker's X25519 public key |
 | `OAUTH_COMPLETION_WORKER_PUBLIC_KEY_ID` | `^[A-Za-z0-9_.:-]{1,128}$` |
-| ~~`VERCEL_OIDC_TOKEN`~~ | **Not used in Functions.** Build/local-dev only. The Function reads the platform token from Vercel's request context via `getVercelOidcTokenSync()` (§8.4). |
+| ~~`VERCEL_OIDC_TOKEN`~~ | **Not used in Functions.** Build/local-dev only. The Function reads the platform token from Vercel's request context via the approved request-context module (§8.4). |
 
 `OAUTH_COMPLETER_DB_URL` is **removed from the V3 contract entirely** and its presence is now a refusal (§8.1).
 

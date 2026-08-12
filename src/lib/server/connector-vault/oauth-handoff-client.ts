@@ -36,6 +36,7 @@ import {
 } from "./oauth-handoff-protocol";
 import { PayloadSealError, parseWorkerSealKey, type WorkerSealKey } from "./oauth-payload-seal";
 import { exchangeForDedicatedAudience, type ExchangeDeps } from "./vercel-platform-oidc";
+import { readBounded } from "./read-bounded";
 
 if (typeof (globalThis as { window?: unknown }).window !== "undefined") {
   throw new Error("connector-vault/oauth-handoff-client is server-only and must not be imported in client code");
@@ -262,6 +263,11 @@ export function preflightOwnAssertion(
   }
   const claims = decoded as Record<string, unknown>;
 
+  // EXACTLY ONE audience. A string, or a single-element array — never a multi-audience array, even one that CONTAINS
+  // ours. A token minted for us *and* Vercel's default team audience is a token every other relying party in the team
+  // can also present; accepting it would give away the whole point of a dedicated audience. A mutation relaxing this to
+  // `.includes(expected.audience)` previously passed the entire suite, which is why the array branch is now pinned
+  // explicitly in both directions.
   const audRaw = claims.aud;
   const aud = typeof audRaw === "string" ? audRaw : Array.isArray(audRaw) && audRaw.length === 1 && typeof audRaw[0] === "string" ? audRaw[0] : null;
   if (aud !== expected.audience) return { ok: false, reason: "handoff_assertion_audience_mismatch" };
@@ -296,29 +302,7 @@ export type HandoffFetch = (input: string, init: RequestInit) => Promise<Respons
  * they have all been decompressed into memory. One byte over the limit is enough to decide — the caller only needs to
  * know the body is too large, never what the rest of it said.
  */
-async function readBounded(response: Response, limit: number): Promise<string> {
-  const body = response.body;
-  // No stream (an empty body, or a fetch implementation that does not expose one). There is nothing to bound.
-  if (!body) return await response.text();
 
-  const reader = body.getReader();
-  const chunks: Uint8Array[] = [];
-  let total = 0;
-  try {
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      if (!value) continue;
-      chunks.push(value);
-      total += value.byteLength;
-      if (total > limit) break; // one byte over is enough; do not keep reading a hostile body
-    }
-  } finally {
-    // Releases the connection whether we finished or bailed out early.
-    await reader.cancel().catch(() => {});
-  }
-  return Buffer.concat(chunks.map((c) => Buffer.from(c)), Math.min(total, limit + 1)).toString("utf8");
-}
 
 /**
  * Post one handoff and return a bounded acknowledgement.

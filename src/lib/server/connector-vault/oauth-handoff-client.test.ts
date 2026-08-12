@@ -209,18 +209,20 @@ describe("the OIDC assertion source — request context in, exchanged token out"
   }, 10_000);
 
   it("malformed and OVERSIZED responses fail closed", async () => {
-    const bad: [string, Response][] = [
-      ["not JSON", new Response("<html>", { status: 200 })],
-      ["JSON without a token", jsonRes({ nope: 1 })],
-      ["token not a string", jsonRes({ token: 42 })],
-      ["empty token", jsonRes({ token: "" })],
-      ["declared length over the ceiling", new Response("{}", { status: 200, headers: { "content-length": String(64 * 1024) } })],
-      ["actual body over the ceiling", jsonRes({ token: "x".repeat(20 * 1024) })],
+    // Each case builds a FRESH Response inside fetchImpl. Reusing one via `clone()` deadlocks now that `readBounded`
+    // cancels the reader: the untouched tee branch buffers forever.
+    const bad: [string, () => Response][] = [
+      ["not JSON", () => new Response("<html>", { status: 200 })],
+      ["JSON without a token", () => new Response(JSON.stringify({ nope: 1 }), { status: 200 })],
+      ["token not a string", () => new Response(JSON.stringify({ token: 42 }), { status: 200 })],
+      ["empty token", () => new Response(JSON.stringify({ token: "" }), { status: 200 })],
+      ["declared length over the ceiling", () => new Response("{}", { status: 200, headers: { "content-length": String(64 * 1024) } })],
+      ["actual body over the ceiling", () => new Response(JSON.stringify({ token: "x".repeat(20 * 1024) }), { status: 200 })],
     ];
-    for (const [name, res] of bad) {
+    for (const [name, make] of bad) {
       const r = await acquireHandoffAssertion(HANDOFF_OIDC_AUDIENCE, {
         readContext: ctx(PLATFORM),
-        fetchImpl: (async () => res.clone()) as unknown as typeof fetch,
+        fetchImpl: (async () => make()) as unknown as typeof fetch,
       });
       expect(r.ok, name).toBe(false);
     }
@@ -499,5 +501,76 @@ describe("submitting the handoff", () => {
     expect(s).not.toContain(REQUEST.protectedPayload);
     expect(s).not.toContain("detail");
     expect(Object.keys(r).sort()).toEqual(["ok", "reason"]);
+  });
+});
+
+// ── The aud-array mutation survivor, and the bounded read (closing review round 4) ───────────────────────────────────
+describe("preflight: aud must name EXACTLY one audience", () => {
+  const pre = (aud: unknown) => preflightOwnAssertion(assertionWith({ ...GOOD_CLAIMS, aud }), { audience: AUDIENCE, nowSeconds: NOW_S });
+  const MISMATCH = { ok: false, reason: "handoff_assertion_audience_mismatch" } as const;
+
+  it("accepts the exact string and the single-element array form", () => {
+    expect(pre(AUDIENCE)).toEqual({ ok: true });
+    expect(pre([AUDIENCE])).toEqual({ ok: true });
+  });
+
+  // The survivor: a mutation to `.includes(expected.audience)` passed every test. These pin it.
+  it("REFUSES a multi-audience array, even when ours is in it", () => {
+    expect(pre([AUDIENCE, "https://vercel.com/idc-projects-f977cea1"])).toEqual(MISMATCH);
+    expect(pre(["https://vercel.com/idc-projects-f977cea1", AUDIENCE])).toEqual(MISMATCH);
+    expect(pre([AUDIENCE, "https://example.test/other"])).toEqual(MISMATCH);
+    expect(pre([AUDIENCE, AUDIENCE])).toEqual(MISMATCH); // duplicated is still multi-audience
+    expect(pre([AUDIENCE, "https://idcaddie.com/oauth-completion-worker/"])).toEqual(MISMATCH);
+  });
+
+  it("REFUSES every other aud shape", () => {
+    for (const bad of [[], [42], [null], [{ a: 1 }], 42, null, undefined, {}, "https://vercel.com/idc-projects-f977cea1"]) {
+      expect(pre(bad), JSON.stringify(bad)).toEqual(MISMATCH);
+    }
+  });
+});
+
+describe("the exchange body ceiling is enforced on the STREAM, not after buffering", () => {
+  const PLATFORM = "platform.token.value";
+  const ctx = () => ({ headers: { "x-vercel-oidc-token": PLATFORM } });
+
+  it("stops reading near the ceiling and does NOT consume an oversized stream with no Content-Length", async () => {
+    let pulled = 0;
+    const CHUNKS = 300;
+    const stream = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (pulled >= CHUNKS) return controller.close();
+        pulled++;
+        controller.enqueue(new Uint8Array(64 * 1024)); // 64 KiB each; ceiling is 16 KiB
+      },
+    });
+    const r = await acquireHandoffAssertion(HANDOFF_OIDC_AUDIENCE, {
+      readContext: ctx,
+      // No content-length at all — the pre-check cannot help, so only the streaming cap can.
+      fetchImpl: (async () => new Response(stream, { status: 200 })) as unknown as typeof fetch,
+    });
+    expect(r).toEqual({ ok: false, reason: "handoff_assertion_exchange_failed" });
+    // The whole point: it refused WITHOUT draining the body. `response.text()` pulled all 300.
+    expect(pulled).toBeLessThan(10);
+  });
+
+  it("a declared length over the ceiling is refused without reading a byte", async () => {
+    let read = 0;
+    const stream = new ReadableStream<Uint8Array>({ pull(c) { read++; c.enqueue(new Uint8Array(8)); c.close(); } });
+    const r = await acquireHandoffAssertion(HANDOFF_OIDC_AUDIENCE, {
+      readContext: ctx,
+      fetchImpl: (async () => new Response(stream, { status: 200, headers: { "content-length": String(1024 * 1024) } })) as unknown as typeof fetch,
+    });
+    expect(r.ok).toBe(false);
+    // A ReadableStream calls `pull` once eagerly on construction, so "did not read" means "did not drain", not zero.
+    expect(read).toBeLessThanOrEqual(1);
+  });
+
+  it("malformed JSON within the ceiling refuses; correct bounded JSON succeeds", async () => {
+    const res = (b: string) => (async () => new Response(b, { status: 200 })) as unknown as typeof fetch;
+    expect(await acquireHandoffAssertion(HANDOFF_OIDC_AUDIENCE, { readContext: ctx, fetchImpl: res("<html>") }))
+      .toEqual({ ok: false, reason: "handoff_assertion_exchange_failed" });
+    expect(await acquireHandoffAssertion(HANDOFF_OIDC_AUDIENCE, { readContext: ctx, fetchImpl: res(JSON.stringify({ token: ASSERTION })) }))
+      .toEqual({ ok: true, token: ASSERTION });
   });
 });

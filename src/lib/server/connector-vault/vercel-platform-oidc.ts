@@ -57,6 +57,8 @@ export type ExchangeResult =
   | { ok: true; token: string }
   | { ok: false; reason: "platform_token_missing" | "exchange_failed" | "exchange_timeout" | "exchange_response_invalid" };
 
+import { readBounded } from "./read-bounded";
+
 export type ExchangeDeps = { fetchImpl?: typeof fetch; readContext?: PlatformContextReader };
 
 /**
@@ -95,13 +97,15 @@ export async function exchangeForDedicatedAudience(audience: string, deps: Excha
 
   if (!response.ok) return { ok: false, reason: "exchange_failed" };
 
-  // Bounded read: a declared length over the ceiling is refused without reading a byte, and the text is capped anyway
-  // so a chunked body with no declared length — or a lying one — cannot exceed it either.
+  // BOUNDED READ. A declared length over the ceiling is refused without reading a byte — but `Content-Length` can be
+  // absent, wrong, or describe the COMPRESSED size, so the stream is capped as it arrives too. `readBounded` stops one
+  // byte past the limit rather than draining a hostile body; this used to be `response.text()`, which buffers the whole
+  // thing before any ceiling can apply, and a review measured that reading 300 MB before refusing.
   const declared = Number(response.headers.get("content-length") ?? "0");
   if (Number.isFinite(declared) && declared > EXCHANGE_MAX_RESPONSE_BYTES) return { ok: false, reason: "exchange_response_invalid" };
   let body: string;
   try {
-    body = await response.text();
+    body = await readBounded(response, EXCHANGE_MAX_RESPONSE_BYTES);
   } catch {
     return { ok: false, reason: "exchange_failed" };
   }

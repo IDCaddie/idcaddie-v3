@@ -14,7 +14,9 @@
     "run-gate-a:preflight:selftest": "node scripts/run-gate-a-b2c-real-exchange-launcher.mjs selftest",
     "runner:typecheck": "tsc -p runner/connector-runner/tsconfig.json",
     "runner:test": "vitest run runner/connector-runner",
-    "connector-manifests:validate": "vitest run src/lib/server/connectors/manifest-validate.test.ts"
+    "connector-manifests:validate": "vitest run src/lib/server/connectors/manifest-validate.test.ts",
+    "security:bundle:check": "node scripts/check-callback-bundle.mjs",
+    "security:bundle": "next build && node scripts/check-callback-bundle.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-kms": "^3.1073.0",
