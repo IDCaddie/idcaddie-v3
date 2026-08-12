@@ -184,6 +184,48 @@ here instead of silently doubling every proposal.
 confirmed load-bearing by mutation rather than assumed: deleting the bot filter from the person-creation pass fails P2
 with `got 4`, and making the person join case-sensitive fails P12 with `got 0`. `scripts/test-rls.sh` re-revokes the new table in lockstep with the migration so the suite mirrors the real
 deny-all surface. **Not applied to hosted Supabase; nothing deployed. No risk opened or closed.**
+### feat(commercial) — Phase 10: migration 0083, `contract_entitlements` — the purchased side of the graph · 2026-08-12
+
+**v3 could state a commitment and an observation but never whether they agreed.** `contracts` holds one `total_cost` —
+a commitment, not a quantity. There was no seat count, no unit price, no SKU, and no foreign key from a contract to the
+canonical `vendors` / `app_products` rows that 0024 created; `contracts.vendor_name` and `apps.vendor_name` are free
+text, so "Slack" the contract and "Slack" the connector were two unrelated strings. A contract entitlement is one
+purchased line — this contract bought this much of this product, at this unit price, on this cadence, for this term.
+
+**Five quantities, kept apart permanently.** *purchased* (this table), *assigned*
+(`directory_application_user_assignments`, 0059), *provisioned* (`app_accounts` current, 0076), *billable* (**no source
+exists** — `license_evaluations` has existed since 0001 and has never been written by anything), *active* (**no source
+exists** — the `usage` capability is vocabulary only). `app_accounts.account_status = 'active'` is the provider's
+lifecycle bucket, **not usage**; a reader that renders it as "recently active" is making a claim the evidence does not
+support. Because billable and active have no source they report as *unavailable*, never `0` — the Phase-7B
+capability rule applied to money.
+
+**What the schema enforces rather than documents.** Unknown is NULL, never 0 — a contract nobody has entered seats for
+must not read as "bought none". `unit_amount` requires both `currency` and `billing_frequency`, because a price that
+cannot be annualized is not a price and an engine assuming USD/annual would fabricate the savings figure.
+`minimum_quantity` is present in v1 specifically because reclaim below a contracted floor is still paid for — omitting
+it makes the first savings finding wrong, not merely incomplete. `source` and `confidence` are NOT NULL, defaulting to
+the conservative reading (`manual_entry` / `low`), so an unattributed number can never pass for a verified one.
+
+**Measurement is declared, never inferred.** `measured_by_connection_id` names the connector whose evidence a line is
+compared against. No name or domain matching: two workspaces, two regions, or two vendors can share a word. Same
+reasoning as connector supersession (0071) and application matches (0075).
+
+**Authorization inherited, not reinvented.** Read = the visibility of the parent contract via the 0006 subquery-RLS
+mechanism, so procurement- and paying-org members keep exactly the access they already had. Write = the same two
+authorities that may write the contract (0004: tenant editor+ **or** procurement-org manager); the paying org reads and
+never writes. No DELETE policy — financial evidence is evidence. Accepted writes append to `audit_logs` through the
+0010 SECURITY DEFINER trigger pattern, recording the quantity and deliberately **not** the price, per 0010's convention.
+
+`supabase/tests/contract_entitlement_test.sql` (T1–T11) asserts all of it, including the escalation cases (viewer,
+paying manager, cross-tenant) and the seven CHECK refusals. Full RLS suite green.
+
+**Deliberately absent:** discounts, pricing tiers, termination provisions, notice-period days, minimum commitment
+*amount* — real contract facts, but none is required by any finding in this phase and each would be a column with no
+reader. No AI, no PDF extraction, no invoice ingestion, no observed-spend events (docs/63 stays design-only). Nothing
+reads this table yet. No change to connector authentication, OAuth, the connector runner, AWS worker infrastructure,
+the shared connector framework, or the Slack / Google / Okta implementations. Staging apply pending; production
+untouched. Design and the full pre-work audit: `docs/84_CONTRACT_ENTITLEMENT_INTELLIGENCE.md`.
 
 ### feat(vault) — Phase 8M: handoff protocol v2 carries `nonceHash` and `subject` · 2026-08-03
 
