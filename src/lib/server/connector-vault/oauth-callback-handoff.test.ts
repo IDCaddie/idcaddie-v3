@@ -58,7 +58,7 @@ function deps(over: Partial<HandoffCallbackDeps> = {}): HandoffCallbackDeps {
     signer,
     expected: { tenantId: TENANT, connectorId: CONNECTOR, correlationId: CORR, expectedTeamId: TEAM, redirectUri: HANDOFF_REDIRECT_URI },
     config: { endpoint: "https://worker.internal.example/internal/oauth-completion/handoff", audience: AUDIENCE, workerKey },
-    readAssertion: async () => assertion(),
+    readAssertion: async () => ({ ok: true, token: assertion() } as const),
     fetchImpl: accepted,
     now: () => NOW,
     ...over,
@@ -143,17 +143,17 @@ describe("the handoff callback runner", () => {
 
   it("refuses without an OIDC assertion, and hands nothing off", async () => {
     const fetchImpl = vi.fn(accepted);
-    const r = await makeHandoffCallbackRunner(deps({ readAssertion: async () => null, fetchImpl }))({ state: validState(), code: CODE, subject: SUBJECT });
+    const r = await makeHandoffCallbackRunner(deps({ readAssertion: async () => ({ ok: false, reason: "handoff_assertion_missing" } as const), fetchImpl }))({ state: validState(), code: CODE, subject: SUBJECT });
     expect(r).toEqual({ ok: false, reason: "handoff_assertion_missing" });
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
   it("refuses an assertion for the wrong audience or project, and hands nothing off", async () => {
     const fetchImpl = vi.fn(accepted);
-    expect(await makeHandoffCallbackRunner(deps({ readAssertion: async () => assertion({ aud: "https://vercel.com/idcaddie" }), fetchImpl }))(
+    expect(await makeHandoffCallbackRunner(deps({ readAssertion: async () => ({ ok: true, token: assertion({ aud: "https://vercel.com/idcaddie" }) } as const), fetchImpl }))(
       { state: validState(), code: CODE, subject: SUBJECT },
     )).toEqual({ ok: false, reason: "handoff_assertion_audience_mismatch" });
-    expect(await makeHandoffCallbackRunner(deps({ readAssertion: async () => assertion({ project_id: "prj_OTHER" }), fetchImpl }))(
+    expect(await makeHandoffCallbackRunner(deps({ readAssertion: async () => ({ ok: true, token: assertion({ project_id: "prj_OTHER" }) } as const), fetchImpl }))(
       { state: validState(), code: CODE, subject: SUBJECT },
     )).toEqual({ ok: false, reason: "handoff_assertion_project_mismatch" });
     expect(fetchImpl).not.toHaveBeenCalled();

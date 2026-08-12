@@ -95,7 +95,7 @@ Full model in [83 §8.6](./83_REAL_OAUTH_COMPLETION_ARCHITECTURE.md).
 | `OAUTH_COMPLETION_WORKER_OIDC_AUDIENCE` | server-only, **not secret** | The audience **dedicated** to the completion worker | present; never Vercel's default team audience |
 | `OAUTH_COMPLETION_WORKER_PUBLIC_KEY` | server-only, **not secret** (public half) | Seals the authorization code to the worker | base64 **SPKI DER** of an X25519 public key — raw 32 bytes are refused, because they cannot be told apart from Ed25519 |
 | `OAUTH_COMPLETION_WORKER_PUBLIC_KEY_ID` | server-only, **not secret** | Names the key the bytes were sealed to | `^[A-Za-z0-9_.:-]{1,128}$` |
-| `VERCEL_OIDC_TOKEN` | **injected by Vercel** | The handoff assertion | read from the environment ONLY — never from a request header |
+| ~~`VERCEL_OIDC_TOKEN`~~ | injected by Vercel | **Not used in Functions** | Build/local-dev path only. In a Function the platform token comes from Vercel’s request context via `getVercelOidcTokenSync()`; application code never reads a header itself, and there is no CLI refresh path (doc 83 §8.4). |
 
 **`OAUTH_COMPLETER_DB_URL` is NOT a V3 variable and must never be set on this project.** Since Phase 8K its presence —
 under that name or any other name carrying the `oauth_completer` role — makes the environment gate refuse with

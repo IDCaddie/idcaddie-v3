@@ -423,20 +423,34 @@ different relying party never leaves the building.
 > 1. Application code **must never** read `x-vercel-oidc-token` off a request itself, and must never treat any
 >    caller-supplied header or body value as an assertion. A value we do not control must not become an outbound
 >    `Authorization`.
-> 2. The **only** permitted source is the official `@vercel/oidc` SDK, which reads the platform-injected token from
->    Vercel's own trusted request context. We never see, parse, or choose the raw header.
+> 2. The **only** permitted source is the official `@vercel/oidc` SDK, via `getVercelOidcTokenSync()`, which reads the
+>    platform-injected token from Vercel's own trusted request context. We never see, parse, or choose the raw header.
+> 4. **No CLI refresh path.** `getVercelOidcToken` is deliberately NOT used: it unconditionally loads `token-util.js` +
+>    `token.js`, which pull `@vercel/cli-exec` -> `execa` -> `child_process` and `@vercel/cli-config`'s keyring, and it
+>    CALLS `refreshToken()` whenever the token is missing or expired — reachable in production, where it would read
+>    `~/.vercel` and try to spawn a CLI that is not in the bundle. A missing platform token is a plain refusal instead.
+>    `oauth-handoff-runtime-closure.test.ts` walks the actual require graph of the two primitives we do use and proves
+>    none of those capabilities is reachable — with a control asserting the walker DOES find them in the wrapper.
 > 3. An inbound `Authorization` is never forwarded to the worker.
 >
 > All three are enforced against the source of every file on the path by `oauth-handoff-architecture.test.ts`, and each
 > rule is mutation-tested against a planted violation — a rule that cannot be made to fire is not protecting anything.
 
-**The audience is a dedicated one, and obtaining it is an EXCHANGE.** `getVercelOidcToken({ audience })` exchanges the
-platform token for one whose `aud` is exactly `https://idcaddie.com/oauth-completion-worker`. It is not a dashboard
+**The audience is a dedicated one, and obtaining it is an EXCHANGE.** `exchangeVercelOidcToken({ token, audience })` exchanges the
+platform token, PER REQUEST, for one whose `aud` is exactly `https://idcaddie.com/oauth-completion-worker`. It is not a dashboard
 setting and there is nothing to configure in the project. Vercel's default `aud` is `https://vercel.com/<team-slug>`,
 which **every** relying party in the team receives — accepting it would mean a token minted for any of them
 authenticates a handoff, so the worker refuses it by name (`oidc_audience_is_vercel_default`) and V3 never requests it.
-A failed exchange returns null and the caller fails closed; the SDK's error is discarded rather than wrapped, because it
-can embed the token, the exchange URL and the response body.
+The exchange is BOUNDED by `OIDC_EXCHANGE_TIMEOUT_MS` (3s) enforced by a race, because it is a third-party POST with no
+signal of its own inside the request the browser is blocked on, and a hang is not a rejection that `try/catch` can see.
+Three distinct bounded reasons — `handoff_assertion_missing`, `..._exchange_failed`, `..._exchange_timeout`. The SDK's
+error is discarded rather than wrapped, because it can embed the token, the exchange URL and the response body.
+
+**V3 enforces the audience itself, at config time.** `resolveWorkerHandoffConfig` refuses any `vercel.com`-origin value
+(`worker_audience_is_vercel_default`, normalized for whitespace/case/port/trailing dot) and then requires exact equality
+with the pinned constant (`worker_audience_not_dedicated`). A defaulted deployment cannot build the runner, so it cannot
+even REQUEST the default. This is not an env-var promise: an adversarial review proved a planted default previously
+passed the entire suite, because `preflightOwnAssertion` compared the token's `aud` against that same configured value.
 
 ### 8.5 Sealing
 
@@ -497,7 +511,7 @@ Added by this PR as **parsing and validation only** (doc 24 §3f):
 | `OAUTH_COMPLETION_WORKER_OIDC_AUDIENCE` | the dedicated worker audience |
 | `OAUTH_COMPLETION_WORKER_PUBLIC_KEY` | base64 SPKI of the worker's X25519 public key |
 | `OAUTH_COMPLETION_WORKER_PUBLIC_KEY_ID` | `^[A-Za-z0-9_.:-]{1,128}$` |
-| `VERCEL_OIDC_TOKEN` | injected by Vercel; read from the environment only |
+| ~~`VERCEL_OIDC_TOKEN`~~ | **Not used in Functions.** Build/local-dev only. The Function reads the platform token from Vercel's request context via `getVercelOidcTokenSync()` (§8.4). |
 
 `OAUTH_COMPLETER_DB_URL` is **removed from the V3 contract entirely** and its presence is now a refusal (§8.1).
 

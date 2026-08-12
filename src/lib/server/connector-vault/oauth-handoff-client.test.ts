@@ -29,6 +29,7 @@ import {
   preflightOwnAssertion,
   acquireHandoffAssertion,
   HANDOFF_OIDC_AUDIENCE,
+  isVercelDefaultAudience,
   resolveWorkerHandoffConfig,
   submitHandoff,
 } from "./oauth-handoff-client";
@@ -38,7 +39,8 @@ const spki = (key: KeyObject) => (key.export({ format: "der", type: "spki" }) as
 const WORKER_KEY = spki(generateKeyPairSync("x25519").publicKey);
 const HOST = "oauth-completion-worker.internal.example";
 const ALLOWED = [HOST];
-const AUDIENCE = "https://idcaddie.example/oauth-completion-worker";
+// The audience fixture is now the REAL pinned constant, because `resolveWorkerHandoffConfig` accepts nothing else.
+const AUDIENCE = "https://idcaddie.com/oauth-completion-worker";
 
 const ENV: Record<string, string | undefined> = {
   OAUTH_COMPLETION_WORKER_URL: `https://${HOST}${HANDOFF_PATH}`,
@@ -130,53 +132,125 @@ const NOW_S = 1_800_000_000;
 const GOOD_CLAIMS = { aud: AUDIENCE, project_id: STAGING_VERCEL_PROJECT_ID, owner_id: STAGING_VERCEL_TEAM_ID, exp: NOW_S + 600 };
 const ASSERTION = assertionWith(GOOD_CLAIMS);
 
-describe("the OIDC assertion source — the official SDK, a dedicated audience, and nothing caller-controlled", () => {
-  // (1) the Function runtime obtains the token through @vercel/oidc, and (2)/(3) the audience requested is exactly ours.
-  it("requests the token through the injected @vercel/oidc getter, with the DEDICATED audience", async () => {
-    const seen: { audience: string }[] = [];
-    const token = await acquireHandoffAssertion(async (o) => { seen.push(o); return ASSERTION; });
-    expect(seen).toEqual([{ audience: "https://idcaddie.com/oauth-completion-worker" }]);
-    expect(HANDOFF_OIDC_AUDIENCE).toBe("https://idcaddie.com/oauth-completion-worker");
-    expect(token).toBe(ASSERTION);
+describe("the OIDC assertion source — trusted request context, dedicated audience, bounded exchange", () => {
+  const PLATFORM = "platform.token.value";
+  const deps = (o: Partial<{ readPlatformToken: () => string; exchange: (x: { token: string; audience: string }) => Promise<string> }> = {}) => ({
+    readPlatformToken: o.readPlatformToken ?? (() => PLATFORM),
+    exchange: o.exchange ?? (async () => ASSERTION),
   });
 
-  it("the exchanged token it returns carries exactly that aud claim", async () => {
+  it("reads the platform token via the SDK's request-context accessor and exchanges it for the DEDICATED audience", async () => {
+    const seen: { token: string; audience: string }[] = [];
+    const r = await acquireHandoffAssertion(deps({ exchange: async (o) => { seen.push(o); return ASSERTION; } }));
+    expect(seen).toEqual([{ token: PLATFORM, audience: "https://idcaddie.com/oauth-completion-worker" }]);
+    expect(HANDOFF_OIDC_AUDIENCE).toBe("https://idcaddie.com/oauth-completion-worker");
+    expect(r).toEqual({ ok: true, token: ASSERTION });
+  });
+
+  it("the exchanged token carries exactly that aud claim, and preflight accepts it", async () => {
     const exchanged = assertionWith({ ...GOOD_CLAIMS, aud: HANDOFF_OIDC_AUDIENCE });
-    const token = await acquireHandoffAssertion(async () => exchanged);
-    const aud = JSON.parse(Buffer.from((token as string).split(".")[1], "base64url").toString()).aud;
-    expect(aud).toBe("https://idcaddie.com/oauth-completion-worker");
+    const r = await acquireHandoffAssertion(deps({ exchange: async () => exchanged }));
+    expect(r.ok).toBe(true);
+    const token = (r as { token: string }).token;
+    expect(JSON.parse(Buffer.from(token.split(".")[1], "base64url").toString()).aud).toBe("https://idcaddie.com/oauth-completion-worker");
     expect(preflightOwnAssertion(token, { audience: HANDOFF_OIDC_AUDIENCE, nowSeconds: NOW_S })).toEqual({ ok: true });
   });
 
-  // (7) missing platform token and (8) exchange failure both fail CLOSED.
-  it("fails closed when the platform token is missing or the exchange throws", async () => {
-    expect(await acquireHandoffAssertion(async () => "")).toBeNull();
-    expect(await acquireHandoffAssertion(async () => null as unknown as string)).toBeNull();
-    expect(await acquireHandoffAssertion(async () => { throw new Error("exchange failed"); })).toBeNull();
+  // No request context => the SDK throws. Refuse; never refresh, never read ~/.vercel, never spawn anything.
+  it("a MISSING request-context token refuses, and never reaches the exchange", async () => {
+    let exchanged = 0;
+    const thrown = await acquireHandoffAssertion(deps({
+      readPlatformToken: () => { throw new Error("The 'x-vercel-oidc-token' header is missing from the request."); },
+      exchange: async () => { exchanged++; return ASSERTION; },
+    }));
+    expect(thrown).toEqual({ ok: false, reason: "handoff_assertion_missing" });
+    expect(exchanged).toBe(0);
+    expect(await acquireHandoffAssertion(deps({ readPlatformToken: () => "" }))).toEqual({ ok: false, reason: "handoff_assertion_missing" });
   });
 
-  // (9) an SDK error can embed the token, the exchange URL and the response body. None of it may escape.
-  it("discards the exchange error rather than wrapping it — no token or URL escapes", async () => {
+  it("an exchange FAILURE refuses, distinguishably", async () => {
+    expect(await acquireHandoffAssertion(deps({ exchange: async () => { throw new Error("exchange refused"); } })))
+      .toEqual({ ok: false, reason: "handoff_assertion_exchange_failed" });
+  });
+
+  it("an exchange that HANGS refuses on the timeout rather than blocking the callback", async () => {
+    const started = Date.now();
+    const r = await acquireHandoffAssertion(deps({ exchange: () => new Promise<string>(() => {}) }), HANDOFF_OIDC_AUDIENCE, 40);
+    expect(r).toEqual({ ok: false, reason: "handoff_assertion_exchange_timeout" });
+    expect(Date.now() - started).toBeLessThan(2000);
+  });
+
+  it("a fast success does not wait for the ceiling", async () => {
+    const started = Date.now();
+    expect(await acquireHandoffAssertion(deps(), HANDOFF_OIDC_AUDIENCE, 5000)).toEqual({ ok: true, token: ASSERTION });
+    expect(Date.now() - started).toBeLessThan(1000);
+  });
+
+  it("an empty exchanged token refuses", async () => {
+    expect(await acquireHandoffAssertion(deps({ exchange: async () => "" }))).toEqual({ ok: false, reason: "handoff_assertion_missing" });
+  });
+
+  it("neither the platform token nor the exchange error escapes into a result or a log", async () => {
     const logs: string[] = [];
     const spies = (["log","info","warn","error","debug"] as const).map((m) => vi.spyOn(console, m).mockImplementation((...a: unknown[]) => { logs.push(a.map(String).join(" ")); }));
-    const out = await acquireHandoffAssertion(async () => { throw new Error(`boom ${ASSERTION} https://vercel.com/exchange`); });
+    const out = await acquireHandoffAssertion(deps({ exchange: async () => { throw new Error(`boom ${PLATFORM} ${ASSERTION} https://oidc.vercel.com/~token`); } }));
     spies.forEach((s) => s.mockRestore());
     const dump = JSON.stringify({ out, logs });
-    expect(out).toBeNull();
-    expect(dump).not.toContain(ASSERTION);
-    expect(dump).not.toContain("boom");
+    expect(out).toEqual({ ok: false, reason: "handoff_assertion_exchange_failed" });
+    for (const secret of [PLATFORM, ASSERTION, "boom", "~token"]) expect(dump).not.toContain(secret);
   });
 
-  // (10) THE TRUST RULE. Option B permits the official SDK to read Vercel's request context; it does NOT permit this
-  // module to read a header itself or to accept an assertion from application input.
   it("has no path from a request, header or caller input to the assertion", () => {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const src = (require("node:fs") as typeof import("node:fs")).readFileSync("src/lib/server/connector-vault/oauth-handoff-client.ts", "utf8");
     const fn = src.slice(src.indexOf("export async function acquireHandoffAssertion"), src.indexOf("export function preflightOwnAssertion"));
     const code = fn.split("\n").filter((l) => !l.trim().startsWith("*") && !l.trim().startsWith("//")).join("\n");
     expect(code).not.toMatch(/headers|Request\b|req\.|request\.|x-vercel-oidc-token/i);
-    expect(code).not.toMatch(/process\.env/);           // the env path is no longer the source
-    expect(code).toMatch(/getToken\(\{ audience \}\)/); // the ONLY source is the injected SDK getter
+    expect(code).not.toMatch(/process\.env|refresh|\.vercel|execa|child_process/i);
+  });
+});
+
+describe("the requesting side REFUSES a non-dedicated audience at config time", () => {
+  const cfg = (audience: string) => resolveWorkerHandoffConfig(withVal({ OAUTH_COMPLETION_WORKER_OIDC_AUDIENCE: audience }), ALLOWED);
+  const reasonOf = (audience: string) => { const r = cfg(audience); return r.ok ? "ACCEPTED" : r.reason; };
+
+  it("accepts ONLY the exact dedicated audience", () => {
+    expect(reasonOf("https://idcaddie.com/oauth-completion-worker")).toBe("ACCEPTED");
+  });
+
+  // A planted default must be impossible to configure — not merely to fail closed against the worker.
+  for (const a of [
+    "https://vercel.com/idc-projects-f977cea1",
+    "https://vercel.com/idc-projects-f977cea1/",
+    "  https://vercel.com/idc-projects-f977cea1  ",
+    "https://VERCEL.COM/idc-projects-f977cea1",
+    "HTTPS://vercel.com/idc-projects-f977cea1",
+    "https://vercel.com:443/idc-projects-f977cea1",
+    "https://vercel.com./idc-projects-f977cea1",
+    "https://vercel.com/some-other-team",
+  ]) {
+    it(`refuses the Vercel default spelled ${JSON.stringify(a)}`, () => {
+      expect(reasonOf(a)).toBe("worker_audience_is_vercel_default");
+    });
+  }
+
+  it("refuses any other audience as not-dedicated, with a distinct reason", () => {
+    for (const a of ["https://idcaddie.com/oauth-completion-worker/", "https://idcaddie.com/other", "https://example.test/x"]) {
+      expect(reasonOf(a)).toBe("worker_audience_not_dedicated");
+    }
+  });
+
+  it("still refuses an absent audience", () => {
+    expect(reasonOf("")).toBe("worker_audience_missing");
+  });
+
+  // The property that matters: a bad config cannot even REQUEST the default, because the runner is never built.
+  it("a defaulted config never reaches the exchange at all", async () => {
+    const r = cfg("https://vercel.com/idc-projects-f977cea1");
+    expect(r.ok).toBe(false);
+    // No config => no worker config => `makeHandoffCallbackRunner` is never constructed, so no getter is ever called.
+    expect(isVercelDefaultAudience("https://vercel.com/idc-projects-f977cea1")).toBe(true);
+    expect(isVercelDefaultAudience("https://idcaddie.com/oauth-completion-worker")).toBe(false);
   });
 });
 

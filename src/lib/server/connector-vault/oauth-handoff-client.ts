@@ -1,6 +1,8 @@
 // Phase 8K — the bounded V3 → completion-worker handoff client. Server-only.
 //
-// This is the ONE place the web tier reaches out during OAuth completion, and the only network call the callback makes.
+// This is the ONE place the web tier reaches out to the WORKER during OAuth completion. The callback makes exactly
+// one other outbound call — the `@vercel/oidc` audience exchange in `acquireHandoffAssertion` — and both are bounded by
+// an explicit timeout, because the browser is waiting on this request.
 // It does NOT contact Slack: the token exchange belongs to the worker, and this repository has no path to it from the
 // callback (`oauth-handoff-architecture.test.ts` asserts that).
 //
@@ -68,12 +70,16 @@ export type WorkerConfigRefusal =
   | "worker_url_not_exact"
   | "worker_host_not_allowlisted"
   | "worker_audience_missing"
+  | "worker_audience_is_vercel_default"
+  | "worker_audience_not_dedicated"
   | "worker_public_key_missing"
   | "worker_public_key_malformed"
   | "worker_public_key_id_invalid";
 
 export type HandoffRefusal =
   | "handoff_assertion_missing"
+  | "handoff_assertion_exchange_failed"
+  | "handoff_assertion_exchange_timeout"
   | "handoff_assertion_malformed"
   | "handoff_assertion_audience_mismatch"
   | "handoff_assertion_project_mismatch"
@@ -114,8 +120,22 @@ export function resolveWorkerHandoffConfig(
   if (url.href !== rawUrl.trim()) return { ok: false, reason: "worker_url_not_exact" };
   if (!allowedHosts.includes(url.host)) return { ok: false, reason: "worker_host_not_allowlisted" };
 
-  const audience = env.OAUTH_COMPLETION_WORKER_OIDC_AUDIENCE;
-  if (typeof audience !== "string" || audience.trim().length === 0) return { ok: false, reason: "worker_audience_missing" };
+  const audienceRaw = env.OAUTH_COMPLETION_WORKER_OIDC_AUDIENCE;
+  if (typeof audienceRaw !== "string" || audienceRaw.trim().length === 0) return { ok: false, reason: "worker_audience_missing" };
+  const audience = audienceRaw.trim();
+  // THE REQUESTING SIDE ENFORCES THE AUDIENCE TOO — it is not an env-var promise.
+  //
+  // This used to accept any non-empty string, which made the whole dedicated-audience design unenforced on the side
+  // that actually ASKS for the token: a config naming Vercel's default would exchange for it and post a team-wide
+  // bearer to the worker, and `preflightOwnAssertion` could never catch it because it compares the token's `aud`
+  // against THIS SAME VALUE — a tautology. The worker refuses the default (its own guard), so the two sides would have
+  // disagreed and failed closed; but "fails closed because the other end disagrees" is not enforcement, and an
+  // adversarial review proved a planted default passed the entire suite.
+  //
+  // Two checks, ordered so the REASON is diagnostic. The first names the specific mistake; the second is the general
+  // rule that makes any other value impossible.
+  if (isVercelDefaultAudience(audience)) return { ok: false, reason: "worker_audience_is_vercel_default" };
+  if (audience !== HANDOFF_OIDC_AUDIENCE) return { ok: false, reason: "worker_audience_not_dedicated" };
 
   // Base64 of the SPKI DER — see `parseWorkerSealKey` for why the format carries its own curve identity.
   const publicKey = env.OAUTH_COMPLETION_WORKER_PUBLIC_KEY;
@@ -142,52 +162,130 @@ export function resolveWorkerHandoffConfig(
  */
 export const HANDOFF_OIDC_AUDIENCE = "https://idcaddie.com/oauth-completion-worker" as const;
 
-/** The shape of `getVercelOidcToken` from `@vercel/oidc`. Injected so tests never touch the platform. */
-export type VercelOidcTokenGetter = (options: { audience: string }) => Promise<string>;
+/**
+ * Is this Vercel's DEFAULT team audience, under any trivially-equivalent spelling?
+ *
+ * Deliberately does NOT need the team slug. Vercel's default is always `https://vercel.com/<slug>`, so on the
+ * REQUESTING side the whole `vercel.com` origin is out of bounds: our dedicated audience lives on `idcaddie.com`, and
+ * there is no legitimate configuration here that names Vercel's host at all. That is strictly stronger than matching a
+ * single slug and cannot be evaded by naming a different team.
+ *
+ * Permissive about FORM, strict about IDENTITY: surrounding whitespace, case in scheme and host (case-insensitive per
+ * RFC 3986), an explicit default port, a trailing dot on the host, and any number of trailing slashes all describe the
+ * same origin. Anything unparseable as a URL is not the default and falls through to the exact-match check.
+ */
+export function isVercelDefaultAudience(candidate: string): boolean {
+  let u: URL;
+  try {
+    u = new URL(candidate.trim());
+  } catch {
+    return false;
+  }
+  if (u.protocol !== "https:" && u.protocol !== "http:") return false;
+  const host = u.hostname.toLowerCase().replace(/\.$/, "");
+  return host === "vercel.com";
+}
+
+/**
+ * The two `@vercel/oidc` primitives this path is allowed to use, injected so tests never touch the platform.
+ *
+ * DELIBERATELY NOT `getVercelOidcToken`. That convenience wrapper unconditionally does
+ * `await import("./token-util.js")` + `await import("./token.js")` on EVERY call, and `token.js` pulls
+ * `@vercel/cli-exec` -> `execa` -> `child_process` plus `@vercel/cli-config`'s keyring credential store. It then calls
+ * `refreshToken()` whenever the platform token is missing or expired — a branch that is reachable in production, where
+ * it would read `~/.vercel` and try to shell out to a CLI that is not in the bundle. That is a process-spawning
+ * credential-store capability in a public request path, which is the exact class of creep doc 83 §2 exists to prevent,
+ * and the refresh can never succeed on Vercel anyway.
+ *
+ * The two primitives it wraps have a clean graph — `getVercelOidcTokenSync` requires only `./get-context` (which
+ * requires nothing), and `exchangeVercelOidcToken` requires only `./version`. `oauth-handoff-runtime-closure.test.ts`
+ * proves that graph stays clean.
+ */
+export type PlatformTokenReader = () => string;
+export type OidcTokenExchanger = (options: { token: string; audience: string }) => Promise<string>;
+
+/** Ceiling on the audience exchange. The browser is waiting, and the exchange is a THIRD-PARTY call we do not control. */
+export const OIDC_EXCHANGE_TIMEOUT_MS = 3000;
+
+export type AcquiredAssertion =
+  | { ok: true; token: string }
+  | { ok: false; reason: "handoff_assertion_missing" | "handoff_assertion_exchange_failed" | "handoff_assertion_exchange_timeout" };
 
 /**
  * Acquire the Vercel OIDC assertion, minted for OUR dedicated audience.
  *
- * ── WHERE THE TOKEN COMES FROM, AND WHY THIS IS NOT THE THING §8.4 FORBIDS ──────────────────────────────────────────
- * This used to read `process.env.VERCEL_OIDC_TOKEN` and nothing else. That was wrong for the runtime this actually runs
- * in: Vercel documents `VERCEL_OIDC_TOKEN` as the BUILD and LOCAL-DEVELOPMENT path, while in Vercel Functions the
- * platform supplies the token through the function's request context (`x-vercel-oidc-token`). An env-only read is
- * therefore empty in production and the handoff could never authenticate.
+ * ── WHERE THE TOKEN COMES FROM ─────────────────────────────────────────────────────────────────────────────────────
+ * `getVercelOidcTokenSync()` reads the platform-injected token from Vercel's own request context
+ * (`globalThis[Symbol.for("@vercel/request-context")]`). This module never touches `request.headers`, never names
+ * `x-vercel-oidc-token`, and never accepts an assertion from a body, query, cookie or inbound `Authorization`. The
+ * rule is about TRUST, not transport: the platform's own accessor is permitted; our parsing of a request is not.
+ * Enforced over the AST by `oauth-handoff-header-trust.test.ts`.
  *
- * The rule that matters is unchanged and is about TRUST, not about which transport the platform chose:
- *   * application code must NEVER read `x-vercel-oidc-token` off a request itself, and never treat any caller-supplied
- *     header or body value as an assertion — a value we do not control must not become an outbound `Authorization`;
- *   * the ONLY permitted source is the official `@vercel/oidc` SDK, which reads the platform-injected token from
- *     Vercel's own trusted request context. We never see, parse or choose the raw header.
- * `oauth-handoff-architecture.test.ts` enforces both halves against the source of every file on this path.
+ * A missing platform token is a plain refusal. There is NO refresh, no `~/.vercel` read and no subprocess.
  *
- * ── THE AUDIENCE IS AN EXCHANGE ────────────────────────────────────────────────────────────────────────────────────
- * Passing `audience` makes the SDK exchange the platform token for one whose `aud` is exactly that string. It is not a
- * project setting and there is nothing to configure in the dashboard. A failed exchange returns null and the caller
- * fails closed — an assertion for the wrong audience must never be sent instead.
+ * ── THE AUDIENCE IS AN EXCHANGE, PER REQUEST ───────────────────────────────────────────────────────────────────────
+ * Vercel's default `aud` is `https://vercel.com/<team-slug>`, which every relying party in the team receives.
+ * `exchangeVercelOidcToken` trades the platform token for one whose `aud` is exactly ours. It is not a dashboard
+ * setting. The exchange is BOUNDED: it is a third-party POST with no signal of its own, inside the request the browser
+ * is blocked on, and a hang is not a rejection — so only a race bounds it.
  */
 export async function acquireHandoffAssertion(
-  getToken: VercelOidcTokenGetter,
+  deps: { readPlatformToken: PlatformTokenReader; exchange: OidcTokenExchanger },
   audience: string = HANDOFF_OIDC_AUDIENCE,
-): Promise<string | null> {
-  let token: unknown;
+  timeoutMs: number = OIDC_EXCHANGE_TIMEOUT_MS,
+): Promise<AcquiredAssertion> {
+  let platformToken: unknown;
   try {
-    token = await getToken({ audience });
+    platformToken = deps.readPlatformToken();
   } catch {
-    // The caught error is DISCARDED, never wrapped or logged: an SDK error can embed the token, the exchange URL and
-    // response body. The caller reports a bounded reason.
-    return null;
+    // The SDK throws when the request context carries no token. Discarded, never logged: its message names the header.
+    return { ok: false, reason: "handoff_assertion_missing" };
   }
-  return typeof token === "string" && token.length > 0 ? token : null;
+  if (typeof platformToken !== "string" || platformToken.length === 0) {
+    return { ok: false, reason: "handoff_assertion_missing" };
+  }
+
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<{ timedOut: true }>((resolve) => {
+    timer = setTimeout(() => resolve({ timedOut: true }), timeoutMs);
+  });
+
+  let raced: unknown;
+  try {
+    raced = await Promise.race([
+      deps.exchange({ token: platformToken, audience }).then((token) => ({ token })),
+      timeout,
+    ]);
+  } catch {
+    // DISCARDED, never wrapped or logged: an exchange error can embed the token, the exchange URL and the response body.
+    return { ok: false, reason: "handoff_assertion_exchange_failed" };
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+
+  if (raced !== null && typeof raced === "object" && "timedOut" in raced) {
+    // The in-flight exchange is abandoned rather than awaited: its result can only be a token we have already decided
+    // not to use, and nothing downstream reads it.
+    return { ok: false, reason: "handoff_assertion_exchange_timeout" };
+  }
+  const token = (raced as { token?: unknown }).token;
+  return typeof token === "string" && token.length > 0
+    ? { ok: true, token }
+    : { ok: false, reason: "handoff_assertion_missing" };
 }
 
 /**
- * A CLIENT-SIDE sanity check on our own assertion. This is NOT authentication and must never be described as such — the
- * worker verifies the signature and every pinned claim (`verifyHandoffAssertion`), and this function verifies nothing.
+ * A CLIENT-SIDE sanity check on our own assertion. This is **NOT authentication** and must never be described as such —
+ * the worker verifies the signature and every pinned claim (`verifyHandoffAssertion`), and this function verifies
+ * nothing.
  *
- * It exists to catch a misconfiguration before a bearer token leaves the building: a token minted for Vercel's default
- * team audience rather than the dedicated worker audience, a token from the wrong project or team, or an expired one.
- * Refusing here means the assertion is never sent to a relying party it was not minted for.
+ * It exists to catch a misconfiguration before a bearer token leaves the building: a token from the wrong project or
+ * team, or an expired one. Refusing here means the assertion is never sent to a relying party it was not minted for.
+ *
+ * Its audience comparison is no longer the only thing standing between us and Vercel's default team audience —
+ * `resolveWorkerHandoffConfig` now refuses to build a config that names it at all, so a defaulted deployment cannot
+ * reach the exchange. That check moved because this one compared the token's `aud` against the SAME configured value,
+ * which made it a tautology in exactly the case it was written for.
  */
 export function preflightOwnAssertion(
   token: string | null,

@@ -29,6 +29,7 @@ import {
 import { PayloadSealError, sealAuthorizationCode, type SealRefusal } from "./oauth-payload-seal";
 import {
   preflightOwnAssertion,
+  type AcquiredAssertion,
   submitHandoff,
   type HandoffFetch,
   type HandoffRefusal,
@@ -73,7 +74,7 @@ export type HandoffCallbackDeps = {
   expected: HandoffExpectedContext;
   config: WorkerHandoffConfig;
   /** Reads the Vercel OIDC assertion from the environment. Injected so a test never needs a real one. */
-  readAssertion: () => Promise<string | null>;
+  readAssertion: () => Promise<AcquiredAssertion>;
   fetchImpl: HandoffFetch;
   now: () => number;
 };
@@ -172,7 +173,9 @@ export function makeHandoffCallbackRunner(deps: HandoffCallbackDeps): HandoffCal
 
     // 3. The assertion, sanity-checked against our own configuration before it leaves. The worker is the authority on
     //    whether it is valid; this only stops us presenting one that was minted for somebody else.
-    const assertion = await deps.readAssertion();
+    const acquired = await deps.readAssertion();
+    if (!acquired.ok) return { ok: false, reason: acquired.reason };
+    const assertion = acquired.token;
     const preflight = preflightOwnAssertion(assertion, {
       audience: deps.config.audience,
       nowSeconds: Math.floor(deps.now() / 1000),

@@ -37,7 +37,7 @@ const VALID: Record<string, string | undefined> = {
   CONNECTOR_OAUTH_STATE_SECRET: "state-secret-not-real",
   CONNECTOR_OAUTH_STATE_KEY_ID: "k1",
   OAUTH_COMPLETION_WORKER_URL: `https://${WORKER_HOST}${HANDOFF_PATH}`,
-  OAUTH_COMPLETION_WORKER_OIDC_AUDIENCE: "https://idcaddie.example/oauth-completion-worker",
+  OAUTH_COMPLETION_WORKER_OIDC_AUDIENCE: "https://idcaddie.com/oauth-completion-worker", // the pinned dedicated audience; nothing else resolves
   OAUTH_COMPLETION_WORKER_PUBLIC_KEY: workerPublicKey,
   OAUTH_COMPLETION_WORKER_PUBLIC_KEY_ID: "worker-seal-v1",
 };
