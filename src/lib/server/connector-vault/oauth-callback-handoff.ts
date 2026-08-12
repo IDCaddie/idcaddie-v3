@@ -29,6 +29,7 @@ import {
 import { PayloadSealError, sealAuthorizationCode, type SealRefusal } from "./oauth-payload-seal";
 import {
   preflightOwnAssertion,
+  acquireDedicatedAudienceAssertion,
   submitHandoff,
   type HandoffFetch,
   type HandoffRefusal,
@@ -72,8 +73,22 @@ export type HandoffCallbackDeps = {
   signer: OAuthStateSigner;
   expected: HandoffExpectedContext;
   config: WorkerHandoffConfig;
-  /** Reads the Vercel OIDC assertion from the environment. Injected so a test never needs a real one. */
-  readAssertion: () => string | null;
+  /**
+   * NO SEAM FOR THE ASSERTION, IN ANY SPELLING. It has exactly ONE construction path —
+   * `acquireDedicatedAudienceAssertion(deps.config.audience)` — called directly below, with nothing injected into it.
+   *
+   * This has now been got wrong twice, and both are recorded because the second looked like the fix for the first.
+   * First it was `readAssertion: () => string`, and a review substituted it in `real-callback-dependencies` with a
+   * helper returning an inbound `Authorization` bearer: the whole suite stayed green, because nothing pinned the
+   * CONSTRUCTION site. Removing it, the replacement was `exchange?: ExchangeDeps` — ostensibly only a fetch and a
+   * context reader. But a caller-supplied `fetchImpl` receives the RAW PLATFORM TOKEN in the request body and returns
+   * the `Response` whose `token` field BECOMES the assertion, so it was the same seam plus a leak. A review
+   * demonstrated both, and the guards missed it because they watched the return value and the call site while the
+   * capability sat in an argument.
+   *
+   * `fetchImpl` below is NOT that seam: it carries the sealed payload to the worker and cannot influence the
+   * assertion. Tests drive the exchange by stubbing the real platform globals, which no production signature reaches.
+   */
   fetchImpl: HandoffFetch;
   now: () => number;
 };
@@ -172,7 +187,9 @@ export function makeHandoffCallbackRunner(deps: HandoffCallbackDeps): HandoffCal
 
     // 3. The assertion, sanity-checked against our own configuration before it leaves. The worker is the authority on
     //    whether it is valid; this only stops us presenting one that was minted for somebody else.
-    const assertion = deps.readAssertion();
+    const acquired = await acquireDedicatedAudienceAssertion(deps.config.audience);
+    if (!acquired.ok) return { ok: false, reason: acquired.reason };
+    const assertion = acquired.token;
     const preflight = preflightOwnAssertion(assertion, {
       audience: deps.config.audience,
       nowSeconds: Math.floor(deps.now() / 1000),

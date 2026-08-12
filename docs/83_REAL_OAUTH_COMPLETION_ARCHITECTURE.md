@@ -398,17 +398,126 @@ set and nothing else.
 | `nbf` | if present, `<= now + 30s` |
 | `exp - iat` | `<= maxLifetime` |
 
-`maxLifetime` / `maxAge` default to **3600s** and are **parameters, not constants**. That is an assumption, not a
-measurement: Vercel's runtime-injected token lifetime is not observable from this repository, and a ceiling below it
-would refuse every real token. **PR 4 must tighten it to the observed lifetime once a real assertion has been seen.**
+`maxLifetime` / `maxAge` default to **7200s** and are **parameters, not constants**.
+
+> **CORRECTED (Phase 8R).** This said 3600s, described as "an assumption, not a measurement". It was a measurement of
+> the wrong token: **one hour is the BUILD-token lifetime**, and Vercel's OIDC reference states that *"Function tokens
+> for `preview` and `production` expire after two hours."* Since the check is `exp - iat <= maxLifetime`, a 3600 ceiling
+> would have refused **every real callback** — a total outage presenting as an assertion fault rather than a ceiling we
+> chose. **Correction:** an earlier revision of this paragraph said *every* real callback. The next paragraph shows
+> why that is wrong — `exp - iat` on the EXCHANGED assertion is the platform token's REMAINING life, so a 3600 ceiling
+> refuses every callback whose platform token has more than an hour left. Most of them, not all of them.
+>
+> This value is CITED FROM VERCEL'S DOCUMENTATION, NOT OBSERVED. `WORKER_ALLOWED_HOSTS` is empty, so no handoff has
+> ever been posted to a worker and no live run has occurred. Wording that implied the ceiling was discovered in
+> production has been removed here and in `oidc.ts`.
+>
+> On the **exchanged** assertion the worker actually receives, Vercel's custom-audience changelog is explicit: the
+> exchange *updates `iat` to the current timestamp* and *preserves all original claims including expiration*, carrying
+> the original issue time in an `act.iat` claim. So `exp - iat` is the platform token's REMAINING life (≤ 7200), and
+> `iat` is the exchange moment.
+>
+> `maxAge` is held AT the lifetime rather than tightened. V3 exchanges per request with no cache, so a real `iat` should
+> be seconds old and the honest tightening is large — but "should be" is exactly what 3600 was, and a ceiling below the
+> truth refuses real customers intermittently. §8.4a defines the evidence that settles it.
+
+### §8.4a — first-live timing evidence
+
+Every accepted handoff records **four integers and nothing else** (there is no first-run gate; the name refers to what
+the first live run is FOR): `iat`, `exp`, `exp - iat`, and `act.iat` if
+present. `assertionTimingEvidence` in the runner returns exactly that shape and is asserted to carry no token, no
+signature, and none of `aud` / `iss` / `sub` / `owner_id` / `project_id` / correlation — timestamps cannot identify a
+customer, a workspace or a tenant. **The JWT itself is never logged.**
+
+`act.iat` is the one that matters: it is the only claim revealing the true end-to-end age, because the exchange
+refreshes `iat`. Once observed, `OAUTH_COMPLETION_WORKER_OIDC_MAX_AGE_SECONDS` can be tightened from the environment
+with no code change — the knob is downward-only by construction.
 
 Alongside the assertion, `verifyHandoffRequest` checks the version header, the body size, the digest header against the
 received bytes, the strict schema, the correlation header against the body, canonical form, and the payload bounds.
 
-V3 also runs `preflightOwnAssertion` before sending — audience, project, team, expiry. It is **NOT authentication**, it
+V3 also runs `preflightOwnAssertion` before sending. It pins six claims — `aud`, `iss`, `sub`, `owner_id`,
+`project_id`, `environment` — plus `exp` liveness. It is **NOT authentication**, it
 verifies no signature, and it is named so nobody can mistake it for one. It exists so a bearer token minted for a
-different relying party never leaves the building. The assertion is read from `process.env.VERCEL_OIDC_TOKEN` **only**;
-an inbound `x-vercel-oidc-token` header is attacker-controlled and would become an outbound `Authorization` header.
+different relying party never leaves the building.
+
+> **CORRECTED (Phase 8R) — the assertion comes from Vercel's request context, via one isolated module, and there is
+> no `@vercel/oidc` production dependency.**
+>
+> This section used to say the assertion is read from `process.env.VERCEL_OIDC_TOKEN` **only**, on the grounds that an
+> inbound `x-vercel-oidc-token` header is attacker-controlled. The trust reasoning was right; the conclusion named the
+> wrong source. Vercel documents `VERCEL_OIDC_TOKEN` as the **build** and **local-development** path, while **in Vercel
+> Functions the platform supplies the token through the function's request context**. An env-only read is empty in the
+> runtime this actually runs in.
+>
+> An interim revision of this section adopted the official `@vercel/oidc` SDK. **That is not what ships.** The package
+> has exactly one supported entry — a CommonJS barrel that eagerly requires `@vercel/cli-exec` → `execa` →
+> `child_process`, plus `@vercel/cli-config`'s keyring credential store — and CJS re-exports cannot be tree-shaken by
+> name, so importing it at all put a process-spawning credential store in the public callback path. A build
+> module-graph walk showed the synchronous edge from the route entry to `child_process`. The dependency was removed.
+>
+> **What ships instead**, in `src/lib/server/connector-vault/vercel-platform-oidc.ts` — the ONE approved module:
+>
+> | | |
+> |---|---|
+> | platform token | read from `globalThis[Symbol.for("@vercel/request-context")].get().headers["x-vercel-oidc-token"]`, with a `VERCEL_OIDC_TOKEN` fallback for build/local-dev only |
+> | raw token | `readPlatformToken` is **not exported** — the raw value never leaves the module |
+> | exchange | direct `POST https://oidc.vercel.com/~token`, body `{ token, aud }`, response `{ token }` |
+> | exported operation | `exchangeForDedicatedAudience(audience, timeoutMs?)` — returns only the EXCHANGED token. It takes NO injectable dependencies: a `deps` parameter handed the raw platform token to caller-supplied code (Phase 8R review) |
+> | audience | exactly `https://idcaddie.com/oauth-completion-worker` |
+> | bound | `EXCHANGE_TIMEOUT_MS` = **3000ms**, enforced by an `AbortController` |
+> | transport | exact pinned URL, `redirect: "error"`, `cache: "no-store"`, `Content-Length` pre-check **and** a streaming ceiling via `readBounded` (`EXCHANGE_MAX_RESPONSE_BYTES`) |
+> | errors | provider body and thrown error discarded; only a bounded reason escapes |
+>
+> The rule, restated so it constrains TRUST rather than transport:
+>
+> 1. Application code **must never** read `x-vercel-oidc-token` off a request itself, and must never treat any
+>    caller-supplied header, body, query or cookie value as an assertion.
+> 2. **Exactly one module** may touch the platform value, and it does not hand the raw token out.
+> 3. An inbound `Authorization` is never forwarded to the worker.
+>
+> Enforced by `vercel-platform-oidc.dataflow.test.ts`, which computes the callback route's **real import closure** and
+> asserts exactly one module in it reads the request context. It is rooted at the route rather than at a maintained file
+> list because a review defeated the list-based version with a helper module that simply was not listed. A planted
+> helper anywhere in the closure now fails it.
+>
+> The build itself is checked by `scripts/check-callback-bundle.mjs`, which reads the callback route's `.nft.json`
+> trace and its chunk closure and fails on `pg`/`postgres`, `child_process`, `execa`, `@vercel/cli-exec`,
+> `@vercel/cli-config`, `cross-spawn`, keytar/keyring or the AWS KMS client. It runs in CI **after** `next build`, and a
+> missing build is a **failure, never a skip** — the previous version was a vitest skip that never once inspected a
+> bundle on a PR.
+
+**The decoded preflight is NOT signature verification.** `preflightOwnAssertion` base64-decodes the payload and pins six
+claims — `aud` (exactly one audience; a multi-audience array is refused even when ours is in it), `iss`, `sub`,
+`owner_id`, `project_id`, `environment` — plus `exp` liveness. It verifies no signature and cannot. It exists so a token
+minted for another project, team or channel is never PRESENTED. **The worker's JWKS verification remains
+authoritative.**
+
+> **CORRECTED (Phase 8R).** The full history of what this section used to claim, and the description of what actually
+> ships, are in **§8.4a** — the approved module, the direct exchange, the bounds, and the controls that enforce them.
+> They are not restated here so the two cannot drift. (An earlier version of this note restated both paragraphs and
+> then claimed it had not; the pointer also named §8.4, which carries only the claims table and the lifetime
+> correction.)
+
+**The audience is a dedicated one, and obtaining it is an EXCHANGE.** `exchangeForDedicatedAudience(audience)` exchanges the
+platform token, PER REQUEST, for one whose `aud` is exactly `https://idcaddie.com/oauth-completion-worker`. It is not a dashboard
+setting and there is nothing to configure in the project. Vercel's default `aud` is `https://vercel.com/<team-slug>`,
+which **every** relying party in the team receives — accepting it would mean a token minted for any of them
+authenticates a handoff, so the worker refuses it by name (`oidc_audience_is_vercel_default`) and V3 never requests it.
+The exchange is BOUNDED by `EXCHANGE_TIMEOUT_MS` (3s) enforced by an `AbortController`, because it is a third-party POST
+inside the request the browser is blocked on. Its response is read through `readBounded` — a streaming ceiling, not a
+`response.text()` followed by a length check, which buffers the whole body before any limit can apply. Three distinct
+bounded reasons reach the caller — `handoff_assertion_missing`, `..._exchange_failed`, `..._exchange_timeout`. A fourth,
+`exchange_response_invalid`, is distinguished inside the module and folded into `..._exchange_failed` at the boundary,
+so a malformed response and a refused one are indistinguishable to a caller. The provider's error body
+and any thrown error are discarded rather than wrapped, because they can embed the token, the exchange URL and the
+response body.
+
+**V3 enforces the audience itself, at config time.** `resolveWorkerHandoffConfig` refuses any `vercel.com`-origin value
+(`worker_audience_is_vercel_default`, normalized for whitespace/case/port/trailing dot) and then requires exact equality
+with the pinned constant (`worker_audience_not_dedicated`). A defaulted deployment cannot build the runner, so it cannot
+even REQUEST the default. This is not an env-var promise: an adversarial review proved a planted default previously
+passed the entire suite, because `preflightOwnAssertion` compared the token's `aud` against that same configured value.
 
 ### 8.5 Sealing
 
@@ -469,7 +578,7 @@ Added by this PR as **parsing and validation only** (doc 24 §3f):
 | `OAUTH_COMPLETION_WORKER_OIDC_AUDIENCE` | the dedicated worker audience |
 | `OAUTH_COMPLETION_WORKER_PUBLIC_KEY` | base64 SPKI of the worker's X25519 public key |
 | `OAUTH_COMPLETION_WORKER_PUBLIC_KEY_ID` | `^[A-Za-z0-9_.:-]{1,128}$` |
-| `VERCEL_OIDC_TOKEN` | injected by Vercel; read from the environment only |
+| ~~`VERCEL_OIDC_TOKEN`~~ | **Not the Function path.** The Function reads the platform token from Vercel's request context via the approved module (§8.4). The env var remains an unconditional FALLBACK in that module when the context header is absent — not gated on build or dev, as this row previously implied. |
 
 `OAUTH_COMPLETER_DB_URL` is **removed from the V3 contract entirely** and its presence is now a refusal (§8.1).
 
@@ -506,7 +615,8 @@ so truthfully instead of guessing an ending. A refresh renders the durable state
 PR 4 owes, and only this:
 
 1. The worker endpoint at `/internal/oauth-completion/handoff`, calling `verifyHandoffRequest` from this repository with
-   a JWKS-backed verifier and a tightened `maxLifetime` (§8.4).
+   a JWKS-backed verifier. NOT a tightened `maxLifetime`: §8.4 RAISED that ceiling 3600 -> 7200 and holds `maxAge` at
+   the lifetime deliberately, pending the first observed `act.iat` (§8.4a).
 2. Opening the private half of the sealing key and decrypting the envelope (§8.5).
 3. `oauth_completer_enqueue_oauth_completion_job` → claim → Slack `oauth.v2.access` → workspace binding → 0080 secret
    ingest → consume the pending row → complete/fail, over `OAUTH_COMPLETER_DB_URL`, in the worker process.

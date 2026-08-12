@@ -146,6 +146,9 @@ that were supposed to be watching it.**
   and configuration parsing only. Gates: full suite (2407 passed / 22 skipped), typecheck, runner typecheck, lint,
   auth-safety, no-real-tokens, app-runtime-imports, deploy-templates, migration-safety, RLS suite, docs gate, build.
 
+  > **Superseded (Phase 8R).** One hour was the BUILD-token lifetime; production FUNCTION tokens live two hours, so
+  > 3600 would have refused every real callback. The contract is now 7200 in both repositories — doc 83 §8.4.
+
 ### feat(vault) — Phase 8J: migration 0081, the durable one-time OAuth completion job · 2026-08-02
 
 - The web tier cannot complete a Slack OAuth callback — doc 46 §11 and `check-app-runtime-imports.sh` keep the app repo

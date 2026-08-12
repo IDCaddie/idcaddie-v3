@@ -31,3 +31,9 @@ jobs:
         run: npm run runner:typecheck
       - name: Build
         run: npm run build
+      # The OAuth callback function must carry no forbidden runtime capability (doc 83 §2). This MUST run after the
+      # build and on a clean checkout: the previous version was a vitest `it.skipIf` on `.next` existing, `npm test`
+      # ran before the build, `/.next/` is gitignored — so every real assertion skipped silently on every PR while
+      # reporting green. The script treats a missing build as a FAILURE, never a skip.
+      - name: Callback bundle capability guard (post-build, fails if the build is absent)
+        run: npm run security:bundle:check

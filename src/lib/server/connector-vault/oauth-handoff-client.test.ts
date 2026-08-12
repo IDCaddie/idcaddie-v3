@@ -27,17 +27,41 @@ import {
   HANDOFF_TIMEOUT_MS,
   WORKER_ALLOWED_HOSTS,
   preflightOwnAssertion,
-  readVercelOidcAssertion,
+  acquireDedicatedAudienceAssertion,
+  HANDOFF_OIDC_AUDIENCE,
+  isVercelDefaultAudience,
   resolveWorkerHandoffConfig,
   submitHandoff,
 } from "./oauth-handoff-client";
 import { MIN_PROTECTED_PAYLOAD_BYTES } from "./oauth-handoff-protocol";
+import { EXCHANGE_MAX_RESPONSE_BYTES } from "./vercel-platform-oidc";
+import { withPlatform } from "./platform-context.testkit";
+
+/**
+ * TEST-ONLY shim. `acquireDedicatedAudienceAssertion` takes NO injectable dependencies — a review proved that the
+ * `ExchangeDeps` parameter it used to take handed the raw platform token to caller-supplied code and let a caller
+ * choose the assertion. The doubles are therefore installed on the REAL globals the runtime uses, which no production
+ * signature can reach, and the cases below keep their shape.
+ */
+const acquireWith = async (
+  audience: string,
+  d: { readContext?: () => { headers?: Record<string, string | undefined> }; fetchImpl?: unknown },
+  timeoutMs?: number,
+) => {
+  const restore = withPlatform(d.readContext?.().headers?.["x-vercel-oidc-token"], (d.fetchImpl ?? fetch) as never);
+  try {
+    return await acquireDedicatedAudienceAssertion(audience, timeoutMs);
+  } finally {
+    restore();
+  }
+};
 
 const spki = (key: KeyObject) => (key.export({ format: "der", type: "spki" }) as Buffer).toString("base64");
 const WORKER_KEY = spki(generateKeyPairSync("x25519").publicKey);
 const HOST = "oauth-completion-worker.internal.example";
 const ALLOWED = [HOST];
-const AUDIENCE = "https://idcaddie.example/oauth-completion-worker";
+// The audience fixture is now the REAL pinned constant, because `resolveWorkerHandoffConfig` accepts nothing else.
+const AUDIENCE = "https://idcaddie.com/oauth-completion-worker";
 
 const ENV: Record<string, string | undefined> = {
   OAUTH_COMPLETION_WORKER_URL: `https://${HOST}${HANDOFF_PATH}`,
@@ -126,26 +150,193 @@ const b64url = (s: string) => Buffer.from(s).toString("base64url");
 const assertionWith = (claims: Record<string, unknown>) =>
   `${b64url(JSON.stringify({ alg: "RS256", kid: "k" }))}.${b64url(JSON.stringify(claims))}.${b64url("signature-bytes")}`;
 const NOW_S = 1_800_000_000;
-const GOOD_CLAIMS = { aud: AUDIENCE, project_id: STAGING_VERCEL_PROJECT_ID, owner_id: STAGING_VERCEL_TEAM_ID, exp: NOW_S + 600 };
+// The full six-claim identity the worker pins authoritatively. The fixture carries all of it, so a test that drops one
+// fails rather than passing on a token the worker would reject.
+const GOOD_CLAIMS = {
+  aud: AUDIENCE,
+  iss: "https://oidc.vercel.com/idc-projects-f977cea1",
+  sub: "owner:idc-projects-f977cea1:project:idcaddie-v3:environment:production",
+  environment: "production",
+  project_id: STAGING_VERCEL_PROJECT_ID,
+  owner_id: STAGING_VERCEL_TEAM_ID,
+  exp: NOW_S + 600,
+};
 const ASSERTION = assertionWith(GOOD_CLAIMS);
 
-describe("the OIDC assertion source", () => {
-  it("reads the assertion from the ENVIRONMENT only", () => {
-    expect(readVercelOidcAssertion({ VERCEL_OIDC_TOKEN: ASSERTION })).toBe(ASSERTION);
-    expect(readVercelOidcAssertion({})).toBeNull();
-    expect(readVercelOidcAssertion({ VERCEL_OIDC_TOKEN: "" })).toBeNull();
+describe("the OIDC assertion source — request context in, exchanged token out", () => {
+  const PLATFORM = "platform.token.value";
+  const ctx = (token?: string) => () => ({ headers: token === undefined ? {} : { "x-vercel-oidc-token": token } });
+  const jsonRes = (body: unknown, init: { status?: number } = {}) =>
+    new Response(JSON.stringify(body), { status: init.status ?? 200, headers: { "content-type": "application/json" } });
+
+  it("exchanges the request-context token for the DEDICATED audience, and returns only the exchanged token", async () => {
+    const calls: { url: string; body: unknown; init: RequestInit }[] = [];
+    const r = await acquireWith(HANDOFF_OIDC_AUDIENCE, {
+      readContext: ctx(PLATFORM),
+      fetchImpl: (async (url: string, init: RequestInit) => {
+        calls.push({ url, body: JSON.parse(String(init.body)), init });
+        return jsonRes({ token: ASSERTION });
+      }) as unknown as typeof fetch,
+    });
+    expect(r).toEqual({ ok: true, token: ASSERTION });
+    expect(calls).toHaveLength(1);
+    expect(calls[0].url).toBe("https://oidc.vercel.com/~token");
+    expect(calls[0].body).toEqual({ token: PLATFORM, aud: "https://idcaddie.com/oauth-completion-worker" });
+    // Outbound disciplines: a 30x must not carry the bearer to another origin.
+    expect(calls[0].init.redirect).toBe("error");
+    expect(calls[0].init.cache).toBe("no-store");
+    expect(calls[0].init.signal).toBeDefined();
   });
 
-  // An inbound header is attacker-controlled and this value becomes an outbound Authorization header. The module must
-  // contain no path from a request to the assertion at all, so the property is asserted against the source.
-  it("has no path from a request header to the assertion", () => {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const src = (require("node:fs") as typeof import("node:fs")).readFileSync("src/lib/server/connector-vault/oauth-handoff-client.ts", "utf8");
-    const fn = src.slice(src.indexOf("export function readVercelOidcAssertion"), src.indexOf("preflightOwnAssertion"));
-    expect(fn).not.toMatch(/request|headers\.get|Request|x-vercel-oidc-token/);
-    expect(fn).toMatch(/env\.VERCEL_OIDC_TOKEN/);
+  it("NO request-context token and no env fallback => refuses without exchanging", async () => {
+    const prev = process.env.VERCEL_OIDC_TOKEN;
+    delete process.env.VERCEL_OIDC_TOKEN;
+    let called = 0;
+    const r = await acquireWith(HANDOFF_OIDC_AUDIENCE, {
+      readContext: ctx(undefined),
+      fetchImpl: (async () => { called++; return jsonRes({ token: ASSERTION }); }) as unknown as typeof fetch,
+    });
+    if (prev !== undefined) process.env.VERCEL_OIDC_TOKEN = prev;
+    expect(r).toEqual({ ok: false, reason: "handoff_assertion_missing" });
+    expect(called).toBe(0);
   });
 
+  it("a non-2xx exchange refuses, and the provider body never escapes", async () => {
+    const r = await acquireWith(HANDOFF_OIDC_AUDIENCE, {
+      readContext: ctx(PLATFORM),
+      fetchImpl: (async () => new Response(`denied ${PLATFORM}`, { status: 403 })) as unknown as typeof fetch,
+    });
+    expect(r).toEqual({ ok: false, reason: "handoff_assertion_exchange_failed" });
+    expect(JSON.stringify(r)).not.toContain(PLATFORM);
+  });
+
+  it("a REDIRECT fails closed — the bearer must not follow to another origin", async () => {
+    const r = await acquireWith(HANDOFF_OIDC_AUDIENCE, {
+      readContext: ctx(PLATFORM),
+      // `redirect: "error"` makes fetch itself reject; model that.
+      fetchImpl: (async () => { throw new TypeError("unexpected redirect"); }) as unknown as typeof fetch,
+    });
+    expect(r).toEqual({ ok: false, reason: "handoff_assertion_exchange_failed" });
+  });
+
+  it("a HANG fails closed on the abort ceiling", async () => {
+    const r = await acquireWith(HANDOFF_OIDC_AUDIENCE, {
+      readContext: ctx(PLATFORM),
+      fetchImpl: ((_u: string, init: RequestInit) => new Promise((_res, rej) => {
+        init.signal?.addEventListener("abort", () => rej(new DOMException("aborted", "AbortError")));
+      })) as unknown as typeof fetch,
+    });
+    expect(r).toEqual({ ok: false, reason: "handoff_assertion_exchange_timeout" });
+  }, 10_000);
+
+  it("malformed and OVERSIZED responses fail closed", async () => {
+    // Each case builds a FRESH Response inside fetchImpl. Reusing one via `clone()` deadlocks now that `readBounded`
+    // cancels the reader: the untouched tee branch buffers forever.
+    const bad: [string, () => Response][] = [
+      ["not JSON", () => new Response("<html>", { status: 200 })],
+      ["JSON without a token", () => new Response(JSON.stringify({ nope: 1 }), { status: 200 })],
+      ["token not a string", () => new Response(JSON.stringify({ token: 42 }), { status: 200 })],
+      ["empty token", () => new Response(JSON.stringify({ token: "" }), { status: 200 })],
+      ["declared length over the ceiling", () => new Response("{}", { status: 200, headers: { "content-length": String(64 * 1024) } })],
+      ["actual body over the ceiling", () => new Response(JSON.stringify({ token: "x".repeat(20 * 1024) }), { status: 200 })],
+      // The chunk boundary landing EXACTLY on the ceiling, where the prefix is COMPLETE, VALID JSON carrying a token.
+      // A truncated prefix would fail the parse and refuse either way — that version of this case was vacuous. This one
+      // is not: with a `>=` break the read stops holding exactly `limit` bytes, the caller's `> limit` size check cannot
+      // fire, and an over-ceiling response is accepted as a valid token. Only reading one byte PAST makes it observable.
+      ["over the ceiling, valid JSON ending exactly on it", () => {
+        const pad = "x".repeat(EXCHANGE_MAX_RESPONSE_BYTES - '{"token":"' .length - '"}'.length);
+        const exact = new TextEncoder().encode(`{"token":"${pad}"}`);
+        expect(exact.byteLength).toBe(EXCHANGE_MAX_RESPONSE_BYTES); // the boundary this case exists to sit on
+        return new Response(new ReadableStream<Uint8Array>({
+          start(c) { c.enqueue(exact); c.enqueue(new TextEncoder().encode("trailing")); c.close(); },
+        }), { status: 200 });
+      }],
+    ];
+    for (const [name, make] of bad) {
+      const r = await acquireWith(HANDOFF_OIDC_AUDIENCE, {
+        readContext: ctx(PLATFORM),
+        fetchImpl: (async () => make()) as unknown as typeof fetch,
+      });
+      expect(r.ok, name).toBe(false);
+    }
+  });
+
+  it("neither the platform token nor a thrown error reaches a result or a log", async () => {
+    const logs: string[] = [];
+    const spies = (["log","info","warn","error","debug"] as const).map((m) => vi.spyOn(console, m).mockImplementation((...a: unknown[]) => { logs.push(a.map(String).join(" ")); }));
+    const r = await acquireWith(HANDOFF_OIDC_AUDIENCE, {
+      readContext: ctx(PLATFORM),
+      fetchImpl: (async () => { throw new Error(`boom ${PLATFORM} https://oidc.vercel.com/~token`); }) as unknown as typeof fetch,
+    });
+    spies.forEach((x) => x.mockRestore());
+    const dump = JSON.stringify({ r, logs });
+    for (const secret of [PLATFORM, "boom", "~token"]) expect(dump).not.toContain(secret);
+  });
+
+  // DATAFLOW, not string prohibition: `acquireDedicatedAudienceAssertion(audience, timeoutMs?)` takes PRIMITIVES ONLY.
+  // There is no parameter through which a caller could supply an assertion, and the raw platform token is never
+  // returned — only the exchanged one.
+  //
+  // This comment used to describe "injection points for the context reader and fetch". Those existed, and they were
+  // the defect: a caller-supplied `fetchImpl` received the raw platform token in the request body and chose the
+  // returned assertion. `vercel-platform-oidc.dataflow.test.ts` now pins the parameter list to primitives, so the
+  // shape this comment describes cannot come back — but the comment described it as intended design.
+  it("offers no seam for a caller-supplied assertion", async () => {
+    const r = await acquireWith(HANDOFF_OIDC_AUDIENCE, {
+      readContext: ctx(PLATFORM),
+      fetchImpl: (async () => jsonRes({ token: ASSERTION })) as unknown as typeof fetch,
+    });
+    expect(r).toEqual({ ok: true, token: ASSERTION });
+    // The exchanged token is what comes out; the platform token is not reachable from the return value.
+    expect(JSON.stringify(r)).not.toContain(PLATFORM);
+  });
+});
+
+describe("the requesting side REFUSES a non-dedicated audience at config time", () => {
+  const cfg = (audience: string) => resolveWorkerHandoffConfig(withVal({ OAUTH_COMPLETION_WORKER_OIDC_AUDIENCE: audience }), ALLOWED);
+  const reasonOf = (audience: string) => { const r = cfg(audience); return r.ok ? "ACCEPTED" : r.reason; };
+
+  it("accepts ONLY the exact dedicated audience", () => {
+    expect(reasonOf("https://idcaddie.com/oauth-completion-worker")).toBe("ACCEPTED");
+  });
+
+  // A planted default must be impossible to configure — not merely to fail closed against the worker.
+  for (const a of [
+    "https://vercel.com/idc-projects-f977cea1",
+    "https://vercel.com/idc-projects-f977cea1/",
+    "  https://vercel.com/idc-projects-f977cea1  ",
+    "https://VERCEL.COM/idc-projects-f977cea1",
+    "HTTPS://vercel.com/idc-projects-f977cea1",
+    "https://vercel.com:443/idc-projects-f977cea1",
+    "https://vercel.com./idc-projects-f977cea1",
+    "https://vercel.com/some-other-team",
+  ]) {
+    it(`refuses the Vercel default spelled ${JSON.stringify(a)}`, () => {
+      expect(reasonOf(a)).toBe("worker_audience_is_vercel_default");
+    });
+  }
+
+  it("refuses any other audience as not-dedicated, with a distinct reason", () => {
+    for (const a of ["https://idcaddie.com/oauth-completion-worker/", "https://idcaddie.com/other", "https://example.test/x"]) {
+      expect(reasonOf(a)).toBe("worker_audience_not_dedicated");
+    }
+  });
+
+  it("still refuses an absent audience", () => {
+    expect(reasonOf("")).toBe("worker_audience_missing");
+  });
+
+  // The property that matters: a bad config cannot even REQUEST the default, because the runner is never built.
+  it("a defaulted config never reaches the exchange at all", async () => {
+    const r = cfg("https://vercel.com/idc-projects-f977cea1");
+    expect(r.ok).toBe(false);
+    // No config => no worker config => `makeHandoffCallbackRunner` is never constructed, so no getter is ever called.
+    expect(isVercelDefaultAudience("https://vercel.com/idc-projects-f977cea1")).toBe(true);
+    expect(isVercelDefaultAudience("https://idcaddie.com/oauth-completion-worker")).toBe(false);
+  });
+});
+
+describe("the OIDC assertion source — preflight", () => {
   it("refuses to send an assertion minted for a different audience, project or team", () => {
     const preflight = (t: string | null) => preflightOwnAssertion(t, { audience: AUDIENCE, nowSeconds: NOW_S });
     expect(preflight(ASSERTION)).toEqual({ ok: true });
@@ -159,10 +350,30 @@ describe("the OIDC assertion source", () => {
       .toEqual({ ok: false, reason: "handoff_assertion_project_mismatch" });
     expect(preflight(assertionWith({ ...GOOD_CLAIMS, owner_id: "team_SOMEOTHER" })))
       .toEqual({ ok: false, reason: "handoff_assertion_project_mismatch" });
+    // The three claims the preflight gained in Phase 8R. Each is the SAME value the worker verifies authoritatively;
+    // pinning them here means a token for the wrong issuer, project or channel is never PRESENTED.
+    expect(preflight(assertionWith({ ...GOOD_CLAIMS, iss: "https://oidc.vercel.com/some-other-team" })))
+      .toEqual({ ok: false, reason: "handoff_assertion_issuer_mismatch" });
+    expect(preflight(assertionWith({ ...GOOD_CLAIMS, iss: "https://evil.test/idc-projects-f977cea1" })))
+      .toEqual({ ok: false, reason: "handoff_assertion_issuer_mismatch" });
+    expect(preflight(assertionWith({ ...GOOD_CLAIMS, sub: "owner:idc-projects-f977cea1:project:idcaddie-v3:environment:preview" })))
+      .toEqual({ ok: false, reason: "handoff_assertion_subject_mismatch" });
+    expect(preflight(assertionWith({ ...GOOD_CLAIMS, sub: "owner:other:project:idcaddie-v3:environment:production" })))
+      .toEqual({ ok: false, reason: "handoff_assertion_subject_mismatch" });
+    expect(preflight(assertionWith({ ...GOOD_CLAIMS, environment: "preview" })))
+      .toEqual({ ok: false, reason: "handoff_assertion_environment_mismatch" });
+    for (const missing of ["iss", "sub", "environment"] as const) {
+      const claims: Record<string, unknown> = { ...GOOD_CLAIMS };
+      delete claims[missing];
+      expect(preflight(assertionWith(claims)).ok, `missing ${missing}`).toBe(false);
+    }
     expect(preflight(assertionWith({ ...GOOD_CLAIMS, exp: NOW_S - 1 })))
       .toEqual({ ok: false, reason: "handoff_assertion_expired" });
-    expect(preflight(assertionWith({ aud: AUDIENCE, project_id: STAGING_VERCEL_PROJECT_ID, owner_id: STAGING_VERCEL_TEAM_ID })))
-      .toEqual({ ok: false, reason: "handoff_assertion_expired" });
+    // A token with NO `exp` reads as expired. Built from the full identity so it fails on the missing expiry rather
+    // than tripping one of the six claim pins first — the intent is the expiry rule, not the claim set.
+    const noExp: Record<string, unknown> = { ...GOOD_CLAIMS };
+    delete noExp.exp;
+    expect(preflight(assertionWith(noExp))).toEqual({ ok: false, reason: "handoff_assertion_expired" });
   });
 
   // A payload that is not a claims OBJECT must refuse, not throw. `JSON.parse("null")` returns null, and dereferencing
@@ -328,5 +539,123 @@ describe("submitting the handoff", () => {
     expect(s).not.toContain(REQUEST.protectedPayload);
     expect(s).not.toContain("detail");
     expect(Object.keys(r).sort()).toEqual(["ok", "reason"]);
+  });
+});
+
+// ── The aud-array mutation survivor, and the bounded read (closing review round 4) ───────────────────────────────────
+describe("preflight: aud must name EXACTLY one audience", () => {
+  const pre = (aud: unknown) => preflightOwnAssertion(assertionWith({ ...GOOD_CLAIMS, aud }), { audience: AUDIENCE, nowSeconds: NOW_S });
+  const MISMATCH = { ok: false, reason: "handoff_assertion_audience_mismatch" } as const;
+
+  it("accepts the exact string and the single-element array form", () => {
+    expect(pre(AUDIENCE)).toEqual({ ok: true });
+    expect(pre([AUDIENCE])).toEqual({ ok: true });
+  });
+
+  // The survivor: a mutation to `.includes(expected.audience)` passed every test. These pin it.
+  it("REFUSES a multi-audience array, even when ours is in it", () => {
+    expect(pre([AUDIENCE, "https://vercel.com/idc-projects-f977cea1"])).toEqual(MISMATCH);
+    expect(pre(["https://vercel.com/idc-projects-f977cea1", AUDIENCE])).toEqual(MISMATCH);
+    expect(pre([AUDIENCE, "https://example.test/other"])).toEqual(MISMATCH);
+    expect(pre([AUDIENCE, AUDIENCE])).toEqual(MISMATCH); // duplicated is still multi-audience
+    expect(pre([AUDIENCE, "https://idcaddie.com/oauth-completion-worker/"])).toEqual(MISMATCH);
+  });
+
+  it("REFUSES every other aud shape", () => {
+    for (const bad of [[], [42], [null], [{ a: 1 }], 42, null, undefined, {}, "https://vercel.com/idc-projects-f977cea1"]) {
+      expect(pre(bad), JSON.stringify(bad)).toEqual(MISMATCH);
+    }
+  });
+});
+
+describe("the exchange body ceiling is enforced on the STREAM, not after buffering", () => {
+  const PLATFORM = "platform.token.value";
+  const ctx = () => ({ headers: { "x-vercel-oidc-token": PLATFORM } });
+
+  it("stops reading near the ceiling and does NOT consume an oversized stream with no Content-Length", async () => {
+    let pulled = 0;
+    const CHUNKS = 300;
+    const stream = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (pulled >= CHUNKS) return controller.close();
+        pulled++;
+        controller.enqueue(new Uint8Array(64 * 1024)); // 64 KiB each; ceiling is 16 KiB
+      },
+    });
+    const r = await acquireWith(HANDOFF_OIDC_AUDIENCE, {
+      readContext: ctx,
+      // No content-length at all — the pre-check cannot help, so only the streaming cap can.
+      fetchImpl: (async () => new Response(stream, { status: 200 })) as unknown as typeof fetch,
+    });
+    expect(r).toEqual({ ok: false, reason: "handoff_assertion_exchange_failed" });
+    // The whole point: it refused WITHOUT draining the body. `response.text()` pulled all 300.
+    expect(pulled).toBeLessThan(10);
+  });
+
+  it("a declared length over the ceiling is refused without reading a byte", async () => {
+    let read = 0;
+    const stream = new ReadableStream<Uint8Array>({ pull(c) { read++; c.enqueue(new Uint8Array(8)); c.close(); } });
+    const r = await acquireWith(HANDOFF_OIDC_AUDIENCE, {
+      readContext: ctx,
+      fetchImpl: (async () => new Response(stream, { status: 200, headers: { "content-length": String(1024 * 1024) } })) as unknown as typeof fetch,
+    });
+    expect(r.ok).toBe(false);
+    // A ReadableStream calls `pull` once eagerly on construction, so "did not read" means "did not drain", not zero.
+    expect(read).toBeLessThanOrEqual(1);
+  });
+
+  it("malformed JSON within the ceiling refuses; correct bounded JSON succeeds", async () => {
+    const res = (b: string) => (async () => new Response(b, { status: 200 })) as unknown as typeof fetch;
+    expect(await acquireWith(HANDOFF_OIDC_AUDIENCE, { readContext: ctx, fetchImpl: res("<html>") }))
+      .toEqual({ ok: false, reason: "handoff_assertion_exchange_failed" });
+    expect(await acquireWith(HANDOFF_OIDC_AUDIENCE, { readContext: ctx, fetchImpl: res(JSON.stringify({ token: ASSERTION })) }))
+      .toEqual({ ok: true, token: ASSERTION });
+  });
+});
+
+// ── Blocker 1: ONE deadline across fetch, headers, body read and parse ───────────────────────────────────────────────
+describe("the exchange deadline covers the whole exchange, not just the fetch", () => {
+  const PLATFORM = "platform.token.value";
+  const ctx = () => ({ headers: { "x-vercel-oidc-token": PLATFORM } });
+
+  // The regression: headers arrive INSTANTLY, then the body stalls. The old code cleared the timer when the fetch
+  // resolved, so this hung for as long as the platform allowed — measured at 9s against a 3000ms ceiling.
+  it("headers immediately, then a stalled body → bounded timeout reason, in about the ceiling", async () => {
+    const started = Date.now();
+    const stream = new ReadableStream<Uint8Array>({
+      start(c) { c.enqueue(new TextEncoder().encode('{"tok')); },   // a few bytes, then nothing, ever
+      pull() { return new Promise<void>(() => {}); },
+    });
+    const r = await acquireWith(HANDOFF_OIDC_AUDIENCE, {
+      readContext: ctx,
+      fetchImpl: (async () => new Response(stream, { status: 200 })) as unknown as typeof fetch,
+    }, 250);
+    const elapsed = Date.now() - started;
+    expect(r).toEqual({ ok: false, reason: "handoff_assertion_exchange_timeout" });
+    expect(elapsed).toBeLessThan(3000);       // bounded by the deadline, not by the platform
+    expect(JSON.stringify(r)).not.toContain(PLATFORM);
+  }, 10_000);
+
+  it("an oversized stream still stops near the byte ceiling rather than draining", async () => {
+    let pulled = 0;
+    const stream = new ReadableStream<Uint8Array>({
+      pull(c) { pulled++; c.enqueue(new Uint8Array(64 * 1024)); },
+    });
+    const r = await acquireWith(HANDOFF_OIDC_AUDIENCE, {
+      readContext: ctx,
+      fetchImpl: (async () => new Response(stream, { status: 200 })) as unknown as typeof fetch,
+    });
+    expect(r.ok).toBe(false);
+    expect(pulled).toBeLessThan(10);
+  }, 10_000);
+
+  it("a fast, correct exchange is unaffected and does not wait for the deadline", async () => {
+    const started = Date.now();
+    const r = await acquireWith(HANDOFF_OIDC_AUDIENCE, {
+      readContext: ctx,
+      fetchImpl: (async () => new Response(JSON.stringify({ token: ASSERTION }), { status: 200 })) as unknown as typeof fetch,
+    }, 5000);
+    expect(r).toEqual({ ok: true, token: ASSERTION });
+    expect(Date.now() - started).toBeLessThan(1000);
   });
 });

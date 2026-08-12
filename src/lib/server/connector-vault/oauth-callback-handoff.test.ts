@@ -4,9 +4,10 @@
 // state binding, the seal, the assertion — is upstream of that one sentence, and every assertion below either proves a
 // refusal happens or proves nothing was claimed that had not happened.
 
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { generateKeyPairSync, type KeyObject } from "node:crypto";
 import { createHmacStateSigner, createOAuthState, type OAuthStateContext } from "./oauth-state";
+import { withPlatform } from "./platform-context.testkit";
 import { parseWorkerSealKey } from "./oauth-payload-seal";
 import { HANDOFF_PROTOCOL_VERSION, HANDOFF_REDIRECT_URI, canonicalHandoffBody, handoffRequestSchema } from "./oauth-handoff-protocol";
 import {
@@ -31,11 +32,43 @@ const TEAM = "T0ABCDEF123";
 const AUDIENCE = "https://idcaddie.example/oauth-completion-worker";
 const CODE = "1234567890123.9876543210987.abcdef0123456789abcdef0123456789abcdef01";
 
+// The runner neither accepts nor injects an assertion — it CONSTRUCTS one, through a path with no parameters.
+//
+// This comment previously claimed the `exchange` dependency "cannot carry a token of the caller's choosing". That was
+// false: `exchange.fetchImpl` returned the `Response` whose `token` field became the assertion, so it chose the bearer
+// outright, and it also received the raw platform token in the request body. The dependency is gone; the doubles now
+// go on the REAL platform globals, which no production signature reaches.
+const platformYielding = (token: string | null) =>
+  withPlatform(
+    token === null ? undefined : "platform",
+    (async () => new Response(JSON.stringify({ token }), { status: 200 })) as never,
+  );
+
+/** Run `fn` with the exchange yielding `token`, restoring the previous globals afterwards. */
+const withExchange = async <T>(token: string | null, fn: () => Promise<T>): Promise<T> => {
+  const restore = platformYielding(token);
+  try {
+    return await fn();
+  } finally {
+    restore();
+  }
+};
+
+let restorePlatform: (() => void) | null = null;
+beforeEach(() => { restorePlatform = platformYielding(assertion()); });
+afterEach(() => { restorePlatform?.(); restorePlatform = null; });
+
 const signer = createHmacStateSigner("state-secret-not-real", "k1");
 const b64url = (s: string) => Buffer.from(s).toString("base64url");
 const assertion = (over: Record<string, unknown> = {}) =>
   `${b64url(JSON.stringify({ alg: "RS256", kid: "k" }))}.${b64url(JSON.stringify({
-    aud: AUDIENCE, project_id: STAGING_VERCEL_PROJECT_ID, owner_id: STAGING_VERCEL_TEAM_ID, exp: Math.floor(NOW / 1000) + 600, ...over,
+    // The full six-claim identity the preflight pins (Phase 8R). Incomplete claims would fail the preflight here for
+    // the wrong reason and mask whatever the test is actually about.
+    aud: AUDIENCE,
+    iss: "https://oidc.vercel.com/idc-projects-f977cea1",
+    sub: "owner:idc-projects-f977cea1:project:idcaddie-v3:environment:production",
+    environment: "production",
+    project_id: STAGING_VERCEL_PROJECT_ID, owner_id: STAGING_VERCEL_TEAM_ID, exp: Math.floor(NOW / 1000) + 600, ...over,
   }))}.${b64url("signature-bytes")}`;
 
 const stateContext = (over: Partial<OAuthStateContext> = {}): OAuthStateContext => ({
@@ -58,7 +91,6 @@ function deps(over: Partial<HandoffCallbackDeps> = {}): HandoffCallbackDeps {
     signer,
     expected: { tenantId: TENANT, connectorId: CONNECTOR, correlationId: CORR, expectedTeamId: TEAM, redirectUri: HANDOFF_REDIRECT_URI },
     config: { endpoint: "https://worker.internal.example/internal/oauth-completion/handoff", audience: AUDIENCE, workerKey },
-    readAssertion: () => assertion(),
     fetchImpl: accepted,
     now: () => NOW,
     ...over,
@@ -143,18 +175,19 @@ describe("the handoff callback runner", () => {
 
   it("refuses without an OIDC assertion, and hands nothing off", async () => {
     const fetchImpl = vi.fn(accepted);
-    const r = await makeHandoffCallbackRunner(deps({ readAssertion: () => null, fetchImpl }))({ state: validState(), code: CODE, subject: SUBJECT });
+    const r = await withExchange(null, () =>
+      makeHandoffCallbackRunner(deps({ fetchImpl }))({ state: validState(), code: CODE, subject: SUBJECT }));
     expect(r).toEqual({ ok: false, reason: "handoff_assertion_missing" });
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
   it("refuses an assertion for the wrong audience or project, and hands nothing off", async () => {
     const fetchImpl = vi.fn(accepted);
-    expect(await makeHandoffCallbackRunner(deps({ readAssertion: () => assertion({ aud: "https://vercel.com/idcaddie" }), fetchImpl }))(
-      { state: validState(), code: CODE, subject: SUBJECT },
+    expect(await withExchange(assertion({ aud: "https://vercel.com/idcaddie" }), () =>
+      makeHandoffCallbackRunner(deps({ fetchImpl }))({ state: validState(), code: CODE, subject: SUBJECT }),
     )).toEqual({ ok: false, reason: "handoff_assertion_audience_mismatch" });
-    expect(await makeHandoffCallbackRunner(deps({ readAssertion: () => assertion({ project_id: "prj_OTHER" }), fetchImpl }))(
-      { state: validState(), code: CODE, subject: SUBJECT },
+    expect(await withExchange(assertion({ project_id: "prj_OTHER" }), () =>
+      makeHandoffCallbackRunner(deps({ fetchImpl }))({ state: validState(), code: CODE, subject: SUBJECT }),
     )).toEqual({ ok: false, reason: "handoff_assertion_project_mismatch" });
     expect(fetchImpl).not.toHaveBeenCalled();
   });

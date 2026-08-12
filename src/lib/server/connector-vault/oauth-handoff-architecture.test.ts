@@ -119,6 +119,29 @@ export const RULES: Rule[] = [
       || /\{[^}]*\bOAUTH_COMPLETER_DB_URL\b[^}]*\}\s*=\s*(?:process\.)?env/.test(code),
   },
   {
+    // TRUST RULE (doc 83 §8.4). The platform token is read from Vercel's request context by ONE approved module
+    // (`vercel-platform-oidc.ts`) — there is no `@vercel/oidc` dependency. What no file may do is read
+    // `x-vercel-oidc-token` off a request ITSELF, because a value pulled out of a request is a value a caller can
+    // shape, and it becomes an outbound `Authorization`. The authoritative control is the closure-rooted
+    // `vercel-platform-oidc.dataflow.test.ts`; this rule is a cheap second net, not the boundary.
+    label: "x-vercel-oidc-token read from a request by application code",
+    applies: everywhere,
+    violates: (code) => {
+      const live = stripComments(code);
+      if (!/x-vercel-oidc-token/i.test(live)) return false;
+      // Naming it in a REFUSAL (a denylist of headers we strip) is fine; reading it is not.
+      return /headers\s*(?:\.get\s*\(|\[)\s*['"`]x-vercel-oidc-token/i.test(live)
+        || /req(?:uest)?\s*\.\s*headers[^;]{0,80}x-vercel-oidc-token/i.test(live);
+    },
+  },
+  {
+    // The handoff's Authorization must be the assertion the approved module returned — never a value threaded in from a
+    // request. `submitHandoff` takes `assertion` from the runner, which takes it from `acquireDedicatedAudienceAssertion`.
+    label: "an inbound Authorization header forwarded to the worker",
+    applies: onCompletionPath,
+    violates: (code) => /Authorization[^\n]{0,60}(?:req(?:uest)?\.headers|headers\.get)/i.test(stripComments(code)),
+  },
+  {
     label: "the connector_runner credential referenced under src/",
     applies: (f) => !f.rel.endsWith("staging-environment-identity.ts"),
     // The gate declares the role name so it can refuse it; nowhere else may mention it at all.
@@ -211,6 +234,9 @@ describe("every rule actually fires", () => {
     ["a direct completion-job database write from V3", { rel: "lib/anything.ts", source: `await rpc("oauth_completer_enqueue_oauth_completion_job", {});` }],
     ["a direct completion-job database write from V3", { rel: "lib/anything.ts", source: `await supabase.from("oauth_completion_jobs").select("*");` }],
     ["the OAuth completion path consuming the pending row itself", { rel: onPath, source: `await rpc("runner_consume_oauth_pending", {});` }],
+    ["x-vercel-oidc-token read from a request by application code", { rel: "lib/anything.ts", source: `const t = request.headers.get("x-vercel-oidc-token");` }],
+    ["x-vercel-oidc-token read from a request by application code", { rel: "lib/anything.ts", source: `const t = req.headers["x-vercel-oidc-token"];` }],
+    ["an inbound Authorization header forwarded to the worker", { rel: onPath, source: `const h = { Authorization: request.headers.get("authorization") };` }],
   ];
 
   it.each(plants)("%s fires on a planted violation", (label, file) => {
