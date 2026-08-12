@@ -31,7 +31,9 @@ function walkFiles(dir: string, acc: string[] = []): string[] {
     // `.testkit.ts` files are test-only fixtures — they install doubles on the real platform globals, which is the
     // only place doubles can now live. They are excluded here and their exclusion is not a loophole: a separate
     // assertion below proves no production module imports one, so nothing in a shipped path can reach them.
-    else if (/\.tsx?$/.test(n) && !/\.test\.tsx?$/.test(n) && !/\.testkit\.tsx?$/.test(n)) acc.push(p);
+    // `allowJs` is on and Next resolves `.js`/`.jsx`/`.mjs`/`.cjs`. Sweeping only `.tsx?` left a whole file extension
+    // uninspected, and a review put a `globalThis.fetch` patch in a `.js` module that neither scanner could see.
+    else if (/\.(tsx?|jsx?|mjs|cjs)$/.test(n) && !/\.test\.(tsx?|jsx?)$/.test(n) && !/\.testkit\.(tsx?|jsx?)$/.test(n)) acc.push(p);
   }
   return acc;
 }
@@ -46,6 +48,16 @@ const parse = (src: string) => ts.createSourceFile("f.ts", src, ts.ScriptTarget.
  */
 function importDeclarations(sf: ts.SourceFile): { module: string; typeOnly: boolean }[] {
   const out: { module: string; typeOnly: boolean }[] = [];
+  // `await import("./vercel-platform-oidc")` is a VALUE edge and was invisible here, because this read only top-level
+  // statements. A review used it to obtain the exchange and mint a token for any audience it liked.
+  const dynamic = (n: ts.Node): void => {
+    if (ts.isCallExpression(n) && n.expression.kind === ts.SyntaxKind.ImportKeyword
+      && n.arguments[0] && ts.isStringLiteral(n.arguments[0])) {
+      out.push({ module: (n.arguments[0] as ts.StringLiteral).text, typeOnly: false });
+    }
+    ts.forEachChild(n, dynamic);
+  };
+  dynamic(sf);
   for (const s of sf.statements) {
     // RE-EXPORTS COUNT. `export * from "./vercel-platform-oidc"` in a barrel, then importing the barrel, gave a review
     // a second consumer able to mint a token for ANY audience — invisible because this walked only ImportDeclaration.
@@ -157,6 +169,17 @@ describe("the header trust boundary, over the AST", () => {
         && /vercel-platform-oidc$/.test(s.moduleSpecifier.text)))
       .map((f) => f.rel);
     expect(barrels).toEqual([]);
+  });
+
+  // `acquireDedicatedAudienceAssertion` re-offers the approved module's capability for an arbitrary audience, so its
+  // importers are restricted exactly as the approved module's are. A review added a second consumer through it while
+  // every rule here passed, because nothing said who may call the CLIENT.
+  it("only the callback runner consumes the assertion acquisition", () => {
+    const consumers = files
+      .filter((f) => f.rel !== "lib/server/connector-vault/oauth-handoff-client.ts")
+      .filter((f) => /\bacquireDedicatedAudienceAssertion\b/.test(f.src))
+      .map((f) => f.rel);
+    expect(consumers).toEqual(["lib/server/connector-vault/oauth-callback-handoff.ts"]);
   });
 
   it("only the handoff client consumes the approved module at runtime", () => {

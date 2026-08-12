@@ -27,6 +27,8 @@ const APPROVED = resolve(HERE, "vercel-platform-oidc.ts");
 const parse = (src: string) => ts.createSourceFile("f.ts", src, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 
 /** Relative-import closure from an entry file: every first-party module the route can actually reach. */
+/** Every extension Next's resolver will load. Narrower than this and the closure is a fiction. */
+const RESOLVES_AS = [".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"];
 const unresolvable: string[] = [];
 function importClosure(entry: string): string[] {
   const seen = new Set<string>();
@@ -54,7 +56,13 @@ function importClosure(entry: string): string[] {
         const base = spec.startsWith(".") ? resolve(dirname(f), spec) : spec.startsWith("@/") ? join(process.cwd(), "src", spec.slice(2)) : null;
         // `index.tsx` was missing from this list, and a review put a module holding the crudest possible violation
         // behind exactly that filename. Every extension Next resolves must be probed or the closure is a fiction.
-        if (base) for (const c of [`${base}.ts`, `${base}.tsx`, join(base, "index.ts"), join(base, "index.tsx")]) if (existsSync(c) && !seen.has(c)) queue.push(c);
+        // EVERY extension the RUNTIME resolver accepts, not just the ones we happen to write. `allowJs` is on in
+        // tsconfig and Next resolves `.js`/`.jsx`/`.mjs`/`.cjs`, so a `.js` module was in the real closure and invisible
+        // to this walk — a review used exactly that to patch `globalThis.fetch` inside the callback process while this
+        // test still reported the reviewed 24. A resolver that is narrower than the runtime's is not a boundary.
+        if (base) for (const c of RESOLVES_AS.map((e) => `${base}${e}`).concat(RESOLVES_AS.map((e) => join(base, `index${e}`)))) {
+          if (existsSync(c) && !seen.has(c)) queue.push(c);
+        }
       }
       ts.forEachChild(n, visit);
     };
@@ -335,19 +343,41 @@ describe("platform-token dataflow, rooted at the real callback route closure", (
   // capability was in an ARGUMENT, so watching returns and call sites could not see it.
   //
   // Pinning the parameter list is what closes that: a dependency cannot be injected into a function that takes none.
+  // ALL declarations of the name, not the last one seen. The first version assigned on every match while walking the
+  // whole AST, so a trailing `function __shape() { function exchangeForDedicatedAudience(audience: string, timeoutMs:
+  // number) {} }` shadowed the real signature and a review restored a live injectable behind it. Ambiguity is itself
+  // the finding: if a name is declared more than once in these files, the guard cannot know which one ships.
   const paramsOf = (rel: string, fn: string): string[] => {
     const sf = parse(readFileSync(join(HERE, rel), "utf8"));
-    let found: string[] | null = null;
+    const found: string[][] = [];
     const visit = (n: ts.Node): void => {
       if (ts.isFunctionDeclaration(n) && n.name?.text === fn) {
-        found = n.parameters.map((prm) => `${(prm.name as ts.Identifier).text}: ${prm.type ? prm.type.getText() : "?"}`);
+        found.push(n.parameters.map((prm) => `${(prm.name as ts.Identifier).text}: ${prm.type ? prm.type.getText() : "?"}`));
       }
       ts.forEachChild(n, visit);
     };
     visit(sf);
-    if (found === null) throw new Error(`${fn} not found in ${rel} — the guard has lost its subject`);
-    return found;
+    expect(found.length, `${fn} in ${rel}: expected exactly one declaration, found ${found.length}`).toBe(1);
+    return found[0];
   };
+
+  // A review added `export function installExchangeTransport(f)` — a module-level mutable transport, zero change to
+  // either pinned signature — and every guard stayed green. Pinning signatures is not enough; the SURFACE is pinned.
+  it("the approved module exports exactly the reviewed surface", () => {
+    const sf = parse(readFileSync(APPROVED, "utf8"));
+    const exported: string[] = [];
+    for (const st of sf.statements) {
+      const mods = ts.canHaveModifiers(st) ? (ts.getModifiers(st) ?? []) : [];
+      if (!mods.some((m) => m.kind === ts.SyntaxKind.ExportKeyword)) continue;
+      if (ts.isFunctionDeclaration(st) && st.name) exported.push(st.name.text);
+      else if (ts.isTypeAliasDeclaration(st)) exported.push(st.name.text);
+      else if (ts.isVariableStatement(st)) for (const d of st.declarationList.declarations) exported.push((d.name as ts.Identifier).text);
+    }
+    expect(exported.sort()).toEqual([
+      "EXCHANGE_MAX_RESPONSE_BYTES", "EXCHANGE_TIMEOUT_MS", "ExchangeResult", "VERCEL_TOKEN_EXCHANGE_URL",
+      "exchangeForDedicatedAudience",
+    ]);
+  });
 
   it("the exchange takes an audience and a timeout, and nothing else", () => {
     expect(paramsOf("vercel-platform-oidc.ts", "exchangeForDedicatedAudience"))
@@ -373,15 +403,18 @@ describe("platform-token dataflow, rooted at the real callback route closure", (
   //     name — fails here, which is what `readAssertion` and then `exchange` each needed and did not have.
   it("HandoffCallbackDeps exposes exactly the reviewed fields", () => {
     const sf = parse(readFileSync(join(HERE, "oauth-callback-handoff.ts"), "utf8"));
-    let members: string[] | null = null;
+    // Same decoy defeat as `paramsOf`: a trailing `namespace __pin { export type HandoffCallbackDeps = {…} }` hid an
+    // added `transport?: HandoffFetch` from the version that kept the last match.
+    const all: string[][] = [];
     const visit = (n: ts.Node): void => {
       if (ts.isTypeAliasDeclaration(n) && n.name.text === "HandoffCallbackDeps" && ts.isTypeLiteralNode(n.type)) {
-        members = n.type.members.map((m) => (m.name as ts.Identifier)?.text).filter(Boolean).sort();
+        all.push(n.type.members.map((m) => (m.name as ts.Identifier)?.text).filter(Boolean).sort());
       }
       ts.forEachChild(n, visit);
     };
     visit(sf);
-    expect(members, "HandoffCallbackDeps not found — the guard has lost its subject").not.toBeNull();
+    expect(all.length, `HandoffCallbackDeps: expected exactly one declaration, found ${all.length}`).toBe(1);
+    const members = all[0];
     // `fetchImpl` carries the SEALED payload to the worker; it cannot influence the assertion. Everything else is
     // configuration or a clock. No member may supply, exchange for, or observe the platform token.
     expect(members).toEqual(["config", "expected", "fetchImpl", "now", "signer"]);

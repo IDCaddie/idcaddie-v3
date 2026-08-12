@@ -26,6 +26,20 @@
 // tests drive the REAL globals (`Symbol.for("@vercel/request-context")`, `vi.stubGlobal("fetch")`) exactly as the
 // runtime does — a test double installed on the global cannot be reached through a production signature.
 //
+// ── WHAT THIS DOES AND DOES NOT DEFEND ───────────────────────────────────────────────────────────────────────────────
+// It defends the API SURFACE: no caller, however it is written, can obtain the raw token or choose the assertion by
+// calling into this module. That is checkable and it is checked.
+//
+// It does NOT defend against code already executing in this process. Using the global `fetch` means any module that
+// loads first can replace it and intercept the exchange — a review demonstrated exactly that from a `.js` module, and
+// capturing a reference at module load would not help, since the patch can load earlier. Nothing at this layer can fix
+// that, because a module running in the function can read `process.env` and the request context directly anyway.
+//
+// The control for that threat is therefore not a signature but MEMBERSHIP: `vercel-platform-oidc.dataflow.test.ts`
+// pins the callback route's entire import closure by name, across every extension the runtime resolves. A new module
+// fails that test whatever it contains. The boundary is "no unreviewed module runs in the callback", not "hostile code
+// in the callback cannot reach the token" — the second is not achievable and is not claimed.
+//
 // The platform value is INFRASTRUCTURE METADATA supplied by the runtime, not application input. Vercel documents
 // `x-vercel-oidc-token` on the function's request context as the delivery mechanism; we read it only through that
 // context object, never off a `Request` we were handed.

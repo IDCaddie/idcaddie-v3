@@ -30,14 +30,27 @@ const problems = [];
 const fail = (m) => problems.push(m);
 
 // ── Forbidden capability. `packages` match a node_modules path segment; `symbols` match emitted chunk text. ──────────
+// Node builtins are reached by MANY spellings, and anchoring on `require(` caught one of them. A review used
+// `process.getBuiltinModule("child_process")` — a first-class Node API needing no require, no import, no bundler edge —
+// and the guard printed OK while `execSync` sat in a chunk it had already walked. So builtins are matched by the module
+// NAME wherever it appears next to any loader spelling, and the loader list includes the ones that need no bundling.
+const BUILTIN_LOADERS = String.raw`(?:require|getBuiltinModule|createRequire\([^)]*\)|import|__webpack_require__|[a-zA-Z_$][\w$]*)`;
+const builtinSymbols = (mod) => [
+  new RegExp(String.raw`${BUILTIN_LOADERS}\(\s*["'](?:node:)?${mod}["']`),
+  new RegExp(String.raw`["'](?:node:)?${mod}["']\s*\)`),   // the bare specifier in any call position
+];
+
 const FORBIDDEN = [
   { name: "pg / postgres", packages: [/(^|\/)pg($|\/)/, /(^|\/)pg-[a-z0-9-]+($|\/)/, /(^|\/)postgres($|\/)/], symbols: [/pg-connection-string/, /node-postgres/] },
-  { name: "child_process", packages: [], symbols: [/require\(\s*["']child_process["']\s*\)/, /require\(\s*["']node:child_process["']\s*\)/, /x\(\s*["']child_process["']/] },
+  { name: "child_process", packages: [/(^|\/)child_process($|\/)/], symbols: [...builtinSymbols("child_process"), /\bexecSync\b/, /\bspawnSync\b/] },
+  // `node:net` was absent from this table entirely: a review reached it from the callback and NOTHING fired, in a chunk
+  // the walk had already opened. A raw socket in the public callback path is exactly what doc 83 §2 forbids.
+  { name: "node:net / tls / dgram", packages: [], symbols: [...builtinSymbols("net"), ...builtinSymbols("tls"), ...builtinSymbols("dgram")] },
   { name: "execa", packages: [/(^|\/)execa($|\/)/], symbols: [/VERCEL_CLI_EXEC_FAILED/] },
   { name: "@vercel/cli-exec", packages: [/@vercel\/cli-exec/], symbols: [/Vercel CLI command/] },
   { name: "@vercel/cli-config", packages: [/@vercel\/cli-config/], symbols: [/cred-storage/] },
   { name: "cross-spawn", packages: [/(^|\/)cross-spawn($|\/)/], symbols: [] },
-  { name: "keytar / keyring", packages: [/(^|\/)keytar($|\/)/, /(^|\/)node-keyring($|\/)/], symbols: [/require\(\s*["']keytar["']\s*\)/] },
+  { name: "keytar / keyring", packages: [/(^|\/)keytar($|\/)/, /(^|\/)node-keyring($|\/)/], symbols: [...builtinSymbols("keytar")] },
   { name: "AWS KMS client", packages: [/@aws-sdk\/client-kms/], symbols: [/GenerateDataKeyCommand/, /DecryptCommand/] },
 ];
 
