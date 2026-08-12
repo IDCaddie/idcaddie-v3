@@ -70,55 +70,66 @@ export type ExchangeDeps = { fetchImpl?: typeof fetch; readContext?: PlatformCon
  * cannot carry the bearer to another origin, `cache: "no-store"`, an `AbortController` ceiling, a bounded read, and a
  * bounded parse. The provider's error body is DISCARDED rather than surfaced — it can echo the token we just sent.
  */
-export async function exchangeForDedicatedAudience(audience: string, deps: ExchangeDeps = {}): Promise<ExchangeResult> {
+export async function exchangeForDedicatedAudience(audience: string, deps: ExchangeDeps = {}, timeoutMs: number = EXCHANGE_TIMEOUT_MS): Promise<ExchangeResult> {
   const doFetch = deps.fetchImpl ?? fetch;
   const platformToken = readPlatformToken(deps.readContext ?? defaultContextReader);
   if (platformToken === null) return { ok: false, reason: "platform_token_missing" };
 
+  // ONE DEADLINE COVERS THE WHOLE EXCHANGE — fetch, headers, the streamed body read, and the parse.
+  //
+  // It used to be cleared in a `finally` around the fetch alone, which disarmed it the moment HEADERS arrived. A server
+  // that answered instantly and then trickled the body held this browser-blocking callback open indefinitely: measured
+  // at 9s against a 3000ms ceiling, and it would have run to the platform function timeout. `readBounded` bounds SIZE;
+  // only a live signal bounds TIME, and the two are different hazards.
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), EXCHANGE_TIMEOUT_MS);
-  let response: Response;
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const timedOut = () => controller.signal.aborted;
   try {
-    response = await doFetch(VERCEL_TOKEN_EXCHANGE_URL, {
-      method: "POST",
-      headers: { "content-type": "application/json", accept: "application/json" },
-      body: JSON.stringify({ token: platformToken, aud: audience }),
-      redirect: "error",
-      cache: "no-store",
-      signal: controller.signal,
-    });
-  } catch (error) {
-    // The caught error is never wrapped or logged: a fetch failure embeds the URL, and an abort must be distinguishable
-    // from a refusal without leaking either.
-    return { ok: false, reason: controller.signal.aborted ? "exchange_timeout" : "exchange_failed" };
+    let response: Response;
+    try {
+      response = await doFetch(VERCEL_TOKEN_EXCHANGE_URL, {
+        method: "POST",
+        headers: { "content-type": "application/json", accept: "application/json" },
+        body: JSON.stringify({ token: platformToken, aud: audience }),
+        redirect: "error",
+        cache: "no-store",
+        signal: controller.signal,
+      });
+    } catch {
+      // The caught error is never wrapped or logged: a fetch failure embeds the URL, and an abort must be
+      // distinguishable from a refusal without leaking either.
+      return { ok: false, reason: timedOut() ? "exchange_timeout" : "exchange_failed" };
+    }
+
+    if (!response.ok) return { ok: false, reason: "exchange_failed" };
+
+    // BOUNDED READ. A declared length over the ceiling is refused without reading a byte — but `Content-Length` can be
+    // absent, wrong, or describe the COMPRESSED size, so the stream is capped as it arrives too. `readBounded` stops at
+    // the limit rather than draining a hostile body, and the deadline above is still armed while it does.
+    const declared = Number(response.headers.get("content-length") ?? "0");
+    if (Number.isFinite(declared) && declared > EXCHANGE_MAX_RESPONSE_BYTES) return { ok: false, reason: "exchange_response_invalid" };
+    let body: string;
+    try {
+      body = await readBounded(response, EXCHANGE_MAX_RESPONSE_BYTES, controller.signal);
+    } catch {
+      return { ok: false, reason: timedOut() ? "exchange_timeout" : "exchange_failed" };
+    }
+    if (timedOut()) return { ok: false, reason: "exchange_timeout" };
+    if (Buffer.byteLength(body, "utf8") > EXCHANGE_MAX_RESPONSE_BYTES) return { ok: false, reason: "exchange_response_invalid" };
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(body);
+    } catch {
+      return { ok: false, reason: "exchange_response_invalid" };
+    }
+    if (timedOut()) return { ok: false, reason: "exchange_timeout" };
+    const token = (parsed as { token?: unknown } | null)?.token;
+    return typeof token === "string" && token.length > 0
+      ? { ok: true, token }
+      : { ok: false, reason: "exchange_response_invalid" };
   } finally {
+    // Cleared only once every phase is done, so a fast success does not hold the event loop open.
     clearTimeout(timer);
   }
-
-  if (!response.ok) return { ok: false, reason: "exchange_failed" };
-
-  // BOUNDED READ. A declared length over the ceiling is refused without reading a byte — but `Content-Length` can be
-  // absent, wrong, or describe the COMPRESSED size, so the stream is capped as it arrives too. `readBounded` stops one
-  // byte past the limit rather than draining a hostile body; this used to be `response.text()`, which buffers the whole
-  // thing before any ceiling can apply, and a review measured that reading 300 MB before refusing.
-  const declared = Number(response.headers.get("content-length") ?? "0");
-  if (Number.isFinite(declared) && declared > EXCHANGE_MAX_RESPONSE_BYTES) return { ok: false, reason: "exchange_response_invalid" };
-  let body: string;
-  try {
-    body = await readBounded(response, EXCHANGE_MAX_RESPONSE_BYTES);
-  } catch {
-    return { ok: false, reason: "exchange_failed" };
-  }
-  if (body.length > EXCHANGE_MAX_RESPONSE_BYTES) return { ok: false, reason: "exchange_response_invalid" };
-
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(body);
-  } catch {
-    return { ok: false, reason: "exchange_response_invalid" };
-  }
-  const token = (parsed as { token?: unknown } | null)?.token;
-  return typeof token === "string" && token.length > 0
-    ? { ok: true, token }
-    : { ok: false, reason: "exchange_response_invalid" };
 }

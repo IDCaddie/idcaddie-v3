@@ -31,6 +31,13 @@ const TEAM = "T0ABCDEF123";
 const AUDIENCE = "https://idcaddie.example/oauth-completion-worker";
 const CODE = "1234567890123.9876543210987.abcdef0123456789abcdef0123456789abcdef01";
 
+// The runner no longer accepts an assertion — it CONSTRUCTS one. Tests therefore supply a request context and a fetch,
+// which is the only seam that exists, and cannot carry a token of the caller's choosing.
+const exchangeYielding = (token: string | null) => ({
+  readContext: () => (token === null ? { headers: {} } : { headers: { "x-vercel-oidc-token": "platform" } }),
+  fetchImpl: (async () => new Response(JSON.stringify({ token }), { status: 200 })) as unknown as typeof fetch,
+});
+
 const signer = createHmacStateSigner("state-secret-not-real", "k1");
 const b64url = (s: string) => Buffer.from(s).toString("base64url");
 const assertion = (over: Record<string, unknown> = {}) =>
@@ -64,7 +71,7 @@ function deps(over: Partial<HandoffCallbackDeps> = {}): HandoffCallbackDeps {
     signer,
     expected: { tenantId: TENANT, connectorId: CONNECTOR, correlationId: CORR, expectedTeamId: TEAM, redirectUri: HANDOFF_REDIRECT_URI },
     config: { endpoint: "https://worker.internal.example/internal/oauth-completion/handoff", audience: AUDIENCE, workerKey },
-    readAssertion: async () => ({ ok: true, token: assertion() } as const),
+    exchange: exchangeYielding(assertion()),
     fetchImpl: accepted,
     now: () => NOW,
     ...over,
@@ -149,17 +156,17 @@ describe("the handoff callback runner", () => {
 
   it("refuses without an OIDC assertion, and hands nothing off", async () => {
     const fetchImpl = vi.fn(accepted);
-    const r = await makeHandoffCallbackRunner(deps({ readAssertion: async () => ({ ok: false, reason: "handoff_assertion_missing" } as const), fetchImpl }))({ state: validState(), code: CODE, subject: SUBJECT });
+    const r = await makeHandoffCallbackRunner(deps({ exchange: exchangeYielding(null), fetchImpl }))({ state: validState(), code: CODE, subject: SUBJECT });
     expect(r).toEqual({ ok: false, reason: "handoff_assertion_missing" });
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
   it("refuses an assertion for the wrong audience or project, and hands nothing off", async () => {
     const fetchImpl = vi.fn(accepted);
-    expect(await makeHandoffCallbackRunner(deps({ readAssertion: async () => ({ ok: true, token: assertion({ aud: "https://vercel.com/idcaddie" }) } as const), fetchImpl }))(
+    expect(await makeHandoffCallbackRunner(deps({ exchange: exchangeYielding(assertion({ aud: "https://vercel.com/idcaddie" })), fetchImpl }))(
       { state: validState(), code: CODE, subject: SUBJECT },
     )).toEqual({ ok: false, reason: "handoff_assertion_audience_mismatch" });
-    expect(await makeHandoffCallbackRunner(deps({ readAssertion: async () => ({ ok: true, token: assertion({ project_id: "prj_OTHER" }) } as const), fetchImpl }))(
+    expect(await makeHandoffCallbackRunner(deps({ exchange: exchangeYielding(assertion({ project_id: "prj_OTHER" })), fetchImpl }))(
       { state: validState(), code: CODE, subject: SUBJECT },
     )).toEqual({ ok: false, reason: "handoff_assertion_project_mismatch" });
     expect(fetchImpl).not.toHaveBeenCalled();

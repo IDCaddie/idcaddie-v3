@@ -1,7 +1,7 @@
 // Phase 8K — the bounded V3 → completion-worker handoff client. Server-only.
 //
 // This is the ONE place the web tier reaches out to the WORKER during OAuth completion. The callback makes exactly
-// one other outbound call — the `@vercel/oidc` audience exchange in `acquireHandoffAssertion` — and both are bounded by
+// one other outbound call — the Vercel custom-audience exchange in `vercel-platform-oidc.ts` — and both are bounded by
 // an explicit timeout, because the browser is waiting on this request.
 // It does NOT contact Slack: the token exchange belongs to the worker, and this repository has no path to it from the
 // callback (`oauth-handoff-architecture.test.ts` asserts that).
@@ -214,11 +214,12 @@ export type AcquiredAssertion =
  * the one module permitted to, and returns only the EXCHANGED token. This function has no seam through which
  * application input could supply an assertion — there is no parameter for one.
  */
-export async function acquireHandoffAssertion(
+export async function acquireDedicatedAudienceAssertion(
   audience: string = HANDOFF_OIDC_AUDIENCE,
   deps: ExchangeDeps = {},
+  timeoutMs?: number,
 ): Promise<AcquiredAssertion> {
-  const exchanged = await exchangeForDedicatedAudience(audience, deps);
+  const exchanged = await exchangeForDedicatedAudience(audience, deps, timeoutMs);
   if (exchanged.ok) return { ok: true, token: exchanged.token };
   return {
     ok: false,

@@ -29,12 +29,14 @@ import {
 import { PayloadSealError, sealAuthorizationCode, type SealRefusal } from "./oauth-payload-seal";
 import {
   preflightOwnAssertion,
+  acquireDedicatedAudienceAssertion,
   type AcquiredAssertion,
   submitHandoff,
   type HandoffFetch,
   type HandoffRefusal,
   type WorkerHandoffConfig,
 } from "./oauth-handoff-client";
+import type { ExchangeDeps } from "./vercel-platform-oidc";
 
 if (typeof (globalThis as { window?: unknown }).window !== "undefined") {
   throw new Error("connector-vault/oauth-callback-handoff is server-only and must not be imported in client code");
@@ -74,7 +76,16 @@ export type HandoffCallbackDeps = {
   expected: HandoffExpectedContext;
   config: WorkerHandoffConfig;
   /** Reads the Vercel OIDC assertion from the environment. Injected so a test never needs a real one. */
-  readAssertion: () => Promise<AcquiredAssertion>;
+  /**
+   * NO `readAssertion` SEAM. The assertion has exactly ONE construction path —
+   * `acquireDedicatedAudienceAssertion` — called directly below. It used to be an injected dependency, and a review
+   * proved that substituting it in `real-callback-dependencies` with a helper returning an inbound `Authorization`
+   * bearer passed the entire suite: nothing pinned the CONSTRUCTION site, only the consumption site.
+   *
+   * Tests drive the acquisition through `exchange`, which can supply a fetch and a request context but CANNOT supply a
+   * token — the raw platform value never leaves the approved module, so this seam cannot carry an assertion.
+   */
+  exchange?: ExchangeDeps;
   fetchImpl: HandoffFetch;
   now: () => number;
 };
@@ -173,7 +184,7 @@ export function makeHandoffCallbackRunner(deps: HandoffCallbackDeps): HandoffCal
 
     // 3. The assertion, sanity-checked against our own configuration before it leaves. The worker is the authority on
     //    whether it is valid; this only stops us presenting one that was minted for somebody else.
-    const acquired = await deps.readAssertion();
+    const acquired = await acquireDedicatedAudienceAssertion(deps.config.audience, deps.exchange);
     if (!acquired.ok) return { ok: false, reason: acquired.reason };
     const assertion = acquired.token;
     const preflight = preflightOwnAssertion(assertion, {

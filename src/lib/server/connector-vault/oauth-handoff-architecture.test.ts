@@ -135,8 +135,8 @@ export const RULES: Rule[] = [
     },
   },
   {
-    // The handoff's Authorization must be the assertion we acquired from the SDK — never a value threaded in from a
-    // request. `submitHandoff` takes `assertion` from the runner, which takes it from `acquireHandoffAssertion`.
+    // The handoff's Authorization must be the assertion the approved module returned — never a value threaded in from a
+    // request. `submitHandoff` takes `assertion` from the runner, which takes it from `acquireDedicatedAudienceAssertion`.
     label: "an inbound Authorization header forwarded to the worker",
     applies: onCompletionPath,
     violates: (code) => /Authorization[^\n]{0,60}(?:req(?:uest)?\.headers|headers\.get)/i.test(stripComments(code)),

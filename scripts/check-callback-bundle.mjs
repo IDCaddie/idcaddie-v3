@@ -62,24 +62,54 @@ if (!tracePath) {
   process.exit(1);
 }
 
-// ── (1) the traced file list ─────────────────────────────────────────────────────────────────────────────────────────
+// ── (1) the traced file list — externalized packages ─────────────────────────────────────────────────────────────────
 const trace = JSON.parse(readFileSync(tracePath, "utf8"));
 const traced = (trace.files ?? []).map((f) => resolve(dirname(tracePath), f));
 if (traced.length === 0) fail("the nft trace lists ZERO files — it cannot be proving anything");
+const packagesSeen = new Set();
 for (const f of traced) {
-  const rel = f.slice(f.lastIndexOf("node_modules/") + "node_modules/".length);
   if (!f.includes("node_modules/")) continue;
-  for (const cap of FORBIDDEN) {
-    if (cap.packages.some((re) => re.test(rel))) fail(`${cap.name}: traced into the callback lambda via node_modules/${rel}`);
-  }
+  packagesSeen.add(f.slice(f.lastIndexOf("node_modules/") + "node_modules/".length));
 }
 
-// ── (2) the chunk closure the route loads ────────────────────────────────────────────────────────────────────────────
+// ── (2) sourcemap provenance — packages the bundler INLINED ──────────────────────────────────────────────────────────
+// This is the signal the first version lacked, and it is the one that matters. A pure-ESM driver such as `postgres` is
+// inlined into a chunk rather than externalized, so it appears in NO nft trace and its package name appears nowhere in
+// the emitted JS — a review proved a real `postgres` client in the callback closure passed the guard 5/5 green while
+// its wire protocol was demonstrably in the bundle. Turbopack still emits a sourcemap per chunk whose `sources` name
+// the original module paths, so provenance survives inlining even when identifiers do not.
 const routeJs = tracePath.replace(/\.nft\.json$/, "");
 const chunkRefs = existsSync(routeJs)
   ? [...readFileSync(routeJs, "utf8").matchAll(/["'](server\/chunks\/[^"']+)["']/g)].map((m) => join(SERVER, m[1].replace(/^server\//, "")))
   : [];
 if (existsSync(routeJs) && chunkRefs.length === 0) fail("the route loader references ZERO chunks — the closure cannot be proving anything");
+
+let mapped = 0;
+for (const c of chunkRefs) {
+  const mp = `${c}.map`;
+  if (!existsSync(mp)) { fail(`no sourcemap for ${c.slice(SERVER.length + 1)} — inlined packages would be invisible`); continue; }
+  mapped++;
+  let sources = [];
+  try { sources = JSON.parse(readFileSync(mp, "utf8")).sources ?? []; } catch { fail(`unreadable sourcemap ${mp}`); continue; }
+  for (const raw of sources) {
+    // Sourcemap sources are URI-encoded, so a SCOPED package arrives as `%40aws-sdk/client-kms/...`. Decoding is
+    // load-bearing, not tidiness: without it the `@aws-sdk/client-kms` control passed while the client was in the
+    // bundle — the same class of miss as the inlined-package gap this signal exists to close.
+    let src = raw;
+    try { src = decodeURIComponent(raw); } catch { /* leave as-is; a malformed escape is still worth matching raw */ }
+    if (!src.includes("node_modules/")) continue;
+    packagesSeen.add(src.slice(src.lastIndexOf("node_modules/") + "node_modules/".length));
+  }
+}
+if (chunkRefs.length > 0 && mapped === 0) fail("no chunk sourcemaps at all — the inlining signal is dead");
+
+for (const rel of packagesSeen) {
+  for (const cap of FORBIDDEN) {
+    if (cap.packages.some((re) => re.test(rel))) fail(`${cap.name}: reachable from the callback closure via node_modules/${rel}`);
+  }
+}
+
+// ── (3) runtime symbols — Node builtins and class names, which are not node_modules files at all ────────────────────
 for (const c of chunkRefs) {
   if (!existsSync(c)) continue;
   const src = readFileSync(c, "utf8");
@@ -93,4 +123,4 @@ if (problems.length) {
   for (const p of [...new Set(problems)]) console.error(`  - ${p}`);
   process.exit(1);
 }
-console.log(`check-callback-bundle OK — ${traced.length} traced file(s) and ${chunkRefs.length} chunk(s) in the OAuth callback closure; none of ${FORBIDDEN.length} forbidden capabilities present`);
+console.log(`check-callback-bundle OK — ${traced.length} traced file(s), ${chunkRefs.length} chunk(s), ${packagesSeen.size} distinct package path(s) reachable from the OAuth callback closure; none of ${FORBIDDEN.length} forbidden capabilities present`);

@@ -36,6 +36,24 @@ const rel = (p: string) => p.slice(SRC.length + 1);
 const parse = (src: string) => ts.createSourceFile("f.ts", src, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 
 /** Every string value the AST can see, including the pieces of a `+` concatenation and template literals. */
+/**
+ * Import declarations with their module specifier and whether they are type-only. A declaration counts as type-only
+ * when the whole clause is (`import type { X }`) or when EVERY named binding is (`import { type X, type Y }`) — a
+ * mixed clause carries a runtime binding and is therefore a value import.
+ */
+function importDeclarations(sf: ts.SourceFile): { module: string; typeOnly: boolean }[] {
+  const out: { module: string; typeOnly: boolean }[] = [];
+  for (const s of sf.statements) {
+    if (!ts.isImportDeclaration(s) || !ts.isStringLiteral(s.moduleSpecifier)) continue;
+    const clause = s.importClause;
+    const named = clause?.namedBindings;
+    const allNamedAreTypes =
+      clause !== undefined && named !== undefined && ts.isNamedImports(named) && !clause.name && named.elements.every((e) => e.isTypeOnly);
+    out.push({ module: s.moduleSpecifier.text, typeOnly: clause?.isTypeOnly === true || allNamedAreTypes });
+  }
+  return out;
+}
+
 function stringValues(sf: ts.SourceFile): string[] {
   const out: string[] = [];
   const visit = (n: ts.Node): void => {
@@ -116,11 +134,22 @@ describe("the header trust boundary, over the AST", () => {
     expect(src).toMatch(/export async function exchangeForDedicatedAudience/);
   });
 
-  it("only the handoff client consumes the approved module", () => {
-    const importers = files
-      .filter((f) => f.rel !== APPROVED_OIDC_MODULE && /from\s+["'].*vercel-platform-oidc["']/.test(f.src))
-      .map((f) => f.rel);
-    expect(importers).toEqual(["lib/server/connector-vault/oauth-handoff-client.ts"]);
+  it("only the handoff client consumes the approved module at runtime", () => {
+    // The invariant is about RUNTIME capability, so it is stated over value imports. `import type` is erased by the
+    // compiler and carries none: the callback runner takes `ExchangeDeps` as a type to plumb test fakes through, which
+    // cannot yield a token. Both halves are asserted so the distinction can't be used as a hiding place.
+    const importsFrom = (f: { src: string }) =>
+      importDeclarations(parse(f.src)).filter((d) => /vercel-platform-oidc$/.test(d.module));
+    const others = files.filter((f) => f.rel !== APPROVED_OIDC_MODULE && importsFrom(f).length > 0);
+
+    const valueImporters = others.filter((f) => importsFrom(f).some((d) => !d.typeOnly)).map((f) => f.rel);
+    expect(valueImporters).toEqual(["lib/server/connector-vault/oauth-handoff-client.ts"]);
+
+    // Everything else may only take types, and nobody outside the client may even name the token-returning export.
+    for (const f of others.filter((f) => f.rel !== "lib/server/connector-vault/oauth-handoff-client.ts")) {
+      expect(importsFrom(f).every((d) => d.typeOnly), f.rel).toBe(true);
+      expect(f.src, f.rel).not.toMatch(/exchangeForDedicatedAudience/);
+    }
   });
 
   // RULE B — no file on the completion path reads an INBOUND header or cookie at all. The assertion comes from the SDK;

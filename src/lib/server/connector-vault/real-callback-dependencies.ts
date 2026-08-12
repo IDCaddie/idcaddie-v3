@@ -15,7 +15,6 @@ import { createHmacStateSigner } from "./oauth-state";
 import { makeHandoffCallbackRunner, type HandoffCallbackRunner } from "./oauth-callback-handoff";
 import {
   WORKER_ALLOWED_HOSTS,
-  acquireHandoffAssertion,
   resolveWorkerHandoffConfig,
   type WorkerConfigRefusal,
 } from "./oauth-handoff-client";
@@ -70,7 +69,6 @@ export function buildRealCallbackRunnerFromEnvironment(
           redirectUri: identity.callbackUri,
         },
         config: worker.config,
-        readAssertion: () => acquireHandoffAssertion(worker.config.audience),
         fetchImpl: (input, init) => fetchImpl(input, init),
         now: () => Date.now(),
       }),

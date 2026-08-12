@@ -485,24 +485,6 @@ claims — `aud` (exactly one audience; a multi-audience array is refused even w
 minted for another project, team or channel is never PRESENTED. **The worker's JWKS verification remains
 authoritative.**
 
-### §8.4a — first-live timing evidence
-
-The first staging callback records **four integers and nothing else**: `iat`, `exp`, `exp - iat`, and `act.iat` if
-present. `assertionTimingEvidence` in the runner returns exactly that shape and is asserted to carry no token, no
-signature, and none of `aud` / `iss` / `sub` / `owner_id` / `project_id` / correlation — timestamps cannot identify a
-customer, a workspace or a tenant. **The JWT itself is never logged.**
-
-`act.iat` is the one that matters: it is the only claim revealing the true end-to-end age, because the exchange
-refreshes `iat`. Once observed, `OAUTH_COMPLETION_WORKER_OIDC_MAX_AGE_SECONDS` can be tightened from the environment
-with no code change — the knob is downward-only by construction.
-
-Alongside the assertion, `verifyHandoffRequest` checks the version header, the body size, the digest header against the
-received bytes, the strict schema, the correlation header against the body, canonical form, and the payload bounds.
-
-V3 also runs `preflightOwnAssertion` before sending — audience, project, team, expiry. It is **NOT authentication**, it
-verifies no signature, and it is named so nobody can mistake it for one. It exists so a bearer token minted for a
-different relying party never leaves the building.
-
 > **CORRECTED (Phase 8R).** This section used to say the assertion is read from `process.env.VERCEL_OIDC_TOKEN` only.
 > That named the wrong source: `VERCEL_OIDC_TOKEN` is the build/local-dev path, and in Functions the platform supplies
 > the token through the request context. An interim revision then adopted the `@vercel/oidc` SDK, which is **also not

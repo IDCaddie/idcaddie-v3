@@ -27,13 +27,14 @@ import {
   HANDOFF_TIMEOUT_MS,
   WORKER_ALLOWED_HOSTS,
   preflightOwnAssertion,
-  acquireHandoffAssertion,
+  acquireDedicatedAudienceAssertion,
   HANDOFF_OIDC_AUDIENCE,
   isVercelDefaultAudience,
   resolveWorkerHandoffConfig,
   submitHandoff,
 } from "./oauth-handoff-client";
 import { MIN_PROTECTED_PAYLOAD_BYTES } from "./oauth-handoff-protocol";
+import { EXCHANGE_MAX_RESPONSE_BYTES } from "./vercel-platform-oidc";
 
 const spki = (key: KeyObject) => (key.export({ format: "der", type: "spki" }) as Buffer).toString("base64");
 const WORKER_KEY = spki(generateKeyPairSync("x25519").publicKey);
@@ -150,7 +151,7 @@ describe("the OIDC assertion source — request context in, exchanged token out"
 
   it("exchanges the request-context token for the DEDICATED audience, and returns only the exchanged token", async () => {
     const calls: { url: string; body: unknown; init: RequestInit }[] = [];
-    const r = await acquireHandoffAssertion(HANDOFF_OIDC_AUDIENCE, {
+    const r = await acquireDedicatedAudienceAssertion(HANDOFF_OIDC_AUDIENCE, {
       readContext: ctx(PLATFORM),
       fetchImpl: (async (url: string, init: RequestInit) => {
         calls.push({ url, body: JSON.parse(String(init.body)), init });
@@ -171,7 +172,7 @@ describe("the OIDC assertion source — request context in, exchanged token out"
     const prev = process.env.VERCEL_OIDC_TOKEN;
     delete process.env.VERCEL_OIDC_TOKEN;
     let called = 0;
-    const r = await acquireHandoffAssertion(HANDOFF_OIDC_AUDIENCE, {
+    const r = await acquireDedicatedAudienceAssertion(HANDOFF_OIDC_AUDIENCE, {
       readContext: ctx(undefined),
       fetchImpl: (async () => { called++; return jsonRes({ token: ASSERTION }); }) as unknown as typeof fetch,
     });
@@ -181,7 +182,7 @@ describe("the OIDC assertion source — request context in, exchanged token out"
   });
 
   it("a non-2xx exchange refuses, and the provider body never escapes", async () => {
-    const r = await acquireHandoffAssertion(HANDOFF_OIDC_AUDIENCE, {
+    const r = await acquireDedicatedAudienceAssertion(HANDOFF_OIDC_AUDIENCE, {
       readContext: ctx(PLATFORM),
       fetchImpl: (async () => new Response(`denied ${PLATFORM}`, { status: 403 })) as unknown as typeof fetch,
     });
@@ -190,7 +191,7 @@ describe("the OIDC assertion source — request context in, exchanged token out"
   });
 
   it("a REDIRECT fails closed — the bearer must not follow to another origin", async () => {
-    const r = await acquireHandoffAssertion(HANDOFF_OIDC_AUDIENCE, {
+    const r = await acquireDedicatedAudienceAssertion(HANDOFF_OIDC_AUDIENCE, {
       readContext: ctx(PLATFORM),
       // `redirect: "error"` makes fetch itself reject; model that.
       fetchImpl: (async () => { throw new TypeError("unexpected redirect"); }) as unknown as typeof fetch,
@@ -199,7 +200,7 @@ describe("the OIDC assertion source — request context in, exchanged token out"
   });
 
   it("a HANG fails closed on the abort ceiling", async () => {
-    const r = await acquireHandoffAssertion(HANDOFF_OIDC_AUDIENCE, {
+    const r = await acquireDedicatedAudienceAssertion(HANDOFF_OIDC_AUDIENCE, {
       readContext: ctx(PLATFORM),
       fetchImpl: ((_u: string, init: RequestInit) => new Promise((_res, rej) => {
         init.signal?.addEventListener("abort", () => rej(new DOMException("aborted", "AbortError")));
@@ -218,9 +219,21 @@ describe("the OIDC assertion source — request context in, exchanged token out"
       ["empty token", () => new Response(JSON.stringify({ token: "" }), { status: 200 })],
       ["declared length over the ceiling", () => new Response("{}", { status: 200, headers: { "content-length": String(64 * 1024) } })],
       ["actual body over the ceiling", () => new Response(JSON.stringify({ token: "x".repeat(20 * 1024) }), { status: 200 })],
+      // The chunk boundary landing EXACTLY on the ceiling, where the prefix is COMPLETE, VALID JSON carrying a token.
+      // A truncated prefix would fail the parse and refuse either way — that version of this case was vacuous. This one
+      // is not: with a `>=` break the read stops holding exactly `limit` bytes, the caller's `> limit` size check cannot
+      // fire, and an over-ceiling response is accepted as a valid token. Only reading one byte PAST makes it observable.
+      ["over the ceiling, valid JSON ending exactly on it", () => {
+        const pad = "x".repeat(EXCHANGE_MAX_RESPONSE_BYTES - '{"token":"' .length - '"}'.length);
+        const exact = new TextEncoder().encode(`{"token":"${pad}"}`);
+        expect(exact.byteLength).toBe(EXCHANGE_MAX_RESPONSE_BYTES); // the boundary this case exists to sit on
+        return new Response(new ReadableStream<Uint8Array>({
+          start(c) { c.enqueue(exact); c.enqueue(new TextEncoder().encode("trailing")); c.close(); },
+        }), { status: 200 });
+      }],
     ];
     for (const [name, make] of bad) {
-      const r = await acquireHandoffAssertion(HANDOFF_OIDC_AUDIENCE, {
+      const r = await acquireDedicatedAudienceAssertion(HANDOFF_OIDC_AUDIENCE, {
         readContext: ctx(PLATFORM),
         fetchImpl: (async () => make()) as unknown as typeof fetch,
       });
@@ -231,7 +244,7 @@ describe("the OIDC assertion source — request context in, exchanged token out"
   it("neither the platform token nor a thrown error reaches a result or a log", async () => {
     const logs: string[] = [];
     const spies = (["log","info","warn","error","debug"] as const).map((m) => vi.spyOn(console, m).mockImplementation((...a: unknown[]) => { logs.push(a.map(String).join(" ")); }));
-    const r = await acquireHandoffAssertion(HANDOFF_OIDC_AUDIENCE, {
+    const r = await acquireDedicatedAudienceAssertion(HANDOFF_OIDC_AUDIENCE, {
       readContext: ctx(PLATFORM),
       fetchImpl: (async () => { throw new Error(`boom ${PLATFORM} https://oidc.vercel.com/~token`); }) as unknown as typeof fetch,
     });
@@ -240,11 +253,11 @@ describe("the OIDC assertion source — request context in, exchanged token out"
     for (const secret of [PLATFORM, "boom", "~token"]) expect(dump).not.toContain(secret);
   });
 
-  // DATAFLOW, not string prohibition: `acquireHandoffAssertion` takes an AUDIENCE and injection points for the context
+  // DATAFLOW, not string prohibition: `acquireDedicatedAudienceAssertion` takes an AUDIENCE and injection points for the context
   // reader and fetch. There is NO parameter through which a caller could supply an assertion, and the raw platform
   // token is never returned — only the exchanged one. That is the boundary, expressed as a type.
   it("offers no seam for a caller-supplied assertion", async () => {
-    const r = await acquireHandoffAssertion(HANDOFF_OIDC_AUDIENCE, {
+    const r = await acquireDedicatedAudienceAssertion(HANDOFF_OIDC_AUDIENCE, {
       readContext: ctx(PLATFORM),
       fetchImpl: (async () => jsonRes({ token: ASSERTION })) as unknown as typeof fetch,
     });
@@ -544,7 +557,7 @@ describe("the exchange body ceiling is enforced on the STREAM, not after bufferi
         controller.enqueue(new Uint8Array(64 * 1024)); // 64 KiB each; ceiling is 16 KiB
       },
     });
-    const r = await acquireHandoffAssertion(HANDOFF_OIDC_AUDIENCE, {
+    const r = await acquireDedicatedAudienceAssertion(HANDOFF_OIDC_AUDIENCE, {
       readContext: ctx,
       // No content-length at all — the pre-check cannot help, so only the streaming cap can.
       fetchImpl: (async () => new Response(stream, { status: 200 })) as unknown as typeof fetch,
@@ -557,7 +570,7 @@ describe("the exchange body ceiling is enforced on the STREAM, not after bufferi
   it("a declared length over the ceiling is refused without reading a byte", async () => {
     let read = 0;
     const stream = new ReadableStream<Uint8Array>({ pull(c) { read++; c.enqueue(new Uint8Array(8)); c.close(); } });
-    const r = await acquireHandoffAssertion(HANDOFF_OIDC_AUDIENCE, {
+    const r = await acquireDedicatedAudienceAssertion(HANDOFF_OIDC_AUDIENCE, {
       readContext: ctx,
       fetchImpl: (async () => new Response(stream, { status: 200, headers: { "content-length": String(1024 * 1024) } })) as unknown as typeof fetch,
     });
@@ -568,9 +581,56 @@ describe("the exchange body ceiling is enforced on the STREAM, not after bufferi
 
   it("malformed JSON within the ceiling refuses; correct bounded JSON succeeds", async () => {
     const res = (b: string) => (async () => new Response(b, { status: 200 })) as unknown as typeof fetch;
-    expect(await acquireHandoffAssertion(HANDOFF_OIDC_AUDIENCE, { readContext: ctx, fetchImpl: res("<html>") }))
+    expect(await acquireDedicatedAudienceAssertion(HANDOFF_OIDC_AUDIENCE, { readContext: ctx, fetchImpl: res("<html>") }))
       .toEqual({ ok: false, reason: "handoff_assertion_exchange_failed" });
-    expect(await acquireHandoffAssertion(HANDOFF_OIDC_AUDIENCE, { readContext: ctx, fetchImpl: res(JSON.stringify({ token: ASSERTION })) }))
+    expect(await acquireDedicatedAudienceAssertion(HANDOFF_OIDC_AUDIENCE, { readContext: ctx, fetchImpl: res(JSON.stringify({ token: ASSERTION })) }))
       .toEqual({ ok: true, token: ASSERTION });
+  });
+});
+
+// ── Blocker 1: ONE deadline across fetch, headers, body read and parse ───────────────────────────────────────────────
+describe("the exchange deadline covers the whole exchange, not just the fetch", () => {
+  const PLATFORM = "platform.token.value";
+  const ctx = () => ({ headers: { "x-vercel-oidc-token": PLATFORM } });
+
+  // The regression: headers arrive INSTANTLY, then the body stalls. The old code cleared the timer when the fetch
+  // resolved, so this hung for as long as the platform allowed — measured at 9s against a 3000ms ceiling.
+  it("headers immediately, then a stalled body → bounded timeout reason, in about the ceiling", async () => {
+    const started = Date.now();
+    const stream = new ReadableStream<Uint8Array>({
+      start(c) { c.enqueue(new TextEncoder().encode('{"tok')); },   // a few bytes, then nothing, ever
+      pull() { return new Promise<void>(() => {}); },
+    });
+    const r = await acquireDedicatedAudienceAssertion(HANDOFF_OIDC_AUDIENCE, {
+      readContext: ctx,
+      fetchImpl: (async () => new Response(stream, { status: 200 })) as unknown as typeof fetch,
+    }, 250);
+    const elapsed = Date.now() - started;
+    expect(r).toEqual({ ok: false, reason: "handoff_assertion_exchange_timeout" });
+    expect(elapsed).toBeLessThan(3000);       // bounded by the deadline, not by the platform
+    expect(JSON.stringify(r)).not.toContain(PLATFORM);
+  }, 10_000);
+
+  it("an oversized stream still stops near the byte ceiling rather than draining", async () => {
+    let pulled = 0;
+    const stream = new ReadableStream<Uint8Array>({
+      pull(c) { pulled++; c.enqueue(new Uint8Array(64 * 1024)); },
+    });
+    const r = await acquireDedicatedAudienceAssertion(HANDOFF_OIDC_AUDIENCE, {
+      readContext: ctx,
+      fetchImpl: (async () => new Response(stream, { status: 200 })) as unknown as typeof fetch,
+    });
+    expect(r.ok).toBe(false);
+    expect(pulled).toBeLessThan(10);
+  }, 10_000);
+
+  it("a fast, correct exchange is unaffected and does not wait for the deadline", async () => {
+    const started = Date.now();
+    const r = await acquireDedicatedAudienceAssertion(HANDOFF_OIDC_AUDIENCE, {
+      readContext: ctx,
+      fetchImpl: (async () => new Response(JSON.stringify({ token: ASSERTION }), { status: 200 })) as unknown as typeof fetch,
+    }, 5000);
+    expect(r).toEqual({ ok: true, token: ASSERTION });
+    expect(Date.now() - started).toBeLessThan(1000);
   });
 });
