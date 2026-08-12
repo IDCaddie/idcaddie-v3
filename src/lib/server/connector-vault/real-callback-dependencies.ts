@@ -13,9 +13,10 @@
 
 import { createHmacStateSigner } from "./oauth-state";
 import { makeHandoffCallbackRunner, type HandoffCallbackRunner } from "./oauth-callback-handoff";
+import { getVercelOidcToken } from "@vercel/oidc";
 import {
   WORKER_ALLOWED_HOSTS,
-  readVercelOidcAssertion,
+  acquireHandoffAssertion,
   resolveWorkerHandoffConfig,
   type WorkerConfigRefusal,
 } from "./oauth-handoff-client";
@@ -70,7 +71,7 @@ export function buildRealCallbackRunnerFromEnvironment(
           redirectUri: identity.callbackUri,
         },
         config: worker.config,
-        readAssertion: () => readVercelOidcAssertion(env),
+        readAssertion: () => acquireHandoffAssertion(getVercelOidcToken, worker.config.audience),
         fetchImpl: (input, init) => fetchImpl(input, init),
         now: () => Date.now(),
       }),

@@ -135,14 +135,49 @@ export function resolveWorkerHandoffConfig(
 }
 
 /**
- * Read the Vercel OIDC assertion.
- *
- * From the ENVIRONMENT only. Vercel injects `VERCEL_OIDC_TOKEN` into the function's environment and refreshes it; it is
- * NEVER read from an incoming request header, because an inbound `x-vercel-oidc-token` is attacker-controlled and this
- * value becomes the `Authorization` header of an outbound request.
+ * The dedicated audience this deployment's assertion must be minted for. Vercel's default `aud` is
+ * `https://vercel.com/<team-slug>`, which EVERY relying party in the team receives — a token minted for any of them
+ * would otherwise authenticate a handoff. Requesting a dedicated audience narrows the assertion to this worker, and the
+ * worker refuses the default by name.
  */
-export function readVercelOidcAssertion(env: Env = process.env): string | null {
-  const token = env.VERCEL_OIDC_TOKEN;
+export const HANDOFF_OIDC_AUDIENCE = "https://idcaddie.com/oauth-completion-worker" as const;
+
+/** The shape of `getVercelOidcToken` from `@vercel/oidc`. Injected so tests never touch the platform. */
+export type VercelOidcTokenGetter = (options: { audience: string }) => Promise<string>;
+
+/**
+ * Acquire the Vercel OIDC assertion, minted for OUR dedicated audience.
+ *
+ * ── WHERE THE TOKEN COMES FROM, AND WHY THIS IS NOT THE THING §8.4 FORBIDS ──────────────────────────────────────────
+ * This used to read `process.env.VERCEL_OIDC_TOKEN` and nothing else. That was wrong for the runtime this actually runs
+ * in: Vercel documents `VERCEL_OIDC_TOKEN` as the BUILD and LOCAL-DEVELOPMENT path, while in Vercel Functions the
+ * platform supplies the token through the function's request context (`x-vercel-oidc-token`). An env-only read is
+ * therefore empty in production and the handoff could never authenticate.
+ *
+ * The rule that matters is unchanged and is about TRUST, not about which transport the platform chose:
+ *   * application code must NEVER read `x-vercel-oidc-token` off a request itself, and never treat any caller-supplied
+ *     header or body value as an assertion — a value we do not control must not become an outbound `Authorization`;
+ *   * the ONLY permitted source is the official `@vercel/oidc` SDK, which reads the platform-injected token from
+ *     Vercel's own trusted request context. We never see, parse or choose the raw header.
+ * `oauth-handoff-architecture.test.ts` enforces both halves against the source of every file on this path.
+ *
+ * ── THE AUDIENCE IS AN EXCHANGE ────────────────────────────────────────────────────────────────────────────────────
+ * Passing `audience` makes the SDK exchange the platform token for one whose `aud` is exactly that string. It is not a
+ * project setting and there is nothing to configure in the dashboard. A failed exchange returns null and the caller
+ * fails closed — an assertion for the wrong audience must never be sent instead.
+ */
+export async function acquireHandoffAssertion(
+  getToken: VercelOidcTokenGetter,
+  audience: string = HANDOFF_OIDC_AUDIENCE,
+): Promise<string | null> {
+  let token: unknown;
+  try {
+    token = await getToken({ audience });
+  } catch {
+    // The caught error is DISCARDED, never wrapped or logged: an SDK error can embed the token, the exchange URL and
+    // response body. The caller reports a bounded reason.
+    return null;
+  }
   return typeof token === "string" && token.length > 0 ? token : null;
 }
 

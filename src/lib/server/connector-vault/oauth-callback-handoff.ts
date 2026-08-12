@@ -73,7 +73,7 @@ export type HandoffCallbackDeps = {
   expected: HandoffExpectedContext;
   config: WorkerHandoffConfig;
   /** Reads the Vercel OIDC assertion from the environment. Injected so a test never needs a real one. */
-  readAssertion: () => string | null;
+  readAssertion: () => Promise<string | null>;
   fetchImpl: HandoffFetch;
   now: () => number;
 };
@@ -172,7 +172,7 @@ export function makeHandoffCallbackRunner(deps: HandoffCallbackDeps): HandoffCal
 
     // 3. The assertion, sanity-checked against our own configuration before it leaves. The worker is the authority on
     //    whether it is valid; this only stops us presenting one that was minted for somebody else.
-    const assertion = deps.readAssertion();
+    const assertion = await deps.readAssertion();
     const preflight = preflightOwnAssertion(assertion, {
       audience: deps.config.audience,
       nowSeconds: Math.floor(deps.now() / 1000),

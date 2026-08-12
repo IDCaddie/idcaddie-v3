@@ -27,7 +27,8 @@ import {
   HANDOFF_TIMEOUT_MS,
   WORKER_ALLOWED_HOSTS,
   preflightOwnAssertion,
-  readVercelOidcAssertion,
+  acquireHandoffAssertion,
+  HANDOFF_OIDC_AUDIENCE,
   resolveWorkerHandoffConfig,
   submitHandoff,
 } from "./oauth-handoff-client";
@@ -129,23 +130,57 @@ const NOW_S = 1_800_000_000;
 const GOOD_CLAIMS = { aud: AUDIENCE, project_id: STAGING_VERCEL_PROJECT_ID, owner_id: STAGING_VERCEL_TEAM_ID, exp: NOW_S + 600 };
 const ASSERTION = assertionWith(GOOD_CLAIMS);
 
-describe("the OIDC assertion source", () => {
-  it("reads the assertion from the ENVIRONMENT only", () => {
-    expect(readVercelOidcAssertion({ VERCEL_OIDC_TOKEN: ASSERTION })).toBe(ASSERTION);
-    expect(readVercelOidcAssertion({})).toBeNull();
-    expect(readVercelOidcAssertion({ VERCEL_OIDC_TOKEN: "" })).toBeNull();
+describe("the OIDC assertion source — the official SDK, a dedicated audience, and nothing caller-controlled", () => {
+  // (1) the Function runtime obtains the token through @vercel/oidc, and (2)/(3) the audience requested is exactly ours.
+  it("requests the token through the injected @vercel/oidc getter, with the DEDICATED audience", async () => {
+    const seen: { audience: string }[] = [];
+    const token = await acquireHandoffAssertion(async (o) => { seen.push(o); return ASSERTION; });
+    expect(seen).toEqual([{ audience: "https://idcaddie.com/oauth-completion-worker" }]);
+    expect(HANDOFF_OIDC_AUDIENCE).toBe("https://idcaddie.com/oauth-completion-worker");
+    expect(token).toBe(ASSERTION);
   });
 
-  // An inbound header is attacker-controlled and this value becomes an outbound Authorization header. The module must
-  // contain no path from a request to the assertion at all, so the property is asserted against the source.
-  it("has no path from a request header to the assertion", () => {
+  it("the exchanged token it returns carries exactly that aud claim", async () => {
+    const exchanged = assertionWith({ ...GOOD_CLAIMS, aud: HANDOFF_OIDC_AUDIENCE });
+    const token = await acquireHandoffAssertion(async () => exchanged);
+    const aud = JSON.parse(Buffer.from((token as string).split(".")[1], "base64url").toString()).aud;
+    expect(aud).toBe("https://idcaddie.com/oauth-completion-worker");
+    expect(preflightOwnAssertion(token, { audience: HANDOFF_OIDC_AUDIENCE, nowSeconds: NOW_S })).toEqual({ ok: true });
+  });
+
+  // (7) missing platform token and (8) exchange failure both fail CLOSED.
+  it("fails closed when the platform token is missing or the exchange throws", async () => {
+    expect(await acquireHandoffAssertion(async () => "")).toBeNull();
+    expect(await acquireHandoffAssertion(async () => null as unknown as string)).toBeNull();
+    expect(await acquireHandoffAssertion(async () => { throw new Error("exchange failed"); })).toBeNull();
+  });
+
+  // (9) an SDK error can embed the token, the exchange URL and the response body. None of it may escape.
+  it("discards the exchange error rather than wrapping it — no token or URL escapes", async () => {
+    const logs: string[] = [];
+    const spies = (["log","info","warn","error","debug"] as const).map((m) => vi.spyOn(console, m).mockImplementation((...a: unknown[]) => { logs.push(a.map(String).join(" ")); }));
+    const out = await acquireHandoffAssertion(async () => { throw new Error(`boom ${ASSERTION} https://vercel.com/exchange`); });
+    spies.forEach((s) => s.mockRestore());
+    const dump = JSON.stringify({ out, logs });
+    expect(out).toBeNull();
+    expect(dump).not.toContain(ASSERTION);
+    expect(dump).not.toContain("boom");
+  });
+
+  // (10) THE TRUST RULE. Option B permits the official SDK to read Vercel's request context; it does NOT permit this
+  // module to read a header itself or to accept an assertion from application input.
+  it("has no path from a request, header or caller input to the assertion", () => {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const src = (require("node:fs") as typeof import("node:fs")).readFileSync("src/lib/server/connector-vault/oauth-handoff-client.ts", "utf8");
-    const fn = src.slice(src.indexOf("export function readVercelOidcAssertion"), src.indexOf("preflightOwnAssertion"));
-    expect(fn).not.toMatch(/request|headers\.get|Request|x-vercel-oidc-token/);
-    expect(fn).toMatch(/env\.VERCEL_OIDC_TOKEN/);
+    const fn = src.slice(src.indexOf("export async function acquireHandoffAssertion"), src.indexOf("export function preflightOwnAssertion"));
+    const code = fn.split("\n").filter((l) => !l.trim().startsWith("*") && !l.trim().startsWith("//")).join("\n");
+    expect(code).not.toMatch(/headers|Request\b|req\.|request\.|x-vercel-oidc-token/i);
+    expect(code).not.toMatch(/process\.env/);           // the env path is no longer the source
+    expect(code).toMatch(/getToken\(\{ audience \}\)/); // the ONLY source is the injected SDK getter
   });
+});
 
+describe("the OIDC assertion source — preflight", () => {
   it("refuses to send an assertion minted for a different audience, project or team", () => {
     const preflight = (t: string | null) => preflightOwnAssertion(t, { audience: AUDIENCE, nowSeconds: NOW_S });
     expect(preflight(ASSERTION)).toEqual({ ok: true });

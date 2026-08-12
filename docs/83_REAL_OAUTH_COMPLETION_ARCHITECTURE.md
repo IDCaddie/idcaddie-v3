@@ -407,8 +407,36 @@ received bytes, the strict schema, the correlation header against the body, cano
 
 V3 also runs `preflightOwnAssertion` before sending — audience, project, team, expiry. It is **NOT authentication**, it
 verifies no signature, and it is named so nobody can mistake it for one. It exists so a bearer token minted for a
-different relying party never leaves the building. The assertion is read from `process.env.VERCEL_OIDC_TOKEN` **only**;
-an inbound `x-vercel-oidc-token` header is attacker-controlled and would become an outbound `Authorization` header.
+different relying party never leaves the building.
+
+> **CORRECTED (Phase 8R) — the assertion comes from the official `@vercel/oidc` SDK, not from `process.env`.**
+>
+> This section used to say the assertion is read from `process.env.VERCEL_OIDC_TOKEN` **only**, on the grounds that an
+> inbound `x-vercel-oidc-token` header is attacker-controlled. The trust reasoning was right; the conclusion named the
+> wrong source. Vercel documents `VERCEL_OIDC_TOKEN` as the **build** and **local-development** path, while **in Vercel
+> Functions the platform supplies the token through the function's request context** (`x-vercel-oidc-token`). An
+> env-only read is therefore empty in the runtime this actually runs in, and the handoff could never have
+> authenticated — a defect that would have surfaced as a bare refusal on the first real callback.
+>
+> The rule, restated so it constrains TRUST rather than transport:
+>
+> 1. Application code **must never** read `x-vercel-oidc-token` off a request itself, and must never treat any
+>    caller-supplied header or body value as an assertion. A value we do not control must not become an outbound
+>    `Authorization`.
+> 2. The **only** permitted source is the official `@vercel/oidc` SDK, which reads the platform-injected token from
+>    Vercel's own trusted request context. We never see, parse, or choose the raw header.
+> 3. An inbound `Authorization` is never forwarded to the worker.
+>
+> All three are enforced against the source of every file on the path by `oauth-handoff-architecture.test.ts`, and each
+> rule is mutation-tested against a planted violation — a rule that cannot be made to fire is not protecting anything.
+
+**The audience is a dedicated one, and obtaining it is an EXCHANGE.** `getVercelOidcToken({ audience })` exchanges the
+platform token for one whose `aud` is exactly `https://idcaddie.com/oauth-completion-worker`. It is not a dashboard
+setting and there is nothing to configure in the project. Vercel's default `aud` is `https://vercel.com/<team-slug>`,
+which **every** relying party in the team receives — accepting it would mean a token minted for any of them
+authenticates a handoff, so the worker refuses it by name (`oidc_audience_is_vercel_default`) and V3 never requests it.
+A failed exchange returns null and the caller fails closed; the SDK's error is discarded rather than wrapped, because it
+can embed the token, the exchange URL and the response body.
 
 ### 8.5 Sealing
 
