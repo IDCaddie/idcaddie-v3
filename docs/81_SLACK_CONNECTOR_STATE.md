@@ -126,7 +126,9 @@ synthetic handler on the real path. Under the staging environment identity it ru
 
 1. validates the signed state against server-trusted context, **before** the authorization code is touched;
 2. seals the code to the completion worker's X25519 public key (`node:crypto`, no KMS, no new dependency);
-3. builds the canonical protocol-v1 body and presents a Vercel OIDC assertion read from the environment;
+3. builds the canonical protocol-v2 body and presents a Vercel OIDC assertion obtained from the platform's request
+   context and exchanged for the dedicated worker audience (Phase 8R — doc 83 §8.4; it is **not** read from the
+   environment, which is the build/local-dev path);
 4. posts once to the pinned worker path and accepts only a two-word acknowledgement;
 5. redirects to `/connectors/oauth/pending`, which reads `product_oauth_completion_job_status` and nothing else.
 

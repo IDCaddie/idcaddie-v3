@@ -27,6 +27,7 @@ import {
   MAX_HANDOFF_BODY_BYTES,
   STAGING_VERCEL_PROJECT_ID,
   STAGING_VERCEL_TEAM_ID,
+  VERCEL_OIDC_ISSUER_PREFIX,
   canonicalHandoffBody,
   handoffAckSchema,
   handoffBodyDigest,
@@ -84,6 +85,9 @@ export type HandoffRefusal =
   | "handoff_assertion_malformed"
   | "handoff_assertion_audience_mismatch"
   | "handoff_assertion_project_mismatch"
+  | "handoff_assertion_issuer_mismatch"
+  | "handoff_assertion_subject_mismatch"
+  | "handoff_assertion_environment_mismatch"
   | "handoff_assertion_expired"
   | "handoff_body_too_large"
   | "handoff_transport_failed"
@@ -162,6 +166,16 @@ export function resolveWorkerHandoffConfig(
  * worker refuses the default by name.
  */
 export const HANDOFF_OIDC_AUDIENCE = "https://idcaddie.com/oauth-completion-worker" as const;
+
+/**
+ * The rest of this deployment's OIDC identity, pinned exactly. These are the SAME values the worker verifies
+ * authoritatively after JWKS signature verification — pinned here as well so a token minted for another project,
+ * environment or team is never PRESENTED, rather than merely rejected on arrival.
+ */
+export const HANDOFF_OIDC_ISSUER = "https://oidc.vercel.com/idc-projects-f977cea1" as const;
+export const HANDOFF_OIDC_SUBJECT = "owner:idc-projects-f977cea1:project:idcaddie-v3:environment:production" as const;
+/** Vercel's CHANNEL name. This staging deployment is served on the Production channel (doc 83 §8.2). */
+export const HANDOFF_OIDC_ENVIRONMENT = "production" as const;
 
 /**
  * Is this Vercel's DEFAULT team audience, under any trivially-equivalent spelling?
@@ -254,6 +268,18 @@ export function preflightOwnAssertion(
   if (claims.project_id !== STAGING_VERCEL_PROJECT_ID || claims.owner_id !== STAGING_VERCEL_TEAM_ID) {
     return { ok: false, reason: "handoff_assertion_project_mismatch" };
   }
+  // `iss`, `sub` and `environment` complete the six-claim set the worker pins authoritatively. Checked here so a token
+  // for the wrong issuer, project or channel never LEAVES — the worker refusing it on arrival would already have meant
+  // we presented a bearer to a relying party it was not minted for.
+  //
+  // The issuer is compared WHOLE, and separately required to carry the Vercel prefix. A prefix test alone would accept
+  // `https://oidc.vercel.com/some-other-team`, and an equality test alone would accept a value that is not a Vercel
+  // issuer at all if the constant were ever mis-set.
+  if (typeof claims.iss !== "string" || !claims.iss.startsWith(VERCEL_OIDC_ISSUER_PREFIX) || claims.iss !== HANDOFF_OIDC_ISSUER) {
+    return { ok: false, reason: "handoff_assertion_issuer_mismatch" };
+  }
+  if (claims.sub !== HANDOFF_OIDC_SUBJECT) return { ok: false, reason: "handoff_assertion_subject_mismatch" };
+  if (claims.environment !== HANDOFF_OIDC_ENVIRONMENT) return { ok: false, reason: "handoff_assertion_environment_mismatch" };
   const exp = claims.exp;
   if (typeof exp !== "number" || !Number.isFinite(exp) || !(exp > expected.nowSeconds)) {
     return { ok: false, reason: "handoff_assertion_expired" };

@@ -180,7 +180,15 @@ describe("OIDC assertion — the pinned claim contract", () => {
   });
 
   it("refuses an assertion that is too OLD or claims too long a lifetime", () => {
-    expect(verify(token({ iat: NOW - 7200, exp: NOW + 600, nbf: NOW - 7200 }))).toEqual({ ok: false, reason: "assertion_too_old" });
+    // One second past the 7200s ceiling. Exactly 7200 is the documented lifetime of a production function token, so it
+    // must be ACCEPTED — a ceiling at 3600 refused every real callback, which is the bug this contract replaced.
+    expect(verify(token({ iat: NOW - 7201, exp: NOW + 600, nbf: NOW - 7201 }))).toEqual({ ok: false, reason: "assertion_too_old" });
+    // `exp - iat` exactly 7200 — the documented lifetime — and still live. Must be ACCEPTED: a 3600 ceiling refused
+    // every real callback, which is the bug this contract replaced. (Age and lifetime are different ceilings; this
+    // case sits on the lifetime one at 7199s of age.)
+    expect(verify(token({ iat: NOW - 7199, exp: NOW + 1, nbf: NOW - 7199 })).ok, "exactly the documented lifetime").toBe(true);
+    expect(verify(token({ iat: NOW - 7199, exp: NOW + 2, nbf: NOW - 7199 })))
+      .toEqual({ ok: false, reason: "assertion_lifetime_too_long" }); // 7201s claimed
     expect(verifyHandoffAssertion(token({ iat: NOW - 10, exp: NOW + 100_000 }), EXPECTED, { nowSeconds: NOW, verifySignature }))
       .toEqual({ ok: false, reason: "assertion_lifetime_too_long" });
   });
@@ -402,10 +410,10 @@ describe("handoff request — the envelope PR 4 verifies", () => {
   // `verifyHandoffRequest` forwards the three lifetime options to `verifyHandoffAssertion`. That forwarding is the
   // whole reason those options exist as parameters (doc 83 §8.4 says PR 4 must tighten them), and nothing exercised it:
   // dropping all three, or swapping maxAge and maxLifetime, left the suite green — so PR 4 could pass a tightened
-  // ceiling, watch its tests pass, and ship a worker silently applying the 1-hour default.
+  // ceiling, watch its tests pass, and ship a worker silently applying the default.
   // (Found in adversarial review of PR #398.)
   it("FORWARDS the assertion lifetime options rather than silently applying the defaults", () => {
-    // Well inside the 3600s defaults, so only a forwarded tighter ceiling can reject these.
+    // Well inside the 7200s defaults, so only a forwarded tighter ceiling can reject these.
     const old = () => envelope(REQUEST, { headers: {} });
     const withToken = (over: Record<string, unknown>) => ({ ...old(), token: token(over) });
 

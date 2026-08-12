@@ -129,7 +129,17 @@ const b64url = (s: string) => Buffer.from(s).toString("base64url");
 const assertionWith = (claims: Record<string, unknown>) =>
   `${b64url(JSON.stringify({ alg: "RS256", kid: "k" }))}.${b64url(JSON.stringify(claims))}.${b64url("signature-bytes")}`;
 const NOW_S = 1_800_000_000;
-const GOOD_CLAIMS = { aud: AUDIENCE, project_id: STAGING_VERCEL_PROJECT_ID, owner_id: STAGING_VERCEL_TEAM_ID, exp: NOW_S + 600 };
+// The full six-claim identity the worker pins authoritatively. The fixture carries all of it, so a test that drops one
+// fails rather than passing on a token the worker would reject.
+const GOOD_CLAIMS = {
+  aud: AUDIENCE,
+  iss: "https://oidc.vercel.com/idc-projects-f977cea1",
+  sub: "owner:idc-projects-f977cea1:project:idcaddie-v3:environment:production",
+  environment: "production",
+  project_id: STAGING_VERCEL_PROJECT_ID,
+  owner_id: STAGING_VERCEL_TEAM_ID,
+  exp: NOW_S + 600,
+};
 const ASSERTION = assertionWith(GOOD_CLAIMS);
 
 describe("the OIDC assertion source — request context in, exchanged token out", () => {
@@ -300,10 +310,30 @@ describe("the OIDC assertion source — preflight", () => {
       .toEqual({ ok: false, reason: "handoff_assertion_project_mismatch" });
     expect(preflight(assertionWith({ ...GOOD_CLAIMS, owner_id: "team_SOMEOTHER" })))
       .toEqual({ ok: false, reason: "handoff_assertion_project_mismatch" });
+    // The three claims the preflight gained in Phase 8R. Each is the SAME value the worker verifies authoritatively;
+    // pinning them here means a token for the wrong issuer, project or channel is never PRESENTED.
+    expect(preflight(assertionWith({ ...GOOD_CLAIMS, iss: "https://oidc.vercel.com/some-other-team" })))
+      .toEqual({ ok: false, reason: "handoff_assertion_issuer_mismatch" });
+    expect(preflight(assertionWith({ ...GOOD_CLAIMS, iss: "https://evil.test/idc-projects-f977cea1" })))
+      .toEqual({ ok: false, reason: "handoff_assertion_issuer_mismatch" });
+    expect(preflight(assertionWith({ ...GOOD_CLAIMS, sub: "owner:idc-projects-f977cea1:project:idcaddie-v3:environment:preview" })))
+      .toEqual({ ok: false, reason: "handoff_assertion_subject_mismatch" });
+    expect(preflight(assertionWith({ ...GOOD_CLAIMS, sub: "owner:other:project:idcaddie-v3:environment:production" })))
+      .toEqual({ ok: false, reason: "handoff_assertion_subject_mismatch" });
+    expect(preflight(assertionWith({ ...GOOD_CLAIMS, environment: "preview" })))
+      .toEqual({ ok: false, reason: "handoff_assertion_environment_mismatch" });
+    for (const missing of ["iss", "sub", "environment"] as const) {
+      const claims: Record<string, unknown> = { ...GOOD_CLAIMS };
+      delete claims[missing];
+      expect(preflight(assertionWith(claims)).ok, `missing ${missing}`).toBe(false);
+    }
     expect(preflight(assertionWith({ ...GOOD_CLAIMS, exp: NOW_S - 1 })))
       .toEqual({ ok: false, reason: "handoff_assertion_expired" });
-    expect(preflight(assertionWith({ aud: AUDIENCE, project_id: STAGING_VERCEL_PROJECT_ID, owner_id: STAGING_VERCEL_TEAM_ID })))
-      .toEqual({ ok: false, reason: "handoff_assertion_expired" });
+    // A token with NO `exp` reads as expired. Built from the full identity so it fails on the missing expiry rather
+    // than tripping one of the six claim pins first — the intent is the expiry rule, not the claim set.
+    const noExp: Record<string, unknown> = { ...GOOD_CLAIMS };
+    delete noExp.exp;
+    expect(preflight(assertionWith(noExp))).toEqual({ ok: false, reason: "handoff_assertion_expired" });
   });
 
   // A payload that is not a claims OBJECT must refuse, not throw. `JSON.parse("null")` returns null, and dereferencing

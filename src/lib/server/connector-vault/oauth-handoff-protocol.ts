@@ -184,15 +184,31 @@ export { STAGING_VERCEL_PROJECT_ID };
 const PERMITTED_ALG = "RS256" as const;
 
 /**
- * Ceilings on the assertion's own timestamps.
+ * Ceilings on the assertion's own timestamps. THE reviewed lifetime contract — one value, used by both repositories.
  *
- * ASSUMED, NOT VERIFIED: Vercel's runtime-injected OIDC token lifetime is not something this repository can observe, and
- * a ceiling below it would refuse every real token. One hour is the defensible upper bound to start from; PR 4 should
- * tighten it to the observed lifetime once a real assertion has been seen, which is why these are parameters with
- * defaults rather than constants baked into the comparison.
+ * CITED, not assumed. This was 3600 with a comment saying the lifetime "is not something this repository can observe".
+ * It is documented:
+ *   * Vercel's OIDC reference: "Function tokens for `preview` and `production` expire after **two hours**." One hour is
+ *     the BUILD-token lifetime, which is the token this design does NOT use.
+ *   * Vercel's custom-audience changelog: the exchange "[u]pdates the `iat` to the current timestamp" and "[p]reserves
+ *     all original claims (project, environment, owner, **expiration**)", carrying the original issue time in `act.iat`.
+ *
+ * So on the EXCHANGED assertion the worker actually receives, `exp` is inherited from the platform token and `iat` is
+ * the exchange moment. `exp - iat` is therefore the platform token's REMAINING life — at most 7200, usually less. A
+ * 3600 ceiling would have refused any exchange performed in the first hour of a platform token's life, i.e. most real
+ * callbacks, and it would have presented as an assertion fault rather than as a ceiling we chose.
+ *
+ * `maxAge` (`now - iat`) is left AT the lifetime rather than tightened, and that is a deliberate hold, not an oversight:
+ * because V3 exchanges per request with no cache, a real `iat` should be seconds old, and the honest tightening is
+ * large. But the value is not yet OBSERVED, and a ceiling below the truth refuses real customers intermittently — the
+ * failure mode the 3600 bug just demonstrated. Doc 83 §8.4a defines the first-live-run evidence that settles it, and
+ * both remain parameters so tightening needs no code change.
+ *
+ * The replay window that actually matters is neither of these: it is the correlation's uniqueness in
+ * `oauth_completion_jobs` plus that job's ten-minute deadline.
  */
-export const DEFAULT_MAX_ASSERTION_LIFETIME_SECONDS = 3600;
-export const DEFAULT_MAX_ASSERTION_AGE_SECONDS = 3600;
+export const DEFAULT_MAX_ASSERTION_LIFETIME_SECONDS = 7200;
+export const DEFAULT_MAX_ASSERTION_AGE_SECONDS = 7200;
 /** A token issued more than this far in the future is refused outright — clock drift, not a licence to pre-date. */
 export const DEFAULT_CLOCK_SKEW_SECONDS = 30;
 

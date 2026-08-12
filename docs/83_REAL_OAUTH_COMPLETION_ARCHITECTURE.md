@@ -398,9 +398,33 @@ set and nothing else.
 | `nbf` | if present, `<= now + 30s` |
 | `exp - iat` | `<= maxLifetime` |
 
-`maxLifetime` / `maxAge` default to **3600s** and are **parameters, not constants**. That is an assumption, not a
-measurement: Vercel's runtime-injected token lifetime is not observable from this repository, and a ceiling below it
-would refuse every real token. **PR 4 must tighten it to the observed lifetime once a real assertion has been seen.**
+`maxLifetime` / `maxAge` default to **7200s** and are **parameters, not constants**.
+
+> **CORRECTED (Phase 8R).** This said 3600s, described as "an assumption, not a measurement". It was a measurement of
+> the wrong token: **one hour is the BUILD-token lifetime**, and Vercel's OIDC reference states that *"Function tokens
+> for `preview` and `production` expire after two hours."* Since the check is `exp - iat <= maxLifetime`, a 3600 ceiling
+> would have refused **every real callback** — a total outage presenting as an assertion fault rather than a ceiling we
+> chose.
+>
+> On the **exchanged** assertion the worker actually receives, Vercel's custom-audience changelog is explicit: the
+> exchange *updates `iat` to the current timestamp* and *preserves all original claims including expiration*, carrying
+> the original issue time in an `act.iat` claim. So `exp - iat` is the platform token's REMAINING life (≤ 7200), and
+> `iat` is the exchange moment.
+>
+> `maxAge` is held AT the lifetime rather than tightened. V3 exchanges per request with no cache, so a real `iat` should
+> be seconds old and the honest tightening is large — but "should be" is exactly what 3600 was, and a ceiling below the
+> truth refuses real customers intermittently. §8.4a defines the evidence that settles it.
+
+### §8.4a — first-live timing evidence
+
+The first staging callback records **four integers and nothing else**: `iat`, `exp`, `exp - iat`, and `act.iat` if
+present. `assertionTimingEvidence` in the runner returns exactly that shape and is asserted to carry no token, no
+signature, and none of `aud` / `iss` / `sub` / `owner_id` / `project_id` / correlation — timestamps cannot identify a
+customer, a workspace or a tenant. **The JWT itself is never logged.**
+
+`act.iat` is the one that matters: it is the only claim revealing the true end-to-end age, because the exchange
+refreshes `iat`. Once observed, `OAUTH_COMPLETION_WORKER_OIDC_MAX_AGE_SECONDS` can be tightened from the environment
+with no code change — the knob is downward-only by construction.
 
 Alongside the assertion, `verifyHandoffRequest` checks the version header, the body size, the digest header against the
 received bytes, the strict schema, the correlation header against the body, canonical form, and the payload bounds.

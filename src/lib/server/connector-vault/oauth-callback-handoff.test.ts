@@ -35,7 +35,13 @@ const signer = createHmacStateSigner("state-secret-not-real", "k1");
 const b64url = (s: string) => Buffer.from(s).toString("base64url");
 const assertion = (over: Record<string, unknown> = {}) =>
   `${b64url(JSON.stringify({ alg: "RS256", kid: "k" }))}.${b64url(JSON.stringify({
-    aud: AUDIENCE, project_id: STAGING_VERCEL_PROJECT_ID, owner_id: STAGING_VERCEL_TEAM_ID, exp: Math.floor(NOW / 1000) + 600, ...over,
+    // The full six-claim identity the preflight pins (Phase 8R). Incomplete claims would fail the preflight here for
+    // the wrong reason and mask whatever the test is actually about.
+    aud: AUDIENCE,
+    iss: "https://oidc.vercel.com/idc-projects-f977cea1",
+    sub: "owner:idc-projects-f977cea1:project:idcaddie-v3:environment:production",
+    environment: "production",
+    project_id: STAGING_VERCEL_PROJECT_ID, owner_id: STAGING_VERCEL_TEAM_ID, exp: Math.floor(NOW / 1000) + 600, ...over,
   }))}.${b64url("signature-bytes")}`;
 
 const stateContext = (over: Partial<OAuthStateContext> = {}): OAuthStateContext => ({
