@@ -132,81 +132,113 @@ const NOW_S = 1_800_000_000;
 const GOOD_CLAIMS = { aud: AUDIENCE, project_id: STAGING_VERCEL_PROJECT_ID, owner_id: STAGING_VERCEL_TEAM_ID, exp: NOW_S + 600 };
 const ASSERTION = assertionWith(GOOD_CLAIMS);
 
-describe("the OIDC assertion source — trusted request context, dedicated audience, bounded exchange", () => {
+describe("the OIDC assertion source — request context in, exchanged token out", () => {
   const PLATFORM = "platform.token.value";
-  const deps = (o: Partial<{ readPlatformToken: () => string; exchange: (x: { token: string; audience: string }) => Promise<string> }> = {}) => ({
-    readPlatformToken: o.readPlatformToken ?? (() => PLATFORM),
-    exchange: o.exchange ?? (async () => ASSERTION),
-  });
+  const ctx = (token?: string) => () => ({ headers: token === undefined ? {} : { "x-vercel-oidc-token": token } });
+  const jsonRes = (body: unknown, init: { status?: number } = {}) =>
+    new Response(JSON.stringify(body), { status: init.status ?? 200, headers: { "content-type": "application/json" } });
 
-  it("reads the platform token via the SDK's request-context accessor and exchanges it for the DEDICATED audience", async () => {
-    const seen: { token: string; audience: string }[] = [];
-    const r = await acquireHandoffAssertion(deps({ exchange: async (o) => { seen.push(o); return ASSERTION; } }));
-    expect(seen).toEqual([{ token: PLATFORM, audience: "https://idcaddie.com/oauth-completion-worker" }]);
-    expect(HANDOFF_OIDC_AUDIENCE).toBe("https://idcaddie.com/oauth-completion-worker");
+  it("exchanges the request-context token for the DEDICATED audience, and returns only the exchanged token", async () => {
+    const calls: { url: string; body: unknown; init: RequestInit }[] = [];
+    const r = await acquireHandoffAssertion(HANDOFF_OIDC_AUDIENCE, {
+      readContext: ctx(PLATFORM),
+      fetchImpl: (async (url: string, init: RequestInit) => {
+        calls.push({ url, body: JSON.parse(String(init.body)), init });
+        return jsonRes({ token: ASSERTION });
+      }) as unknown as typeof fetch,
+    });
     expect(r).toEqual({ ok: true, token: ASSERTION });
+    expect(calls).toHaveLength(1);
+    expect(calls[0].url).toBe("https://oidc.vercel.com/~token");
+    expect(calls[0].body).toEqual({ token: PLATFORM, aud: "https://idcaddie.com/oauth-completion-worker" });
+    // Outbound disciplines: a 30x must not carry the bearer to another origin.
+    expect(calls[0].init.redirect).toBe("error");
+    expect(calls[0].init.cache).toBe("no-store");
+    expect(calls[0].init.signal).toBeDefined();
   });
 
-  it("the exchanged token carries exactly that aud claim, and preflight accepts it", async () => {
-    const exchanged = assertionWith({ ...GOOD_CLAIMS, aud: HANDOFF_OIDC_AUDIENCE });
-    const r = await acquireHandoffAssertion(deps({ exchange: async () => exchanged }));
-    expect(r.ok).toBe(true);
-    const token = (r as { token: string }).token;
-    expect(JSON.parse(Buffer.from(token.split(".")[1], "base64url").toString()).aud).toBe("https://idcaddie.com/oauth-completion-worker");
-    expect(preflightOwnAssertion(token, { audience: HANDOFF_OIDC_AUDIENCE, nowSeconds: NOW_S })).toEqual({ ok: true });
+  it("NO request-context token and no env fallback => refuses without exchanging", async () => {
+    const prev = process.env.VERCEL_OIDC_TOKEN;
+    delete process.env.VERCEL_OIDC_TOKEN;
+    let called = 0;
+    const r = await acquireHandoffAssertion(HANDOFF_OIDC_AUDIENCE, {
+      readContext: ctx(undefined),
+      fetchImpl: (async () => { called++; return jsonRes({ token: ASSERTION }); }) as unknown as typeof fetch,
+    });
+    if (prev !== undefined) process.env.VERCEL_OIDC_TOKEN = prev;
+    expect(r).toEqual({ ok: false, reason: "handoff_assertion_missing" });
+    expect(called).toBe(0);
   });
 
-  // No request context => the SDK throws. Refuse; never refresh, never read ~/.vercel, never spawn anything.
-  it("a MISSING request-context token refuses, and never reaches the exchange", async () => {
-    let exchanged = 0;
-    const thrown = await acquireHandoffAssertion(deps({
-      readPlatformToken: () => { throw new Error("The 'x-vercel-oidc-token' header is missing from the request."); },
-      exchange: async () => { exchanged++; return ASSERTION; },
-    }));
-    expect(thrown).toEqual({ ok: false, reason: "handoff_assertion_missing" });
-    expect(exchanged).toBe(0);
-    expect(await acquireHandoffAssertion(deps({ readPlatformToken: () => "" }))).toEqual({ ok: false, reason: "handoff_assertion_missing" });
+  it("a non-2xx exchange refuses, and the provider body never escapes", async () => {
+    const r = await acquireHandoffAssertion(HANDOFF_OIDC_AUDIENCE, {
+      readContext: ctx(PLATFORM),
+      fetchImpl: (async () => new Response(`denied ${PLATFORM}`, { status: 403 })) as unknown as typeof fetch,
+    });
+    expect(r).toEqual({ ok: false, reason: "handoff_assertion_exchange_failed" });
+    expect(JSON.stringify(r)).not.toContain(PLATFORM);
   });
 
-  it("an exchange FAILURE refuses, distinguishably", async () => {
-    expect(await acquireHandoffAssertion(deps({ exchange: async () => { throw new Error("exchange refused"); } })))
-      .toEqual({ ok: false, reason: "handoff_assertion_exchange_failed" });
+  it("a REDIRECT fails closed — the bearer must not follow to another origin", async () => {
+    const r = await acquireHandoffAssertion(HANDOFF_OIDC_AUDIENCE, {
+      readContext: ctx(PLATFORM),
+      // `redirect: "error"` makes fetch itself reject; model that.
+      fetchImpl: (async () => { throw new TypeError("unexpected redirect"); }) as unknown as typeof fetch,
+    });
+    expect(r).toEqual({ ok: false, reason: "handoff_assertion_exchange_failed" });
   });
 
-  it("an exchange that HANGS refuses on the timeout rather than blocking the callback", async () => {
-    const started = Date.now();
-    const r = await acquireHandoffAssertion(deps({ exchange: () => new Promise<string>(() => {}) }), HANDOFF_OIDC_AUDIENCE, 40);
+  it("a HANG fails closed on the abort ceiling", async () => {
+    const r = await acquireHandoffAssertion(HANDOFF_OIDC_AUDIENCE, {
+      readContext: ctx(PLATFORM),
+      fetchImpl: ((_u: string, init: RequestInit) => new Promise((_res, rej) => {
+        init.signal?.addEventListener("abort", () => rej(new DOMException("aborted", "AbortError")));
+      })) as unknown as typeof fetch,
+    });
     expect(r).toEqual({ ok: false, reason: "handoff_assertion_exchange_timeout" });
-    expect(Date.now() - started).toBeLessThan(2000);
+  }, 10_000);
+
+  it("malformed and OVERSIZED responses fail closed", async () => {
+    const bad: [string, Response][] = [
+      ["not JSON", new Response("<html>", { status: 200 })],
+      ["JSON without a token", jsonRes({ nope: 1 })],
+      ["token not a string", jsonRes({ token: 42 })],
+      ["empty token", jsonRes({ token: "" })],
+      ["declared length over the ceiling", new Response("{}", { status: 200, headers: { "content-length": String(64 * 1024) } })],
+      ["actual body over the ceiling", jsonRes({ token: "x".repeat(20 * 1024) })],
+    ];
+    for (const [name, res] of bad) {
+      const r = await acquireHandoffAssertion(HANDOFF_OIDC_AUDIENCE, {
+        readContext: ctx(PLATFORM),
+        fetchImpl: (async () => res.clone()) as unknown as typeof fetch,
+      });
+      expect(r.ok, name).toBe(false);
+    }
   });
 
-  it("a fast success does not wait for the ceiling", async () => {
-    const started = Date.now();
-    expect(await acquireHandoffAssertion(deps(), HANDOFF_OIDC_AUDIENCE, 5000)).toEqual({ ok: true, token: ASSERTION });
-    expect(Date.now() - started).toBeLessThan(1000);
-  });
-
-  it("an empty exchanged token refuses", async () => {
-    expect(await acquireHandoffAssertion(deps({ exchange: async () => "" }))).toEqual({ ok: false, reason: "handoff_assertion_missing" });
-  });
-
-  it("neither the platform token nor the exchange error escapes into a result or a log", async () => {
+  it("neither the platform token nor a thrown error reaches a result or a log", async () => {
     const logs: string[] = [];
     const spies = (["log","info","warn","error","debug"] as const).map((m) => vi.spyOn(console, m).mockImplementation((...a: unknown[]) => { logs.push(a.map(String).join(" ")); }));
-    const out = await acquireHandoffAssertion(deps({ exchange: async () => { throw new Error(`boom ${PLATFORM} ${ASSERTION} https://oidc.vercel.com/~token`); } }));
-    spies.forEach((s) => s.mockRestore());
-    const dump = JSON.stringify({ out, logs });
-    expect(out).toEqual({ ok: false, reason: "handoff_assertion_exchange_failed" });
-    for (const secret of [PLATFORM, ASSERTION, "boom", "~token"]) expect(dump).not.toContain(secret);
+    const r = await acquireHandoffAssertion(HANDOFF_OIDC_AUDIENCE, {
+      readContext: ctx(PLATFORM),
+      fetchImpl: (async () => { throw new Error(`boom ${PLATFORM} https://oidc.vercel.com/~token`); }) as unknown as typeof fetch,
+    });
+    spies.forEach((x) => x.mockRestore());
+    const dump = JSON.stringify({ r, logs });
+    for (const secret of [PLATFORM, "boom", "~token"]) expect(dump).not.toContain(secret);
   });
 
-  it("has no path from a request, header or caller input to the assertion", () => {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const src = (require("node:fs") as typeof import("node:fs")).readFileSync("src/lib/server/connector-vault/oauth-handoff-client.ts", "utf8");
-    const fn = src.slice(src.indexOf("export async function acquireHandoffAssertion"), src.indexOf("export function preflightOwnAssertion"));
-    const code = fn.split("\n").filter((l) => !l.trim().startsWith("*") && !l.trim().startsWith("//")).join("\n");
-    expect(code).not.toMatch(/headers|Request\b|req\.|request\.|x-vercel-oidc-token/i);
-    expect(code).not.toMatch(/process\.env|refresh|\.vercel|execa|child_process/i);
+  // DATAFLOW, not string prohibition: `acquireHandoffAssertion` takes an AUDIENCE and injection points for the context
+  // reader and fetch. There is NO parameter through which a caller could supply an assertion, and the raw platform
+  // token is never returned — only the exchanged one. That is the boundary, expressed as a type.
+  it("offers no seam for a caller-supplied assertion", async () => {
+    const r = await acquireHandoffAssertion(HANDOFF_OIDC_AUDIENCE, {
+      readContext: ctx(PLATFORM),
+      fetchImpl: (async () => jsonRes({ token: ASSERTION })) as unknown as typeof fetch,
+    });
+    expect(r).toEqual({ ok: true, token: ASSERTION });
+    // The exchanged token is what comes out; the platform token is not reachable from the return value.
+    expect(JSON.stringify(r)).not.toContain(PLATFORM);
   });
 });
 

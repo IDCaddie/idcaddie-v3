@@ -20,6 +20,8 @@ import ts from "typescript";
 
 const SRC = join(process.cwd(), "src");
 const HEADER = "x-vercel-oidc-token";
+// The ONE module permitted to touch the platform OIDC value (doc 83 §8.4). Its raw token never leaves it.
+const APPROVED_OIDC_MODULE = "lib/server/connector-vault/vercel-platform-oidc.ts";
 
 function walkFiles(dir: string, acc: string[] = []): string[] {
   for (const n of readdirSync(dir)) {
@@ -92,13 +94,32 @@ describe("the header trust boundary, over the AST", () => {
     for (const p of COMPLETION_PATH) expect(files.some((f) => f.rel === p), `missing ${p}`).toBe(true);
   });
 
-  // RULE A — the header NAME may not appear as a runtime string ANYWHERE under src/. Not in a literal, not aliased to a
-  // constant, not concatenated, not as a computed key. Comments are not string literals, so prose may still explain it.
-  it("no file names x-vercel-oidc-token as a runtime string", () => {
-    const offenders = files
+  // RULE A — SEMANTIC, not a string prohibition. Vercel's documented Function delivery mechanism IS that header, so
+  // forbidding the name outright was both unenforceable (a review bypassed it 15 ways: fromCharCode, array join,
+  // base64/hex decode, .concat, Reflect.get, an alias chain, a helper in another module) and wrong in principle.
+  //
+  // The boundary that actually holds: EXACTLY ONE module may touch the platform OIDC value, and it does not hand the
+  // raw value out. Everything else is expressed as dataflow in `vercel-platform-oidc.dataflow.test.ts`.
+  it("exactly one approved module names the platform OIDC header", () => {
+    const namers = files
       .filter((f) => stringValues(parse(f.src)).some((v) => v.toLowerCase().includes(HEADER)))
       .map((f) => f.rel);
-    expect(offenders).toEqual([]);
+    expect(namers).toEqual([APPROVED_OIDC_MODULE]);
+  });
+
+  it("the approved module does not export the raw platform token — only an exchanged one", () => {
+    const src = files.find((f) => f.rel === APPROVED_OIDC_MODULE)?.src ?? "";
+    expect(src).toContain("function readPlatformToken");     // it exists
+    expect(src).not.toMatch(/export\s+(?:async\s+)?function\s+readPlatformToken/); // and is NOT exported
+    // The only exported way to obtain a token returns the EXCHANGED one.
+    expect(src).toMatch(/export async function exchangeForDedicatedAudience/);
+  });
+
+  it("only the handoff client consumes the approved module", () => {
+    const importers = files
+      .filter((f) => f.rel !== APPROVED_OIDC_MODULE && /from\s+["'].*vercel-platform-oidc["']/.test(f.src))
+      .map((f) => f.rel);
+    expect(importers).toEqual(["lib/server/connector-vault/oauth-handoff-client.ts"]);
   });
 
   // RULE B — no file on the completion path reads an INBOUND header or cookie at all. The assertion comes from the SDK;
@@ -132,8 +153,10 @@ describe("the AST rules fire on every form the regex missed", () => {
     ["template literal", "const t = req.headers.get(`x-vercel-oidc-token`);"],
     ["uppercase spelling", `const t = req.headers.get("X-Vercel-OIDC-Token");`],
   ];
+  // These are the forms that bypassed the old regex. The AST sees all of them — which is what makes "only the approved
+  // module may name it" enforceable at all.
   for (const [name, src] of headerNamePlants) {
-    it(`RULE A fires on: ${name}`, () => expect(namesHeader(src)).toBe(true));
+    it(`the AST sees the header name via: ${name}`, () => expect(namesHeader(src)).toBe(true));
   }
 
   const headerReadPlants: [string, string][] = [

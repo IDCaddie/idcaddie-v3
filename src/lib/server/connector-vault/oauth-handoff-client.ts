@@ -34,6 +34,7 @@ import {
   type HandoffRequest,
 } from "./oauth-handoff-protocol";
 import { PayloadSealError, parseWorkerSealKey, type WorkerSealKey } from "./oauth-payload-seal";
+import { exchangeForDedicatedAudience, type ExchangeDeps } from "./vercel-platform-oidc";
 
 if (typeof (globalThis as { window?: unknown }).window !== "undefined") {
   throw new Error("connector-vault/oauth-handoff-client is server-only and must not be imported in client code");
@@ -186,92 +187,31 @@ export function isVercelDefaultAudience(candidate: string): boolean {
   return host === "vercel.com";
 }
 
-/**
- * The two `@vercel/oidc` primitives this path is allowed to use, injected so tests never touch the platform.
- *
- * DELIBERATELY NOT `getVercelOidcToken`. That convenience wrapper unconditionally does
- * `await import("./token-util.js")` + `await import("./token.js")` on EVERY call, and `token.js` pulls
- * `@vercel/cli-exec` -> `execa` -> `child_process` plus `@vercel/cli-config`'s keyring credential store. It then calls
- * `refreshToken()` whenever the platform token is missing or expired — a branch that is reachable in production, where
- * it would read `~/.vercel` and try to shell out to a CLI that is not in the bundle. That is a process-spawning
- * credential-store capability in a public request path, which is the exact class of creep doc 83 §2 exists to prevent,
- * and the refresh can never succeed on Vercel anyway.
- *
- * The two primitives it wraps have a clean graph — `getVercelOidcTokenSync` requires only `./get-context` (which
- * requires nothing), and `exchangeVercelOidcToken` requires only `./version`. `oauth-handoff-runtime-closure.test.ts`
- * proves that graph stays clean.
- */
-export type PlatformTokenReader = () => string;
-export type OidcTokenExchanger = (options: { token: string; audience: string }) => Promise<string>;
-
-/** Ceiling on the audience exchange. The browser is waiting, and the exchange is a THIRD-PARTY call we do not control. */
-export const OIDC_EXCHANGE_TIMEOUT_MS = 3000;
-
+/** Ceiling on the audience exchange, enforced inside `vercel-platform-oidc` by an AbortController. */
 export type AcquiredAssertion =
   | { ok: true; token: string }
   | { ok: false; reason: "handoff_assertion_missing" | "handoff_assertion_exchange_failed" | "handoff_assertion_exchange_timeout" };
 
 /**
- * Acquire the Vercel OIDC assertion, minted for OUR dedicated audience.
+ * Acquire the handoff assertion, minted for OUR dedicated audience.
  *
- * ── WHERE THE TOKEN COMES FROM ─────────────────────────────────────────────────────────────────────────────────────
- * `getVercelOidcTokenSync()` reads the platform-injected token from Vercel's own request context
- * (`globalThis[Symbol.for("@vercel/request-context")]`). This module never touches `request.headers`, never names
- * `x-vercel-oidc-token`, and never accepts an assertion from a body, query, cookie or inbound `Authorization`. The
- * rule is about TRUST, not transport: the platform's own accessor is permitted; our parsing of a request is not.
- * Enforced over the AST by `oauth-handoff-header-trust.test.ts`.
- *
- * A missing platform token is a plain refusal. There is NO refresh, no `~/.vercel` read and no subprocess.
- *
- * ── THE AUDIENCE IS AN EXCHANGE, PER REQUEST ───────────────────────────────────────────────────────────────────────
- * Vercel's default `aud` is `https://vercel.com/<team-slug>`, which every relying party in the team receives.
- * `exchangeVercelOidcToken` trades the platform token for one whose `aud` is exactly ours. It is not a dashboard
- * setting. The exchange is BOUNDED: it is a third-party POST with no signal of its own, inside the request the browser
- * is blocked on, and a hang is not a rejection — so only a race bounds it.
+ * The platform token is never seen here: `exchangeForDedicatedAudience` reads it from Vercel's request context inside
+ * the one module permitted to, and returns only the EXCHANGED token. This function has no seam through which
+ * application input could supply an assertion — there is no parameter for one.
  */
 export async function acquireHandoffAssertion(
-  deps: { readPlatformToken: PlatformTokenReader; exchange: OidcTokenExchanger },
   audience: string = HANDOFF_OIDC_AUDIENCE,
-  timeoutMs: number = OIDC_EXCHANGE_TIMEOUT_MS,
+  deps: ExchangeDeps = {},
 ): Promise<AcquiredAssertion> {
-  let platformToken: unknown;
-  try {
-    platformToken = deps.readPlatformToken();
-  } catch {
-    // The SDK throws when the request context carries no token. Discarded, never logged: its message names the header.
-    return { ok: false, reason: "handoff_assertion_missing" };
-  }
-  if (typeof platformToken !== "string" || platformToken.length === 0) {
-    return { ok: false, reason: "handoff_assertion_missing" };
-  }
-
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const timeout = new Promise<{ timedOut: true }>((resolve) => {
-    timer = setTimeout(() => resolve({ timedOut: true }), timeoutMs);
-  });
-
-  let raced: unknown;
-  try {
-    raced = await Promise.race([
-      deps.exchange({ token: platformToken, audience }).then((token) => ({ token })),
-      timeout,
-    ]);
-  } catch {
-    // DISCARDED, never wrapped or logged: an exchange error can embed the token, the exchange URL and the response body.
-    return { ok: false, reason: "handoff_assertion_exchange_failed" };
-  } finally {
-    if (timer !== undefined) clearTimeout(timer);
-  }
-
-  if (raced !== null && typeof raced === "object" && "timedOut" in raced) {
-    // The in-flight exchange is abandoned rather than awaited: its result can only be a token we have already decided
-    // not to use, and nothing downstream reads it.
-    return { ok: false, reason: "handoff_assertion_exchange_timeout" };
-  }
-  const token = (raced as { token?: unknown }).token;
-  return typeof token === "string" && token.length > 0
-    ? { ok: true, token }
-    : { ok: false, reason: "handoff_assertion_missing" };
+  const exchanged = await exchangeForDedicatedAudience(audience, deps);
+  if (exchanged.ok) return { ok: true, token: exchanged.token };
+  return {
+    ok: false,
+    reason:
+      exchanged.reason === "platform_token_missing" ? "handoff_assertion_missing"
+      : exchanged.reason === "exchange_timeout" ? "handoff_assertion_exchange_timeout"
+      : "handoff_assertion_exchange_failed",
+  };
 }
 
 /**
