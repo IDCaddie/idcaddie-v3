@@ -12,6 +12,34 @@ from PRs verified via `git log` / `gh pr list`.
 > **as of each PR's date** and are historical — where an older entry says "RISK-007 remains OPEN" / "Phase C remains
 > BLOCKED", that was accurate at that entry's date; this banner is the current state.
 
+### feat(governance) — Phase 16: the tenant-wide cross-source engine · 2026-08-12
+
+A **sibling** to Phase 14 at `src/lib/server/cross-source-governance/`, not an extension of it. Phase 14 keeps its
+`(tenant, connection, provider)` scope, its rule catalog and its finding-id function untouched; this engine's scope is
+the **tenant**, because every question it asks spans connectors by definition. They share severity, confidence, the
+message-key indirection, the PII-free evidence discipline and migration 0083 — and share no rule implementation.
+
+Five rules ship: orphaned active SaaS account, inactive identity with a live SaaS account, privileged account with no
+owner, duplicate active accounts inside one connection, and application unmanaged by the IdP.
+`ACTIVE_ENTITLEMENT_ON_INACTIVE_IDENTITY` is **deferred, not stubbed** — no entitlement evidence model exists, and a
+rule that cannot be evaluated must not appear as one that found nothing.
+
+**The load-bearing part is what the rules refuse to say.** Each declares what must be `available` before it may open;
+when that is unmet the rule is **withheld** with a reason rather than evaluated to zero. Two guards are counter-intuitive
+enough to name: an empty `person_account_links` is *unknown*, not "every account is an orphan" (so shipping 0082 does not
+flag an entire estate), and an empty `application_matches` is *unknown*, not "nothing is managed" — no matcher exists, so
+rule 5 ships correct and permanently silent until one runs. `isActive`/`isAdmin` nulls mean the provider did not say;
+only explicit values count, because treating unknown as inactive would accuse a live employee.
+
+**Provider-neutral by construction:** zero provider imports — only `node:crypto` and two sibling type modules. `provider`
+is an opaque string for provenance, never compared to a literal. A test asserts an unknown provider evaluates identically
+to a known one, so Google plugs in without touching this code.
+
+**Verified local: 30 engine tests, 2594 unit tests passed, tsc 0, lint 0 errors (68 warnings, baseline unchanged), build
+compiled, test-rls.sh passed.** Four mutants all RED: removing the identity-completeness guard, weakening the
+accepted-link requirement, treating unknown `isActive` as inactive, and letting an empty matcher mean unmanaged.
+**No migration. Nothing deployed, no hosted apply, no provider contacted. No risk opened or closed.**
+
 ### feat(governance) — Phase 16: migration 0083, persisted findings with an evidence-gated lifecycle · 2026-08-12
 
 Phase 14's engine computes deterministic findings in memory and writes nothing, so a finding had no age and no history.

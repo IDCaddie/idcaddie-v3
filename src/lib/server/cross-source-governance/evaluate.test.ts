@@ -1,0 +1,423 @@
+// Phase 16 — the cross-source engine.
+//
+// The property this suite exists to protect: the engine must never turn "we could not look" into "we looked and found
+// none". Most of the cases below are one restatement of that; the rest pin determinism, so a finding keeps its identity
+// and therefore its age.
+
+import { describe, expect, it } from "vitest";
+import { evaluateCrossSourceGovernance } from "./evaluate";
+import { crossSourceFindingKey } from "./finding-id";
+import type {
+  AppAccountRow,
+  CrossSourceGraph,
+  DirectoryApplicationRow,
+  IdentityAccountRow,
+  PersonAccountLinkRow,
+  SourceCapability,
+} from "./types";
+
+const TENANT = "11111111-1111-4111-8111-111111111111";
+const OKTA = "22222222-2222-4222-8222-222222222222";
+const SLACK = "33333333-3333-4333-8333-333333333333";
+const GOOGLE = "44444444-4444-4444-8444-444444444444";
+
+const caps = (...xs: [string, string, SourceCapability["capability"], SourceCapability["state"]][]): SourceCapability[] =>
+  xs.map(([connectionId, provider, capability, state]) => ({ connectionId, provider, capability, state }));
+
+const ALL_AVAILABLE = caps(
+  [OKTA, "okta", "identity", "available"],
+  [SLACK, "slack", "app_accounts", "available"],
+);
+
+const identity = (o: Partial<IdentityAccountRow> & { id: string }): IdentityAccountRow => ({
+  connectionId: OKTA, provider: "okta", syncStatus: "current", isActive: true, ...o,
+});
+const account = (o: Partial<AppAccountRow> & { id: string }): AppAccountRow => ({
+  connectionId: SLACK, provider: "slack", syncStatus: "current",
+  accountKind: "human", accountStatus: "active", isAdmin: null, ...o,
+});
+const link = (o: Partial<PersonAccountLinkRow> & { personId: string }): PersonAccountLinkRow => ({
+  identityAccountId: null, appAccountId: null, status: "accepted", ...o,
+});
+
+const graph = (o: Partial<CrossSourceGraph> = {}): CrossSourceGraph => ({
+  tenantId: TENANT,
+  capabilities: ALL_AVAILABLE,
+  identityAccounts: [],
+  appAccounts: [],
+  personAccountLinks: [],
+  directoryApplications: [],
+  applicationMatches: [],
+  ...o,
+});
+
+const ruleIds = (g: CrossSourceGraph) => evaluateCrossSourceGovernance(g).findings.map(f => f.rule_id);
+
+describe("rule 1 — active SaaS account without an accepted identity", () => {
+  // 1. accepted identity exists -> no orphan finding
+  it("does not fire when a person has been accepted for the account", () => {
+    const g = graph({
+      appAccounts: [account({ id: "a1" })],
+      personAccountLinks: [link({ personId: "p1", appAccountId: "a1" })],
+    });
+    expect(ruleIds(g)).not.toContain("active_saas_account_without_accepted_identity");
+  });
+
+  // 2. no accepted identity, identity source complete -> orphan finding
+  it("fires when the account is unowned and the directory source is proven complete", () => {
+    const g = graph({
+      appAccounts: [account({ id: "a1" }), account({ id: "a2" })],
+      personAccountLinks: [link({ personId: "p1", appAccountId: "a2" })],
+    });
+    const f = evaluateCrossSourceGovernance(g).findings;
+    expect(f).toHaveLength(1);
+    expect(f[0].rule_id).toBe("active_saas_account_without_accepted_identity");
+    expect(f[0].subject_id).toBe("a1");
+    expect(f[0].severity).toBe("medium");
+    // The closure gate must name BOTH sides: the account's own connection and the identity source that proved absence.
+    expect(f[0].evidence_connection_ids).toEqual([OKTA, SLACK].sort());
+  });
+
+  // 3. identity source incomplete -> no false finding
+  it("is WITHHELD, not zero, when no directory source is complete", () => {
+    const g = graph({
+      capabilities: caps([OKTA, "okta", "identity", "failed"], [SLACK, "slack", "app_accounts", "available"]),
+      appAccounts: [account({ id: "a1" })],
+      personAccountLinks: [link({ personId: "p1", appAccountId: "zzz" })],
+    });
+    const r = evaluateCrossSourceGovernance(g);
+    expect(r.findings).toHaveLength(0);
+    expect(r.withheldRules.map(w => w.ruleId)).toContain("active_saas_account_without_accepted_identity");
+    expect(r.evaluatedRules).not.toContain("active_saas_account_without_accepted_identity");
+  });
+
+  it("is withheld while person resolution has produced nothing — an empty link table is unknown, not orphaned", () => {
+    const g = graph({ appAccounts: [account({ id: "a1" })], personAccountLinks: [] });
+    const r = evaluateCrossSourceGovernance(g);
+    expect(r.findings).toHaveLength(0);
+    expect(r.withheldRules.find(w => w.ruleId === "active_saas_account_without_accepted_identity")?.reason)
+      .toMatch(/person resolution/);
+  });
+
+  it("treats a PROPOSED link as awaiting review rather than as an orphan", () => {
+    const g = graph({
+      appAccounts: [account({ id: "a1" })],
+      personAccountLinks: [link({ personId: "p1", appAccountId: "a1", status: "proposed" })],
+    });
+    expect(ruleIds(g)).toHaveLength(0);
+  });
+
+  // 5. stale SaaS account must not be treated as current active access
+  it("ignores a stale account — the connector stopped confirming it, which is not evidence of access", () => {
+    const g = graph({
+      appAccounts: [account({ id: "a1", syncStatus: "stale" })],
+      personAccountLinks: [link({ personId: "p1", appAccountId: "zzz" })],
+    });
+    expect(ruleIds(g)).toHaveLength(0);
+  });
+
+  it("ignores bots and non-active accounts", () => {
+    const g = graph({
+      appAccounts: [
+        account({ id: "bot", accountKind: "bot" }),
+        account({ id: "svc", accountKind: "service" }),
+        account({ id: "gone", accountStatus: "deleted" }),
+        account({ id: "off", accountStatus: "inactive" }),
+      ],
+      personAccountLinks: [link({ personId: "p1", appAccountId: "zzz" })],
+    });
+    expect(ruleIds(g)).toHaveLength(0);
+  });
+});
+
+describe("rule 2 — inactive identity with an active SaaS account", () => {
+  // 4. inactive identity + active linked SaaS account -> finding
+  const leaver = () =>
+    graph({
+      identityAccounts: [identity({ id: "i1", isActive: false })],
+      appAccounts: [account({ id: "a1" })],
+      personAccountLinks: [
+        link({ personId: "p1", identityAccountId: "i1" }),
+        link({ personId: "p1", appAccountId: "a1" }),
+      ],
+    });
+
+  it("fires and names both sides", () => {
+    const f = evaluateCrossSourceGovernance(leaver()).findings.filter(
+      x => x.rule_id === "inactive_identity_with_active_saas_account",
+    );
+    expect(f).toHaveLength(1);
+    expect(f[0].severity).toBe("high");
+    expect(f[0].subject_id).toBe("p1");
+    expect(f[0].evidence.supportingIds).toEqual(["i1", "a1"]);
+    expect(f[0].source_providers).toEqual(["okta", "slack"]);
+    expect(f[0].evidence_connection_ids).toEqual([OKTA, SLACK].sort());
+  });
+
+  it("does NOT fire when the provider never said whether the identity is active", () => {
+    const g = leaver();
+    const withUnknown = { ...g, identityAccounts: [identity({ id: "i1", isActive: null })] };
+    expect(ruleIds(withUnknown)).not.toContain("inactive_identity_with_active_saas_account");
+  });
+
+  it("does not fire on a PROPOSED link — an undecided judgement is not a fact about a person", () => {
+    const g = graph({
+      identityAccounts: [identity({ id: "i1", isActive: false })],
+      appAccounts: [account({ id: "a1" })],
+      personAccountLinks: [
+        link({ personId: "p1", identityAccountId: "i1", status: "proposed" }),
+        link({ personId: "p1", appAccountId: "a1", status: "proposed" }),
+      ],
+    });
+    expect(ruleIds(g)).not.toContain("inactive_identity_with_active_saas_account");
+  });
+
+  it("is withheld when the SaaS side cannot be proven current", () => {
+    const g = { ...leaver(), capabilities: caps([OKTA, "okta", "identity", "available"]) };
+    const r = evaluateCrossSourceGovernance(g);
+    expect(r.withheldRules.map(w => w.ruleId)).toContain("inactive_identity_with_active_saas_account");
+    expect(r.findings).toHaveLength(0);
+  });
+});
+
+describe("rule 3 — privileged account without an accepted identity", () => {
+  // 6. privileged SaaS account without identity -> finding only when privilege is actually reported
+  it("fires at HIGH severity when the provider reported admin", () => {
+    const g = graph({
+      appAccounts: [account({ id: "a1", isAdmin: true })],
+      personAccountLinks: [link({ personId: "p1", appAccountId: "zzz" })],
+    });
+    const f = evaluateCrossSourceGovernance(g).findings;
+    expect(f).toHaveLength(1);
+    expect(f[0].rule_id).toBe("privileged_saas_account_without_accepted_identity");
+    expect(f[0].severity).toBe("high");
+  });
+
+  it("does not infer privilege the provider never reported", () => {
+    const g = graph({
+      appAccounts: [account({ id: "a1", isAdmin: null })],
+      personAccountLinks: [link({ personId: "p1", appAccountId: "zzz" })],
+    });
+    expect(ruleIds(g)).toEqual(["active_saas_account_without_accepted_identity"]);
+  });
+
+  it("reports one account exactly once — rule 1 yields to rule 3 for admins", () => {
+    const g = graph({
+      appAccounts: [account({ id: "a1", isAdmin: true })],
+      personAccountLinks: [link({ personId: "p1", appAccountId: "zzz" })],
+    });
+    const subjects = evaluateCrossSourceGovernance(g).findings.map(f => f.subject_id);
+    expect(subjects).toEqual(["a1"]);
+  });
+});
+
+describe("rule 4 — duplicate active accounts for one person", () => {
+  // 7. duplicate provider accounts, deterministic, no accidental duplicate ids
+  it("fires for two active accounts in ONE connection", () => {
+    const g = graph({
+      appAccounts: [account({ id: "a1" }), account({ id: "a2" })],
+      personAccountLinks: [
+        link({ personId: "p1", appAccountId: "a1" }),
+        link({ personId: "p1", appAccountId: "a2" }),
+      ],
+    });
+    const f = evaluateCrossSourceGovernance(g).findings.filter(
+      x => x.rule_id === "duplicate_active_accounts_for_one_person",
+    );
+    expect(f).toHaveLength(1);
+    expect(f[0].evidence.supportingIds).toEqual(["a1", "a2"]);
+    expect(f[0].evidence_connection_ids).toEqual([SLACK]);
+  });
+
+  it("does NOT fire for one account each in two different connections — that is normal", () => {
+    const g = graph({
+      capabilities: [
+        ...ALL_AVAILABLE,
+        { connectionId: GOOGLE, provider: "google", capability: "app_accounts", state: "available" },
+      ],
+      appAccounts: [account({ id: "a1" }), account({ id: "a2", connectionId: GOOGLE, provider: "google" })],
+      personAccountLinks: [
+        link({ personId: "p1", appAccountId: "a1" }),
+        link({ personId: "p1", appAccountId: "a2" }),
+      ],
+    });
+    expect(ruleIds(g)).not.toContain("duplicate_active_accounts_for_one_person");
+  });
+
+  it("gives each connection's duplicate set its own distinct finding key", () => {
+    const g = graph({
+      capabilities: [
+        ...ALL_AVAILABLE,
+        { connectionId: GOOGLE, provider: "google", capability: "app_accounts", state: "available" },
+      ],
+      appAccounts: [
+        account({ id: "a1" }), account({ id: "a2" }),
+        account({ id: "b1", connectionId: GOOGLE, provider: "google" }),
+        account({ id: "b2", connectionId: GOOGLE, provider: "google" }),
+      ],
+      personAccountLinks: ["a1", "a2", "b1", "b2"].map(id => link({ personId: "p1", appAccountId: id })),
+    });
+    const keys = evaluateCrossSourceGovernance(g)
+      .findings.filter(x => x.rule_id === "duplicate_active_accounts_for_one_person")
+      .map(f => f.finding_key);
+    expect(keys).toHaveLength(2);
+    expect(new Set(keys).size).toBe(2);
+  });
+});
+
+describe("rule 5 — application unmanaged by the IdP", () => {
+  const apps: DirectoryApplicationRow[] = [
+    { id: "app1", connectionId: OKTA, provider: "okta", syncStatus: "current" },
+  ];
+  const appCaps = caps([OKTA, "okta", "directory_applications", "available"]);
+
+  it("stays SILENT while no matcher has run — an empty match table is unknown, not unmanaged", () => {
+    const g = graph({ capabilities: appCaps, directoryApplications: apps, applicationMatches: [] });
+    const r = evaluateCrossSourceGovernance(g);
+    expect(r.findings).toHaveLength(0);
+    expect(r.withheldRules.find(w => w.ruleId === "discovered_application_unmanaged_by_idp")?.reason)
+      .toMatch(/no application matcher has run/);
+  });
+
+  it("fires only once a matcher has produced output and this application is still unmatched", () => {
+    const g = graph({
+      capabilities: appCaps,
+      directoryApplications: [...apps, { id: "app2", connectionId: OKTA, provider: "okta", syncStatus: "current" }],
+      applicationMatches: [{ directoryApplicationId: "app2", status: "accepted" }],
+    });
+    const f = evaluateCrossSourceGovernance(g).findings;
+    expect(f.map(x => x.subject_id)).toEqual(["app1"]);
+    expect(f[0].confidence).toBe("medium");
+  });
+
+  it("treats a proposed match as not yet accepted", () => {
+    const g = graph({
+      capabilities: appCaps,
+      directoryApplications: apps,
+      applicationMatches: [{ directoryApplicationId: "app1", status: "proposed" }],
+    });
+    expect(evaluateCrossSourceGovernance(g).findings.map(x => x.subject_id)).toEqual(["app1"]);
+  });
+});
+
+describe("tenant scope, determinism and empty estates", () => {
+  // 8. cross-tenant rows are structurally out of reach: the engine is handed ONE tenant's rows and folds that tenant
+  // into every key, so a foreign row cannot enter and a foreign key cannot collide.
+  it("folds the tenant into the finding key, so two tenants never share one", () => {
+    const rows = {
+      appAccounts: [account({ id: "a1" })],
+      personAccountLinks: [link({ personId: "p1", appAccountId: "zzz" })],
+    };
+    const a = evaluateCrossSourceGovernance(graph(rows)).findings[0].finding_key;
+    const b = evaluateCrossSourceGovernance(graph({ ...rows, tenantId: "99999999-9999-4999-8999-999999999999" }))
+      .findings[0].finding_key;
+    expect(a).not.toBe(b);
+  });
+
+  // 14. deterministic rerun -> same finding keys
+  it("is byte-identical across repeated evaluation, and independent of input order", () => {
+    const rows = {
+      identityAccounts: [identity({ id: "i1", isActive: false })],
+      appAccounts: [account({ id: "a1" }), account({ id: "a2" }), account({ id: "a3" })],
+      personAccountLinks: [
+        link({ personId: "p1", identityAccountId: "i1" }),
+        link({ personId: "p1", appAccountId: "a1" }),
+        link({ personId: "p1", appAccountId: "a2" }),
+      ],
+    };
+    const first = evaluateCrossSourceGovernance(graph(rows));
+    const second = evaluateCrossSourceGovernance(graph(rows));
+    expect(JSON.stringify(second)).toBe(JSON.stringify(first));
+
+    const reversed = evaluateCrossSourceGovernance(
+      graph({
+        ...rows,
+        appAccounts: [...rows.appAccounts].reverse(),
+        personAccountLinks: [...rows.personAccountLinks].reverse(),
+      }),
+    );
+    expect(reversed.findings.map(f => f.finding_key)).toEqual(first.findings.map(f => f.finding_key));
+  });
+
+  it("keeps a finding's identity when a mutable attribute changes", () => {
+    const base = { appAccounts: [account({ id: "a1" })], personAccountLinks: [link({ personId: "p1", appAccountId: "z" })] };
+    const before = evaluateCrossSourceGovernance(graph(base)).findings[0].finding_key;
+    const after = evaluateCrossSourceGovernance(
+      graph({ ...base, appAccounts: [account({ id: "a1", provider: "slack-renamed" })] }),
+    ).findings[0].finding_key;
+    expect(after).toBe(before);
+  });
+
+  it("builds keys in the domain migration 0083 requires", () => {
+    const k = crossSourceFindingKey({
+      ruleId: "active_saas_account_without_accepted_identity",
+      tenantId: TENANT, subjectType: "app_account", subjectId: "a1",
+    });
+    expect(k.startsWith("cross-source:")).toBe(true);
+  });
+
+  // 15. zero-data but COMPLETE tenant -> empty result, nothing invented
+  it("invents nothing for a complete tenant that simply has no rows", () => {
+    const r = evaluateCrossSourceGovernance(graph({ personAccountLinks: [link({ personId: "p", appAccountId: "x" })] }));
+    expect(r.findings).toHaveLength(0);
+    expect(r.evaluatedRules).toContain("active_saas_account_without_accepted_identity");
+  });
+
+  it("withholds every gated rule for a tenant with no proven sources at all", () => {
+    const r = evaluateCrossSourceGovernance(graph({ capabilities: [] }));
+    expect(r.findings).toHaveLength(0);
+    expect(r.evaluatedRules).toHaveLength(0);
+    expect(r.withheldRules).toHaveLength(5);
+    expect(r.completeConnectionIds).toEqual([]);
+  });
+
+  it("hands 0083 exactly the connections it proved complete", () => {
+    const r = evaluateCrossSourceGovernance(graph({}));
+    expect(r.completeConnectionIds).toEqual([OKTA, SLACK].sort());
+  });
+
+  it("every emitted finding declares at least one evidence connection (0083 refuses otherwise)", () => {
+    const g = graph({
+      identityAccounts: [identity({ id: "i1", isActive: false })],
+      appAccounts: [account({ id: "a1" }), account({ id: "a2", isAdmin: true }), account({ id: "a3" })],
+      personAccountLinks: [
+        link({ personId: "p1", identityAccountId: "i1" }),
+        link({ personId: "p1", appAccountId: "a1" }),
+      ],
+    });
+    const f = evaluateCrossSourceGovernance(g).findings;
+    expect(f.length).toBeGreaterThan(0);
+    for (const x of f) expect(x.evidence_connection_ids.length).toBeGreaterThan(0);
+  });
+
+  it("orders findings by severity so the worst is first", () => {
+    const g = graph({
+      identityAccounts: [identity({ id: "i1", isActive: false })],
+      appAccounts: [account({ id: "a1" }), account({ id: "a2" })],
+      personAccountLinks: [
+        link({ personId: "p1", identityAccountId: "i1" }),
+        link({ personId: "p1", appAccountId: "a1" }),
+      ],
+    });
+    const f = evaluateCrossSourceGovernance(g).findings;
+    expect(f[0].severity).toBe("high");
+  });
+});
+
+describe("provider neutrality", () => {
+  // A provider the engine has never heard of must behave exactly like one it has.
+  it("evaluates an unknown provider identically to a known one", () => {
+    const g = graph({
+      capabilities: caps(
+        [OKTA, "okta", "identity", "available"],
+        [GOOGLE, "google", "app_accounts", "available"],
+      ),
+      appAccounts: [account({ id: "a1", connectionId: GOOGLE, provider: "google" })],
+      personAccountLinks: [link({ personId: "p1", appAccountId: "zzz" })],
+    });
+    const f = evaluateCrossSourceGovernance(g).findings;
+    expect(f).toHaveLength(1);
+    expect(f[0].rule_id).toBe("active_saas_account_without_accepted_identity");
+    expect(f[0].source_providers).toEqual(["google"]);
+  });
+});
