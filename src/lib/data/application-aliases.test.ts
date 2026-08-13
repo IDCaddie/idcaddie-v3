@@ -228,6 +228,20 @@ describe("0087 privilege closure, read off the migration itself", () => {
     expect(sql.match(/^\s*grant\b/gim) ?? []).toHaveLength(1);
   });
 
+  // The CONCURRENT-writer branch, which no single-session test can reach.
+  //
+  // Step E returns `conflict` before the insert, so in one session `ON CONFLICT` is unreachable and a mutation from
+  // `do nothing` to `do update` leaves the entire SQL suite GREEN — verified by mutating it. The clause only matters when
+  // two declarations race the natural key, and that is exactly the case where a `do update` would silently overwrite one
+  // human's canonical judgement with another's. A real two-session race against this migration returns
+  // created/conflict with ONE row and no overwrite; this assertion is what keeps that true.
+  it("resolves a concurrent natural-key collision by DOING NOTHING, never by overwriting", () => {
+    expect(sql).toMatch(/on conflict \(tenant_id, alias_type, alias_value\) do nothing;/);
+    expect(sql).not.toMatch(/on conflict[^;]*do update/i);
+    // and the losing writer re-reads and re-decides rather than assuming a conflict
+    expect(sql).toMatch(/if v_inserted = 0 then/);
+  });
+
   it("adds NO table grant, NO policy, and NO read path to external_id", () => {
     expect(sql).not.toMatch(/grant .* on (table )?public\./i);
     expect(sql).not.toMatch(/create policy/i);
