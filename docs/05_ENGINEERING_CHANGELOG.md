@@ -12,6 +12,43 @@ from PRs verified via `git log` / `gh pr list`.
 > **as of each PR's date** and are historical — where an older entry says "RISK-007 remains OPEN" / "Phase C remains
 > BLOCKED", that was accurate at that entry's date; this banner is the current state.
 
+### feat(catalog) — Phase 18B0: the canonical product layer gets its first writer · 2026-08-13
+
+**No migration. The schema was never the problem.** `app_products`, `app_aliases` and the nullable `apps.canonical_app_id`
+(with its same-tenant composite FK to `app_products(id, tenant_id)`) have all existed since **0024**. What did not exist
+was a WRITER: `app_products` had zero writers anywhere in src/scripts/runner, and `resolution.ts` says it outright —
+*"the resolver does not exist yet and nothing populates apps.canonical_app_id yet."* That is why Phase 18A2's governed
+declaration had no `app_product` to target and the Phase 18 matcher could not produce a real proposal. This phase adds
+the writer and nothing else.
+
+**One identifier, and only because something populates it.** `apps.external_instance_id` — a Slack workspace team_id —
+is written by connector sync under `UNIQUE(tenant_id, external_instance_id)` (0036). The 0024 alias vocabulary also
+admits `instance_domain`, `domain`, `oauth_client_id` and `sso_app_id`, and it would be one line to accept them, but
+**nothing in this repository writes any of them**. Enabling an alias class because an enum permits it creates a branch
+no test can reach and a claim nobody can check.
+
+**Names never establish identity.** No resolution path reads a name. `normalizeProductName` exists only to fill
+`app_products.normalized_name`, that table's own per-tenant dedup key for a human-entered label, and is never compared
+to anything on the `apps` side. Resolution goes through Phase 18A1's `resolveCanonicalAlias`, which admits `confirmed`
+only — never `pending`, `rejected` or the undefined `auto` — and structurally refuses the `name` class.
+
+**Three actions, deliberately not collapsed.** (1) create a canonical product, (2) declare the alias, (3) link the app.
+Only (3) is derivable. A connector observing a workspace called "Slack" proves an instance exists; it proves nothing
+about canonical product identity, so (1) and (2) stay human judgements. A different existing `canonical_app_id` is a
+**conflict, never an overwrite** — 0024 unmerges by repointing deliberately, not as a side effect of a resolve.
+
+**T2, and that is a finding rather than a shortcut.** All three writes are already reachable under existing policy
+(0024 editors manage app_products/app_aliases; 0004 editors update apps), so no SECURITY DEFINER wrapper is warranted.
+This is the apps-side counterpart of 0087 and deliberately NOT that command: 0087 needs definer because
+`directory_applications` is deny-all and its `external_id` is unreachable, whereas `apps` carries a plain members-read
+policy. Overloading 0087 would have hidden that difference. Same-tenant integrity is structural — the 0024 composite FK
+holds even if this code is wrong, proven by dropping the constraint in the harness and watching C3 fail.
+
+15 pure tests + 6 real-DB assertions (C1–C6: editor may link, one product owns many apps, viewer reads but never
+writes, cross-tenant refused by FK, foreign tenant sees nothing, connector_runner holds no canonical authority, one
+judgement per identifier). Mutants: name-only resolution RED · silent overwrite RED · dropped tenant FK RED ·
+pending/rejected-as-confirmed RED. Auto-creation from a display name has no code path to mutate — it does not exist.
+
 ### feat(governance) — Phase 17: the tenant loader and cross-source evaluation path · 2026-08-13
 
 Canonical evidence now reaches the engine. `loadCrossSourceGovernanceInput` assembles one tenant's rows from the
