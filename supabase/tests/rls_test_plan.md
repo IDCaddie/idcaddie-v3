@@ -570,4 +570,9 @@ finding closes with `resolved_at` stamped · **G7** reopen: the row survives the
 as another reopen · **G8** the two engines do not close each other by omission · **G9** cross-tenant isolation — another
 tenant's empty evaluation declaring every connection complete closes nothing, the same deterministic key in two tenants
 is two findings, and the read never crosses · **G10** the read orders by severity and filters by engine and status ·
-**G11** a non-array payload and an unknown engine are each refused for their stated reason.
+**G11** a non-array payload and an unknown engine are each refused for their stated reason ·
+**G12** a finding declaring NO evidence sources is refused by the sync *and* by the table CHECK — an empty array
+satisfies `<@` against any complete set, so such a finding would have closed on pure silence · **G13** completeness
+cannot be declared with another tenant's connection or an invented UUID, a finding cannot depend on a connection its
+tenant does not own, and a refused sync leaves the estate untouched · **G14** a provider-local finding naming another
+tenant's connection is refused by the composite FK — impossible, not merely unused.

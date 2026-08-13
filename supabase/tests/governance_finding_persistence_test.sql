@@ -69,9 +69,9 @@ begin
   begin
     insert into public.governance_findings
       (tenant_id, engine, finding_key, rule_id, rule_version, subject_type, subject_id, severity, confidence,
-       title_key, summary_key)
+       title_key, summary_key, evidence_connection_ids)
     values ('f6000000-0000-4000-8000-00000000000a', 'provider_local', 'governance:r:1', 'r', 'v1',
-            'identity', 'i1', 'high', 'high', 't', 's');
+            'identity', 'i1', 'high', 'high', 't', 's', array['f6000000-0000-4000-8000-0000000000c1']::uuid[]);
     assert false, 'G2 provider_local REQUIRES connection_id + provider';
   exception when check_violation then null;
   end;
@@ -79,9 +79,10 @@ begin
   begin
     insert into public.governance_findings
       (tenant_id, engine, finding_key, rule_id, rule_version, connection_id, provider, subject_type, subject_id,
-       severity, confidence, title_key, summary_key)
+       severity, confidence, title_key, summary_key, evidence_connection_ids)
     values ('f6000000-0000-4000-8000-00000000000a', 'cross_source', 'cross-source:r:1', 'r', 'v1',
-            'f6000000-0000-4000-8000-0000000000c1', 'okta', 'person', 'p1', 'high', 'high', 't', 's');
+            'f6000000-0000-4000-8000-0000000000c1', 'okta', 'person', 'p1', 'high', 'high', 't', 's',
+            array['f6000000-0000-4000-8000-0000000000c1']::uuid[]);
     assert false, 'G2 cross_source REFUSES a connection/provider — it is tenant-wide by definition';
   exception when check_violation then null;
   end;
@@ -89,9 +90,9 @@ begin
   begin
     insert into public.governance_findings
       (tenant_id, engine, finding_key, rule_id, rule_version, subject_type, subject_id, severity, confidence,
-       title_key, summary_key)
+       title_key, summary_key, evidence_connection_ids)
     values ('f6000000-0000-4000-8000-00000000000a', 'cross_source', 'governance:r:1', 'r', 'v1',
-            'person', 'p1', 'high', 'high', 't', 's');
+            'person', 'p1', 'high', 'high', 't', 's', array['f6000000-0000-4000-8000-0000000000c1']::uuid[]);
     assert false, 'G2 a cross-source key must not live in the provider-local id space';
   exception when check_violation then null;
   end;
@@ -167,9 +168,10 @@ begin
   begin
     insert into public.governance_findings
       (tenant_id, engine, finding_key, rule_id, rule_version, subject_type, subject_id, severity, confidence,
-       title_key, summary_key)
+       title_key, summary_key, evidence_connection_ids)
     values ('f6000000-0000-4000-8000-00000000000a', 'cross_source',
-            'cross-source:saas_account_without_identity:A', 'r', 'v1', 'app_account', 'acct-A', 'low', 'low', 't', 's');
+            'cross-source:saas_account_without_identity:A', 'r', 'v1', 'app_account', 'acct-A', 'low', 'low', 't', 's',
+            array['f6000000-0000-4000-8000-0000000000c1']::uuid[]);
     assert false, 'G4 no duplicate finding for one deterministic identity';
   exception when unique_violation then null;
   end;
@@ -229,7 +231,7 @@ begin
     '[{"finding_key":"cross-source:saas_account_without_identity:A","rule_id":"saas_account_without_identity",
        "subject_type":"app_account","subject_id":"acct-A","severity":"medium","confidence":"high",
        "title_key":"t.a","summary_key":"s.a","evidence":{},"source_providers":["slack"],
-       "evidence_connection_ids":[]}]'::jsonb,
+       "evidence_connection_ids":["f6000000-0000-4000-8000-0000000000c2"]}]'::jsonb,
     array['f6000000-0000-4000-8000-0000000000c1','f6000000-0000-4000-8000-0000000000c2']::uuid[]);
   assert (r ->> 'reopened')::int = 1, 'G7 the condition came back, got ' || (r ->> 'reopened');
   assert (r ->> 'opened')::int = 0, 'G7 a reopen is not a new finding';
@@ -247,7 +249,7 @@ begin
     '[{"finding_key":"cross-source:saas_account_without_identity:A","rule_id":"saas_account_without_identity",
        "subject_type":"app_account","subject_id":"acct-A","severity":"medium","confidence":"high",
        "title_key":"t.a","summary_key":"s.a","evidence":{},"source_providers":["slack"],
-       "evidence_connection_ids":[]}]'::jsonb,
+       "evidence_connection_ids":["f6000000-0000-4000-8000-0000000000c2"]}]'::jsonb,
     array['f6000000-0000-4000-8000-0000000000c1','f6000000-0000-4000-8000-0000000000c2']::uuid[]);
   assert (r ->> 'reopened')::int = 0, 'G7 refreshing an already-open finding is not a reopen';
   select reopen_count into rc from public.governance_findings
@@ -281,11 +283,11 @@ end $$;
 do $$
 declare r jsonb; n int; st text;
 begin
-  -- Tenant B syncs an EMPTY evaluation declaring every connection complete. Nothing of tenant A's may close.
+  -- Tenant B syncs an EMPTY evaluation declaring ITS OWN connection complete. Nothing of tenant A's may close.
+  -- (It cannot even name tenant A's connections — G13 — so isolation holds at two layers, not one.)
   r := public.product_sync_governance_findings(
     'f6000000-0000-4000-8000-00000000000b', 'cross_source', 'v1', '[]'::jsonb,
-    array['f6000000-0000-4000-8000-0000000000c1','f6000000-0000-4000-8000-0000000000c2',
-          'f6000000-0000-4000-8000-0000000000c3']::uuid[]);
+    array['f6000000-0000-4000-8000-0000000000c3']::uuid[]);
   assert (r ->> 'closed')::int = 0, 'G9 tenant B closed nothing — it has nothing';
 
   select status into st from public.governance_findings
@@ -298,7 +300,7 @@ begin
     '[{"finding_key":"cross-source:saas_account_without_identity:A","rule_id":"saas_account_without_identity",
        "subject_type":"app_account","subject_id":"acct-A","severity":"medium","confidence":"high",
        "title_key":"t.a","summary_key":"s.a","evidence":{},"source_providers":["slack"],
-       "evidence_connection_ids":[]}]'::jsonb, '{}');
+       "evidence_connection_ids":["f6000000-0000-4000-8000-0000000000c3"]}]'::jsonb, '{}');
   assert (r ->> 'opened')::int = 1, 'G9 tenant B opens its own';
   select count(*) into n from public.governance_findings
    where finding_key = 'cross-source:saas_account_without_identity:A';
@@ -345,6 +347,94 @@ begin
   exception when others then msg := sqlerrm;
   end;
   assert msg like '%unknown engine%', 'G11 unknown engine refused, got: ' || msg;
+end $$;
+
+
+-- ════ G12: A FINDING THAT DECLARES NO SOURCES CANNOT CLOSE ON SILENCE ═════════════════════════════════════════════
+-- Found by probing rather than by reading: an empty evidence array satisfies `<@` against ANY complete set, INCLUDING
+-- the empty one — so such a finding closed on a run that had proven nothing whatsoever. It is refused at write time
+-- (naming the rule) and by a table CHECK (the structural backstop).
+do $$
+declare msg text;
+begin
+  begin
+    perform public.product_sync_governance_findings(
+      'f6000000-0000-4000-8000-00000000000a', 'cross_source', 'v1',
+      '[{"finding_key":"cross-source:no_sources:Z","rule_id":"r","subject_type":"person","subject_id":"p",
+         "severity":"high","confidence":"high","title_key":"t","summary_key":"s","evidence":{},
+         "source_providers":["slack"],"evidence_connection_ids":[]}]'::jsonb, '{}');
+    assert false, 'G12 a finding declaring no evidence connections must be refused';
+  exception when others then msg := sqlerrm;
+  end;
+  assert msg like '%at least one evidence connection%', 'G12 refused for the stated reason, got: ' || msg;
+
+  -- The table CHECK is the backstop, so it cannot be bypassed by writing the row directly either.
+  begin
+    insert into public.governance_findings
+      (tenant_id, engine, finding_key, rule_id, rule_version, subject_type, subject_id, severity, confidence,
+       title_key, summary_key, evidence_connection_ids)
+    values ('f6000000-0000-4000-8000-00000000000a', 'cross_source', 'cross-source:no_sources:Z2', 'r', 'v1',
+            'person', 'p', 'high', 'high', 't', 's', '{}');
+    assert false, 'G12 the CHECK must refuse a sourceless finding written directly';
+  exception when check_violation then null;
+  end;
+end $$;
+
+-- ════ G13: COMPLETENESS CANNOT BE DECLARED WITH SOMEONE ELSE'S CONNECTION — OR AN INVENTED ONE ════════════════════
+-- Also found by probing. Neither array can carry a foreign key, so ownership is verified in the function or nowhere;
+-- without it, naming another tenant's connector was enough to force a close.
+do $$
+declare msg text; st text;
+begin
+  begin
+    perform public.product_sync_governance_findings(
+      'f6000000-0000-4000-8000-00000000000a', 'cross_source', 'v1', '[]'::jsonb,
+      array['f6000000-0000-4000-8000-0000000000c3']::uuid[]);   -- tenant B's connector
+    assert false, 'G13 a foreign tenant''s connection cannot declare completeness';
+  exception when insufficient_privilege then msg := sqlerrm;
+  end;
+  assert msg like '%complete_connection_ids%', 'G13 refused for the stated reason, got: ' || msg;
+
+  begin
+    perform public.product_sync_governance_findings(
+      'f6000000-0000-4000-8000-00000000000a', 'cross_source', 'v1', '[]'::jsonb,
+      array['99999999-9999-4999-8999-999999999999']::uuid[]);   -- names nothing at all
+    assert false, 'G13 an invented connection id cannot declare completeness';
+  exception when insufficient_privilege then null;
+  end;
+
+  -- Nor can a finding claim to depend on a connection it does not own.
+  begin
+    perform public.product_sync_governance_findings(
+      'f6000000-0000-4000-8000-00000000000a', 'cross_source', 'v1',
+      '[{"finding_key":"cross-source:foreign_evidence:Z","rule_id":"r","subject_type":"person","subject_id":"p",
+         "severity":"high","confidence":"high","title_key":"t","summary_key":"s","evidence":{},
+         "source_providers":["okta"],"evidence_connection_ids":["f6000000-0000-4000-8000-0000000000c3"]}]'::jsonb,
+      array['f6000000-0000-4000-8000-0000000000c1']::uuid[]);
+    assert false, 'G13 a finding cannot depend on another tenant''s connection';
+  exception when insufficient_privilege then msg := sqlerrm;
+  end;
+  assert msg like '%evidence_connection_ids%', 'G13 refused for the stated reason, got: ' || msg;
+
+  -- And a refused sync changed nothing.
+  select status into st from public.governance_findings
+   where finding_key = 'cross-source:saas_account_without_identity:A';
+  assert st = 'open', 'G13 a refused sync leaves the estate untouched, got ' || st;
+end $$;
+
+-- ════ G14: a provider-local finding cannot name another tenant's connection, by FK ════════════════════════════════
+do $$
+begin
+  begin
+    insert into public.governance_findings
+      (tenant_id, engine, finding_key, rule_id, rule_version, connection_id, provider, subject_type, subject_id,
+       severity, confidence, title_key, summary_key, evidence_connection_ids)
+    values ('f6000000-0000-4000-8000-00000000000a', 'provider_local', 'governance:foreign:Z', 'r', 'v1',
+            'f6000000-0000-4000-8000-0000000000c3', 'okta', 'identity', 'i', 'high', 'high', 't', 's',
+            array['f6000000-0000-4000-8000-0000000000c1']::uuid[]);
+    assert false, 'G14 a cross-tenant scope must be impossible, not merely unused';
+  exception when foreign_key_violation then null;
+  end;
 end $$;
 
 -- Restore the real gate VERBATIM from 0001 so a later test file in the same run cannot inherit the stub.

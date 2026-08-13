@@ -39,10 +39,19 @@ which sees only the new row — so a finding that reopened during an *earlier* s
 have counted as reopening again on every run. Reopen is a transition, not a state, so the sync now classifies every
 reported key against the table *before* the upsert. G7 pins it.
 
-**Verified local: full `scripts/test-rls.sh` passed (`==> RLS migration tests passed`, 34 files, exit 0).** Both
-load-bearing properties confirmed by mutation, not assumed: removing the closure gate fails G5 with `must stay open, got
-closed`; making the reopen increment unconditional fails G7 with `reopen_count advanced, got 2`. **Not applied to hosted
-Supabase; nothing deployed. No risk opened or closed.**
+**Review found two false-closure paths, by probing the predicate rather than re-reading it.** (1) A finding declaring no
+evidence sources closed on pure silence — `'{}' <@ anything` is true, including against an empty complete set, so it
+resolved on a run that had proven nothing. (2) Completeness could be declared with another tenant's connector, or an
+invented UUID: neither array can carry a foreign key, so ownership was verified nowhere, and naming a foreign connection
+was enough to force a close. Both are fixed — `evidence_connection_ids` is NOT NULL with a cardinality CHECK and refused
+by name in the sync; both connection-id sets are now verified against the caller's own `connectors`; and
+`gf_connection_same_tenant` composite-FKs the provider-local scope. Duplicated, irrelevant and partial completeness sets
+probed clean, as did engine crossover (`gf_key_domain_chk` fires on the conflict path).
+
+**Verified local: full `scripts/test-rls.sh` passed (34 files, exit 0), typecheck 0, lint 0 errors, 2564 unit tests
+passed, build compiled.** Four load-bearing properties confirmed by mutation: closure gate → G5; reopen transition →
+G7; engine isolation → G8; and weakening finding identity breaks the sync outright, so identity is structurally
+load-bearing rather than merely asserted. **Not applied to hosted Supabase; nothing deployed. No risk opened or closed.**
 
 ### feat(governance) — Phase 16: migration 0082, the person layer · 2026-08-12
 

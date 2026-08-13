@@ -635,11 +635,32 @@ advanced. Reopen is a **transition, not a state**: the sync classifies every rep
 upsert, because `RETURNING` sees only the new row, so a finding that reopened during an earlier sync and is merely being
 refreshed now would otherwise be counted as reopening again on every run.
 
+### Two false-closure paths, found by probing
+
+Review attacked the closure predicate directly rather than re-reading it, and two cases closed findings that nothing had
+disproved:
+
+- **A finding declaring no evidence sources closed on pure silence.** `'{}' <@ anything` is true — including against an
+  empty complete set — so such a finding resolved on a run that had proven nothing at all. `evidence_connection_ids` is
+  now NOT NULL with `gf_evidence_sources_chk (cardinality > 0)`, and the sync refuses a sourceless finding by name.
+  Every rule in the catalog reads connector-sourced rows, so a rule emitting none is a bug in the rule.
+- **Completeness could be declared with another tenant's connector — or an invented UUID.** Neither connection-id array
+  can carry a foreign key, so ownership was verified nowhere; naming a foreign connection was enough to force a close.
+  The sync now verifies both `p_complete_connection_ids` and every finding's `evidence_connection_ids` against
+  `connectors` for the calling tenant, and `gf_connection_same_tenant` composite-FKs the provider-local scope so a
+  cross-tenant `connection_id` is impossible rather than merely unused.
+
+Duplicated, irrelevant and partial completeness sets were probed and already behaved correctly (`<@` is containment).
+The engine-crossover probe also came back clean: `gf_key_domain_chk` fires on the conflict path, so a cross-source sync
+cannot mutate a provider-local row.
+
 RLS on, zero policies, `revoke all` from `anon`/`authenticated`/`connector_runner` — the runner produces evidence, never
-conclusions. `scripts/test-rls.sh` re-revokes in lockstep. Proven by **G0–G11** in
+conclusions. `scripts/test-rls.sh` re-revokes in lockstep. Proven by **G0–G14** in
 `supabase/tests/governance_finding_persistence_test.sql`.
 
 **Verified local: full `scripts/test-rls.sh` passed (`==> RLS migration tests passed`, 34 test files, exit 0), and the
-two load-bearing properties were confirmed by mutation. Removing the closure gate (`and c.covered`) fails G5 with
-`a finding whose evidence source was INCOMPLETE must stay open, got closed`; making the reopen increment unconditional
-fails G7 with `reopen_count advanced, got 2`. NOT applied to hosted Supabase.**
+four load-bearing properties were confirmed by mutation: removing the closure gate fails **G5**
+(`must stay open, got closed`); making the reopen increment unconditional fails **G7** (`reopen_count advanced, got 2`);
+dropping the engine filter from the close predicate fails **G8** (`closed NOTHING belonging to the other engine`); and
+weakening `gf_identity_key` breaks the sync outright (`no unique or exclusion constraint matching the ON CONFLICT
+specification`) — finding identity is structurally load-bearing, not merely asserted. NOT applied to hosted Supabase.**

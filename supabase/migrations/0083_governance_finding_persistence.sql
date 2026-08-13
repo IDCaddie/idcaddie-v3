@@ -81,7 +81,13 @@ create table if not exists public.governance_findings (
   -- Which providers contributed, for display and filtering. Provenance, not identity.
   source_providers text[] not null default '{}',
   -- THE CLOSURE GATE. The connections whose evidence this finding rests on; see the header.
-  evidence_connection_ids uuid[] not null default '{}',
+  --
+  -- NON-EMPTY, enforced. An empty array satisfies `<@` against ANY complete set — including the empty one — so a
+  -- finding declaring no sources would close on pure silence, which is precisely the failure this table exists to
+  -- prevent. Every rule in the catalog reads connector-sourced rows, so a rule emitting none is a bug in the rule; the
+  -- persistence layer refuses it loudly at write time rather than quietly guessing on its behalf.
+  evidence_connection_ids uuid[] not null,
+  constraint gf_evidence_sources_chk check (cardinality(evidence_connection_ids) > 0),
 
   status text not null default 'open',
   constraint gf_status_chk check (status in ('open', 'closed')),
@@ -99,7 +105,13 @@ create table if not exists public.governance_findings (
 
   -- ONE row per deterministic identity per tenant. This is what makes "no duplicate open finding for the same identity"
   -- structural rather than a property of the sync function: a second open row cannot be inserted even by hand.
-  constraint gf_identity_key unique (tenant_id, finding_key)
+  constraint gf_identity_key unique (tenant_id, finding_key),
+
+  -- Same-tenant integrity on the provider-local scope (the 0005 pattern). NULL passes MATCH SIMPLE, which is exactly
+  -- what the cross-source half of gf_scope_chk intends. A finding cannot name another tenant's connector, and a
+  -- provider-local finding does not outlive the connection it is about.
+  constraint gf_connection_same_tenant foreign key (connection_id, tenant_id)
+    references public.connectors (id, tenant_id) on delete cascade
 );
 
 create index if not exists gf_open_idx on public.governance_findings (tenant_id, engine, severity)
@@ -170,6 +182,28 @@ begin
   on conflict (finding_key) do nothing;
 
   select count(*) into v_reported from reported_findings;
+
+  -- Both connection-id sets are CALLER-SUPPLIED, and both are load-bearing: one gates closure, the other declares what
+  -- a finding depends on. Neither can carry a FK (they are arrays), so ownership is verified here or nowhere. Without
+  -- this, declaring another tenant's connector — or a UUID that names nothing at all — is enough to force a close.
+  -- Tenant authority itself comes from the has_tenant_role gate above and auth.uid(), never from a parameter.
+  if exists (
+    select 1 from unnest(p_complete_connection_ids) cid
+     where not exists (select 1 from public.connectors c where c.id = cid and c.tenant_id = p_tenant_id)) then
+    raise exception 'complete_connection_ids names a connection that does not belong to tenant %', p_tenant_id
+      using errcode = '42501';
+  end if;
+  if exists (
+    select 1 from reported_findings r, unnest(r.evidence_connection_ids) cid
+     where not exists (select 1 from public.connectors c where c.id = cid and c.tenant_id = p_tenant_id)) then
+    raise exception 'evidence_connection_ids names a connection that does not belong to tenant %', p_tenant_id
+      using errcode = '42501';
+  end if;
+  -- A rule that declares no sources cannot ever be proven absent; refuse it here so the failure names the rule rather
+  -- than surfacing later as an immortal finding. (The table CHECK is the structural backstop.)
+  if exists (select 1 from reported_findings r where cardinality(r.evidence_connection_ids) = 0) then
+    raise exception 'every finding must declare at least one evidence connection';
+  end if;
 
   -- Classify BEFORE the upsert, against the rows as they stand. Deriving "was this closed?" from the upsert's own
   -- output cannot work — RETURNING sees the new row, so a finding that reopened during some EARLIER sync and is merely
