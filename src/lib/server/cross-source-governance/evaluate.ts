@@ -298,11 +298,12 @@ function ruleDuplicateAccounts(ctx: Ctx): CrossSourceFinding[] {
 // ══ RULE 5 ═══════════════════════════════════════════════════════════════════════════════════════════════════════════
 // DISCOVERED_APPLICATION_UNMANAGED_BY_IDP.
 //
-// OPEN REQUIRES:  the application's connection with `directory_applications` available, AND `application_matches` to
-//                 contain at least one row. That second clause is the whole point: the matcher does not exist yet
-//                 (docs/79 — "No matcher exists. The table is empty"), so an empty table means NOT YET LOOKED, not
-//                 "nothing is managed". Firing on it would declare a customer's entire estate unmanaged on the strength
-//                 of code nobody has written. The rule therefore ships correct and SILENT until a matcher runs.
+// OPEN REQUIRES:  the application's connection with `directory_applications` available, AND the matcher's CURRENT
+//                 status to be `completed` (migration 0085). Counting `application_matches` rows cannot substitute:
+//                 an empty table means NOT YET LOOKED just as readily as "nothing is managed", and firing on it would
+//                 declare a customer's whole estate unmanaged on the strength of code nobody had run. `completed` is
+//                 also deliberately stricter than `lastCompletedAt is not null` — that timestamp survives a later
+//                 failure, so a run that failed this morning must not present yesterday's completeness as today's.
 // CLOSE REQUIRES: that application's connection.
 function ruleUnmanagedApplications(ctx: Ctx): CrossSourceFinding[] {
   const matched = new Set(
@@ -329,6 +330,18 @@ function ruleUnmanagedApplications(ctx: Ctx): CrossSourceFinding[] {
       source_providers: sorted([app.provider]),
       evidence_connection_ids: [app.connectionId],
     }));
+}
+
+/**
+ * Why rule 5 is staying quiet. Each of these is a DIFFERENT reason an application has no accepted match, and only
+ * `completed` licenses the conclusion that the absence is real.
+ */
+function matcherWithheldReason(m: CrossSourceGraph["matcherState"]): string {
+  if (!m.hasEverRun || m.status === null) {
+    return "the application matcher has never run, so an unmatched application is unknown rather than unmanaged";
+  }
+  if (m.status === "running") return "an application matcher run is still in flight, so its output is not yet complete";
+  return "the most recent application matcher run did not complete, so absence of a match proves nothing";
 }
 
 /**
@@ -379,11 +392,12 @@ export function evaluateCrossSourceGovernance(graph: CrossSourceGraph): CrossSou
     "no connection has proven its SaaS account list is complete",
     () => ruleDuplicateAccounts(ctx),
   );
+  const matcher = graph.matcherState;
   gate(
     "discovered_application_unmanaged_by_idp",
-    ctx.appsComplete.size > 0 && graph.applicationMatches.length > 0,
-    graph.applicationMatches.length === 0
-      ? "no application matcher has run, so an unmatched application is unknown rather than unmanaged"
+    ctx.appsComplete.size > 0 && matcher.status === "completed",
+    matcher.status !== "completed"
+      ? matcherWithheldReason(matcher)
       : "no connection has proven its directory application list is complete",
     () => ruleUnmanagedApplications(ctx),
   );

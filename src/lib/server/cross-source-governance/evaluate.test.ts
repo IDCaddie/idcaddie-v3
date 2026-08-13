@@ -40,6 +40,9 @@ const link = (o: Partial<PersonAccountLinkRow> & { personId: string }): PersonAc
   identityAccountId: null, appAccountId: null, status: "accepted", ...o,
 });
 
+const NEVER_RAN = { hasEverRun: false, status: null, lastCompletedAt: null } as const;
+const COMPLETED = { hasEverRun: true, status: "completed", lastCompletedAt: "2026-01-01T00:00:00Z" } as const;
+
 const graph = (o: Partial<CrossSourceGraph> = {}): CrossSourceGraph => ({
   tenantId: TENANT,
   capabilities: ALL_AVAILABLE,
@@ -48,6 +51,7 @@ const graph = (o: Partial<CrossSourceGraph> = {}): CrossSourceGraph => ({
   personAccountLinks: [],
   directoryApplications: [],
   applicationMatches: [],
+  matcherState: NEVER_RAN,
   ...o,
 });
 
@@ -271,19 +275,51 @@ describe("rule 5 — application unmanaged by the IdP", () => {
   ];
   const appCaps = caps([OKTA, "okta", "directory_applications", "available"]);
 
-  it("stays SILENT while no matcher has run — an empty match table is unknown, not unmanaged", () => {
-    const g = graph({ capabilities: appCaps, directoryApplications: apps, applicationMatches: [] });
-    const r = evaluateCrossSourceGovernance(g);
-    expect(r.findings).toHaveLength(0);
-    expect(r.withheldRules.find(w => w.ruleId === "discovered_application_unmanaged_by_idp")?.reason)
-      .toMatch(/no application matcher has run/);
+  const reasonFor = (g: CrossSourceGraph) =>
+    evaluateCrossSourceGovernance(g).withheldRules.find(w => w.ruleId === "discovered_application_unmanaged_by_idp")
+      ?.reason;
+
+  it("stays SILENT while the matcher has never run — absence is unknown, not unmanaged", () => {
+    const g = graph({ capabilities: appCaps, directoryApplications: apps, matcherState: NEVER_RAN });
+    expect(evaluateCrossSourceGovernance(g).findings).toHaveLength(0);
+    expect(reasonFor(g)).toMatch(/never run/);
   });
 
-  it("fires only once a matcher has produced output and this application is still unmatched", () => {
+  it("stays silent while a run is still in flight", () => {
+    const g = graph({
+      capabilities: appCaps, directoryApplications: apps,
+      matcherState: { hasEverRun: true, status: "running", lastCompletedAt: null },
+    });
+    expect(evaluateCrossSourceGovernance(g).findings).toHaveLength(0);
+    expect(reasonFor(g)).toMatch(/still in flight/);
+  });
+
+  // The one the row count could never express: a run that FAILED today must not present an older completion as
+  // current, so `lastCompletedAt` being set is deliberately not enough.
+  it("stays silent when the latest run failed, even though an earlier run completed", () => {
+    const g = graph({
+      capabilities: appCaps, directoryApplications: apps,
+      matcherState: { hasEverRun: true, status: "failed", lastCompletedAt: "2026-01-01T00:00:00Z" },
+    });
+    expect(evaluateCrossSourceGovernance(g).findings).toHaveLength(0);
+    expect(reasonFor(g)).toMatch(/did not complete/);
+  });
+
+  it("evaluates once a run COMPLETED, even though it produced zero matches", () => {
+    const g = graph({
+      capabilities: appCaps, directoryApplications: apps, applicationMatches: [], matcherState: COMPLETED,
+    });
+    const f = evaluateCrossSourceGovernance(g).findings;
+    expect(f.map(x => x.subject_id)).toEqual(["app1"]);
+    expect(evaluateCrossSourceGovernance(g).evaluatedRules).toContain("discovered_application_unmanaged_by_idp");
+  });
+
+  it("recognises a managed application once a completed run produced an accepted match", () => {
     const g = graph({
       capabilities: appCaps,
       directoryApplications: [...apps, { id: "app2", connectionId: OKTA, provider: "okta", syncStatus: "current" }],
       applicationMatches: [{ directoryApplicationId: "app2", status: "accepted" }],
+      matcherState: COMPLETED,
     });
     const f = evaluateCrossSourceGovernance(g).findings;
     expect(f.map(x => x.subject_id)).toEqual(["app1"]);
@@ -292,8 +328,7 @@ describe("rule 5 — application unmanaged by the IdP", () => {
 
   it("treats a proposed match as not yet accepted", () => {
     const g = graph({
-      capabilities: appCaps,
-      directoryApplications: apps,
+      capabilities: appCaps, directoryApplications: apps, matcherState: COMPLETED,
       applicationMatches: [{ directoryApplicationId: "app1", status: "proposed" }],
     });
     expect(evaluateCrossSourceGovernance(g).findings.map(x => x.subject_id)).toEqual(["app1"]);
