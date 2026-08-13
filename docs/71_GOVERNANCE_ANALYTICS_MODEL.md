@@ -316,8 +316,12 @@ false-closure harm as a skipped page. Cursor reads carry no server-side total, s
 dropped; the asymmetry is a recorded decision, not an oversight.
 
 **Still true, and the reason to convert this read to a cursor eventually:** these checks detect instability, they do not
-make OFFSET paging snapshot-consistent. A cursor on `product_app_accounts` would remove the failure mode instead of
-observing it, and needs a migration — so it is the follow-up, not this change.
+make OFFSET paging snapshot-consistent. One residual case survives all of them, and is worth naming rather than leaving
+for someone to discover: a row deleted *before* the current offset and another inserted *after* it, within the same read,
+leaves the total unchanged and produces no duplicate, while the shift skips one row at the page boundary. The assembled
+size then equals the reported total and the read is accepted. It is narrow — it needs a concurrent write on both sides of
+the cursor — but it is not impossible, and no count-based check can see it. A cursor on `product_app_accounts` would
+remove the failure mode instead of observing it, and needs a migration — so it is the follow-up, not this change.
 
 Stale rows are loaded **deliberately** — the engine decides what staleness means per rule, and a loader that filtered
 them would answer a question the rules exist to answer.
