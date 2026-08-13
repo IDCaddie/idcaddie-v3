@@ -591,3 +591,55 @@ suite reflects the real deny-all surface. Proven by **P0–P11** in `supabase/te
 the suite was confirmed load-bearing by mutation — removing the bot filter from the person-creation pass fails P2 with
 `one person per resolvable address (ada@, dup@, ada.l@), got 4`, and making the person join case-sensitive fails P12
 with `one account yields one link, got 0`. NOT applied to hosted Supabase.**
+
+## 0083 — Persisted governance findings (Phase 16)
+
+Phase 14's engine computes deterministic findings in memory and writes nothing, so a finding has no age and no history.
+"This has been true for six weeks" and "this is new since Tuesday" are different sentences to an administrator, and
+neither could be said. 0083 adds `public.governance_findings` and the sync that maintains it.
+
+### Two engines, two scopes, one table
+
+Phase 14 is **provider-local**: its scope is `(tenant, connection, provider)` and its finding id is folded over that
+triple. The cross-source engine is **tenant-wide**: it spans connections and providers by definition, so it has no
+connection and no provider to name. This migration does not pretend those are the same scope. `gf_scope_chk` makes a
+`provider_local` row **require** its `connection_id` + `provider` and a `cross_source` row **refuse** both;
+`gf_key_domain_chk` pins each engine's `finding_key` to its own domain prefix (`governance:` / `cross-source:`) so the
+two id spaces cannot collide into one row. One table because the **lifecycle** is identical and worth writing once; two
+disjoint scope shapes because collapsing them is how one column comes to mean two things. A sync reconciles only its own
+engine's findings, so a provider-local run can never resolve a cross-source finding by omission (G8).
+
+### The property this migration exists to get right
+
+**A finding must not close because the evidence that proved it stopped arriving.**
+
+When a rule stops firing there are two possible reasons and they are opposite: the condition ended, or we stopped being
+able to see it. A connector that failed, lost a scope, hit a plan limit or simply had not run yet produces exactly the
+same silence as a fixed problem. Closing on silence would mark a suspended employee's live SaaS account *resolved*
+because the SaaS connector was broken that morning — the worst failure this table could have, because it is invisible
+and it reads as progress.
+
+So closure is **evidence-gated, not absence-gated**. Each finding records `evidence_connection_ids` — the connections
+whose facts the rule actually read. Each sync declares `p_complete_connection_ids` — the connections that produced
+complete, current evidence for that evaluation. A finding closes only when `evidence_connection_ids <@ complete`.
+Otherwise it is **withheld**: left open, `last_seen_at` untouched (silence is not an observation), and counted in the
+returned `withheld_from_closure`, so an incomplete run is a number the caller can see rather than a silent state change.
+This is the 0053/0077 complete-and-clean-run gate applied one layer up.
+
+### Lifecycle
+
+`gf_identity_key unique (tenant_id, finding_key)` makes "no duplicate open finding for one deterministic identity"
+structural — a second row cannot be inserted even by hand. Reported findings are inserted, refreshed, or **reopened**
+with `first_seen_at` preserved (the age of the condition, never reset), `resolved_at` cleared and `reopen_count`
+advanced. Reopen is a **transition, not a state**: the sync classifies every reported key against the table *before* the
+upsert, because `RETURNING` sees only the new row, so a finding that reopened during an earlier sync and is merely being
+refreshed now would otherwise be counted as reopening again on every run.
+
+RLS on, zero policies, `revoke all` from `anon`/`authenticated`/`connector_runner` — the runner produces evidence, never
+conclusions. `scripts/test-rls.sh` re-revokes in lockstep. Proven by **G0–G11** in
+`supabase/tests/governance_finding_persistence_test.sql`.
+
+**Verified local: full `scripts/test-rls.sh` passed (`==> RLS migration tests passed`, 34 test files, exit 0), and the
+two load-bearing properties were confirmed by mutation. Removing the closure gate (`and c.covered`) fails G5 with
+`a finding whose evidence source was INCOMPLETE must stay open, got closed`; making the reopen increment unconditional
+fails G7 with `reopen_count advanced, got 2`. NOT applied to hosted Supabase.**

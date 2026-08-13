@@ -12,6 +12,38 @@ from PRs verified via `git log` / `gh pr list`.
 > **as of each PR's date** and are historical — where an older entry says "RISK-007 remains OPEN" / "Phase C remains
 > BLOCKED", that was accurate at that entry's date; this banner is the current state.
 
+### feat(governance) — Phase 16: migration 0083, persisted findings with an evidence-gated lifecycle · 2026-08-12
+
+Phase 14's engine computes deterministic findings in memory and writes nothing, so a finding had no age and no history.
+"This has been true for six weeks" and "this is new since Tuesday" are different sentences to an administrator, and
+neither could be said. 0083 adds `governance_findings` and the sync that maintains it.
+
+**Two engines, two scopes, one table — and the difference is enforced.** Phase 14 stays exactly as it is: provider-local,
+scope `(tenant, connection, provider)`. The cross-source engine is tenant-wide and has no connection or provider to name.
+`gf_scope_chk` makes a provider-local row *require* both and a cross-source row *refuse* both; `gf_key_domain_chk` pins
+each engine's key to its own domain prefix so the id spaces cannot collide. One table because the lifecycle is identical
+and worth writing once; two disjoint scope shapes because collapsing them is how one column comes to mean two things. A
+sync reconciles only its own engine, so a provider-local run cannot resolve a cross-source finding by omission.
+
+**The property this migration exists to get right: a finding must not close because the evidence that proved it stopped
+arriving.** When a rule stops firing there are two opposite possible reasons — the condition ended, or we stopped being
+able to see it — and a broken connector produces exactly the same silence as a fixed problem. Closing on silence would
+mark a suspended employee's live SaaS account *resolved* because the SaaS connector broke that morning: invisible, and it
+reads as progress. So closure is evidence-gated. Each finding records the connections its rule actually read; each sync
+declares which connections produced complete evidence; a finding closes only when the former is contained in the latter,
+and is otherwise **withheld** — left open, untouched, and counted in the return value so an incomplete run is a number
+rather than a silent state change. This is the 0053/0077 complete-and-clean-run gate applied one layer up.
+
+**One bug caught by reading rather than by testing:** reopen was originally derived from the upsert's own `RETURNING`,
+which sees only the new row — so a finding that reopened during an *earlier* sync and was merely being refreshed would
+have counted as reopening again on every run. Reopen is a transition, not a state, so the sync now classifies every
+reported key against the table *before* the upsert. G7 pins it.
+
+**Verified local: full `scripts/test-rls.sh` passed (`==> RLS migration tests passed`, 34 files, exit 0).** Both
+load-bearing properties confirmed by mutation, not assumed: removing the closure gate fails G5 with `must stay open, got
+closed`; making the reopen increment unconditional fails G7 with `reopen_count advanced, got 2`. **Not applied to hosted
+Supabase; nothing deployed. No risk opened or closed.**
+
 ### feat(governance) — Phase 16: migration 0082, the person layer · 2026-08-12
 
 **The estate could describe every provider account and no human.** `identity_accounts` (0053) holds the IdP side,
