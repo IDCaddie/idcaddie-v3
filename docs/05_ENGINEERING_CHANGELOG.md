@@ -35,7 +35,20 @@ only explicit values count, because treating unknown as inactive would accuse a 
 is an opaque string for provenance, never compared to a literal. A test asserts an unknown provider evaluates identically
 to a known one, so Google plugs in without touching this code.
 
-**Verified local: 30 engine tests, 2594 unit tests passed, tsc 0, lint 0 errors (68 warnings, baseline unchanged), build
+**Review of #410 found two reachable defects, both fixed before merge.** (1) A pending `proposed` link shielded a
+PRIVILEGED orphan. A proposal never expires, so a wrong one — or nobody reviewing — hid an unowned admin account
+indefinitely; only an ACCEPTED owner silences that rule now, while an ordinary account is still shielded (reporting a
+reviewer's own queue as a finding is how a queue gets ignored). (2) Rule 4 counted any linked account, so a person's
+login plus a service account read as two duplicates; it now counts only `human`, because a rule must not depend on
+0082's proposer applying that filter for it.
+
+`resolutionHasRun` was independently examined against cases A–E and **kept**: it is conservative and truthful, because
+0082's proposer links every current human account carrying an address, so an orphan candidate cannot return link-less
+from a real run unless it has no address at all. Its limitation — a row-count proxy cannot distinguish a partial run
+from a complete one — is now documented in docs/71 alongside rule 5's identical limitation, so the eventual explicit
+execution marker is a decision rather than a discovery.
+
+**Verified local: 52 engine tests, 2616 unit tests passed, tsc 0, lint 0 errors (68 warnings, baseline unchanged), build
 compiled, test-rls.sh passed.** Four mutants all RED: removing the identity-completeness guard, weakening the
 accepted-link requirement, treating unknown `isActive` as inactive, and letting an empty matcher mean unmanaged.
 **No migration. Nothing deployed, no hosted apply, no provider contacted. No risk opened or closed.**

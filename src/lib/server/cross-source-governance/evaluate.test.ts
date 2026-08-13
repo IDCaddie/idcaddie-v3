@@ -421,3 +421,193 @@ describe("provider neutrality", () => {
     expect(f[0].source_providers).toEqual(["google"]);
   });
 });
+
+// ── Independent review of #410 ────────────────────────────────────────────────────────────────────────────────────
+describe("review: does a pending proposal shield a PRIVILEGED orphan?", () => {
+  const privileged = (status: PersonAccountLinkRow["status"] | "none") =>
+    graph({
+      appAccounts: [account({ id: "a1", isAdmin: true })],
+      personAccountLinks:
+        status === "none"
+          ? [link({ personId: "p0", appAccountId: "other" })]
+          : [link({ personId: "p1", appAccountId: "a1", status })],
+    });
+  const ordinary = (status: PersonAccountLinkRow["status"] | "none") =>
+    graph({
+      appAccounts: [account({ id: "a1" })],
+      personAccountLinks:
+        status === "none"
+          ? [link({ personId: "p0", appAccountId: "other" })]
+          : [link({ personId: "p1", appAccountId: "a1", status })],
+    });
+
+  it("ordinary account: accepted and proposed are silent; rejected and none fire", () => {
+    expect(ruleIds(ordinary("accepted"))).toHaveLength(0);
+    expect(ruleIds(ordinary("proposed"))).toHaveLength(0);
+    expect(ruleIds(ordinary("rejected"))).toEqual(["active_saas_account_without_accepted_identity"]);
+    expect(ruleIds(ordinary("none"))).toEqual(["active_saas_account_without_accepted_identity"]);
+  });
+
+  // An undecided proposal is a queue entry, not an owner. For an ADMIN account, letting one suppress the finding means
+  // a proposer bug — or simply nobody reviewing — hides an unowned privileged account for as long as the queue is
+  // ignored. Only an ACCEPTED owner should silence this one.
+  it("privileged account: ONLY an accepted owner is silent", () => {
+    expect(ruleIds(privileged("accepted"))).toHaveLength(0);
+    expect(ruleIds(privileged("proposed"))).toEqual(["privileged_saas_account_without_accepted_identity"]);
+    expect(ruleIds(privileged("rejected"))).toEqual(["privileged_saas_account_without_accepted_identity"]);
+    expect(ruleIds(privileged("none"))).toEqual(["privileged_saas_account_without_accepted_identity"]);
+  });
+});
+
+describe("review: rule 4 must not call a service account a duplicate person account", () => {
+  // 0082's proposer only ever links `human` accounts, but a MANUAL link can attach anything, and the engine must not
+  // depend on another component's filter. A person who owns their login plus a service account has ONE account, not two.
+  it("counts only human accounts", () => {
+    const g = graph({
+      appAccounts: [account({ id: "a1" }), account({ id: "svc", accountKind: "service" })],
+      personAccountLinks: [
+        link({ personId: "p1", appAccountId: "a1" }),
+        link({ personId: "p1", appAccountId: "svc" }),
+      ],
+    });
+    expect(ruleIds(g)).not.toContain("duplicate_active_accounts_for_one_person");
+  });
+
+  it("still fires for two genuine human accounts", () => {
+    const g = graph({
+      appAccounts: [account({ id: "a1" }), account({ id: "a2" })],
+      personAccountLinks: [
+        link({ personId: "p1", appAccountId: "a1" }),
+        link({ personId: "p1", appAccountId: "a2" }),
+      ],
+    });
+    expect(ruleIds(g)).toContain("duplicate_active_accounts_for_one_person");
+  });
+});
+
+describe("review: resolutionHasRun — cases A-E", () => {
+  const acct = { appAccounts: [account({ id: "a1" })] };
+
+  // A. resolution never ran
+  it("A: no links at all -> orphan rules WITHHELD", () => {
+    const r = evaluateCrossSourceGovernance(graph({ ...acct, personAccountLinks: [] }));
+    expect(r.withheldRules.map(w => w.ruleId)).toContain("active_saas_account_without_accepted_identity");
+  });
+
+  // B/C. A run that produced nothing is INDISTINGUISHABLE from a run that never happened. 0082 proposes a link for
+  // every current human account carrying a normalized_email, so an account that would be an orphan candidate cannot
+  // come back link-less from a real run unless it has NO address — in which case nothing could ever resolve it.
+  it("B/C: an account with no address is the only orphan candidate a real run leaves link-less", () => {
+    const r = evaluateCrossSourceGovernance(
+      graph({
+        appAccounts: [account({ id: "withAddress" }), account({ id: "noAddress" })],
+        personAccountLinks: [link({ personId: "p1", appAccountId: "withAddress", status: "proposed" })],
+      }),
+    );
+    // The run is proven to have happened by the link it produced, so the address-less account is correctly an orphan.
+    expect(r.findings.map(f => f.subject_id)).toEqual(["noAddress"]);
+  });
+
+  // D. only rejected links -> resolution demonstrably ran
+  it("D: rejected links prove the run happened, and a rejected candidate is genuinely unowned", () => {
+    const r = evaluateCrossSourceGovernance(
+      graph({ ...acct, personAccountLinks: [link({ personId: "p1", appAccountId: "a1", status: "rejected" })] }),
+    );
+    expect(r.evaluatedRules).toContain("active_saas_account_without_accepted_identity");
+    expect(r.findings.map(f => f.subject_id)).toEqual(["a1"]);
+  });
+
+  // E. only proposed links -> run happened; the proposed account is awaiting review, not orphaned
+  it("E: proposed links prove the run happened", () => {
+    const r = evaluateCrossSourceGovernance(
+      graph({ ...acct, personAccountLinks: [link({ personId: "p1", appAccountId: "a1", status: "proposed" })] }),
+    );
+    expect(r.evaluatedRules).toContain("active_saas_account_without_accepted_identity");
+    expect(r.findings).toHaveLength(0);
+  });
+});
+
+describe("review: unknown is never zero", () => {
+  it.each(["plan_dependent", "permission_dependent", "unavailable", "incomplete", "failed"] as const)(
+    "withholds when the identity capability is %s rather than available",
+    state => {
+      const r = evaluateCrossSourceGovernance(
+        graph({
+          capabilities: caps([OKTA, "okta", "identity", state], [SLACK, "slack", "app_accounts", "available"]),
+          appAccounts: [account({ id: "a1" })],
+          personAccountLinks: [link({ personId: "p1", appAccountId: "zzz" })],
+        }),
+      );
+      expect(r.findings).toHaveLength(0);
+      expect(r.withheldRules.map(w => w.ruleId)).toContain("active_saas_account_without_accepted_identity");
+    },
+  );
+
+  it.each(["stale", "disconnected", "review_required"] as const)(
+    "never treats a %s account as live access",
+    syncStatus => {
+      const g = graph({
+        appAccounts: [account({ id: "a1", syncStatus })],
+        personAccountLinks: [link({ personId: "p1", appAccountId: "zzz" })],
+      });
+      expect(ruleIds(g)).toHaveLength(0);
+    },
+  );
+
+  it("never treats a non-current inactive identity as proof of a leaver", () => {
+    const g = graph({
+      identityAccounts: [identity({ id: "i1", isActive: false, syncStatus: "disconnected" })],
+      appAccounts: [account({ id: "a1" })],
+      personAccountLinks: [
+        link({ personId: "p1", identityAccountId: "i1" }),
+        link({ personId: "p1", appAccountId: "a1" }),
+      ],
+    });
+    expect(ruleIds(g)).not.toContain("inactive_identity_with_active_saas_account");
+  });
+
+  it("ignores rows from a connection whose capability was never declared at all", () => {
+    const g = graph({
+      capabilities: caps([OKTA, "okta", "identity", "available"]),
+      appAccounts: [account({ id: "a1", connectionId: GOOGLE, provider: "google" })],
+      personAccountLinks: [link({ personId: "p1", appAccountId: "zzz" })],
+    });
+    const r = evaluateCrossSourceGovernance(g);
+    expect(r.findings).toHaveLength(0);
+    expect(r.completeConnectionIds).toEqual([OKTA]);
+  });
+});
+
+describe("review: finding identity", () => {
+  const base = {
+    ruleId: "active_saas_account_without_accepted_identity" as const,
+    tenantId: TENANT,
+    subjectType: "app_account" as const,
+    subjectId: "a1",
+  };
+
+  it("folds the tenant, the rule and the subject, and nothing else", () => {
+    const k = crossSourceFindingKey(base);
+    expect(k).not.toBe(crossSourceFindingKey({ ...base, tenantId: "00000000-0000-4000-8000-000000000000" }));
+    expect(k).not.toBe(crossSourceFindingKey({ ...base, subjectId: "a2" }));
+    expect(k).not.toBe(
+      crossSourceFindingKey({ ...base, ruleId: "privileged_saas_account_without_accepted_identity" }),
+    );
+  });
+
+  it("is order-independent in relatedIds but sensitive to the set", () => {
+    const a = crossSourceFindingKey({ ...base, relatedIds: ["x", "y", "z"] });
+    expect(crossSourceFindingKey({ ...base, relatedIds: ["z", "x", "y"] })).toBe(a);
+    expect(crossSourceFindingKey({ ...base, relatedIds: ["x", "y"] })).not.toBe(a);
+  });
+
+  it("cannot be forged by a value containing the delimiter", () => {
+    expect(crossSourceFindingKey({ ...base, subjectId: "a", relatedIds: ["1:b"] })).not.toBe(
+      crossSourceFindingKey({ ...base, subjectId: "a 1:b", relatedIds: [] }),
+    );
+  });
+
+  it("is stable across repeated construction (no clock, no randomness)", () => {
+    expect(crossSourceFindingKey(base)).toBe(crossSourceFindingKey(base));
+  });
+});

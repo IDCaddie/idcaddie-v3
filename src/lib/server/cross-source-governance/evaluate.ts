@@ -93,14 +93,24 @@ function buildCtx(graph: CrossSourceGraph): Ctx {
 }
 
 /**
- * A SaaS account is UNOWNED when nobody has accepted a person for it and no candidate is awaiting review. A `proposed`
- * link is a different state — "we found a candidate, a human has not decided" — and calling that an orphan would put
- * the reviewer's own queue back in front of them as a governance problem.
+ * Does this account have an owner?
+ *
+ * The two orphan rules answer that question differently ON PURPOSE.
+ *
+ * For an ORDINARY account, a `proposed` link counts: it means "we found a candidate and a human has not decided yet",
+ * and reporting that as an orphan just hands the reviewer their own queue back as a governance problem.
+ *
+ * For a PRIVILEGED account it does NOT count — `acceptedOnly`. An undecided proposal is a queue entry, not an owner,
+ * and a proposal never expires: a wrong proposal, or simply nobody reviewing, would hide an unowned ADMIN account for
+ * as long as the queue is ignored. That is a real false negative with an indefinite lifetime, and the account class it
+ * hides is exactly the one worth not hiding. Only an accepted owner silences that rule.
  */
-function isUnowned(ctx: Ctx, account: AppAccountRow): boolean {
+function hasOwner(ctx: Ctx, account: AppAccountRow, acceptedOnly: boolean): boolean {
   const links = ctx.linksByAppAccount.get(account.id);
-  if (!links) return true;
-  return !links.some(l => l.status === "accepted" || l.status === "proposed");
+  if (!links) return false;
+  return acceptedOnly
+    ? links.some(l => l.status === "accepted")
+    : links.some(l => l.status === "accepted" || l.status === "proposed");
 }
 
 /** The human, currently-confirmed, provider-active accounts — the only ones any orphan rule may speak about. */
@@ -129,7 +139,8 @@ function ruleOrphanAccounts(ctx: Ctx, privileged: boolean): CrossSourceFinding[]
 
   return liveHumanAccounts(ctx)
     .filter(a => (privileged ? a.isAdmin === true : a.isAdmin !== true))
-    .filter(a => isUnowned(ctx, a))
+    // Privileged accounts require an ACCEPTED owner; ordinary ones are also shielded by a pending proposal.
+    .filter(a => !hasOwner(ctx, a, privileged))
     .map(a => ({
       finding_key: crossSourceFindingKey({
         ruleId,
@@ -237,7 +248,17 @@ function ruleDuplicateAccounts(ctx: Ctx): CrossSourceFinding[] {
   for (const [personId, accountIds] of ctx.acceptedAppAccountsByPerson) {
     const live = accountIds
       .map(id => accountById.get(id))
-      .filter(a => !!a && a.accountStatus === "active" && isCurrent(a) && ctx.accountsComplete.has(a.connectionId));
+      // `human` is load-bearing, not decoration: 0082's proposer only links human accounts, but a MANUAL link can
+      // attach anything, and this rule must not depend on another component's filter. A person who owns their login
+      // plus a service account has ONE account and a robot, not two duplicates.
+      .filter(
+        a =>
+          !!a &&
+          a.accountKind === "human" &&
+          a.accountStatus === "active" &&
+          isCurrent(a) &&
+          ctx.accountsComplete.has(a.connectionId),
+      );
 
     const byConnection = new Map<string, string[]>();
     for (const a of live) {

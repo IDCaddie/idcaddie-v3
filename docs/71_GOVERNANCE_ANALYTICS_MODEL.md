@@ -129,18 +129,35 @@ Two guards are worth naming because they are counter-intuitive:
 - **An empty `application_matches` is unknown, not "nothing is managed."** No matcher exists yet (see
   [79](./79_CANONICAL_INTELLIGENCE_LAYER.md)), so **rule 5 ships correct and permanently silent** until one runs.
 
+Both guards are **row-count proxies for "did this process run"**, and neither can distinguish a *partial* run from a
+complete one. That is sound today — no matcher exists at all, and 0082's proposer links every current human account
+carrying an address in one pass, so an orphan candidate cannot come back link-less from a real run unless it has no
+address. It stops being sound the moment either process gains partial or incremental execution, at which point each
+needs a real completeness signal of its own, in the shape `connector_capability_state` already uses for connectors.
+Recorded here so the replacement is a decision rather than a discovery.
+
 ## Rule catalog
 
 | rule | subject | severity | must be `available` to open |
 |---|---|---|---|
 | `active_saas_account_without_accepted_identity` | app account | medium | the account's `app_accounts` + ≥1 `identity` source + resolution has run |
-| `privileged_saas_account_without_accepted_identity` | app account | high | as above; fires only where the provider actually reported admin |
+| `privileged_saas_account_without_accepted_identity` | app account | high | as above; fires only where the provider actually reported admin, and **only an ACCEPTED owner silences it** |
 | `inactive_identity_with_active_saas_account` | person | high | ≥1 `identity` **and** ≥1 `app_accounts` — the finding asserts both sides |
 | `duplicate_active_accounts_for_one_person` | person | medium | that connection's `app_accounts` |
 | `discovered_application_unmanaged_by_idp` | directory application | low | that connection's `directory_applications` **and** a matcher having run |
 
 `isActive` / `isAdmin` are nullable: **only an explicit `false` / `true` counts.** Null means the provider did not say,
 and treating unknown as inactive would accuse a live employee.
+
+**A pending proposal shields an ordinary account, but never a privileged one.** For an ordinary account a `proposed`
+link means "a candidate exists, a human has not decided", and reporting that as an orphan hands the reviewer their own
+queue back as a governance problem. For an admin account it is not enough: a proposal never expires, so a wrong one — or
+simply nobody reviewing — would hide an unowned privileged account for as long as the queue is ignored. That is a false
+negative with an indefinite lifetime, on exactly the account class worth not hiding.
+
+**Rule 4 counts only `human` accounts.** 0082's proposer links only humans, but a *manual* link can attach anything, and
+a rule must not depend on another component's filter. A person who owns their login plus a service account has one
+account and a robot, not two duplicates.
 
 **Rule 4 is deliberately narrow.** Holding many accounts is normal — one person legitimately has several providers — so
 the rule fires only on two or more active accounts **within a single connection**. Across connections it is not a
