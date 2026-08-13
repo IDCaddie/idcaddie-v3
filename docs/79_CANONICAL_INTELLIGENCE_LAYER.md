@@ -201,6 +201,58 @@ app_products                         canonical application/product identity
 application_matches                  directory application ↔ SaaS app (0075)
 ```
 
+## The application match review boundary (Phase 18B)
+
+Migration **0088** adds the only two mutations `application_matches` will ever need, and nothing else:
+
+```
+deterministic evidence  →  PROPOSED match  →  human ACCEPT / REJECT  →  accepted relationship  →  governance truth
+```
+
+**PROPOSED ≠ MATCHED. REJECTED ≠ ABSENT EVIDENCE. ACCEPTED = CANONICAL RELATIONSHIP.** No LLM establishes this truth, and no
+automatic process may: a proposal carries no decision, and 0075's `decided_chk` refuses any row that claims `accepted` without a
+`decided_at`, so auto-accepting is structurally impossible rather than merely un-implemented.
+
+- `product_propose_application_match(tenant, directory_application, app, method, confidence)` → `proposed` only.
+- `product_decide_application_match(tenant, match, accepted|rejected)` → `decided_by` is `auth.uid()`, `decided_at` is the
+  database's clock, and the update is guarded on `status = 'proposed'` so a decided row is **immutable through this command**.
+  Re-opening a decision is a separate future workflow, never a hidden toggle.
+
+Both are owner/admin, matching 0085's read and the 0078/0087 precedent. `connector_runner` is granted nothing; proposal generation
+is product-side orchestration, so no new machine identity was introduced. `application_matches` keeps its 0075 deny-all posture —
+RLS on, no policy, no table grant — and 0085's bounded read stays the only read path.
+
+**Candidate identity is the pair `(tenant, directory application, app)`** — one row per pair for all time (0088's unique index).
+That makes three properties structural: re-proposing is a no-op, a **rejected candidate can never be resurrected** by proposing
+again, and an accepted one can never be duplicated. Method is deliberately not part of the key: two methods reaching the same pair
+are one candidate with two lines of evidence.
+
+**Ambiguity is preserved, not resolved.** Different targets are different pairs, so one directory application may carry several
+competing proposals at once; nothing picks a winner by confidence or arrival order. Cardinality is 0075's: at most **one accepted**
+match per directory application, and deliberately **many-to-one** on the SaaS side — two directory applications may both accept one
+`apps` row. Two concurrent accepts cannot both win; the loser gets a bounded status, not a Postgres error.
+
+**Method vocabulary admitted here:** `manual`, `exact_external_id`, `vendor_catalog`. `exact_domain` is refused because the
+directory side carries no domain column, and `suggested` because nothing produces it and admitting the weak-evidence bucket before
+a producer exists invites the name-similarity matching this work exists to prevent.
+
+### The gap 18C must close first
+
+The SaaS endpoint is `apps` — correct, consistent across 0075/0085/Rule 5, and **backed by real data**: the Slack resolver store
+upserts `apps` during sync (keyed on `tenant_id, external_instance_id`), so `apps`, `external_instance_id` and `instance_domain`
+all have live writers.
+
+**The break is exactly one column.** Phase 18A's canonical evidence resolves to `app_products`, and the only link from a product to
+its operational instance — `apps.canonical_app_id` — has **zero writers** anywhere and is NULL on every row; `resolution.ts` states
+it plainly ("nothing populates apps.canonical_app_id yet"), and `app_products` is read-only in the product today. **So there is no
+deterministic path from a confirmed canonical alias to an `apps` row.** A human can propose and decide a real relationship now; a
+deterministic matcher would have nothing to propose. **Populating `apps.canonical_app_id`, plus a write path for `app_products`, is
+the prerequisite for 18C.**
+
+Do **not** "fix" this by repointing `application_matches` at `app_product_id` — that aims the FK at a table with no writer at all
+and leaves the matcher more blocked, not less.
+
+
 ## Adding a new connector
 
 1. Add the provider to the catalogue (`customer-connectors/catalog.ts`).
