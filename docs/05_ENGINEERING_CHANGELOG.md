@@ -12,6 +12,30 @@ from PRs verified via `git log` / `gh pr list`.
 > **as of each PR's date** and are historical — where an older entry says "RISK-007 remains OPEN" / "Phase C remains
 > BLOCKED", that was accurate at that entry's date; this banner is the current state.
 
+### docs(governance) — Phase 18B: what an application match actually is · 2026-08-13
+
+**#419 merged the boundary; this records what it means.** The implementation shipped without the semantic model written down, and
+a propose/decide boundary whose endpoint nobody has defined is one refactor away from being repointed at the wrong table.
+
+**`application_matches` is an INSTANCE relationship, not a product-level one** — 0075 says so outright (`apps` is "what do we pay
+for, and under what contract"; "a directory application with no SaaS record is not an error"). Three layers stay separate:
+`app_products` answers *what software is this*, `apps` answers *what do we pay for*, and `application_matches` answers *which
+contract record does this IdP application correspond to*. Recognition and matching are different acts on different evidence.
+
+Against that model: **one** instance is the ordinary path; **many** produce competing proposals that only a human resolves, with
+the loser left as a proposal rather than silently rejected; **zero** proposes nothing and fabricates nothing, which 0075 defines as
+explicitly not an error. So `app_id` is sufficient *because* the recorded fact is instance-level. Adds **B15** proving the zero
+case — B14 already proved many against a real shared-product estate, and one is covered end to end by B2/B7.
+
+**Rule 5's "managed" therefore means an accepted relationship to an operational/contract record exists** — not that the product is
+recognised. A known `app_product` with zero instances is still unmanaged at the instance layer, coherently. **Debt recorded, not
+fixed:** the rule's name reads backwards from its implementation, and its title/summary/remediation keys resolve to no copy
+anywhere in the repository, so whoever writes it must say instance/contract management rather than product recognition.
+
+Docs and one test only — **no executable SQL changed**, migration 0088 untouched. No hosted apply, no deployment, no provider
+contact, no matcher, no Rule 5 code change.
+
+
 ### feat(governance) — Phase 18B: migration 0088, the application match review boundary · 2026-08-13
 
 **The lifecycle `application_matches` was shaped for in 0075, finally given its two mutations — and nothing else.** 0075 built the

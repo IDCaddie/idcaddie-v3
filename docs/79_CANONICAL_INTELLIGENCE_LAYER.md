@@ -236,30 +236,58 @@ match per directory application, and deliberately **many-to-one** on the SaaS si
 directory side carries no domain column, and `suggested` because nothing produces it and admitting the weak-evidence bucket before
 a producer exists invites the name-similarity matching this work exists to prevent.
 
-### The gap 18C must close first
+### The three layers, and why they are not collapsed
 
-The SaaS endpoint is `apps` — correct, consistent across 0075/0085/Rule 5, and **backed by real data**: the Slack resolver store
-upserts `apps` during sync (keyed on `tenant_id, external_instance_id`), so `apps`, `external_instance_id` and `instance_domain`
-all have live writers.
+| layer | table | question it answers |
+|---|---|---|
+| canonical product identity | `app_products` | *what software is this?* |
+| operational / contract instance | `apps` | *what do we pay for, and under what contract?* |
+| instance relationship | `application_matches` | *which contract record does this IdP application correspond to?* |
 
-**The break is exactly one column.** Phase 18A's canonical evidence resolves to `app_products`, and the only link from a product to
-its operational instance — `apps.canonical_app_id` — has **zero writers** anywhere and is NULL on every row; `resolution.ts` states
-it plainly ("nothing populates apps.canonical_app_id yet"), and `app_products` is read-only in the product today. **So there is no
-deterministic path from a confirmed canonical alias to an `apps` row.** A human can propose and decide a real relationship now; a
-deterministic matcher would have nothing to propose. **Populating `apps.canonical_app_id`, plus a write path for `app_products`, is
-the prerequisite for 18C.**
+```
+canonical product recognition:   directory application → confirmed alias → app_product
+instance matching:               app_product → zero / one / many apps rows → application_match proposals
+```
 
-Do **not** "fix" this by repointing `application_matches` at `app_product_id` — that aims the FK at a table with no writer at all
-and leaves the matcher more blocked, not less.
+Recognition and matching are different acts on different evidence. Collapsing them is what a name-based join does.
 
+### What an application match IS — the 0 / 1 / many instance question
 
-## Adding a new connector
+**`application_matches` is an INSTANCE relationship, not a product-level one.** 0075 settles it in its own words: `apps` is
+*"normalized software records — what do we pay for, and under what contract"*, and *"a directory application with **no SaaS record
+is not an error** (nobody has recorded a contract)"*. Phase 18B0 gave `apps.canonical_app_id` its first writer, so the chain
+`external_id → confirmed alias → app_product → apps WHERE canonical_app_id = product → app_id` is deterministic at last.
 
-1. Add the provider to the catalogue (`customer-connectors/catalog.ts`).
-2. Add its capability row to `SUPPORT` in `canonical/capabilities.ts` — start every capability at `planned`.
-3. Build discovery + promote RPCs for one capability; flip that capability to `implemented`.
-4. If it introduces a new metric, add a `lineage.ts` entry. If it feeds an existing one, nothing changes.
-5. Add its refresh trigger to `REFRESH_PATHS`.
+| instances of the resolved product | what may be proposed |
+|---|---|
+| **exactly one** | that `app_id`, deterministically — the ordinary path |
+| **many** (Salesforce Production + Sandbox) | **each**, as competing `proposed` candidates. The evidence proves the *product*, never the *instance*, so neither confidence, arrival order nor arithmetic may pick one. A human accepts exactly one; the losing candidate **remains a proposal** rather than being silently rejected, and 0075's partial unique index makes a second acceptance impossible |
+| **zero** | nothing. The product is recognised, no contract record exists, and nothing is fabricated to fill the gap. Product-level truth continues to live in `app_products`/`app_aliases` |
 
-Steps 1–2 alone make the connector appear correctly everywhere — as `planned`, with an explanation, and never as a zero. **That is
-the property this layer exists to provide:** a new source lights up every compatible surface without touching product code.
+`app_id` is sufficient **because the fact being recorded is instance-level**. Repointing at `app_product_id` would record a
+weaker, different fact against a far thinner writer. Proven by B14 (many) and B15 (zero) against a real shared-product estate.
+
+### What "managed" means to Rule 5 — and the copy debt it carries
+
+`discovered_application_unmanaged_by_idp` is subjected on a **directory application** and fires when a current one has **no
+accepted match**, gated on the matcher's status being `completed` — an empty table means *not yet looked* just as readily as
+*nothing is managed*. Given the instance semantics above, **"managed" means an accepted relationship exists to a tenant
+operational/contract application record.**
+
+It does **not** mean the canonical product is unknown, the software unidentified, or the alias unresolved. A recognised
+`app_product` with zero operational instances is therefore still "unmanaged" *at the operational-instance layer*, and that is
+coherent rather than contradictory.
+
+**Recorded debt, deliberately not fixed here:**
+- the rule's name reads backwards from its implementation — it is subjected on the IdP's own record, not on a SaaS-discovered one;
+- its `title_key` / `summary_key` / `remediation_key` resolve to **no copy anywhere in the repository**, so the sentence a customer
+  eventually reads is still undefined;
+- whoever writes that copy must say **instance/contract management, not product recognition**, or the finding will contradict this
+  model.
+
+### What 18C still needs
+
+18B0's writer is **human-driven**: an operator creates the product, declares the alias, and the resolver links the app. Until a
+tenant has done that, the join yields nothing, so **a matcher run over an uncanonicalized estate will legitimately propose zero
+matches** — which Rule 5 must not read as "everything is unmanaged". The `completed` gate is what protects that, and 18C must keep
+it honest.
