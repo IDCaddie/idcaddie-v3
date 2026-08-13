@@ -284,8 +284,44 @@ nothing closes. The bounded error vocabulary is `not_authorized` · `query_faile
 URL, PostgREST payload, row or stack ever reaches a caller.
 
 Every read is **paged to exhaustion**. "Page one is enough" is the quiet way a loader lies: the engine would see a
-truthful-looking subset and conclude that accounts beyond row 500 have no owner. A cursor that fails to advance is
-treated as a broken read contract and fails, because a duplicated or truncated estate is worse than no answer.
+truthful-looking subset and conclude that accounts beyond row 500 have no owner.
+
+**Malformed pagination fails closed rather than being repaired.** The cursor reads (0061 / 0085) are
+`where id > p_after_id order by id`, so ids are strictly increasing — a property verified against the merged SQL, not
+assumed, and then *enforced*: a repeated, backward or non-advancing id returns `pagination_contract_violated`, and no
+graph is produced, no rule evaluated and no finding synced.
+
+The offset read is weaker and needs the check more. `product_app_accounts` (0078) orders by
+`display_name nulls last, email nulls last, external_id`, while the loader queries with `p_connection_id = null` — i.e.
+**across connections**, where `external_id` is unique only per `(tenant, connection, provider)`. So the ORDER BY is
+**not a total order in the scope actually read**. That is proven against a database rather than argued: two rows for one
+person in two workspaces tie on all three sort keys, while the per-connection uniqueness still holds. Tied rows have no
+guaranteed inter-statement ordering, and each page is its own statement against a live table.
+
+Two different harms follow, and only one of them is visible:
+
+- a row served **twice** — caught by row identity;
+- a row **skipped** — invisible to row identity, and the dangerous one. A missing account silently withholds its
+  finding while its connection stays closure-eligible, so 0083 resolves a finding that is still true.
+
+The skip is caught by the server's own `count(*) over ()`, which 0078 already returns on every row. If the total moves
+between statements the set changed underneath the read; if the assembled size does not equal it, the whole set was not
+read. Either way the load fails. **This is why deduplicating was rejected:** it would have hidden the broken read *and*
+presented a short set as complete. The concrete harm avoided is a duplicated `app_account` reaching rule 4 as one
+person holding two active accounts in one connection — a finding accusing somebody of a duplicate that does not exist.
+
+A consequence worth stating: on this read a row dropped by **validation** is also a short set, and now fails the load
+too. Continuing would withhold that account's finding while leaving its connection closure-eligible — the same
+false-closure harm as a skipped page. Cursor reads carry no server-side total, so a malformed row there is still
+dropped; the asymmetry is a recorded decision, not an oversight.
+
+**Still true, and the reason to convert this read to a cursor eventually:** these checks detect instability, they do not
+make OFFSET paging snapshot-consistent. One residual case survives all of them, and is worth naming rather than leaving
+for someone to discover: a row deleted *before* the current offset and another inserted *after* it, within the same read,
+leaves the total unchanged and produces no duplicate, while the shift skips one row at the page boundary. The assembled
+size then equals the reported total and the read is accepted. It is narrow — it needs a concurrent write on both sides of
+the cursor — but it is not impossible, and no count-based check can see it. A cursor on `product_app_accounts` would
+remove the failure mode instead of observing it, and needs a migration — so it is the follow-up, not this change.
 
 Stale rows are loaded **deliberately** — the engine decides what staleness means per rule, and a loader that filtered
 them would answer a question the rules exist to answer.

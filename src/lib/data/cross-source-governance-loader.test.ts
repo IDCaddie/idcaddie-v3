@@ -26,7 +26,11 @@ function makeIo(rows: Rows, opts: { fail?: string[]; connectorsError?: boolean; 
   const calls: string[] = [];
   const paged = (all: unknown[], args: Record<string, unknown>): unknown[] => {
     const limit = Number(args.p_limit ?? 500);
-    if (args.p_offset !== undefined) return all.slice(Number(args.p_offset), Number(args.p_offset) + limit);
+    if (args.p_offset !== undefined) {
+      // 0078 returns `count(*) over ()` on every row: the size of the whole matching set, not of the page.
+      const slice = all.slice(Number(args.p_offset), Number(args.p_offset) + limit);
+      return slice.map(r => ({ ...(r as object), total_count: all.length }));
+    }
     const after = args.p_after_id as string | null;
     const start = after ? all.findIndex(r => (r as { id: string }).id === after) + 1 : 0;
     return all.slice(start, start + limit);
@@ -63,6 +67,7 @@ const linkRow = (id: string, o: Record<string, unknown> = {}) => ({
 });
 const cap = (connection_id: string, capability: string, state = "available") => ({ connection_id, capability, state });
 const BOTH_AVAILABLE = [cap(OKTA, "identity"), cap(SLACK, "app_accounts")];
+const id = (p: string, i: number) => `${p}${String(i).padStart(6, "0")}`;
 
 beforeEach(() => { gate.value = { ok: true, tenantId: "t-a" }; });
 
@@ -228,7 +233,7 @@ describe("pagination loads everything, exactly once", () => {
     };
     const r = await loadCrossSourceGovernanceInput("t-a", stuck);
     expect(r.ok).toBe(false);
-    expect(r.ok === false && r.error).toBe("query_failed");
+    expect(r.ok === false && r.error).toBe("pagination_contract_violated");
   });
 });
 
@@ -338,5 +343,395 @@ describe("orchestration: authorize -> load -> evaluate -> 0083", () => {
     const r = await evaluateTenantCrossSourceGovernance(io);
     expect(r.ok === false && r.error).toBe("query_failed");
     expect(JSON.stringify(r)).not.toMatch(/relation|5432|does not exist/i);
+  });
+});
+
+// ── Independent review of #415 ────────────────────────────────────────────────────────────────────────────────────
+describe("review: page-boundary arithmetic", () => {
+  const many = (n: number, f: (i: number) => unknown) => Array.from({ length: n }, (_, i) => f(i));
+
+  // The classic off-by-one: a source holding EXACTLY one page must not stop one page early, and must not loop.
+  it.each([
+    ["cursor, exactly one page", 500],
+    ["cursor, one more than a page", 501],
+    ["cursor, exactly two pages", 1000],
+  ])("%s loads every row once", async (_label, n) => {
+    const links = many(n, i => linkRow(id("l", i), { app_account_id: id("a", i) }));
+    const r = await loadCrossSourceGovernanceInput("t-a", makeIo({ links, capabilities: BOTH_AVAILABLE }));
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.input.personAccountLinks).toHaveLength(n);
+    expect(new Set(r.input.personAccountLinks.map(l => l.appAccountId)).size).toBe(n);
+  });
+
+  it.each([
+    ["offset, exactly one page", 500],
+    ["offset, one more than a page", 501],
+  ])("%s loads every account once", async (_label, n) => {
+    const accounts = many(n, i => account(id("a", i)));
+    const r = await loadCrossSourceGovernanceInput("t-a", makeIo({ accounts, capabilities: BOTH_AVAILABLE }));
+    expect(r.ok && r.input.appAccounts).toHaveLength(n);
+    expect(r.ok && new Set(r.input.appAccounts.map(a => a.id)).size).toBe(n);
+  });
+
+  it.each([["directory, exactly one page", 100], ["directory, one more", 101]])(
+    "%s loads every identity once", async (_label, n) => {
+      const identities = many(n, i => identity(id("i", i)));
+      const r = await loadCrossSourceGovernanceInput("t-a", makeIo({ identities, capabilities: BOTH_AVAILABLE }));
+      expect(r.ok && r.input.identityAccounts).toHaveLength(n);
+    },
+  );
+
+  it("a source with zero rows loads as an empty array, not a failure", async () => {
+    const r = await loadCrossSourceGovernanceInput("t-a", makeIo({ links: [], capabilities: BOTH_AVAILABLE }));
+    expect(r.ok && r.input.personAccountLinks).toEqual([]);
+  });
+
+  // MAX_PAGES is a runaway backstop, not a product limit. Reaching it must FAIL, because a truncated estate returned
+  // as success would understate the graph and could close findings that are still true.
+  it("FAILS rather than truncating when the page backstop is reached", async () => {
+    let served = 0;
+    const runaway: LoaderIo = {
+      rpc: async (name, args) => {
+        if (name === "product_application_matcher_state") return ok([{ has_ever_run: false, status: null, last_completed_at: null }]);
+        if (name !== "product_person_account_links") return ok([]);
+        // Always a FULL page with a strictly advancing cursor — the shape of a source larger than the backstop.
+        const page = served++;
+        void args;
+        return ok(Array.from({ length: 500 }, (_, i) => linkRow(id("l", page * 500 + i))));
+      },
+      connectors: async () => ok([]),
+    };
+    const r = await loadCrossSourceGovernanceInput("t-a", runaway);
+    expect(r.ok).toBe(false);
+    expect(r.ok === false && r.error).toBe("page_limit_exceeded");
+    expect(served).toBeGreaterThan(100); // it really did try, rather than giving up early
+  });
+
+  // The recovered probe from the paused review. Its ORIGINAL expectation was silent deduplication; review rejected
+  // that. A duplicate id means the canonical read is MALFORMED, and deduplicating would hide the broken RPC while
+  // presenting incomplete evidence as complete — the loader would then hand the engine a graph it has no right to
+  // trust, and 0083 could close findings against it. Fail closed instead: no graph, no evaluation, no sync.
+  it("FAILS CLOSED when an offset page repeats a row, rather than deduplicating it away", async () => {
+    let call = 0;
+    const overlapping: LoaderIo = {
+      rpc: async name => {
+        if (name === "product_application_matcher_state") return ok([{ has_ever_run: false, status: null, last_completed_at: null }]);
+        if (name !== "product_app_accounts") return ok([]);
+        call++;
+        if (call === 1) return ok(Array.from({ length: 500 }, (_, i) => account(id("a", i))));
+        if (call === 2) return ok([account(id("a", 499)), account(id("a", 500))]);
+        return ok([]);
+      },
+      connectors: async () => ok([]),
+    };
+    const r = await loadCrossSourceGovernanceInput("t-a", overlapping);
+    expect(r.ok).toBe(false);
+    expect(r.ok === false && r.error).toBe("pagination_contract_violated");
+  });
+
+  it.each([
+    ["a repeated id inside one cursor page", [linkRow("l001"), linkRow("l001")]],
+    ["a backward id inside one cursor page", [linkRow("l002"), linkRow("l001")]],
+  ])("FAILS CLOSED on %s", async (_label, page) => {
+    const bad: LoaderIo = {
+      rpc: async name => {
+        if (name === "product_application_matcher_state") return ok([{ has_ever_run: false, status: null, last_completed_at: null }]);
+        if (name !== "product_person_account_links") return ok([]);
+        return ok(page);
+      },
+      connectors: async () => ok([]),
+    };
+    const r = await loadCrossSourceGovernanceInput("t-a", bad);
+    expect(r.ok === false && r.error).toBe("pagination_contract_violated");
+  });
+
+  // M5's regression target, stated as the harm rather than the mechanism: a duplicated account is exactly what rule 4
+  // reads as one person holding two active accounts in one connection.
+  it("a duplicated account can never reach the engine as a false duplicate-account finding", async () => {
+    let call = 0;
+    const dup = account("a-dup");
+    const io: LoaderIo = {
+      rpc: async (name, args) => {
+        if (name === "product_application_matcher_state") return ok([{ has_ever_run: false, status: null, last_completed_at: null }]);
+        if (name === "product_person_account_links") {
+          return Number(args.p_after_id ?? 0) ? ok([]) : ok([linkRow("l1", { app_account_id: "a-dup", status: "accepted" })]);
+        }
+        if (name !== "product_app_accounts") return ok([]);
+        call++;
+        // The same real account served on two consecutive offset pages.
+        return call <= 2 ? ok(Array.from({ length: 500 }, (_, i) => (i === 0 ? dup : account(id(`p${call}`, i))))) : ok([]);
+      },
+      connectors: async () => ok([{ id: SLACK, provider: "slack" }]),
+    };
+    const r = await loadCrossSourceGovernanceInput("t-a", io);
+    expect(r.ok).toBe(false);
+    expect(r.ok === false && r.error).toBe("pagination_contract_violated");
+  });
+});
+
+describe("review: a SKIPPED row is caught by the server's own set size", () => {
+  // The dangerous half of offset instability. A duplicate is visible; a skip is not — and a missing account silently
+  // withholds its finding while its connection stays closure-eligible, so 0083 resolves something still true.
+  // `count(*) over ()` (0078) makes it observable without a migration.
+  it("FAILS CLOSED when fewer rows are assembled than the server says exist", async () => {
+    const io: LoaderIo = {
+      rpc: async (name, args) => {
+        if (name === "product_application_matcher_state") return ok([{ has_ever_run: false, status: null, last_completed_at: null }]);
+        if (name !== "product_app_accounts") return ok([]);
+        // The server reports 501 rows exist, but the pages only ever yield 500 — one row fell through the boundary.
+        if (Number(args.p_offset) === 0) {
+          return ok(Array.from({ length: 500 }, (_, i) => ({ ...(account(id("a", i)) as object), total_count: 501 })));
+        }
+        return ok([]);
+      },
+      connectors: async () => ok([]),
+    };
+    const r = await loadCrossSourceGovernanceInput("t-a", io);
+    expect(r.ok).toBe(false);
+    expect(r.ok === false && r.error).toBe("pagination_contract_violated");
+  });
+
+  it("FAILS CLOSED when the set size changes between pages", async () => {
+    const io: LoaderIo = {
+      rpc: async (name, args) => {
+        if (name === "product_application_matcher_state") return ok([{ has_ever_run: false, status: null, last_completed_at: null }]);
+        if (name !== "product_app_accounts") return ok([]);
+        const off = Number(args.p_offset);
+        // A connector run inserted rows underneath the read: the second statement sees a bigger set.
+        const total = off === 0 ? 1000 : 1001;
+        const page = Array.from({ length: off === 0 ? 500 : 500 }, (_, i) => ({ ...(account(id("a", off + i)) as object), total_count: total }));
+        return ok(off >= 1000 ? [] : page);
+      },
+      connectors: async () => ok([]),
+    };
+    const r = await loadCrossSourceGovernanceInput("t-a", io);
+    expect(r.ok === false && r.error).toBe("pagination_contract_violated");
+  });
+
+  it("accepts a read whose assembled size matches the server's count", async () => {
+    const accounts = Array.from({ length: 501 }, (_, i) => account(id("a", i)));
+    const r = await loadCrossSourceGovernanceInput("t-a", makeIo({ accounts, capabilities: BOTH_AVAILABLE }));
+    expect(r.ok).toBe(true);
+    expect(r.ok && r.input.appAccounts).toHaveLength(501);
+  });
+});
+
+describe("review: the io seam cannot prove what the real RPCs could not satisfy", () => {
+  it("sends each read exactly the arguments its migration declares", async () => {
+    const seen: { name: string; args: Record<string, unknown> }[] = [];
+    const io = makeIo({ accounts: [account("a1")], capabilities: BOTH_AVAILABLE });
+    const spy: LoaderIo = { ...io, rpc: async (n, a) => { seen.push({ name: n, args: a }); return io.rpc(n, a); } };
+    await loadCrossSourceGovernanceInput("t-a", spy);
+
+    const argsFor = (n: string) => seen.find(s => s.name === n)!.args;
+    // Every read is tenant-scoped, and the tenant is the verified one.
+    for (const s of seen) expect(s.args.p_tenant_id).toBe("t-a");
+    // 0078's account read pages by OFFSET; 0061/0085 page by CURSOR. A mock that got this wrong would prove nothing.
+    expect(argsFor("product_app_accounts")).toMatchObject({ p_offset: 0, p_include_stale: true, p_connection_id: null });
+    expect(argsFor("product_app_accounts").p_after_id).toBeUndefined();
+    expect(argsFor("product_list_directory_identities")).toMatchObject({ p_after_id: null, p_include_stale: true });
+    expect(argsFor("product_person_account_links")).toMatchObject({ p_after_id: null, p_limit: 500 });
+    expect(argsFor("product_application_matches")).toMatchObject({ p_after_id: null, p_limit: 500 });
+    // The directory reads cap at 100 server-side; asking for more would be silently clamped and waste a round trip.
+    expect(argsFor("product_list_directory_identities").p_limit).toBe(100);
+    expect(argsFor("product_connector_capabilities")).toMatchObject({ p_connection_id: null });
+    expect(Object.keys(argsFor("product_application_matcher_state"))).toEqual(["p_tenant_id"]);
+  });
+
+  // BEHAVIOUR CHANGE, deliberate: a row that fails validation used to be dropped and the load continued. The server's
+  // own `count(*) over ()` now shows that for what it is — the loader assembled fewer rows than exist, i.e. missing
+  // evidence. Continuing would withhold that account's finding while leaving its connection closure-eligible, which is
+  // the same false-closure harm as a skipped page. It never coerces the bad row; it refuses the whole read.
+  it("FAILS CLOSED on a malformed row rather than quietly assembling a short set", async () => {
+    const io = makeIo({
+      accounts: [account("a1"), { id: "bad", connection_id: SLACK, provider: "slack", sync_status: "who_knows", account_kind: "human", account_status: "active" }],
+      capabilities: BOTH_AVAILABLE,
+    });
+    const r = await loadCrossSourceGovernanceInput("t-a", io);
+    expect(r.ok).toBe(false);
+    expect(r.ok === false && r.error).toBe("pagination_contract_violated");
+  });
+
+  // A cursor read has no server-side total, so a malformed row there is still dropped — stated so the difference
+  // between the two families is a recorded decision rather than an accident.
+  it("drops a malformed row on a CURSOR read, which carries no server-side set size", async () => {
+    const io = makeIo({
+      links: [linkRow("l1", { app_account_id: "a1" }), { id: "l2", person_id: "p1", status: "nonsense" }],
+      capabilities: BOTH_AVAILABLE,
+    });
+    const r = await loadCrossSourceGovernanceInput("t-a", io);
+    expect(r.ok && r.input.personAccountLinks).toHaveLength(1);
+  });
+
+  it("rejects a non-array payload where rows are expected", async () => {
+    const io: LoaderIo = {
+      rpc: async name => {
+        if (name === "product_application_matcher_state") return ok([{ has_ever_run: false, status: null, last_completed_at: null }]);
+        return ok({ unexpected: "object" });
+      },
+      connectors: async () => ok([]),
+    };
+    const r = await loadCrossSourceGovernanceInput("t-a", io);
+    expect(r.ok && r.input.appAccounts).toEqual([]);
+  });
+});
+
+describe("review: an older completion never licenses a current evaluation", () => {
+  const base = {
+    applications: [{ id: "d1", connection_id: OKTA, provider: "okta", sync_status: "current" }],
+    capabilities: [cap(OKTA, "directory_applications")], matches: [],
+  };
+  const YESTERDAY = "2026-01-01T00:00:00Z";
+
+  it.each([
+    ["a run started today after completing yesterday", "running"],
+    ["a run that failed today after completing yesterday", "failed"],
+  ])("%s withholds rule 5", async (_label, status) => {
+    const r = await evaluateTenantCrossSourceGovernance(
+      makeIo({ ...base, matcher: [{ has_ever_run: true, status, last_completed_at: YESTERDAY }] }),
+    );
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.summary.withheldRules.map(w => w.ruleId)).toContain("discovered_application_unmanaged_by_idp");
+    expect(r.summary.evaluatedRules).not.toContain("discovered_application_unmanaged_by_idp");
+  });
+});
+
+describe("review: person links reach the engine unfiltered", () => {
+  // Phase 16 reviewed `resolutionHasRun = personAccountLinks.length > 0` and retained it. That reasoning holds only if
+  // the loader passes links through untouched — filtering by status here would silently change a reviewed assumption.
+  it("passes proposed, accepted and rejected links through without filtering", async () => {
+    const io = makeIo({
+      links: [
+        linkRow("l1", { status: "proposed", app_account_id: "a1" }),
+        linkRow("l2", { status: "accepted", app_account_id: "a2" }),
+        linkRow("l3", { status: "rejected", app_account_id: "a3" }),
+      ],
+      capabilities: BOTH_AVAILABLE,
+    });
+    const r = await loadCrossSourceGovernanceInput("t-a", io);
+    expect(r.ok && r.input.personAccountLinks.map(l => l.status).sort()).toEqual(["accepted", "proposed", "rejected"]);
+  });
+});
+
+// ── Independent review of #418 ────────────────────────────────────────────────────────────────────────────────────
+describe("review LENS 7: a moving server total is itself evidence the snapshot changed", () => {
+  const pagesWithTotals = (totals: number[]): LoaderIo => ({
+    rpc: async (name, args) => {
+      if (name === "product_application_matcher_state") return ok([{ has_ever_run: false, status: null, last_completed_at: null }]);
+      if (name !== "product_app_accounts") return ok([]);
+      const page = Math.floor(Number(args.p_offset) / 500);
+      if (page >= totals.length) return ok([]);
+      return ok(Array.from({ length: 500 }, (_, i) => ({ ...(account(id("a", page * 500 + i)) as object), total_count: totals[page] })));
+    },
+    connectors: async () => ok([]),
+  });
+
+  it.each([
+    ["the set grows between pages", [1000, 1001]],
+    ["the set shrinks between pages", [1000, 999]],
+    ["it moves only on a later page", [1000, 1000, 1001]],
+  ])("FAILS CLOSED when %s", async (_label, totals) => {
+    const r = await loadCrossSourceGovernanceInput("t-a", pagesWithTotals(totals as number[]));
+    expect(r.ok).toBe(false);
+    expect(r.ok === false && r.error).toBe("pagination_contract_violated");
+  });
+
+  // THE CASE THAT ISOLATES THE PIN. Every test above also fails on the final assembled-size check, so none of them
+  // proves the page-to-page comparison exists. Here the arithmetic deliberately BALANCES: 1000 rows are assembled and
+  // the LAST page reports exactly 1000, so a loader that only compared the final size to the final total would call
+  // this complete. The set nevertheless changed mid-read (1001 -> 1000), which is precisely the insertion-cancels-skip
+  // shape — and only the pin catches it.
+  it("FAILS CLOSED when a moved total is balanced out by the final assembled size", async () => {
+    const io: LoaderIo = {
+      rpc: async (name, args) => {
+        if (name === "product_application_matcher_state") return ok([{ has_ever_run: false, status: null, last_completed_at: null }]);
+        if (name !== "product_app_accounts") return ok([]);
+        const off = Number(args.p_offset);
+        if (off >= 1000) return ok([]);
+        // page 0 reports 1001, page 1 reports 1000; 1000 rows are assembled in total.
+        const total = off === 0 ? 1001 : 1000;
+        return ok(Array.from({ length: 500 }, (_, i) => ({ ...(account(id("a", off + i)) as object), total_count: total })));
+      },
+      connectors: async () => ok([]),
+    };
+    const r = await loadCrossSourceGovernanceInput("t-a", io);
+    expect(r.ok).toBe(false);
+    expect(r.ok === false && r.error).toBe("pagination_contract_violated");
+  });
+});
+
+describe("review LENS 8: duplicate detection keys on the canonical row id, not a scoped one", () => {
+  // The motivating tie: one person in two workspaces, IDENTICAL external_id/display_name/email, different rows.
+  // Keying the guard on external_id would reject this legitimate estate — the fix must not misfire on the very case
+  // that proved the ordering was partial.
+  // Structural, not merely observed: `external_id` is not in the parsed app-account shape at all (zod strips unknown
+  // keys), so the guard CANNOT key on a connection-scoped field even by mistake. Mutating it to try is a no-op —
+  // which is why this property is asserted here rather than left to a mutant that cannot die.
+  it("never lets a connection-scoped field into the parsed shape the guard reads", async () => {
+    const io = makeIo({
+      accounts: [{ ...(account("a1") as object), external_id: "U01", email: "ada@example.test", display_name: "Ada" }],
+      capabilities: BOTH_AVAILABLE,
+    });
+    const r = await loadCrossSourceGovernanceInput("t-a", io);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    const row = r.input.appAccounts[0] as unknown as Record<string, unknown>;
+    for (const scoped of ["external_id", "email", "display_name", "workspace_external_id"]) {
+      expect(row[scoped]).toBeUndefined();
+    }
+    expect(row.id).toBe("a1");
+  });
+
+  it("accepts two real accounts that share external_id, email and display_name across connections", async () => {
+    const twin = (rowId: string, connection: string) => ({
+      id: rowId, connection_id: connection, provider: "slack", sync_status: "current",
+      external_id: "U01", display_name: "Ada Lovelace", email: "ada@example.test",
+      account_kind: "human", account_status: "active", is_admin: null,
+    });
+    const io = makeIo({
+      accounts: [twin("row-1", SLACK), twin("row-2", OKTA)],
+      capabilities: BOTH_AVAILABLE,
+    });
+    const r = await loadCrossSourceGovernanceInput("t-a", io);
+    expect(r.ok).toBe(true);
+    expect(r.ok && r.input.appAccounts.map(a => a.id).sort()).toEqual(["row-1", "row-2"]);
+  });
+});
+
+describe("review LENS 6: the skipped-row harm — a real finding must not close", () => {
+  // The false-OPENING case is covered elsewhere. This is the other direction, and the more dangerous one: a row that
+  // silently vanishes from the assembled read withholds its own finding while its connection stays closure-eligible,
+  // so 0083 would resolve something still true. The completeness check must stop the sync before that can happen.
+  it("a short read never reaches product_sync_governance_findings, so nothing can close", async () => {
+    const calls: string[] = [];
+    const io: LoaderIo = {
+      rpc: async (name, args) => {
+        calls.push(name);
+        if (name === "product_application_matcher_state") return ok([{ has_ever_run: false, status: null, last_completed_at: null }]);
+        if (name === "product_connector_capabilities") return ok(BOTH_AVAILABLE);
+        if (name !== "product_app_accounts") return ok([]);
+        // The server says 501 accounts exist; paging yields 500. One row was skipped by the unstable order.
+        return Number(args.p_offset) === 0
+          ? ok(Array.from({ length: 500 }, (_, i) => ({ ...(account(id("a", i)) as object), total_count: 501 })))
+          : ok([]);
+      },
+      connectors: async () => ok([{ id: OKTA, provider: "okta" }, { id: SLACK, provider: "slack" }]),
+    };
+    const r = await evaluateTenantCrossSourceGovernance(io);
+    expect(r.ok).toBe(false);
+    expect(r.ok === false && r.error).toBe("pagination_contract_violated");
+    // The load-bearing assertion: the sync is the only thing that can close a finding, and it was never called.
+    expect(calls).not.toContain("product_sync_governance_findings");
+  });
+});
+
+describe("review LENS 2: stable datasets of every boundary size still succeed", () => {
+  it.each([0, 1, 499, 500, 501, 1000, 1001])("assembles a stable set of %i rows", async n => {
+    const accounts = Array.from({ length: n }, (_, i) => account(id("a", i)));
+    const r = await loadCrossSourceGovernanceInput("t-a", makeIo({ accounts, capabilities: BOTH_AVAILABLE }));
+    expect(r.ok).toBe(true);
+    expect(r.ok && r.input.appAccounts).toHaveLength(n);
   });
 });
