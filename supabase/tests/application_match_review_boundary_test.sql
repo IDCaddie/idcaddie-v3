@@ -1,4 +1,4 @@
--- 0089 — the governed propose/decide boundary over application_matches.
+-- 0088 — the governed propose/decide boundary over application_matches.
 --
 -- The property this suite exists to protect: **a proposal can never become truth by itself.** Only a human accept produces a
 -- canonical relationship, only one per directory application, and a rejected candidate stays rejected however many times a
@@ -143,7 +143,7 @@ begin
   assert exists (select 1 from pg_indexes where indexname = 'application_matches_one_accepted_dir_idx'),
          'B2 the one-accepted-per-directory-application index must exist (0075)';
   assert exists (select 1 from pg_indexes where indexname = 'application_matches_candidate_idx'),
-         'B2 the candidate identity index this phase adds must exist (0089)';
+         'B2 the candidate identity index this phase adds must exist (0088)';
 end $$;
 
 -- ════ B3: idempotency — re-proposing the same pair changes nothing ═══════════════════════════════════════════════════════════
@@ -219,6 +219,16 @@ do $$
 declare mid uuid := pg_temp.mid('88000000-0000-4000-8000-0000000000d1','88000000-0000-4000-8000-0000000000a1');
 begin
   assert pg_temp.decide('88000000-0000-4000-8000-00000000000a', mid, 'accepted') = 'not_allowed', 'B7 viewer must not decide';
+end $$;
+-- An EDITOR is the role that CAN write app_products and app_aliases (0024), so it is the plausible mistake — extending decide
+-- authority to it would let the party who proposes canonical identity also ratify the match that consumes it. Reviewing a
+-- match is owner/admin, exactly as proposing is.
+select pg_temp.act('88000000-0000-4000-8000-0000000000f3');  -- editor may not decide either
+do $$
+declare mid uuid := pg_temp.mid('88000000-0000-4000-8000-0000000000d1','88000000-0000-4000-8000-0000000000a1');
+begin
+  assert pg_temp.decide('88000000-0000-4000-8000-00000000000a', mid, 'accepted') = 'not_allowed', 'B7 editor must not decide';
+  assert pg_temp.mstatus(mid) = 'proposed', 'B7 a refused decision leaves the candidate untouched';
 end $$;
 select pg_temp.act('88000000-0000-4000-8000-0000000000f2');  -- admin decides
 do $$
@@ -308,7 +318,7 @@ begin
          = array['product_application_matcher_state','product_application_matches','product_complete_application_matcher_run',
                  'product_decide_application_match','product_fail_application_matcher_run','product_propose_application_match',
                  'product_start_application_matcher_run'],
-         'B12 the product application-match surface is 0085 (read + state + start/complete/fail) plus exactly 0089 propose/decide';
+         'B12 the product application-match surface is 0085 (read + state + start/complete/fail) plus exactly 0088 propose/decide';
 end $$;
 
 -- ════ B13: matcher execution state stays decoupled from human decisions ═════════════════════════════════════════════════════
@@ -321,3 +331,61 @@ end $$;
 
 reset role;
 select set_config('request.jwt.claims', '', false);
+
+-- ════ B14: THE AMBIGUITY THIS BOUNDARY EXISTS TO SURVIVE, against a REAL shared canonical product ════════════════════════════
+-- B4 proved that two competing proposals are representable. It did not prove the case that actually arises once #420 populates
+-- the canonical layer: ONE app_product owning SEVERAL operational instances, where the directory evidence identifies the PRODUCT
+-- and cannot identify the INSTANCE.
+--
+-- This is the decision that kept `application_matches.app_id` as-is rather than repointing it at `app_product_id`. Product-level
+-- truth is already recorded one layer up — 0087 writes a confirmed `app_aliases` row from a directory application's external_id
+-- to its `app_product`. Duplicating that authority here would give the product two answers to "what product is this?". What
+-- `application_matches` owns is the INSTANCE question, and the honest answer to it, when a product has several instances, is
+-- "these N are candidates" — not a coin flip and not silence.
+reset role;
+insert into public.app_products (id, tenant_id, name, normalized_name) values
+  ('88000000-0000-4000-8000-0000000000b7', '88000000-0000-4000-8000-00000000000a', 'Salesforce', 'salesforce');
+insert into public.apps (id, tenant_id, name, canonical_app_id) values
+  ('88000000-0000-4000-8000-0000000000a7', '88000000-0000-4000-8000-00000000000a', 'SFDC Production', '88000000-0000-4000-8000-0000000000b7'),
+  ('88000000-0000-4000-8000-0000000000a8', '88000000-0000-4000-8000-00000000000a', 'SFDC Sandbox',    '88000000-0000-4000-8000-0000000000b7');
+insert into public.directory_applications (id, tenant_id, connection_id, provider, external_id, label, sync_status) values
+  ('88000000-0000-4000-8000-0000000000d7', '88000000-0000-4000-8000-00000000000a', '88000000-0000-4000-8000-0000000000c1',
+   'okta', '0oaMATCH0007', 'Salesforce', 'current');
+
+set role authenticated;
+select pg_temp.act('88000000-0000-4000-8000-0000000000f1');   -- owner
+do $$
+declare v integer; v_match uuid;
+begin
+  -- PRECONDITION: the product genuinely owns two instances. This is #420's link being consumed, not a name comparison — the two
+  -- apps are found by canonical_app_id, and their NAMES ("SFDC Production"/"SFDC Sandbox") match neither each other nor the
+  -- directory application's label ("Salesforce").
+  select count(*) into v from public.apps where canonical_app_id = '88000000-0000-4000-8000-0000000000b7';
+  assert v = 2, format('B14 precondition: one product must own two operational instances, saw %s', v);
+
+  -- A matcher that has resolved the PRODUCT proposes every instance under it. Neither is chosen, neither is dropped.
+  assert pg_temp.propose('88000000-0000-4000-8000-00000000000a','88000000-0000-4000-8000-0000000000d7','88000000-0000-4000-8000-0000000000a7') = 'proposed',
+    'B14 the first instance under the resolved product must be proposable';
+  assert pg_temp.propose('88000000-0000-4000-8000-00000000000a','88000000-0000-4000-8000-0000000000d7','88000000-0000-4000-8000-0000000000a8') = 'proposed',
+    'B14 the second instance must be equally proposable — product-level truth needs no instance precision';
+
+  assert pg_temp.ncount('88000000-0000-4000-8000-0000000000d7', null, 'proposed') = 2,
+    'B14 "we know the product, not the instance" is TWO live candidates';
+  assert pg_temp.ncount('88000000-0000-4000-8000-0000000000d7', null, 'accepted') = 0,
+    'B14 NOTHING may auto-accept — no arbitrary instance selection';
+
+  -- And the ambiguity is resolved only by a human, to exactly one instance.
+  v_match := pg_temp.mid('88000000-0000-4000-8000-0000000000d7','88000000-0000-4000-8000-0000000000a7');
+  assert pg_temp.decide('88000000-0000-4000-8000-00000000000a', v_match, 'accepted') = 'accepted',
+    'B14 a human may settle the ambiguity';
+  assert pg_temp.ncount('88000000-0000-4000-8000-0000000000d7', null, 'accepted') = 1,
+    'B14 exactly one instance may be accepted';
+  assert pg_temp.ncount('88000000-0000-4000-8000-0000000000d7', null, 'proposed') = 1,
+    'B14 the losing candidate REMAINS a proposal — it is not silently rejected on its rival''s acceptance';
+
+  -- The second instance cannot also be accepted: 0075's partial unique index is the structural guard.
+  v_match := pg_temp.mid('88000000-0000-4000-8000-0000000000d7','88000000-0000-4000-8000-0000000000a8');
+  assert pg_temp.decide('88000000-0000-4000-8000-00000000000a', v_match, 'accepted') <> 'accepted',
+    'B14 a second instance must never be acceptable for one directory application';
+end $$;
+reset role;
