@@ -82,14 +82,20 @@ role — and 0085's bounded read stays the only read path. Both new functions ar
 search_path, revoked from public/anon/connector_runner and granted to `authenticated` alone. No `connector_runner` authority, no
 `service_role`, no new machine identity: proposal generation is product-side orchestration.
 
-**The gap this phase records but does not close — and a correction made during review.** The first draft of this entry claimed
-nothing inserts `apps` from discovery. That was wrong: the Slack resolver store upserts `apps` during sync, so `apps`,
-`external_instance_id` and `instance_domain` all have live writers, and the endpoint is backed by real data. **The break is exactly
-one column** — `apps.canonical_app_id`, the only link from a canonical product to its operational instance, has zero writers
-anywhere and is NULL on every row (`resolution.ts` says so outright), and `app_products` is read-only in the product. **There is
-still no deterministic path from a confirmed alias to an `apps` row**, so a human can propose today but a matcher would have
-nothing to propose: populating `apps.canonical_app_id` plus an `app_products` write path is the prerequisite for 18C. Repointing
-`application_matches` at `app_product_id` would make it worse, not better — that table has no writer at all.
+**The decisive architecture question, answered rather than assumed.** `application_matches` is an **instance** relationship, not a
+product-level one — 0075 says so outright (`apps` is "what do we pay for, and under what contract", and "a directory application
+with no SaaS record is not an error"). Phase 18B0 (#420) made the chain deterministic by giving `apps.canonical_app_id` its first
+writer, so `external_id → confirmed alias → app_product → apps where canonical_app_id = product → app_id` now resolves. Against
+that: **one** instance is the ordinary path; **many** instances (Salesforce Production + Sandbox) produce competing proposals that
+only a human resolves, since the evidence proves the product and never the instance; **zero** instances proposes nothing, which
+0075 defines as explicitly not an error. `app_id` is sufficient precisely because the fact being recorded is instance-level, and
+repointing at `app_product_id` would record a weaker fact against a thinner writer. Proven by B14 rather than argued.
+
+**What "managed" means to Rule 5, and what is still undefined.** The rule is subjected on a directory application and fires when a
+current one has no accepted match, gated on the matcher having `completed`. Under the instance semantics that means "an accepted
+link to an operational/contract record exists" — so a confirmed product with zero instances still reads unmanaged, coherently.
+**Open and out of scope:** the rule's title/summary/remediation keys resolve to no copy anywhere in the repository, so the sentence
+a customer reads is undefined; whoever writes it must say instance/contract management, not product recognition.
 
 **Proof:** new real-database suite (B0–B13) covering privilege closure and deny-all posture, the owner/admin/editor/viewer
 vocabulary for both commands, proposal carrying no decision, idempotent replay, ambiguity, method/confidence vocabulary,

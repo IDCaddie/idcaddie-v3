@@ -236,30 +236,43 @@ match per directory application, and deliberately **many-to-one** on the SaaS si
 directory side carries no domain column, and `suggested` because nothing produces it and admitting the weak-evidence bucket before
 a producer exists invites the name-similarity matching this work exists to prevent.
 
-### The gap 18C must close first
+### What an application match IS — the 0 / 1 / many instance question
 
-The SaaS endpoint is `apps` — correct, consistent across 0075/0085/Rule 5, and **backed by real data**: the Slack resolver store
-upserts `apps` during sync (keyed on `tenant_id, external_instance_id`), so `apps`, `external_instance_id` and `instance_domain`
-all have live writers.
+**`application_matches` is an INSTANCE relationship, not a product-level one.** 0075 settles it in its own words: `apps` is
+*"normalized software records — what do we pay for, and under what contract"*, and *"a directory application with **no SaaS record
+is not an error** (nobody has recorded a contract)"*. Product-level identity lives one layer up, in `app_aliases` →
+`app_products`. The two answer different questions and are deliberately not merged.
 
-**The break is exactly one column.** Phase 18A's canonical evidence resolves to `app_products`, and the only link from a product to
-its operational instance — `apps.canonical_app_id` — has **zero writers** anywhere and is NULL on every row; `resolution.ts` states
-it plainly ("nothing populates apps.canonical_app_id yet"), and `app_products` is read-only in the product today. **So there is no
-deterministic path from a confirmed canonical alias to an `apps` row.** A human can propose and decide a real relationship now; a
-deterministic matcher would have nothing to propose. **Populating `apps.canonical_app_id`, plus a write path for `app_products`, is
-the prerequisite for 18C.**
+Phase 18B0 made the chain deterministic at last by giving `apps.canonical_app_id` its first writer:
 
-Do **not** "fix" this by repointing `application_matches` at `app_product_id` — that aims the FK at a table with no writer at all
-and leaves the matcher more blocked, not less.
+```
+directory_application.external_id → confirmed alias → app_product → apps WHERE canonical_app_id = product → application_matches.app_id
+```
 
+| instances of the resolved product | what a matcher may do |
+|---|---|
+| **exactly one** | propose that `app_id` deterministically — the ordinary path |
+| **many** (Salesforce Production + Sandbox) | propose **each** as a competing candidate, all `proposed`. The evidence proves the *product*, never the *instance*, so nothing may pick one. A human accepts exactly one; the partial unique index makes a second acceptance impossible |
+| **zero** | propose nothing. Per 0075 this is **explicitly not an error** — the product is known, but nobody has recorded a contract for it. The product-level truth still stands in `app_products`/`app_aliases`; `application_matches` simply has nothing to say |
 
-## Adding a new connector
+`app_id` is therefore sufficient **because the relationship being recorded is instance-level**. Repointing it at `app_product_id`
+would record a different, weaker fact and aim the FK at a table with a far thinner writer.
 
-1. Add the provider to the catalogue (`customer-connectors/catalog.ts`).
-2. Add its capability row to `SUPPORT` in `canonical/capabilities.ts` — start every capability at `planned`.
-3. Build discovery + promote RPCs for one capability; flip that capability to `implemented`.
-4. If it introduces a new metric, add a `lineage.ts` entry. If it feeds an existing one, nothing changes.
-5. Add its refresh trigger to `REFRESH_PATHS`.
+### What "managed" means to Rule 5 — and what is still undefined
 
-Steps 1–2 alone make the connector appear correctly everywhere — as `planned`, with an explanation, and never as a zero. **That is
-the property this layer exists to provide:** a new source lights up every compatible surface without touching product code.
+`discovered_application_unmanaged_by_idp` is subjected on a **directory application** and fires when a current one has **no
+accepted match**, and only when the matcher's status is `completed` — an empty table means *not yet looked* just as readily as
+*nothing is managed*. Given the instance semantics above, "managed" means **an accepted link to an operational/contract record
+exists**. A confirmed product with zero instances therefore still reads as unmanaged, and that is coherent: the estate knows what
+the application is, and has no contract record for it.
+
+**Open, and not this phase's to fix:** the rule's `title_key` / `summary_key` / `remediation_key` resolve to **no copy anywhere in
+the repository**, so the sentence a customer eventually reads is still undefined. Whoever writes that copy must say
+*instance/contract* management, not product recognition, or the finding will contradict this model.
+
+### The prerequisite 18C still needs
+
+18B0 gave `apps.canonical_app_id` a writer, but it is a **human-driven** one: an operator creates the product, declares the alias,
+and the resolver links the app. Until a tenant has actually done that, the join above yields nothing, so **a matcher run over an
+uncanonicalized estate will legitimately propose zero matches** — which Rule 5 must not read as "everything is unmanaged". The
+matcher-state gate (`completed`) is what protects that, and 18C must keep it honest.

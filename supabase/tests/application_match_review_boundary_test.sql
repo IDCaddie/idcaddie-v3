@@ -319,5 +319,43 @@ do $$ begin
     'B13 proposing and deciding must not create or advance matcher run state — they are separate facts';
 end $$;
 
+-- ════ B14: the 0 / 1 / MANY operational-instance test — the decisive architecture question ══════════════════════════════════
+-- `application_matches` is an INSTANCE relationship, not a product-level one. 0075 says so outright: `apps` is "what do we pay
+-- for, and under what contract", and "a directory application with NO SaaS record is not an error (nobody has recorded a
+-- contract)". Phase 18B0 (#420) makes the product layer real — apps.canonical_app_id now has a writer — so the chain
+--
+--     directory_application.external_id → confirmed alias → app_product → apps WHERE canonical_app_id = product → app_id
+--
+-- is deterministic at last. What it CANNOT do is choose between instances, and that is the property proven here.
+reset role;
+insert into public.app_products (id, tenant_id, name, normalized_name) values
+  ('88000000-0000-4000-8000-0000000000e5', '88000000-0000-4000-8000-00000000000a', 'Salesforce', 'salesforce'),
+  ('88000000-0000-4000-8000-0000000000e6', '88000000-0000-4000-8000-00000000000a', 'Jira',       'jira');
+-- MANY: two operational instances of one canonical product. ZERO: Jira is a known product with no instance at all.
+update public.apps set canonical_app_id = '88000000-0000-4000-8000-0000000000e5'
+ where id in ('88000000-0000-4000-8000-0000000000a1','88000000-0000-4000-8000-0000000000a2');
+
+do $$
+declare n_for_product integer; n_for_jira integer;
+begin
+  select count(*) into n_for_product from public.apps where canonical_app_id = '88000000-0000-4000-8000-0000000000e5';
+  select count(*) into n_for_jira    from public.apps where canonical_app_id = '88000000-0000-4000-8000-0000000000e6';
+
+  -- CASE MANY: the product resolves to two instances. Evidence proves the PRODUCT; it cannot distinguish Prod from Sandbox.
+  assert n_for_product = 2, 'B14 the many-instance case must be representable';
+  -- Both candidates already exist as rows from B4/B8 — one accepted, one rejected — proving the boundary let a human choose
+  -- between them rather than the model picking. Neither confidence nor arrival order selected a winner.
+  assert pg_temp.ncount('88000000-0000-4000-8000-0000000000d1', null, 'accepted') = 1
+     and pg_temp.ncount('88000000-0000-4000-8000-0000000000d1', null, 'rejected') = 1,
+     'B14 MANY: a human resolved the ambiguity — exactly one accepted, the other rejected, none auto-picked';
+
+  -- CASE ZERO: a confirmed canonical product with no operational instance. There is no app_id to propose, and per 0075 that is
+  -- explicitly NOT an error — it means nobody has recorded a contract for it yet. The product-level truth still lives in
+  -- app_products/app_aliases; application_matches simply has nothing to say.
+  assert n_for_jira = 0, 'B14 ZERO: a known product may legitimately have no operational instance';
+end $$;
+
+-- CASE ONE is the ordinary path and is already covered end to end by B2 (propose) and B7 (accept).
+
 reset role;
 select set_config('request.jwt.claims', '', false);
