@@ -388,4 +388,42 @@ begin
   assert pg_temp.decide('88000000-0000-4000-8000-00000000000a', v_match, 'accepted') <> 'accepted',
     'B14 a second instance must never be acceptable for one directory application';
 end $$;
+
+-- ════ B15: the ZERO-instance case — the third leg of the 0/1/many model ══════════════════════════════════════════════════════
+-- MANY is proven above; ONE is the ordinary path (B2 propose, B7 accept). ZERO is the leg that decides whether `app_id` is the
+-- right endpoint at all, so it is proven rather than argued.
+--
+-- A canonical product may be RECOGNISED while the tenant holds no operational/contract record for it. 0075 is explicit that this
+-- is not an error: "a directory application with NO SaaS record is not an error (nobody has recorded a contract)". So there is
+-- simply no app_id to propose, nothing is fabricated, and the product-level truth continues to live upstream in
+-- app_products / app_aliases. `application_matches` records an INSTANCE relationship and correctly has nothing to say.
+reset role;
+insert into public.app_products (id, tenant_id, name, normalized_name) values
+  ('88000000-0000-4000-8000-0000000000e9', '88000000-0000-4000-8000-00000000000a', 'Jira', 'jira');
+set role authenticated;
+select pg_temp.act('88000000-0000-4000-8000-0000000000f1');
+do $$
+declare v_instances integer;
+begin
+  select count(*) into v_instances from public.apps a
+   where a.tenant_id = '88000000-0000-4000-8000-00000000000a'
+     and a.canonical_app_id = '88000000-0000-4000-8000-0000000000e9';
+  assert v_instances = 0, 'B15 a recognised canonical product may legitimately own zero operational instances';
+
+  -- The product exists and is readable — recognition is intact — yet there is no instance to match against, and nothing in this
+  -- boundary invents one. No proposal can be made because no app_id exists, which is a representable state, not a failure.
+  assert exists (select 1 from public.app_products p
+                  where p.id = '88000000-0000-4000-8000-0000000000e9'
+                    and p.tenant_id = '88000000-0000-4000-8000-00000000000a'),
+         'B15 product-level identity survives independently of any application_match';
+end $$;
+reset role;
+do $$
+begin
+  assert not exists (select 1 from public.application_matches m
+                      join public.apps a on a.id = m.app_id
+                     where a.canonical_app_id = '88000000-0000-4000-8000-0000000000e9'),
+         'B15 zero instances means zero matches — nothing may be fabricated to fill the gap';
+end $$;
+set role authenticated;
 reset role;
