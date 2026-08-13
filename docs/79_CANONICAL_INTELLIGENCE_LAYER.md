@@ -267,6 +267,23 @@ is not an error** (nobody has recorded a contract)"*. Phase 18B0 gave `apps.cano
 `app_id` is sufficient **because the fact being recorded is instance-level**. Repointing at `app_product_id` would record a
 weaker, different fact against a far thinner writer. Proven by B14 (many) and B15 (zero) against a real shared-product estate.
 
+### A rejection is instance-scoped, and that is deliberate
+
+**Rejecting a candidate means "not this instance" — never "not this product".** The question a reviewer is actually shown is
+*"is this IdP application the same thing as this operational/contract record?"*, so their `rejected` answers exactly that. It
+follows that a later candidate for a **different** instance of the same product is a **new and legitimate question**, not a
+resurrection of the one already refused — and 0088's candidate key `(tenant, directory_application, app_id)` is what keeps the two
+apart. Re-proposing the *same* pair is still an idempotent no-op that can never resurrect the rejection (B10).
+
+This looks, at a glance, like a replay hole: reject Salesforce Production and a Salesforce Sandbox candidate may still appear.
+It is not one, and **the fix that suggests itself is the bug**. Keying rejection on the product instead would (a) refuse a
+question the human was never asked, and (b) put a product-wide `rejected` verdict in `application_matches` alongside a
+`confirmed` `app_aliases` row asserting the same directory application IS that product — two tables recording one fact with
+independently mutable lifecycles and nothing to reconcile them. Product recognition is `app_aliases`'s to accept or reject
+(§ *Only a settled judgement resolves*); this table only ever decides instances.
+
+A reviewer who means "this IdP application is not Salesforce at all" is rejecting the **alias**, not the match.
+
 ### What "managed" means to Rule 5 — and the copy debt it carries
 
 `discovered_application_unmanaged_by_idp` is subjected on a **directory application** and fires when a current one has **no
