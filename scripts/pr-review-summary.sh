@@ -35,6 +35,17 @@ echo "docs changed?            $(yn '^docs/|(^|/)README')"
 echo "risk register (04)?      $(yn '^docs/04_RISK_REGISTER\.md$')"
 echo "changelog (05)?          $(yn '^docs/05_ENGINEERING_CHANGELOG\.md$')"
 echo "-----------------------------------------------------------"
+# Baseline risk tier (ENGINEERING_STANDARDS.md §B). The tier RULES live in change-risk-lib.mjs and are unit-tested
+# there — this script owns the git plumbing only, so there is one owner of the rules (§O), not a bash re-statement.
+# Node is preinstalled on GitHub runners; if it is absent we say so rather than printing a wrong tier.
+if command -v node >/dev/null 2>&1; then
+  printf '%s\n' "$changed" | node "$REPO/scripts/change-risk-lib.mjs" || true
+else
+  echo "baselineRiskTier : <node not found — classify manually per ENGINEERING_STANDARDS.md §B>"
+fi
+echo "  Baseline only, NOT semantic proof: escalate if this diff actually crosses a higher-risk"
+echo "  boundary (ENGINEERING_STANDARDS.md §C). It may never justify de-escalation."
+echo "-----------------------------------------------------------"
 echo "Changed files:"
 printf '%s\n' "$changed" | sed 's/^/    /'
 echo "-----------------------------------------------------------"

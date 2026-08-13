@@ -2,6 +2,9 @@
 
 **Canonical source for: how we write code and docs.** Combines the engineering style bar
 and the living-docs policy. Reviewer enforcement: [07_P0_REVIEW_CHECKLIST](./07_P0_REVIEW_CHECKLIST.md).
+*How much* of this bar a given change has to clear is decided by
+[`ENGINEERING_STANDARDS.md`](../ENGINEERING_STANDARDS.md) (risk tiers T0–T3): determine the
+baseline tier first, escalate semantically, never de-escalate.
 
 ## Code standard
 **Bias:** boring, deterministic, small. The best code is code not written

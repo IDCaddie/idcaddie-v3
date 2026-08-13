@@ -19,6 +19,13 @@ workflow** — RLS-gated, audited contract create/edit — exists. **Connector /
 is ongoing**, and **OMC/Flywheel cutover remains blocked** (RISK-001/RISK-007 open, not
 production-ready). Authoritative status: [`docs/00_PRODUCT_STATUS.md`](docs/00_PRODUCT_STATUS.md).
 
+## How much rigor a change earns
+[`ENGINEERING_STANDARDS.md`](ENGINEERING_STANDARDS.md) is canonical: four gates, four risk tiers
+(T0–T3), and the rule that deterministic classification is a **baseline, not semantic proof**.
+Determine the baseline tier first (`bash scripts/pr-review-summary.sh`), then escalate semantically —
+never de-escalate. Speed and safety are both requirements: T3 ceremony does not belong on a T0/T1
+change unless you can name the higher-risk failure class it catches.
+
 ## Non-negotiables (apply to every change)
 - Do **not** run against hosted Supabase — local-first only.
 - Do **not** use service-role keys outside approved server/test paths.
@@ -44,7 +51,7 @@ bash scripts/check-migration-safety.sh            # migration numbering + unsafe
 bash scripts/test-rls.sh                           # apply ALL migrations to throwaway Postgres + run RLS suite (needs Docker)
 bash scripts/check-auth-safety.sh                  # src/ has no service-role/hardcoded keys/client-side role storage
 bash scripts/check-docs-updated.sh                 # docs-drift gate
-bash scripts/pr-review-summary.sh                  # categorize the diff + reviewer focus
+bash scripts/pr-review-summary.sh                  # baseline risk tier + reasons + reviewer focus
 ```
 For app/UI changes also run `npm run lint`, `npm test`, `npx tsc --noEmit`, and `npm run build`.
 All of these run in CI on every PR (`.github/workflows/`): `app-ci.yml` gates lint/test/typecheck/build,

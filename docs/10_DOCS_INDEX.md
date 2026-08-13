@@ -28,6 +28,12 @@ list + detail, linked app↔contract panels, app-user roster + match status, acc
 `/contracts/[id]/edit` — PR #31, RLS-gated, audited, **Partial** legacy parity); **other write UI, hosted
 apply, UAR, imports/exports are `planned`/`deferred`**.
 
+## Root-level canonical docs (outside `docs/`)
+| Doc | Canonical for | Reader | Status |
+|-----|---------------|--------|--------|
+| [README_START_HERE](../README_START_HERE.md) | repo entry point + non-negotiables | everyone (read first) | living |
+| [ENGINEERING_STANDARDS](../ENGINEERING_STANDARDS.md) | **how much rigor a change earns** — the four gates, risk tiers T0–T3, semantic escalation, provider fact ≠ normalized fact ≠ governance truth, pain-before-platform. Governs `idcaddie-v3` **and** `idcaddie-connector-runner`. Decides *which* of 02/07/08 a change must satisfy; restates none of them | everyone, agents | living (v0.1) |
+
 ## Canonical docs (this set)
 | Doc | Canonical for | Reader | Status |
 |-----|---------------|--------|--------|
