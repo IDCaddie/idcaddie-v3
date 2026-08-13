@@ -1,10 +1,10 @@
--- contract_entitlement_test.sql — runnable verification for 0083_contract_entitlements.sql
+-- contract_entitlement_test.sql — runnable verification for 0084_contract_entitlements.sql
 --
 -- ENVIRONMENT CONTRACT (provided by scripts/test-rls.sh, not by this file): Postgres with every migration applied, a
 -- Supabase-style auth.uid() reading current_setting('request.jwt.claims'), roles `authenticated` / `service_role`, and
 -- table privileges granted (RLS does the filtering).
 --
--- WHAT THIS PROVES. 0083 makes two authorization claims that are worth nothing unasserted:
+-- WHAT THIS PROVES. 0084 makes two authorization claims that are worth nothing unasserted:
 --   (a) READ is exactly the visibility of the parent contract — including for org-only users who are not tenant members;
 --   (b) WRITE is exactly the two authorities that may write the contract itself (tenant editor+, or manager of the
 --       PROCUREMENT org) — and the PAYING org, which can read, still cannot write.

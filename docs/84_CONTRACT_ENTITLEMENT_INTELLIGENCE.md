@@ -1,10 +1,18 @@
 # 84 — Contract & Entitlement Intelligence
 
-> **Cursor (2026-08-12):** `idcaddie-v3` main @ `784a632` (PRs through **#405**). Branch
-> `phase10/contract-entitlement-intelligence`. Migration **0083** is the first artifact; staging apply pending.
+> **Cursor (2026-08-12):** branch `phase10/contract-entitlement-intelligence`, **stacked on
+> `phase16-findings-persistence` (PR #407)**. Migration **0084** is the first artifact; **not applied to any hosted
+> database**.
+>
+> **Migration numbering.** This work was authored as 0082, renumbered to 0083 when #406 (person layer) merged 0082, and
+> renumbered again to **0084** because open PR #407 owns **0083** (`governance_finding_persistence`). 0084 was verified
+> free across every remote ref. `check-migration-safety.sh` enforces a gapless sequence, so this branch is stacked on
+> #407 rather than on `main` — that is the only arrangement in which 0082 → 0083 → 0084 is contiguous and the gate
+> passes. When #407 merges, this rebases onto `main` unchanged. **No migration-number collision remains.**
+>
 > Parallel workstreams NOT touched by this phase: Slack activation/deployment, the Google Workspace connector,
-> connector authentication, OAuth, the connector runner, AWS worker infrastructure, the Okta implementation, and the
-> shared connector framework.
+> connector authentication, OAuth, the connector runner, AWS worker infrastructure, the Okta implementation, the
+> shared connector framework, and the Phase-16 governance/person work this branch merely sits on top of.
 
 ## 1. What this phase is
 
@@ -73,7 +81,7 @@ facts, with different sources, and the model keeps them separate — permanently
 
 | Concept | Means | Source today |
 |---|---|---|
-| **purchased** | what the contract says was bought | `contract_entitlements` (**new**, `0083`) |
+| **purchased** | what the contract says was bought | `contract_entitlements` (**new**, `0084`) |
 | **assigned** | who the identity provider grants access to | `directory_application_user_assignments` (`0059`) |
 | **provisioned** | who exists in the vendor's own system | `app_accounts` where `sync_status = 'current'` (`0076`) |
 | **billable** | who the vendor actually charges for | **no source exists** |
@@ -86,7 +94,7 @@ Two consequences that are not negotiable:
 2. Because billable and active have no source, the reconciliation reports them as **unavailable**, never as `0`. This is
    the Phase-7B rule (`capabilities.ts`) applied to money: a zero is a claim, and an unmeasured quantity is not zero.
 
-## 4. Migration 0083 — `contract_entitlements`
+## 4. Migration 0084 — `contract_entitlements`
 
 One row = **one purchased line**: this contract bought this much of this product, at this unit price, on this cadence,
 for this term.
@@ -114,7 +122,7 @@ audit metadata, viewer read-not-write, procurement-manager read **and** write, p
 unaffiliated user sees nothing, cross-tenant isolation, no DELETE for anyone, the seven CHECK refusals, cross-tenant FK
 refusal on both contract and vendor, and NULL-not-zero with conservative provenance defaults.
 
-## 5. What 0083 deliberately does not add
+## 5. What 0084 deliberately does not add
 
 `discount_percent`, `tier`/pricing-structure, `termination_provisions`, `notice_period_days`, and a
 `minimum_commitment_amount` are all real contract facts and all absent. None of them is required by any of the findings
@@ -153,7 +161,7 @@ connectors ──> app_accounts (provisioned, provider status, freshness)       
 
 ## 8. Next
 
-**P0** — the staging apply of 0083, and a portfolio surface for the two rules the contract page filters out
+**P0** — the staging apply of 0084, and a portfolio surface for the two rules the contract page filters out
 (`possible_duplicate_entitlement`, `discovered_source_without_entitlement`) — both are cross-contract by nature and
 have nowhere to render yet.
 
@@ -167,9 +175,13 @@ usage feed is built, and no finding may imply them.
 
 ## 9. One thing found on the way, for another workstream
 
-`src/lib/database.types.ts` is **stale**: it predates migrations 0076–0081 and is missing `app_accounts`,
-`connector_run_resource_discovery`, `oauth_completion_jobs`, and every `product_app_account_*` /
-`product_oauth_completion_job_status` / `runner_promote_saas_*` signature.
+> **Global `database.types.ts` regeneration remains a separate repository-health item because the current generated file
+> predates several merged migrations and a full regeneration currently interacts with OAuth architecture assertions.**
+
+`src/lib/database.types.ts` is **stale**: it predates migrations 0076–0082 and is missing `app_accounts`,
+`connector_run_resource_discovery`, `oauth_completion_jobs`, `person_account_links` (0082, #406), and every
+`product_app_account_*` / `product_oauth_completion_job_status` / `runner_promote_saas_*` signature. Neither #406 nor
+#407 regenerated it either, so the staleness is repository-wide rather than anything this branch introduced.
 
 Regenerating it with `scripts/gen-types-local.sh` — the documented, correct way — **breaks two assertions in**
 `src/lib/server/connector-vault/oauth-handoff-architecture.test.ts`, because the regenerated file names the nine

@@ -10,13 +10,13 @@ import {
 } from "@/lib/data/entitlement-write";
 
 // The purchased-line create/edit form. A Client Component for controlled inputs, holding NO authorization logic: it posts to
-// the server actions and Postgres RLS (0083) decides whether the save lands. tenant_id is never sent.
+// the server actions and Postgres RLS (0084) decides whether the save lands. tenant_id is never sent.
 //
 // EVERY QUANTITY FIELD IS OPTIONAL AND STARTS EMPTY, and that is a product decision, not laziness. A blank seat box must
 // record NULL — "we have not been told" — because the reconciliation treats that differently from a purchase of zero. A
 // `defaultValue={0}` anywhere here would silently populate the database with claims nobody made.
 //
-// ponytail: no vendor / product / application / evidence-document pickers. Those columns exist on 0083 and are writable, but
+// ponytail: no vendor / product / application / evidence-document pickers. Those columns exist on 0084 and are writable, but
 // no picker UI exists for canonical rows and building three of them is a phase of its own. Add them when the duplicate rule
 // (which needs app_product_id) is wanted in practice.
 

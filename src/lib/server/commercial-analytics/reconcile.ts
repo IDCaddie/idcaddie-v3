@@ -8,7 +8,7 @@
 // the five quantities are modelled separately in the first place.
 //
 // WHERE EACH NUMBER COMES FROM TODAY:
-//   purchased    contract_entitlements.purchased_quantity (0083). NULL = not recorded.
+//   purchased    contract_entitlements.purchased_quantity (0084). NULL = not recorded.
 //   provisioned  product_app_account_counts -> accounts.current (0078/0076), for the DECLARED connection only.
 //   assigned     directory_application_user_assignments (0059). Reachable only through an accepted application_match (0075),
 //                of which there are none, so this reads `unavailable` from the capability model rather than being faked.
@@ -148,7 +148,7 @@ export function estimateOpportunity(entitlement: EntitlementInput, gap: Gap): Op
     return { state: "none", reason: "The purchased quantity does not exceed what the connector found." };
   }
   if (entitlement.unitAmount === null || entitlement.currency === null || entitlement.billingFrequency === null) {
-    // 0083 makes a priced line carry all three or none, so this is the unpriced case, not a half-recorded one.
+    // 0084 makes a priced line carry all three or none, so this is the unpriced case, not a half-recorded one.
     return { state: "not_estimable", reason: "No unit price has been recorded for this line, so the surplus cannot be valued." };
   }
   const periods = PERIODS_PER_YEAR[entitlement.billingFrequency];

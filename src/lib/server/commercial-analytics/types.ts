@@ -1,5 +1,5 @@
 // Phase 10 — the typed contract for the COMMERCIAL-analytics engine. Provider-neutral, COMPUTE-ONLY. It consumes purchased lines
-// (contract_entitlements, 0083), the discovered evidence a caller has already loaded, and the Phase-7B capability resolution, and
+// (contract_entitlements, 0084), the discovered evidence a caller has already loaded, and the Phase-7B capability resolution, and
 // produces a per-line reconciliation plus immutable, deterministic commercial FINDINGS. It writes NOTHING (no migration, table,
 // RPC, route, network, DB read, Date.now, env, flag) — `detectedAt` is injected by the caller so the engine stays deterministic.
 //
@@ -15,7 +15,7 @@
 //   * An estimate is never presented as realized saving.
 //
 // THE FIVE QUANTITIES ARE NEVER COLLAPSED. purchased / assigned / provisioned / billable / active are different facts from
-// different sources (0083's header records them in full). Two of them have NO source today, and this engine reports those as
+// different sources (0084's header records them in full). Two of them have NO source today, and this engine reports those as
 // unavailable — with the capability model's own explanation — rather than as zero.
 
 import type { CapabilityStatus } from "@/lib/canonical/capabilities";

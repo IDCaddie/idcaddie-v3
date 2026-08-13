@@ -13,7 +13,7 @@ import { toCommercialFindingView, type CommercialFindingView } from "./commercia
 // renders — no page derives a commercial number itself.
 //
 // THE DEGRADATION RULE, which is the whole reason this file is careful. `contract_entitlements` is readable by anyone who can read
-// the contract (0083), but the discovered evidence behind `product_app_account_counts` is owner/admin only (0078). A
+// the contract (0084), but the discovered evidence behind `product_app_account_counts` is owner/admin only (0078). A
 // procurement-org manager therefore sees the purchased lines and CANNOT see the accounts. That must render as "we could not read
 // it", never as zero provisioned and certainly never as a savings opportunity computed against a zero — which is exactly what a
 // naive `?? 0` here would produce. Every failure path below resolves to an `unavailable` measure carrying a sentence.

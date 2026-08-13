@@ -5,7 +5,7 @@ import type { TablesInsert } from "@/lib/database.types";
 // client form can import the vocabularies and the parser WITHOUT dragging the server Supabase client into the browser bundle.
 // (The type-only import above is erased at build.)
 //
-// THESE HELPERS DO NOT AUTHORIZE. 0083's RLS is the only authorization boundary. They shape and validate caller input, and
+// THESE HELPERS DO NOT AUTHORIZE. 0084's RLS is the only authorization boundary. They shape and validate caller input, and
 // there is deliberately no tenant_id field — the row's tenant is resolved server-side from the actor's context.
 
 export type EntitlementWriteInput = {
@@ -47,7 +47,7 @@ export type ParsedEntitlement =
   | { ok: true; columns: Omit<TablesInsert<"contract_entitlements">, "tenant_id"> }
   | { ok: false; issues: string[] };
 
-// Parse + normalize. Empty string means "unset" and becomes NULL — never 0, which is the whole point of 0083's nullable
+// Parse + normalize. Empty string means "unset" and becomes NULL — never 0, which is the whole point of 0084's nullable
 // quantities: a blank seat box must not record a purchase of none.
 export function parseEntitlementWriteInput(input: EntitlementWriteInput): ParsedEntitlement {
   const issues: string[] = [];
@@ -87,7 +87,7 @@ export function parseEntitlementWriteInput(input: EntitlementWriteInput): Parsed
   if (billingFrequency !== null && !BILLING_FREQUENCIES.includes(billingFrequency as (typeof BILLING_FREQUENCIES)[number])) {
     issues.push("Billing frequency is not one of the supported values.");
   }
-  // The same rule 0083 enforces, surfaced as a field message rather than a constraint violation: a price that cannot be
+  // The same rule 0084 enforces, surfaced as a field message rather than a constraint violation: a price that cannot be
   // annualized is not a usable price.
   if (unitAmount !== null && (currency === null || billingFrequency === null)) {
     issues.push("A unit price needs both a currency and a billing frequency, otherwise it cannot be put on an annual footing.");

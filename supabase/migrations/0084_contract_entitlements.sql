@@ -1,4 +1,4 @@
--- 0083_contract_entitlements.sql
+-- 0084_contract_entitlements.sql
 --
 -- Phase 10 — the PURCHASED side of the commercial graph.
 --

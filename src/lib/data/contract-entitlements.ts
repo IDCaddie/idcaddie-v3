@@ -6,13 +6,13 @@ import { resolveWriteContextTenantId } from "./contract-write";
 import type { TablesInsert, TablesUpdate } from "@/lib/database.types";
 import type { EntitlementInput } from "@/lib/server/commercial-analytics/reconcile";
 
-// Server-only, RLS-scoped data access for `contract_entitlements` (0083). Same shape and same boundary as
+// Server-only, RLS-scoped data access for `contract_entitlements` (0084). Same shape and same boundary as
 // src/lib/data/contracts.ts: it imports the USER-scoped server client, never a service-role/admin client, takes NO
 // tenant_id from the caller as authorization, and relies entirely on Postgres RLS to decide what is visible and
-// writable. 0083's policies do that by deriving from the parent contract, so this module adds no authorization of its
+// writable. 0084's policies do that by deriving from the parent contract, so this module adds no authorization of its
 // own beyond session/context resolution and input validation.
 //
-// An accepted write is audited by the 0083 AFTER trigger (contract_entitlement.created / .updated, actor = the caller).
+// An accepted write is audited by the 0084 AFTER trigger (contract_entitlement.created / .updated, actor = the caller).
 // This code does NOT and must not write audit_logs itself.
 
 // The columns every read selects. ONE unbroken literal, not a concatenation: supabase-js infers the row type by parsing this
@@ -96,7 +96,7 @@ export async function listEntitlementsForCurrentUser(): Promise<DataResult<Contr
 }
 
 // ── WRITE ────────────────────────────────────────────────────────────────────────────────────────────────────────────
-// The parser below is the app-side input contract. It does NOT authorize — 0083's RLS does — but it does refuse the
+// The parser below is the app-side input contract. It does NOT authorize — 0084's RLS does — but it does refuse the
 // shapes the database would reject anyway, so a user gets a field-level message instead of a constraint error, and it
 // refuses a few the database cannot see (a price with no cadence reaching the DB as three separate nulls, say).
 
@@ -153,7 +153,7 @@ export async function updateEntitlementForCurrentUser(
   const parsed = parseEntitlementWriteInput(input);
   if (!parsed.ok) return { ok: false, error: "invalid_input", issues: parsed.issues };
 
-  // `updated_at` is maintained here rather than by a trigger, matching the `contracts` convention (0083's closing note).
+  // `updated_at` is maintained here rather than by a trigger, matching the `contracts` convention (0084's closing note).
   const payload: TablesUpdate<"contract_entitlements"> = { ...parsed.columns, updated_at: new Date().toISOString() };
   const supabase = await createClient();
   const { data, error } = await supabase

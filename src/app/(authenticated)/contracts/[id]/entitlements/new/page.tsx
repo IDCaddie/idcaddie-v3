@@ -5,7 +5,7 @@ import { EntitlementForm, emptyEntitlementForm, type ConnectorOption } from "../
 export const metadata = { title: "Add purchased line · ID Caddie" };
 
 // Create route for a purchased line. Server-rendered shell + the connector list; the form (a Client Component) posts to the
-// server action. No authorization here — RLS (0083) decides whether the save lands, and the affordance may be shown to a
+// server action. No authorization here — RLS (0084) decides whether the save lands, and the affordance may be shown to a
 // reader for usability exactly as the contract form is.
 export default async function NewEntitlementPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;

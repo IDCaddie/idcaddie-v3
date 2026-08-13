@@ -121,7 +121,7 @@ export const METRICS: readonly MetricLineage[] = [
     formula: "contract_entitlements.purchased_quantity for one line, as recorded; NULL is 'not recorded' and is never counted as 0",
     refresh: "contract_write", connectorScoped: false,
     unavailableState: "No purchased quantity has been recorded for this line. This is not a quantity of zero.",
-    staleBehaviour: "n/a — recorded from paper, not discovered.", security: "RLS; readable by whoever may read the parent contract (0083).",
+    staleBehaviour: "n/a — recorded from paper, not discovered.", security: "RLS; readable by whoever may read the parent contract (0084).",
   },
   {
     id: "provisioned_accounts", name: "Provisioned", capability: "app_accounts",

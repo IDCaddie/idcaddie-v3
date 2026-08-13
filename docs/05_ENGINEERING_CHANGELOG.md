@@ -240,7 +240,7 @@ contracts that would clear them.
 `access-rpc-types`, whose server-only sentinel throws under jsdom. 6 new UI tests; full suite 2626 passing; build,
 callback-bundle guard, auth-safety, import-boundary and migration-safety all green.
 
-### feat(commercial) — Phase 10: the commercial read layer and findings engine over 0083 · 2026-08-12
+### feat(commercial) — Phase 10: the commercial read layer and findings engine over 0084 · 2026-08-12
 
 **The reconciliation refuses to turn "we cannot know" into a zero.** `reconcileEntitlement` returns a `Measure` per
 quantity whose `value` exists in exactly ONE variant — `measured` — so a caller cannot render a number for a concept
@@ -279,7 +279,15 @@ two assertions in `oauth-handoff-architecture.test.ts` by naming the `oauth_comp
 merely describes the schema. That is a guard-scope question for the OAuth workstream, not this phase's to settle — so
 only the generated `contract_entitlements` block was spliced in, leaving the rest byte-identical. See docs/84 §9.
 
-### feat(commercial) — Phase 10: migration 0083, `contract_entitlements` — the purchased side of the graph · 2026-08-12
+### feat(commercial) — Phase 10: migration 0084, `contract_entitlements` — the purchased side of the graph · 2026-08-12
+
+**Numbering, because it moved twice.** Authored as 0082; renumbered to 0083 when #406 merged 0082 (the person layer);
+renumbered again to **0084** because open PR #407 owns **0083** (`governance_finding_persistence`). 0084 was verified
+free across every remote ref before being claimed. `check-migration-safety.sh` enforces a **gapless** sequence, so this
+branch is **stacked on `phase16-findings-persistence` (#407)** rather than on `main` — that is the only arrangement in
+which 0082 → 0083 → 0084 is contiguous and the gate passes; on `main` it fails with `NON-SEQUENTIAL: expected 0083`.
+When #407 merges this rebases onto `main` unchanged. The renumber touched filenames, comments, docs and test references
+only — **no change to the migration's substance**.
 
 **v3 could state a commitment and an observation but never whether they agreed.** `contracts` holds one `total_cost` —
 a commitment, not a quantity. There was no seat count, no unit price, no SKU, and no foreign key from a contract to the
