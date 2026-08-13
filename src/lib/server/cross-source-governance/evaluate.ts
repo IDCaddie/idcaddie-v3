@@ -345,6 +345,39 @@ function matcherWithheldReason(m: CrossSourceGraph["matcherState"]): string {
 }
 
 /**
+ * The connections whose evidence is complete enough to CLOSE a finding.
+ *
+ * This is deliberately NOT the union of the three per-capability sets, and the difference is a real defect rather than
+ * a refinement. 0083 closes a finding when `evidence_connection_ids <@ p_complete_connection_ids` — a FLAT subset test
+ * that cannot know which capability a given finding rested on. So a connection that is `available` for `identity` but
+ * `incomplete` for `app_accounts` would, under a union, license the closure of an app-account finding that this very
+ * run withheld for lack of app-account completeness. The engine would say "no connection has proven its SaaS account
+ * list is complete" and, in the same payload, hand 0083 the proof it needs to close exactly that finding.
+ *
+ * The rule here: a connection is closure-eligible only when EVERY capability it has DECLARED (among the three this
+ * engine understands) is `available`. A capability a connector never attempted has no row at all — the writer
+ * (`runner_record_capability_state`) only records what was tried — so a connector that legitimately has no directory
+ * identity is unaffected, while one that tried and came back degraded is excluded.
+ *
+ * The per-capability sets above are UNCHANGED: they decide whether a rule may OPEN, and that decision is already
+ * correctly scoped. Only the CLOSURE licence is narrowed, because only the closure test is flat.
+ *
+ * The precise long-term fix is per-capability closure scope in 0083's contract, which needs a migration; this is the
+ * correct behaviour available without one, and it errs toward withholding rather than closing.
+ */
+function closureEligibleConnections(graph: CrossSourceGraph, ctx: Ctx): string[] {
+  const degraded = new Set(
+    graph.capabilities
+      .filter(c => (c.capability === "identity" || c.capability === "app_accounts" || c.capability === "directory_applications")
+        && c.state !== "available")
+      .map(c => c.connectionId),
+  );
+  return sorted(
+    [...ctx.identityComplete, ...ctx.accountsComplete, ...ctx.appsComplete].filter(id => !degraded.has(id)),
+  );
+}
+
+/**
  * Evaluate every supported rule over one tenant's canonical rows.
  *
  * Findings are sorted (severity desc, then ruleId, subjectId, key) so repeated evaluation of the same input is
@@ -418,6 +451,6 @@ export function evaluateCrossSourceGovernance(graph: CrossSourceGraph): CrossSou
     withheldRules,
     // Handed to 0083 as `p_complete_connection_ids`: a finding may only be resolved by a run that could actually see
     // every source it rests on.
-    completeConnectionIds: sorted([...ctx.identityComplete, ...ctx.accountsComplete, ...ctx.appsComplete]),
+    completeConnectionIds: closureEligibleConnections(graph, ctx),
   };
 }

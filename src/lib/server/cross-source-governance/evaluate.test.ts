@@ -411,6 +411,46 @@ describe("tenant scope, determinism and empty estates", () => {
     expect(r.completeConnectionIds).toEqual([OKTA, SLACK].sort());
   });
 
+  // ── The MIXED case, which a per-capability union gets wrong ──────────────────────────────────────────────────────
+  // 0083 closes on a FLAT subset test (`evidence_connection_ids <@ p_complete_connection_ids`) and cannot know which
+  // capability a finding rested on. So a connection that is available for one capability and degraded for another must
+  // not appear at all — otherwise this run withholds a rule for lack of app-account completeness and, in the same
+  // payload, hands 0083 the proof needed to close exactly that rule's finding.
+  it("a connection degraded in ANY declared capability cannot license closure, even if another is available", () => {
+    const r = evaluateCrossSourceGovernance(graph({
+      capabilities: caps(
+        [OKTA, "okta", "identity", "available"],
+        [SLACK, "slack", "identity", "available"],
+        [SLACK, "slack", "app_accounts", "incomplete"],
+      ),
+    }));
+    // SLACK's account list is unproven this run, so SLACK may not close anything — including an identity finding.
+    expect(r.completeConnectionIds).toEqual([OKTA]);
+    // and the rule that depends on it is withheld, so the two answers agree
+    expect(r.withheldRules.map(w => w.ruleId)).toContain("duplicate_active_accounts_for_one_person");
+  });
+
+  it("every non-available state is disqualifying, not just incomplete", () => {
+    for (const bad of ["incomplete", "failed", "plan_dependent", "permission_dependent", "unavailable"] as const) {
+      const r = evaluateCrossSourceGovernance(graph({
+        capabilities: caps(
+          [SLACK, "slack", "app_accounts", "available"],
+          [SLACK, "slack", "identity", bad],
+        ),
+      }));
+      expect(r.completeConnectionIds, `${bad} must disqualify`).toEqual([]);
+    }
+  });
+
+  it("a capability a connector never attempted does not disqualify it", () => {
+    // The writer only records what was TRIED, so an unsupported capability has no row. A Slack connection with no
+    // identity row must still be able to close its own app-account findings — otherwise nothing ever closes.
+    const r = evaluateCrossSourceGovernance(graph({
+      capabilities: caps([SLACK, "slack", "app_accounts", "available"]),
+    }));
+    expect(r.completeConnectionIds).toEqual([SLACK]);
+  });
+
   it("every emitted finding declares at least one evidence connection (0083 refuses otherwise)", () => {
     const g = graph({
       identityAccounts: [identity({ id: "i1", isActive: false })],
