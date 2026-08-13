@@ -6,7 +6,9 @@ import { formatMoney } from "@/lib/data/dashboard-overview";
 import { contractAttentionFlags } from "@/lib/data/contract-attention";
 import { listOrganizationsForCurrentUser } from "@/lib/data/organizations";
 import { buildOrgNameLookup, orgDisplayName } from "@/lib/data/organization-display";
+import { loadContractCommercialView } from "@/lib/data/commercial-loader";
 import { ContractFiles } from "./contract-files";
+import { EntitlementsPanel } from "./entitlements-panel";
 
 export const metadata = { title: "Contract · ID Caddie" };
 
@@ -37,6 +39,18 @@ export default async function ContractDetailPage({
   // RLS-visible organizations (id+name only) → id-to-name lookup for safe org display (never a raw UUID).
   const orgs = result.ok ? await listOrganizationsForCurrentUser() : null;
   const orgLookup = buildOrgNameLookup(orgs && orgs.ok ? orgs.data : []);
+
+  // Phase 10 — the commercial view. It is passed the contract facts this page has ALREADY fetched rather than re-reading
+  // them, the same discipline Phase 7A's Home follows: a projection of a result we were paying for anyway.
+  const commercial = result.ok
+    ? await loadContractCommercialView({
+        id: result.data.id,
+        renewalDate: result.data.renewalDate,
+        endDate: result.data.endDate,
+        noticeDeadline: result.data.noticeDeadline,
+        autoRenew: result.data.autoRenew,
+      })
+    : null;
 
   // hasLinkedApp: true = ≥1 linked app, false = known-none, null = unknown (read failed) → not flagged.
   const hasLinkedApp = linkedApps && linkedApps.ok ? linkedApps.data.length > 0 : null;
@@ -180,6 +194,8 @@ export default async function ContractDetailPage({
               </ul>
             )}
           </section>
+
+          <EntitlementsPanel view={commercial && commercial.ok ? commercial.data : null} />
 
           <ContractFiles
             contractId={result.data.id}

@@ -184,6 +184,33 @@ here instead of silently doubling every proposal.
 confirmed load-bearing by mutation rather than assumed: deleting the bot filter from the person-creation pass fails P2
 with `got 4`, and making the person join case-sensitive fails P12 with `got 0`. `scripts/test-rls.sh` re-revokes the new table in lockstep with the migration so the suite mirrors the real
 deny-all surface. **Not applied to hosted Supabase; nothing deployed. No risk opened or closed.**
+### feat(commercial) — Phase 10: the purchased-vs-discovered panel on contract detail · 2026-08-12
+
+**The panel performs no arithmetic.** Both engines hand it finished values, so there is no second place a commercial
+figure can be derived — the rule `lineage.ts` exists to enforce, and the three new metrics (`purchased_quantity`,
+`provisioned_accounts`, `annual_reduction_opportunity`) are registered there with their formula, unavailable state and
+security boundary.
+
+**`MeasureCell` is the component that keeps the phase honest.** A `measured` quantity renders a number; every other
+state renders its sentence — not a zero, and not a dash a reader would take for one. The UI test asserts the Billable,
+Active and Assigned cells contain **no digit at all**, which is the regression that would quietly undo the whole model.
+
+**The degradation path is the one that needed care.** `contract_entitlements` is readable by anyone who can read the
+contract (0082), but the account evidence behind `product_app_account_counts` is owner/admin only (0078). A
+procurement-org manager therefore sees purchased lines and not accounts — so the loader resolves that to `unavailable`
+with an explanation, never to zero provisioned, which a `?? 0` would have turned into a savings opportunity computed
+against nothing. A failed connector read becomes `readFailed` rather than "no connectors", preserving the difference
+between "not connected" and "we could not look".
+
+The loader takes the contract facts the page **already fetched** rather than re-reading them (Phase 7A's discipline),
+and issues one counts call per DECLARED connection — never one per connector. The two portfolio rules (duplicates
+across contracts, connectors with no contract) are filtered out here: a single contract page cannot see the other
+contracts that would clear them.
+
+`contract-detail.ui.test.tsx` gained a mock for the new loader — without it the import chain reaches
+`access-rpc-types`, whose server-only sentinel throws under jsdom. 6 new UI tests; full suite 2626 passing; build,
+callback-bundle guard, auth-safety, import-boundary and migration-safety all green.
+
 ### feat(commercial) — Phase 10: the commercial read layer and findings engine over 0083 · 2026-08-12
 
 **The reconciliation refuses to turn "we cannot know" into a zero.** `reconcileEntitlement` returns a `Measure` per

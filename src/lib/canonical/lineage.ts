@@ -113,6 +113,35 @@ export const METRICS: readonly MetricLineage[] = [
     unavailableState: "Requires contracts with a recorded cost.",
     staleBehaviour: "n/a", security: "RLS; tenant-scoped.",
   },
+  // ── Phase 10 commercial metrics. The purchased side and its reconciliation. Separate owner from `tracked_spend`, which is a
+  // ── contract-level commitment total and answers a different question from a per-line purchased quantity. ─────────────────
+  {
+    id: "purchased_quantity", name: "Purchased", capability: "contracts",
+    rpc: null, tables: ["contract_entitlements"],
+    formula: "contract_entitlements.purchased_quantity for one line, as recorded; NULL is 'not recorded' and is never counted as 0",
+    refresh: "contract_write", connectorScoped: false,
+    unavailableState: "No purchased quantity has been recorded for this line. This is not a quantity of zero.",
+    staleBehaviour: "n/a — recorded from paper, not discovered.", security: "RLS; readable by whoever may read the parent contract (0083).",
+  },
+  {
+    id: "provisioned_accounts", name: "Provisioned", capability: "app_accounts",
+    rpc: "product_app_account_counts", tables: ["app_accounts"],
+    formula: "accounts.current for the connector the line DECLARES as its measurement source; never inferred from a provider name",
+    refresh: "directory_discovery", connectorScoped: false,
+    unavailableState: "Requires a declared measurement source with readable account evidence; the explanation is rendered instead.",
+    staleBehaviour: "Stale rows are excluded from the count and raise a stale-evidence flag on the line.",
+    security: "RLS + has_tenant_role(owner|admin) on the RPC; a reader without it sees 'unavailable', never 0.",
+  },
+  {
+    id: "annual_reduction_opportunity", name: "Estimated annual reduction", capability: "spend",
+    rpc: null, tables: ["contract_entitlements", "app_accounts"],
+    formula:
+      "(purchased − max(contracted minimum, provisioned)) × unit_amount × periods per year, per currency; requires a unit price with a currency and an annualizable cadence, and is never summed across currencies",
+    refresh: "contract_write", connectorScoped: false,
+    unavailableState: "No estimate is offered unless a purchase, a discovered count and an annualizable price all exist.",
+    staleBehaviour: "Inherits the line's stale-evidence flag; the figure is shown with it, never silently.",
+    security: "RLS; derived only from figures the caller may already read.",
+  },
 ];
 
 export const metric = (id: string): MetricLineage | undefined => METRICS.find((m) => m.id === id);

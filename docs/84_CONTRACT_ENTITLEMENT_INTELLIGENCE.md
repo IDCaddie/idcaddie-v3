@@ -153,8 +153,12 @@ connectors ──> app_accounts (provisioned, provider status, freshness)       
 
 ## 8. Next
 
-**P0** — the read layer and the deterministic findings engine over 0083 (this branch, following PRs); staging apply of
-0083; an entitlement editor on the contract detail page.
+**P0** — an **entitlement editor**. The DAL write path (`createEntitlementForCurrentUser` /
+`updateEntitlementForCurrentUser`) and its parser exist and are tested, but no form calls them, so today a purchased
+line can only be created by a direct database write. Until that ships the feature is verifiable but not usable. Also
+P0: the staging apply of 0083, and a portfolio surface for the two rules the contract page filters out
+(`possible_duplicate_entitlement`, `discovered_source_without_entitlement`) — both are cross-contract by nature and
+have nowhere to render yet.
 
 **P1** — `discount_percent` / `minimum_commitment_amount` / `notice_period_days` / termination text on contracts; a
 vendor-level dedupe finding backed by `vendors.normalized_name`; the `application_matches` matcher that would let the
