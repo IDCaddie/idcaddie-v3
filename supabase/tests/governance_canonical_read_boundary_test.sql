@@ -310,6 +310,70 @@ begin
   end;
 end $$;
 
+-- ════ B12: PAGINATION — no skips, no duplicates, and a hostile limit cannot widen the page ════════════════════════
+-- The cursor is the only thing standing between a bounded read and an unbounded enumeration, so the malformed cases
+-- matter as much as the happy one.
+do $$
+declare page1 uuid[]; page2 uuid[]; cur uuid; n int; total int;
+begin
+  select count(*) into total from public.product_person_account_links('a7000000-0000-4000-8000-00000000000a');
+  assert total = 2, 'B12 precondition: two links, got ' || total;
+
+  -- Walking one row at a time must visit every row EXACTLY once — no skip, no repeat.
+  select array_agg(id order by id) into page1
+    from public.product_person_account_links('a7000000-0000-4000-8000-00000000000a', null, 1);
+  cur := page1[1];
+  select array_agg(id order by id) into page2
+    from public.product_person_account_links('a7000000-0000-4000-8000-00000000000a', cur, 1);
+  assert array_length(page1, 1) = 1 and array_length(page2, 1) = 1, 'B12 one row per page';
+  assert page1[1] <> page2[1], 'B12 the second page is not the first again';
+  assert (select count(distinct x) from unnest(page1 || page2) x) = 2, 'B12 both rows seen exactly once';
+  -- And the walk terminates rather than cycling.
+  select count(*) into n
+    from public.product_person_account_links('a7000000-0000-4000-8000-00000000000a', page2[1], 1);
+  assert n = 0, 'B12 the cursor terminates, got ' || n;
+
+  -- A hostile or malformed limit can never widen the page beyond the cap, nor produce a negative-length one.
+  select count(*) into n from public.product_person_account_links('a7000000-0000-4000-8000-00000000000a', null, -5);
+  assert n = 1, 'B12 a negative limit clamps to 1, got ' || n;
+  select count(*) into n from public.product_person_account_links('a7000000-0000-4000-8000-00000000000a', null, 0);
+  assert n = 1, 'B12 a zero limit clamps to 1, got ' || n;
+  select count(*) into n from public.product_person_account_links('a7000000-0000-4000-8000-00000000000a', null, null);
+  assert n = 2, 'B12 a null limit uses the default, got ' || n;
+  select count(*) into n
+    from public.product_person_account_links('a7000000-0000-4000-8000-00000000000a', null, 2147483647);
+  assert n = 2, 'B12 an oversized limit returns only what exists (capped at 500), got ' || n;
+
+  -- The TENANT filter is applied before the page is cut: a cursor from tenant A cannot walk into tenant B, and a
+  -- one-row page for A is A's row rather than whichever row sorts first globally.
+  select count(*) into n from public.product_application_matches('a7000000-0000-4000-8000-00000000000a', null, 500);
+  assert n <= 1, 'B12 tenant A never sees tenant B''s match through a wide page, got ' || n;
+end $$;
+
+-- ════ B13: COMPLETE WITH ONE OR MORE MATCHES is its own state ═════════════════════════════════════════════════════
+-- B7 proved complete-with-zero. This is the other half: a completed run that DID produce output must read as completed
+-- too, so the four states are genuinely four and not three plus a special case.
+do $$
+declare has_run boolean; st text; has_completed boolean; matches int;
+begin
+  insert into public.application_matches
+    (tenant_id, directory_application_id, app_id, method, confidence, status, decided_at)
+  values ('a7000000-0000-4000-8000-00000000000a','a7000000-0000-4000-8000-0000000000d1',
+          'a7000000-0000-4000-8000-0000000000b1','manual','high','accepted', now());
+
+  perform public.product_start_application_matcher_run('a7000000-0000-4000-8000-00000000000a');
+  perform public.product_complete_application_matcher_run('a7000000-0000-4000-8000-00000000000a');
+
+  select r.has_ever_run, r.status, r.has_completed into has_run, st, has_completed
+    from public.product_application_matcher_state('a7000000-0000-4000-8000-00000000000a') r;
+  select count(*) into matches from public.product_application_matches('a7000000-0000-4000-8000-00000000000a');
+
+  assert has_run and st = 'completed' and has_completed, 'B13 a productive run is still a completed run';
+  assert matches = 1, 'B13 and its output is readable, got ' || matches;
+  -- The four states are distinguished by (row exists, status, last_completed_at) — never by counting matches.
+  assert (has_completed and matches > 0) is true, 'B13 complete-with-output is representable';
+end $$;
+
 -- Restore the real gate VERBATIM from 0001 so a later test file in the same run cannot inherit the stub.
 create or replace function public.has_tenant_role(target_tenant_id uuid, allowed_roles text[])
 returns boolean language sql stable security definer set search_path = public

@@ -94,6 +94,18 @@ describe("0085 — every function is a pinned, tenant-gated definer", () => {
     expect(body).toMatch(/values\s*\(\s*p_tenant_id|where tenant_id = p_tenant_id/);
   });
 
+  // The DB suite cannot observe the page cap: proving a limit of 500 clamps a request for 2^31 would need >500 fixture
+  // rows. Asserting the clamp where it is written is honest and cheap, and it is the difference between a bounded read
+  // and an unbounded enumeration of a deny-all table.
+  it.each(["product_person_account_links", "product_application_matches"])("%s clamps its page size", fn => {
+    const body = bodyOf(fn);
+    expect(body).toMatch(/least\(\s*coalesce\(\s*p_limit\s*,\s*500\s*\)\s*,\s*500\s*\)/);
+    // greatest(1, ...) is what stops a negative or zero limit becoming an error or an unbounded read.
+    expect(body).toMatch(/greatest\(\s*1\s*,/);
+    // A cursor without a stable ORDER BY silently skips and repeats rows across pages.
+    expect(body).toMatch(/order by [a-z]\.id/);
+  });
+
   it("uses no dynamic SQL in any function body", () => {
     for (const fn of FUNCTIONS) expect(bodyOf(fn)).not.toMatch(/\bexecute\s+format\(/i);
   });
