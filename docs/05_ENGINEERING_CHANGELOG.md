@@ -43,6 +43,60 @@ and the loader pointed back at the OFFSET RPC — all RED. The non-advancing-cur
 monotonicity and drop checks; it survives mutation and is documented as such rather than claimed as tested.
 **Not applied to any hosted database; nothing deployed.**
 
+### feat(governance) — Phase 18B0: migration 0090, application matches become product-authoritative · 2026-08-13
+
+**A corrective successor to 0088, not a disagreement with it.** 0088 built the propose/decide boundary `application_matches` had
+been waiting for since 0075, and aimed both commands at `app_id` for a reason that was true when it was written: nothing anywhere
+wrote `apps.canonical_app_id`, so pointing the relationship at `app_products` would have aimed it at an unbacked table. **#420
+(merged one commit earlier) removed that premise** — `src/lib/data/app-canonicalization.ts` now inserts `app_products` and writes
+`canonical_app_id` through a governed decision. 0088's header is stale from #420 onward and is deliberately **not edited**;
+migration history is a record of what was believed at the time, and this entry is where the correction belongs.
+
+**Why the endpoint had to move.** The deterministic chain Phase 18A built — `external_id` → confirmed `app_aliases` (0087) →
+`app_product_id` — establishes a PRODUCT. An IdP knows it integrates "Salesforce"; it does not know which of a tenant's Salesforce
+instances that is. Under `app_id NOT NULL` the one thing a matcher can prove is the one thing the table cannot record, so 18C
+would have had to invent an instance in order to write a product fact. 0090 makes `app_product_id` the required authority and
+`app_id` an optional refinement of it. **Final hierarchy: `app_product_id` = canonical authority; `app_id` = optional operational
+refinement.** Not two endpoints — 0084 established that the two models coexist because they answer different questions, and this
+adds the hierarchy 0084 implies.
+
+**The refinement invariant is one three-column FK**, not application code: `(app_id, app_product_id, tenant_id)` →
+`apps (id, canonical_app_id, tenant_id)` `MATCH SIMPLE`, which forces product agreement AND same-tenant in a single constraint.
+MATCH SIMPLE is load-bearing in both directions — `app_id IS NULL` skips the check so a product-only match is valid, while an
+instance whose own `canonical_app_id` is NULL is refused, because an instance of an unknown product refines nothing.
+
+**Candidate identity moves to the product, and that is a correctness fix.** Keying it on `app_id` once that column is nullable
+would let every product-level proposal insert a fresh duplicate — Postgres treats NULLs as distinct in a unique index — so a
+matcher re-running each sync would deposit one row per run forever. It also closes a review-history hole 0088's key left open: a
+rejected product could be re-offered indefinitely by naming a different instance of it. **0088's index is dropped and recreated,
+never re-declared:** `create unique index if not exists` under the same name emits a NOTICE and silently leaves the old definition
+active, which was reproduced directly before this was written.
+
+**The propose command is replaced, and that is required compatibility work rather than scope.** 0088's version cannot write this
+schema — it never supplies `app_product_id` and its `ON CONFLICT` names an index that no longer exists — so it is dropped by exact
+signature and recreated as `(p_tenant_id, p_directory_application_id, p_app_product_id, p_method, p_confidence, p_app_id default
+null)`; only trailing parameters may carry defaults, so the optional refinement goes last. The old overload is dropped rather than
+left resident: it would be an alternate authorization path with its own grant, still writing an instance as if it were the
+relationship. **`product_decide_application_match` is unchanged** — it is keyed on (match id, decision) and never referenced either
+endpoint. 0088's method vocabulary, role gate, `proposed`-only write and bounded statuses are all preserved verbatim.
+
+**No silent enrichment.** A repeat proposal that carries an instance the stored candidate lacks returns `already_proposed` and
+changes nothing. Nothing in the architecture ranks two pieces of instance evidence against each other, so "fill it in if it was
+NULL" is last-write-wins in disguise — the first caller to guess would win and a reviewer would see a refinement nobody proposed.
+Attaching an instance to a live candidate is a distinct reviewed operation and is deliberately absent.
+
+Legacy rows are backfilled ONLY through `apps.canonical_app_id` — a fact the schema already asserts — and the migration **aborts
+with a bounded diagnostic** if any row cannot be resolved. Never from a name, vendor, similarity or model output. 0085's read
+swaps `app_id` for `app_product_id`: same four columns, the authority instead of the subordinate refinement. **Rule 5 is
+semantically unchanged** and needed no edit — its loader parses only `id`, `directory_application_id` and `status`.
+
+Verification ran the real chain, not 0090 in isolation: 0001 → 0088 → 0089 (#421's unrelated `app_accounts` pagination read, which
+shares no object with this) → 0090. 0090 drops 0088's index and command **without `if exists`**, so a chain in which they were
+absent fails to apply — the green run is itself the proof they existed and were replaced. Seven mutants, each RED and restored:
+cross-tenant product FK, weakened refinement FK, dropped accepted-cardinality index, candidate key reverted to nullable `app_id`,
+read reverting to `app_id`, the `if not exists` index shadow, and a surviving `app_id`-only propose overload. Full
+`scripts/test-rls.sh` passed. Applied to no hosted database; no deployment, no provider contact, no UI, no matcher.
+
 ### docs(governance) — Phase 18B: what an application match actually is · 2026-08-13
 
 **#419 merged the boundary; this records what it means.** The implementation shipped without the semantic model written down, and
@@ -65,7 +119,6 @@ anywhere in the repository, so whoever writes it must say instance/contract mana
 
 Docs and one test only — **no executable SQL changed**, migration 0088 untouched. No hosted apply, no deployment, no provider
 contact, no matcher, no Rule 5 code change.
-
 
 ### feat(governance) — Phase 18B: migration 0088, the application match review boundary · 2026-08-13
 
@@ -115,7 +168,6 @@ cross-tenant refusal of source/target/tenant/decision, accepted cardinality and 
 immutability, replay against rejected and accepted candidates, many-to-one acceptance, Rule 5 read-contract stability, and matcher
 run state staying untouched. Full `scripts/test-rls.sh` passed. Five mutants, each RED and restored. Applied to no hosted database;
 no deployment, no provider contact, no UI, no matcher, no Rule 5 change.
-
 ### feat(catalog) — Phase 18B0: the canonical product layer gets its first writer · 2026-08-13
 
 **No migration. The schema was never the problem.** `app_products`, `app_aliases` and the nullable `apps.canonical_app_id`

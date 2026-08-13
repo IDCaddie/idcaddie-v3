@@ -43,14 +43,19 @@ insert into public.person_account_links
 insert into public.apps (id, tenant_id, name) values
   ('a7000000-0000-4000-8000-0000000000b1', 'a7000000-0000-4000-8000-00000000000a', 'Slack'),
   ('a7000000-0000-4000-8000-0000000000b9', 'a7000000-0000-4000-8000-00000000000b', 'Other App');
+-- 0088 made the canonical PRODUCT the required endpoint of application_matches; `apps` is now an optional refinement.
+-- These fixtures assert on directory_application_id and counts only, so they use product-level matches.
+insert into public.app_products (id, tenant_id, name, normalized_name) values
+  ('a7000000-0000-4000-8000-00000000dd01', 'a7000000-0000-4000-8000-00000000000a', 'Slack',     'slack'),
+  ('a7000000-0000-4000-8000-00000000dd09', 'a7000000-0000-4000-8000-00000000000b', 'Other App', 'other app');
 insert into public.directory_applications
   (id, tenant_id, connection_id, provider, external_id, label, sync_status) values
   ('a7000000-0000-4000-8000-0000000000d1','a7000000-0000-4000-8000-00000000000a','a7000000-0000-4000-8000-0000000000c1','okta','A1','Slack','current'),
   ('a7000000-0000-4000-8000-0000000000d9','a7000000-0000-4000-8000-00000000000b','a7000000-0000-4000-8000-0000000000c3','okta','A1','Other','current');
 insert into public.application_matches
-  (tenant_id, directory_application_id, app_id, method, confidence, status, rationale) values
-  ('a7000000-0000-4000-8000-00000000000a','a7000000-0000-4000-8000-0000000000d1','a7000000-0000-4000-8000-0000000000b1','manual','high','proposed','reviewer note that must not leak'),
-  ('a7000000-0000-4000-8000-00000000000b','a7000000-0000-4000-8000-0000000000d9','a7000000-0000-4000-8000-0000000000b9','manual','high','proposed',null);
+  (tenant_id, directory_application_id, app_product_id, method, confidence, status, rationale) values
+  ('a7000000-0000-4000-8000-00000000000a','a7000000-0000-4000-8000-0000000000d1','a7000000-0000-4000-8000-00000000dd01','manual','high','proposed','reviewer note that must not leak'),
+  ('a7000000-0000-4000-8000-00000000000b','a7000000-0000-4000-8000-0000000000d9','a7000000-0000-4000-8000-00000000dd09','manual','high','proposed',null);
 
 -- ════ B0: the deny-all tables STAY deny-all, and the six functions belong to `authenticated` alone ═════════════════
 do $$
@@ -357,9 +362,9 @@ do $$
 declare has_run boolean; st text; has_completed boolean; matches int;
 begin
   insert into public.application_matches
-    (tenant_id, directory_application_id, app_id, method, confidence, status, decided_at)
+    (tenant_id, directory_application_id, app_product_id, method, confidence, status, decided_at)
   values ('a7000000-0000-4000-8000-00000000000a','a7000000-0000-4000-8000-0000000000d1',
-          'a7000000-0000-4000-8000-0000000000b1','manual','high','accepted', now());
+          'a7000000-0000-4000-8000-00000000dd01','manual','high','accepted', now());
 
   perform public.product_start_application_matcher_run('a7000000-0000-4000-8000-00000000000a');
   perform public.product_complete_application_matcher_run('a7000000-0000-4000-8000-00000000000a');
@@ -431,13 +436,15 @@ insert into public.connectors (id, tenant_id, provider, status, connection_state
   ('fa000000-0000-4000-8000-0000000000c1','fa000000-0000-4000-8000-00000000000a','okta','pending','verified');
 insert into public.apps (id, tenant_id, name) values
   ('fa000000-0000-4000-8000-0000000000b1','fa000000-0000-4000-8000-00000000000a','Slack');
+insert into public.app_products (id, tenant_id, name, normalized_name) values
+  ('fa000000-0000-4000-8000-00000000dd01','fa000000-0000-4000-8000-00000000000a','Slack','slack');
 insert into public.directory_applications
   (id, tenant_id, connection_id, provider, external_id, label, sync_status) values
   ('fa000000-0000-4000-8000-0000000000d1','fa000000-0000-4000-8000-00000000000a','fa000000-0000-4000-8000-0000000000c1',
    'okta','A1','Slack','current');
 insert into public.application_matches
-  (tenant_id, directory_application_id, app_id, method, confidence, status) values
-  ('fa000000-0000-4000-8000-00000000000a','fa000000-0000-4000-8000-0000000000d1','fa000000-0000-4000-8000-0000000000b1',
+  (tenant_id, directory_application_id, app_product_id, method, confidence, status) values
+  ('fa000000-0000-4000-8000-00000000000a','fa000000-0000-4000-8000-0000000000d1','fa000000-0000-4000-8000-00000000dd01',
    'manual','high','proposed');
 
 -- ── B14 — the ALLOWED-ROLE VOCABULARY, proven against real memberships ──────────────────────────────────────────────

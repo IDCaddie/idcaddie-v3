@@ -682,7 +682,8 @@ export type Database = {
       }
       application_matches: {
         Row: {
-          app_id: string
+          app_id: string | null
+          app_product_id: string
           confidence: string
           created_at: string
           decided_at: string | null
@@ -696,7 +697,8 @@ export type Database = {
           updated_at: string
         }
         Insert: {
-          app_id: string
+          app_id?: string | null
+          app_product_id: string
           confidence: string
           created_at?: string
           decided_at?: string | null
@@ -710,7 +712,8 @@ export type Database = {
           updated_at?: string
         }
         Update: {
-          app_id?: string
+          app_id?: string | null
+          app_product_id?: string
           confidence?: string
           created_at?: string
           decided_at?: string | null

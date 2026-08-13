@@ -242,48 +242,66 @@ a producer exists invites the name-similarity matching this work exists to preve
 |---|---|---|
 | canonical product identity | `app_products` | *what software is this?* |
 | operational / contract instance | `apps` | *what do we pay for, and under what contract?* |
-| instance relationship | `application_matches` | *which contract record does this IdP application correspond to?* |
+| canonical relationship | `application_matches` | *which product does this IdP application correspond to — and, if known, which instance of it?* |
 
 ```
 canonical product recognition:   directory application → confirmed alias → app_product
-instance matching:               app_product → zero / one / many apps rows → application_match proposals
+canonical relationship:          directory application → app_product  (required)  → apps row  (optional refinement)
 ```
 
 Recognition and matching are different acts on different evidence. Collapsing them is what a name-based join does.
 
-### What an application match IS — the 0 / 1 / many instance question
+### What an application match IS — the authority and its refinement
 
-**`application_matches` is an INSTANCE relationship, not a product-level one.** 0075 settles it in its own words: `apps` is
-*"normalized software records — what do we pay for, and under what contract"*, and *"a directory application with **no SaaS record
-is not an error** (nobody has recorded a contract)"*. Phase 18B0 gave `apps.canonical_app_id` its first writer, so the chain
-`external_id → confirmed alias → app_product → apps WHERE canonical_app_id = product → app_id` is deterministic at last.
+**Superseded, and worth reading in order.** The version of this section written alongside 0088 (#422) said
+`application_matches` is an INSTANCE relationship and that `app_id` was sufficient. **Migration 0090 changed that**, and the
+argument it changed is recorded here rather than deleted, because the reasoning that led to it was sound on the evidence then
+available: when 0088 shipped, `apps.canonical_app_id` had no writer at all, so a product endpoint would have pointed at a table
+nothing populated. #420 supplied that writer one commit earlier, and the balance moved.
 
-| instances of the resolved product | what may be proposed |
-|---|---|
-| **exactly one** | that `app_id`, deterministically — the ordinary path |
-| **many** (Salesforce Production + Sandbox) | **each**, as competing `proposed` candidates. The evidence proves the *product*, never the *instance*, so neither confidence, arrival order nor arithmetic may pick one. A human accepts exactly one; the losing candidate **remains a proposal** rather than being silently rejected, and 0075's partial unique index makes a second acceptance impossible |
-| **zero** | nothing. The product is recognised, no contract record exists, and nothing is fabricated to fill the gap. Product-level truth continues to live in `app_products`/`app_aliases` |
+**Final model: `app_product_id` is the required canonical authority; `app_id` is an OPTIONAL operational refinement of it.**
 
-`app_id` is sufficient **because the fact being recorded is instance-level**. Repointing at `app_product_id` would record a
-weaker, different fact against a far thinner writer. Proven by B14 (many) and B15 (zero) against a real shared-product estate.
+The deciding argument is which fact the evidence actually supports. The deterministic chain is
+`external_id → confirmed alias (0087) → app_product`. It stops at the product. An IdP knows it integrates "Salesforce"; it does
+not know which of a tenant's Salesforce instances that is. Under `app_id NOT NULL` the single thing a matcher can prove was the
+single thing the table could not record — so the 0/1/many question had to be answered by enumeration or by silence:
+
+| instances of the resolved product | 0088 (`app_id` required) | **0090 (product required, instance optional)** |
+|---|---|---|
+| **exactly one** | that `app_id` | one candidate, refined to that instance when it is genuinely known |
+| **many** (Salesforce Production + Sandbox) | one candidate **per instance** — a review queue of guesses the evidence never supported | **ONE** candidate: the product, instance left NULL. The reviewer sees what was proven and nothing else |
+| **zero** | nothing at all — the deterministically-known product fact was simply lost | the product relationship, recorded honestly, with no instance |
+
+0075's *"a directory application with **no SaaS record** is not an error"* still holds and is now expressible rather than merely
+tolerated. The property #422 was protecting — **nothing may be fabricated to fill the instance gap** — is preserved exactly, and
+is now enforced structurally rather than by absence: a named instance must be an instance OF the asserted product
+(`(app_id, app_product_id, tenant_id) → apps (id, canonical_app_id, tenant_id)` MATCH SIMPLE), an instance whose own
+`canonical_app_id` is NULL is refused, and an existing candidate is never silently enriched with a later-supplied instance.
+Candidate identity is `(tenant, directory application, app_product)`, so a rejected product cannot be re-offered by naming a
+different instance of it. Proven by B14 (many), B15–B17 (refinement), B19 (zero) and the product-authority suite.
+
+**Still true, and still the point:** the instance question does not disappear. It stops being answered by fabrication, and
+attaching an instance to a live candidate remains a distinct reviewed operation that no command performs today.
 
 ### What "managed" means to Rule 5 — and the copy debt it carries
 
 `discovered_application_unmanaged_by_idp` is subjected on a **directory application** and fires when a current one has **no
 accepted match**, gated on the matcher's status being `completed` — an empty table means *not yet looked* just as readily as
-*nothing is managed*. Given the instance semantics above, **"managed" means an accepted relationship exists to a tenant
-operational/contract application record.**
+*nothing is managed*. Under 0090, **"managed" means an accepted canonical relationship exists** — the directory application has
+been matched, by a human, to a product the tenant recognises. Whether that acceptance also names an operational instance is a
+refinement recorded on the same row, not a second kind of managed.
 
-It does **not** mean the canonical product is unknown, the software unidentified, or the alias unresolved. A recognised
-`app_product` with zero operational instances is therefore still "unmanaged" *at the operational-instance layer*, and that is
-coherent rather than contradictory.
+It does **not** mean the software is unidentified or the alias unresolved: recognition lives upstream in
+`app_products`/`app_aliases`, and a product can be recognised while no directory application has been accepted against it.
+Rule 5's own semantics are unchanged by 0090 — it reads `directory_application_id` and `status` and has never seen either
+endpoint — so `proposed ≠ managed`, `rejected ≠ managed`, `accepted = managed` exactly as before.
 
 **Recorded debt, deliberately not fixed here:**
 - the rule's name reads backwards from its implementation — it is subjected on the IdP's own record, not on a SaaS-discovered one;
 - its `title_key` / `summary_key` / `remediation_key` resolve to **no copy anywhere in the repository**, so the sentence a customer
   eventually reads is still undefined;
-- whoever writes that copy must say **instance/contract management, not product recognition**, or the finding will contradict this
-  model.
+- whoever writes that copy must say **an accepted canonical match**, not product recognition and not contract coverage — under
+  0090 an accepted match need not name a contract record at all, so copy promising one would contradict this model.
 
 ### What 18C still needs
 
