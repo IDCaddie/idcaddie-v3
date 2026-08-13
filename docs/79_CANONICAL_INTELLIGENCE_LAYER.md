@@ -114,11 +114,25 @@ composite FK — but nothing had ever written either column, and `app_aliases` w
 So **building the matcher before this bridge exists would have forced name-based matching or produced a zero-output engine.** The
 missing layer was canonical application evidence, not matching logic.
 
+**Phase 18A resolves; it does not declare.** This is the load-bearing caveat. There is **no product-side path that creates a
+canonical alias**, so `app_aliases` is still empty and the bridge is still unpopulated. What exists is the read seam: given an
+identifier that already has a settled judgement, the product can name its canonical product. Do not read this section as "the
+bridge is built".
+
+**Why declaration is missing, and why it is a deliberate T3 decision.** The obvious design — a product action that reads a
+directory application's `external_id` and records it — **cannot execute**. `directory_applications` enables RLS and defines **no
+policy at all** (0057), so it is deny-all to `authenticated`; and the product read RPCs deliberately withhold the identifier
+(0061: returns "ONLY bounded safe fields … and **NEVER external_id**"). Product code therefore cannot obtain the value a
+declaration would record. An earlier draft of this phase shipped exactly that action; mocked IO hid that it was non-functional,
+and independent review removed it. Declaration is deferred to **Phase 18A2**, which must first answer why `external_id` was
+withheld — and should prefer a bounded RPC that takes `directory_application_id` + `app_product_id`, reads `external_id`
+*internally*, and never returns it, over any design that hands the identifier to the product.
+
 **Ownership.** `connector_runner` holds no grant on `app_aliases`, `app_products`, `vendors` or `apps`, and gains none. It writes
 `directory_applications` only through the `runner_*` SECURITY DEFINER functions (0057). Discovery may report an identifier; it may
-not decide what that identifier *is*. The canonical judgement is a product-side editor write governed by the existing 0024 RLS
-policies — members read, owner/admin/editor insert and update, nobody deletes. Phase 18A therefore adds **no migration and no
-SECURITY DEFINER RPC**: a wrapper over an already-governed editor write would catch no failure class RLS does not.
+not decide what that identifier *is*. The canonical judgement is product-owned; reads run under the existing 0024 RLS policies
+(members read; owner/admin/editor insert and update; nobody deletes), whose tenant isolation is proven functionally by
+`supabase/tests/org_rls_test.sql` (T46). Phase 18A adds **no migration, no policy, no grant and no SECURITY DEFINER RPC**.
 
 **Ambiguity is not multiple `app_aliases` rows.** The 0026 natural key `UNIQUE(tenant_id, alias_type, alias_value)` means an
 identifier has at most one canonical judgement — that is what makes it a judgement rather than a candidate list. When it is not
@@ -126,10 +140,8 @@ clear which product an identifier belongs to, **leave it unresolved**: write not
 and belong in `application_matches`, which is proposal-bearing by design. Never weaken the natural key to hold candidates.
 
 **Names are display metadata, never identity.** `alias_type` includes `name`, and deterministic resolution excludes it
-structurally (`DETERMINISTIC_ALIAS_TYPES` = every type except `name`). Declaration is narrower still: only `provider_app_id` may
-be declared today, because `directory_applications.external_id` is the only current source field with those semantics. Enabling
-`sso_app_id`, `oauth_client_id`, `external_instance_id` or `instance_domain` means naming the source field it reads from — not
-noticing that the enum contains the word.
+structurally (`DETERMINISTIC_ALIAS_TYPES` = every type except `name`). A name lookup short-circuits before any query reaches the
+database. There is no fuzzy, substring, vendor-similarity or display-label fallback anywhere in the path.
 
 **Only a settled judgement resolves — and only `confirmed`.** `pending` is a proposal nobody accepted and `rejected` is a human
 saying these are not the same product. `auto` is excluded for a stronger reason: the 0024/0025 CHECK constraints admit it, but
@@ -137,13 +149,13 @@ saying these are not the same product. `auto` is excluded for a stronger reason:
 (`sync-review-actions.ts` over `discovery_facts`) transitions pending → confirmed | rejected without it. Treating an undefined
 status as accepted canonical truth is precisely the "proposal silently becomes fact" failure this layer exists to prevent. A
 future deterministic writer that wants auto-confirmed aliases adds `auto` together with a documented meaning.
-Re-declaring the same mapping is an idempotent no-op;
-pointing an identifier at a *different* product is a conflict requiring an explicit review decision, never a silent overwrite.
-Last-write-wins is not a canonical identity policy.
 
-**Provider freshness and canonical judgement are separate facts.** Only a `current` directory application may mint *new* canonical
-identity, but an already-confirmed alias keeps resolving forever — resolution reads `app_aliases` alone and never consults the
-directory side. A source going stale does not retract a judgement a human already made.
+**Provider freshness and canonical judgement are separate facts.** Resolution reads `app_aliases` alone and never consults the
+directory side, so a settled judgement keeps resolving after its source goes stale, is superseded, or its connector is
+disconnected. Whether a *stale* source may mint a *new* judgement is a question for the declaration path, and therefore for 18A2.
+
+**A resolution is not a match.** It says "this identifier IS this product". It does not say a directory application has been
+matched to a SaaS application — that decision belongs to `application_matches` (0075) and remains unbuilt.
 
 ## Adding a new connector
 

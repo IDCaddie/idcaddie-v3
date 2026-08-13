@@ -12,51 +12,55 @@ from PRs verified via `git log` / `gh pr list`.
 > **as of each PR's date** and are historical — where an older entry says "RISK-007 remains OPEN" / "Phase C remains
 > BLOCKED", that was accurate at that entry's date; this banner is the current state.
 
-### feat(catalog) — Phase 18A: deterministic application alias resolution · 2026-08-13
+### feat(catalog) — Phase 18A: deterministic application alias resolution (resolver only) · 2026-08-13
 
 **Phase 18 was going to be the application matcher; recon said the matcher was not the missing piece.** `application_matches`
 (0075) has been correctly shaped since Phase 7B, but both endpoints already point at one catalog —
 `directory_applications.catalog_product_id → app_products` and `apps.canonical_app_id → app_products`, each a same-tenant
 composite FK — and **neither column had ever been written by anything**, while `app_aliases` (0024) was empty. The only remaining
-joinable fields are names. So a matcher built now would have had to either match on names or emit nothing. The absent layer was
-**canonical application evidence**, not TypeScript matching logic. This PR builds that layer and stops there.
+joinable fields are names. So a matcher built now would have had to match on names or emit nothing. The absent layer was
+**canonical application evidence**, not TypeScript matching logic.
 
-**Zero migration, and that is the finding.** The bridge was already fully provisioned: `app_aliases` carries the alias_type
-vocabulary (`provider_app_id`, `sso_app_id`, `oauth_client_id`, `external_instance_id`, `instance_domain`, `domain`, `name`),
-same-tenant composite FKs, `review_status`/`reviewed_by`/`confidence`, and — since 0026 — the natural key
-`UNIQUE(tenant_id, alias_type, alias_value)` added for exactly this idempotency. Its 0024 RLS policies (members read;
-owner/admin/editor insert and update; no delete) are already the governed write boundary. **No SECURITY DEFINER RPC was added**:
-per ENGINEERING_STANDARDS.md Principle 1, a wrapper over an already-governed editor write catches no failure class RLS does not.
-Baseline tier T2, no semantic escalation — no migration, no new grant, no new policy, no definer, no credential path.
+**This PR ships the read half only, and says so.** Given an identifier that already carries a settled canonical judgement, the
+product can name its canonical product: `provider identifier → app_aliases → app_products`. It does **not** create aliases.
+`app_aliases` remains empty and **the bridge remains unpopulated** — this is a usable seam, not a built bridge.
 
-**Ownership is enforced, not documented.** `connector_runner` holds no grant on `app_aliases`/`app_products`/`vendors`/`apps` and
-gains none; it writes `directory_applications` only through the 0057 `runner_*` definer functions. Discovery may report an
-identifier; it may not decide what that identifier *is*. The three facts stay separate: raw provider identifier (connector-owned)
-→ canonical alias judgement (product-owned) → application match decision (18B/18C, untouched here).
+**A declaration action was written, and independent review deleted it.** The obvious design — a product action reading a directory
+application's `external_id` and recording it — **cannot execute against the real authorization model.**
+`directory_applications` enables RLS and defines **no policy at all** (0057), so it is deny-all to `authenticated`; and the
+product read RPCs deliberately withhold the identifier (0061 returns "ONLY bounded safe fields … and **NEVER external_id**").
+Product code cannot obtain the value a declaration would record, so every call would have returned `not_allowed` in production.
+**Mocked Supabase IO hid this**: the unit tests proved the decision logic and never that the query is permitted — exactly the
+ENGINEERING_STANDARDS.md §E/§F failure (mocked IO is a tripwire, not behavioural proof; a guard never demonstrated to fail is not
+yet evidence). Catching a non-functional feature before merge is the Engineering OS working, not a setback. Declaration is a
+deliberate T3 decision deferred to Phase 18A2, which must first answer *why* `external_id` was withheld and should prefer an RPC
+that takes `directory_application_id` + `app_product_id` and reads the identifier **internally, never returning it**.
 
-**Names are excluded structurally.** `DETERMINISTIC_ALIAS_TYPES` is every alias type except `name`, and a `name` lookup
-short-circuits before any query reaches the database. Declaration is narrower still — only `provider_app_id`, because
-`directory_applications.external_id` is the only current source field with those semantics; enabling another type means naming the
-column it reads. The identifier is read from the directory row, never from the request, so a caller cannot submit a forged one.
+**A second review finding: `auto` was resolving on no evidence.** The resolver had treated `review_status='auto'` as settled
+canonical truth on the strength of a comment. `auto` appears in exactly two CHECK constraints (0024, 0025), is **defined nowhere
+in the repository**, is **written by nothing**, and the only implemented review lifecycle (`sync-review-actions.ts` over
+`discovery_facts`) transitions pending → confirmed | rejected without it. Only **`confirmed`** resolves now; `pending`,
+`rejected`, `auto` and any unexpected or empty value read as unresolved.
 
-**Ambiguity stays unwritten.** The natural key means an identifier has at most one canonical judgement — that is what makes it a
-judgement and not a candidate list. When the product is unclear, nothing is written. Only `confirmed`/`auto` resolve; `pending`
-and `rejected` read as unresolved. Re-declaring is an idempotent no-op; re-pointing an identifier at a different product is a
-bounded conflict, never a silent overwrite. Provider freshness and canonical judgement are separate facts: only a `current`
-directory application may mint new identity, but resolution reads `app_aliases` alone, so a confirmed alias survives its source
-going stale.
+**Zero migration, zero new privilege.** No table, column, index, policy, grant or function. Reads run under the existing 0024
+"members read app_aliases" policy, whose tenant isolation is proven functionally against a real database by
+`supabase/tests/org_rls_test.sql` T46 — cited rather than duplicated, and pinned by a tripwire so deleting those assertions cannot
+silently strip this phase of its only real authorization proof. `connector_runner` gains nothing. Baseline tier **T2**, no
+semantic escalation: read-only, existing RLS path, no migration, no `SECURITY DEFINER`, no credential boundary.
 
-**Proof:** 42 focused tests (17 pure resolver + declaration behaviour + privilege/neutrality source contracts), full suite 2746
-passed. Three mutants, each RED on exactly its intended test and restored: allowing `name` as deterministic evidence (3 RED),
-dropping the server-derived tenant filter (1 RED), silently overwriting a different existing mapping (2 RED). One real finding
-along the way — the first draft of the service-role test restated the forbidden literals and tripped
-`check-auth-safety.sh`; the guard was left untouched and the test rewritten to prove coverage instead, since that scanner is
-already the canonical owner of the fact.
+**Names can never be identity.** `DETERMINISTIC_ALIAS_TYPES` is every alias type except `name`, and a name lookup short-circuits
+before any query reaches the database. No fuzzy, substring, vendor-similarity or display-label fallback exists anywhere in the
+path. Ambiguity is represented by **writing nothing** — the 0026 natural key means one identifier has at most one judgement, and
+competing candidates are an `application_matches` concept. Resolution reads `app_aliases` alone, so a settled judgement survives
+its source going stale, superseded or disconnected. A failed read returns `null`, never `unresolved`, so an outage can never be
+read as "no canonical product".
 
-**Not built, deliberately:** no UI, no `application_matches` read or write, no propose/decide boundary, no matcher, no Rule 5
-change, no entitlement or billable computation. `directory_applications.catalog_product_id` is deliberately left NULL —
-resolving through `app_aliases` avoids needing a product-side writer on a connector-owned table, which is the only thing that
-would have forced a migration. No hosted Supabase, no AWS, no provider contact, nothing deployed.
+**Proof:** 28 focused tests, full suite 2733 passed, plus the real-Postgres RLS suite. Three mutants, each RED on exactly its
+intended test and restored: allowing `name` as deterministic evidence, re-admitting `auto`, and dropping the tenant filter from
+the resolver read.
+
+**Not built, deliberately:** no declaration path, no UI, no `application_matches` read or write, no propose/decide boundary, no
+matcher, no Rule 5 change, no entitlement computation. No hosted Supabase, no AWS, no provider contact, nothing deployed.
 
 ### feat(governance) — Phase 16: the tenant-wide cross-source engine · 2026-08-12
 

@@ -3,83 +3,69 @@ import fs from "node:fs";
 import path from "node:path";
 
 const createClient = vi.fn();
-const resolveTenantContext = vi.fn();
-const getSessionUser = vi.fn();
 vi.mock("@/lib/supabase/server", () => ({ createClient: () => createClient() }));
-vi.mock("@/lib/auth/tenant-context", () => ({ resolveTenantContext: () => resolveTenantContext() }));
-vi.mock("@/lib/auth/session", () => ({ getSessionUser: () => getSessionUser() }));
 
-import { declareApplicationAlias, resolveApplicationAlias } from "./application-aliases";
+import { resolveApplicationAlias } from "./application-aliases";
 
 const TENANT = "11111111-1111-1111-1111-111111111111";
-const DIR_APP = "22222222-2222-2222-2222-222222222222";
 const PRODUCT = "33333333-3333-3333-3333-333333333333";
-const OTHER_PRODUCT = "44444444-4444-4444-4444-444444444444";
-const USER = "55555555-5555-5555-5555-555555555555";
 
-type Q = { table: string; cols?: string; eqs: [string, unknown][]; op?: string; payload?: Record<string, unknown> };
+type Q = { table: string; cols?: string; eqs: [string, unknown][]; op?: string };
 
-// Capturing mock. Dispatches per table so one call can read the directory side, read the alias, then insert. Records every
-// filter and the insert payload, so the tests can assert what the query is ALLOWED to look at — not merely what it returned.
-function makeSupabase(opts: {
-  source?: { data: unknown; error?: { code: string } | null };
-  alias?: { data: unknown; error?: { code: string } | null }[];
-  insert?: { error: { code: string } | null };
-}) {
+// Capturing mock. Records the table, selected columns and every filter, so these tests assert what the query is ALLOWED to look
+// at — not merely what it returned. That distinction matters here: the mock cannot prove RLS permits the read, which is why the
+// permission half is proven by supabase/tests/org_rls_test.sql T46 against a real database instead.
+function makeSupabase(result: { data: unknown; error?: { code: string } | null }) {
   const queries: Q[] = [];
-  let aliasReads = 0;
   const from = (table: string) => {
     const q: Q = { table, eqs: [] };
     queries.push(q);
     const chain = {
       select: (cols: string) => { q.cols = cols; return chain; },
       eq: (col: string, val: unknown) => { q.eqs.push([col, val]); return chain; },
-      maybeSingle: () => {
-        if (table === "directory_applications") return Promise.resolve(opts.source ?? { data: null, error: null });
-        const r = opts.alias?.[aliasReads] ?? { data: null, error: null };
-        aliasReads += 1;
-        return Promise.resolve(r);
-      },
-      insert: (payload: Record<string, unknown>) => { q.op = "insert"; q.payload = payload; return Promise.resolve(opts.insert ?? { error: null }); },
+      maybeSingle: () => Promise.resolve(result),
+      insert: () => { q.op = "insert"; return Promise.resolve({ error: null }); },
+      update: () => { q.op = "update"; return Promise.resolve({ error: null }); },
     };
     return chain;
   };
   return { from, __queries: queries };
 }
 
-const currentSource = { data: { external_id: "0oaAbC123", provider: "okta", sync_status: "current" }, error: null };
-const declare = (over: Partial<{ directoryApplicationId: string; appProductId: string; aliasType: string }> = {}) =>
-  declareApplicationAlias({ directoryApplicationId: DIR_APP, appProductId: PRODUCT, aliasType: "provider_app_id", ...over });
+const confirmedRow = { data: { app_product_id: PRODUCT, review_status: "confirmed" }, error: null };
 
-beforeEach(() => {
-  createClient.mockReset();
-  resolveTenantContext.mockReset().mockResolvedValue({ activeTenant: { id: TENANT, role: "editor" }, organizationMemberships: [] });
-  getSessionUser.mockReset().mockResolvedValue({ id: USER });
-});
+beforeEach(() => createClient.mockReset());
 
-describe("resolveApplicationAlias — reads app_aliases ONLY", () => {
-  it("1 — an exact provider_app_id resolves to one product", async () => {
-    const sb = makeSupabase({ alias: [{ data: { app_product_id: PRODUCT, review_status: "confirmed" }, error: null }] });
-    createClient.mockResolvedValue(sb);
+describe("resolveApplicationAlias — reads app_aliases ONLY, and only for the given tenant", () => {
+  it("an exact deterministic identifier resolves to one product", async () => {
+    createClient.mockResolvedValue(makeSupabase(confirmedRow));
     expect(await resolveApplicationAlias(TENANT, "provider_app_id", "0oaAbC123")).toEqual({ outcome: "resolved", appProductId: PRODUCT });
   });
 
-  it("2 — no alias row is unresolved", async () => {
-    createClient.mockResolvedValue(makeSupabase({ alias: [{ data: null, error: null }] }));
+  it("no alias row is unresolved", async () => {
+    createClient.mockResolvedValue(makeSupabase({ data: null, error: null }));
     expect(await resolveApplicationAlias(TENANT, "provider_app_id", "0oaAbC123")).toEqual({ outcome: "unresolved" });
   });
 
-  it("3 + 14 — a name lookup is refused BEFORE any query reaches the database", async () => {
-    const sb = makeSupabase({ alias: [{ data: { app_product_id: PRODUCT, review_status: "confirmed" }, error: null }] });
+  it("pending, rejected and auto rows do not resolve", async () => {
+    for (const review_status of ["pending", "rejected", "auto"]) {
+      createClient.mockResolvedValue(makeSupabase({ data: { app_product_id: PRODUCT, review_status }, error: null }));
+      expect(await resolveApplicationAlias(TENANT, "provider_app_id", "0oaAbC123")).toEqual({ outcome: "unresolved" });
+    }
+  });
+
+  it("a name lookup is refused BEFORE any query reaches the database", async () => {
+    const sb = makeSupabase(confirmedRow);
     createClient.mockResolvedValue(sb);
     expect(await resolveApplicationAlias(TENANT, "name", "Slack")).toEqual({ outcome: "unsupported", aliasType: "name" });
     expect(sb.__queries).toHaveLength(0); // the forbidden path does not exist even as a wasted round trip
   });
 
-  it("4 — resolution cannot see a display name: the query selects only the judgement columns and filters only on identity", async () => {
-    const sb = makeSupabase({ alias: [{ data: { app_product_id: PRODUCT, review_status: "confirmed" }, error: null }] });
+  it("the query is scoped by tenant and identity, selects only the judgement columns, and touches no other table", async () => {
+    const sb = makeSupabase(confirmedRow);
     createClient.mockResolvedValue(sb);
     await resolveApplicationAlias(TENANT, "provider_app_id", "0oaAbC123");
+    expect(sb.__queries).toHaveLength(1);
     const q = sb.__queries[0];
     expect(q.table).toBe("app_aliases");
     expect(q.cols).toBe("app_product_id, review_status");
@@ -87,138 +73,61 @@ describe("resolveApplicationAlias — reads app_aliases ONLY", () => {
     expect(q.eqs).toEqual([["tenant_id", TENANT], ["alias_type", "provider_app_id"], ["alias_value", "0oaAbC123"]]);
   });
 
-  it("6 — repeated resolution of the same alias is identical", async () => {
-    const row = { data: { app_product_id: PRODUCT, review_status: "confirmed" }, error: null };
-    createClient.mockResolvedValue(makeSupabase({ alias: [row, row] }));
+  it("performs no write of any kind", async () => {
+    const sb = makeSupabase(confirmedRow);
+    createClient.mockResolvedValue(sb);
+    await resolveApplicationAlias(TENANT, "provider_app_id", "0oaAbC123");
+    expect(sb.__queries.some((q) => q.op)).toBe(false);
+  });
+
+  it("trims the identifier so a pasted value resolves identically", async () => {
+    createClient.mockResolvedValue(makeSupabase(confirmedRow));
     const a = await resolveApplicationAlias(TENANT, "provider_app_id", "0oaAbC123");
-    createClient.mockResolvedValue(makeSupabase({ alias: [row] }));
+    createClient.mockResolvedValue(makeSupabase(confirmedRow));
     expect(await resolveApplicationAlias(TENANT, "provider_app_id", "  0oaAbC123 ")).toEqual(a);
   });
 
-  it("a stale directory source never enters resolution — a confirmed alias keeps resolving forever", async () => {
-    const sb = makeSupabase({ alias: [{ data: { app_product_id: PRODUCT, review_status: "confirmed" }, error: null }] });
+  it("an empty identifier is unresolved without querying", async () => {
+    const sb = makeSupabase(confirmedRow);
     createClient.mockResolvedValue(sb);
-    await resolveApplicationAlias(TENANT, "provider_app_id", "0oaAbC123");
-    expect(sb.__queries.map((q) => q.table)).toEqual(["app_aliases"]); // directory_applications is never read
-  });
-});
-
-describe("declareApplicationAlias", () => {
-  it("7 — an authorized editor declares the mapping; the identifier comes from the ROW, not the request", async () => {
-    const sb = makeSupabase({ source: currentSource, alias: [{ data: null, error: null }] });
-    createClient.mockResolvedValue(sb);
-    expect(await declare()).toEqual({ ok: true, outcome: "declared", aliasValue: "0oaAbC123" });
-
-    const ins = sb.__queries.find((q) => q.op === "insert");
-    expect(ins?.table).toBe("app_aliases");
-    expect(ins?.payload).toMatchObject({
-      tenant_id: TENANT, alias_type: "provider_app_id", alias_value: "0oaAbC123",
-      app_product_id: PRODUCT, review_status: "confirmed", reviewed_by: USER, confidence: 100, source: "okta",
-    });
-    expect(ins?.payload?.app_id).toBeUndefined(); // directory-sourced evidence has no operational apps instance
-  });
-
-  it("5 — an unknown provider string changes nothing: it is carried as opaque provenance", async () => {
-    const sb = makeSupabase({ source: { data: { external_id: "xyz-9", provider: "some-provider-nobody-has-built", sync_status: "current" }, error: null }, alias: [{ data: null, error: null }] });
-    createClient.mockResolvedValue(sb);
-    expect(await declare()).toEqual({ ok: true, outcome: "declared", aliasValue: "xyz-9" });
-    expect(sb.__queries.find((q) => q.op === "insert")?.payload?.source).toBe("some-provider-nobody-has-built");
-  });
-
-  it("8 — declaring the same mapping twice is idempotent: no second row is written", async () => {
-    const sb = makeSupabase({ source: currentSource, alias: [{ data: { app_product_id: PRODUCT, review_status: "confirmed" }, error: null }] });
-    createClient.mockResolvedValue(sb);
-    expect(await declare()).toEqual({ ok: true, outcome: "unchanged", aliasValue: "0oaAbC123" });
-    expect(sb.__queries.some((q) => q.op === "insert")).toBe(false);
-  });
-
-  it("9 + 15 — the same identifier pointed at a DIFFERENT product conflicts; the existing mapping is never overwritten", async () => {
-    const sb = makeSupabase({ source: currentSource, alias: [{ data: { app_product_id: OTHER_PRODUCT, review_status: "confirmed" }, error: null }] });
-    createClient.mockResolvedValue(sb);
-    expect(await declare()).toEqual({ ok: false, error: "conflict", reason: "different_product" });
-    expect(sb.__queries.some((q) => q.op === "insert")).toBe(false);
-  });
-
-  it("15b — a human 'rejected' judgement is preserved even against the same product", async () => {
-    createClient.mockResolvedValue(makeSupabase({ source: currentSource, alias: [{ data: { app_product_id: PRODUCT, review_status: "rejected" }, error: null }] }));
-    expect(await declare()).toEqual({ ok: false, error: "conflict", reason: "rejected" });
-  });
-
-  it("10 — a foreign-tenant product is refused by the same-tenant composite FK, reported indistinguishably", async () => {
-    createClient.mockResolvedValue(makeSupabase({ source: currentSource, alias: [{ data: null, error: null }], insert: { error: { code: "23503" } } }));
-    expect(await declare({ appProductId: OTHER_PRODUCT })).toEqual({ ok: false, error: "not_allowed" });
-  });
-
-  it("11 — a foreign-tenant directory application is invisible to RLS, so it reads as absent and is refused without disclosure", async () => {
-    const sb = makeSupabase({ source: { data: null, error: null } });
-    createClient.mockResolvedValue(sb);
-    expect(await declare()).toEqual({ ok: false, error: "not_allowed" });
-    expect(sb.__queries.some((q) => q.op === "insert")).toBe(false);
-  });
-
-  it("12 — a member without editor+ is rejected by the 0024 RLS WITH CHECK", async () => {
-    createClient.mockResolvedValue(makeSupabase({ source: currentSource, alias: [{ data: null, error: null }], insert: { error: { code: "42501" } } }));
-    expect(await declare()).toEqual({ ok: false, error: "not_allowed" });
-  });
-
-  it("13 — a stale or disconnected source cannot mint new canonical identity", async () => {
-    for (const sync_status of ["stale", "review_required", "disconnected"]) {
-      const sb = makeSupabase({ source: { data: { external_id: "0oaAbC123", provider: "okta", sync_status }, error: null } });
-      createClient.mockResolvedValue(sb);
-      expect(await declare()).toEqual({ ok: false, error: "source_not_eligible" });
-      expect(sb.__queries.some((q) => q.op === "insert")).toBe(false);
-    }
-  });
-
-  it("14 — a name declaration is refused before anything is read", async () => {
-    const sb = makeSupabase({ source: currentSource });
-    createClient.mockResolvedValue(sb);
-    expect(await declare({ aliasType: "name" })).toEqual({ ok: false, error: "unsupported_alias_type" });
+    expect(await resolveApplicationAlias(TENANT, "provider_app_id", "   ")).toEqual({ outcome: "unresolved" });
     expect(sb.__queries).toHaveLength(0);
-    for (const t of ["sso_app_id", "oauth_client_id", "instance_domain", "external_instance_id", "domain"]) {
-      expect(await declare({ aliasType: t })).toEqual({ ok: false, error: "unsupported_alias_type" });
-    }
   });
 
-  it("5b — the tenant is resolved server-side; no request field can select it", async () => {
-    resolveTenantContext.mockResolvedValue(null);
-    createClient.mockResolvedValue(makeSupabase({ source: currentSource }));
-    expect(await declare()).toEqual({ ok: false, error: "not_allowed" });
-    // and when it does resolve, every query is filtered by the SERVER-derived tenant
-    resolveTenantContext.mockResolvedValue({ activeTenant: { id: TENANT, role: "editor" }, organizationMemberships: [] });
-    const sb = makeSupabase({ source: currentSource, alias: [{ data: null, error: null }] });
-    createClient.mockResolvedValue(sb);
-    await declare();
-    for (const q of sb.__queries.filter((x) => x.cols)) expect(q.eqs).toContainEqual(["tenant_id", TENANT]);
-  });
-
-  it("a concurrent writer taking the natural key re-reads and stays idempotent when it wrote the same product", async () => {
-    createClient.mockResolvedValue(makeSupabase({
-      source: currentSource,
-      alias: [{ data: null, error: null }, { data: { app_product_id: PRODUCT, review_status: "confirmed" }, error: null }],
-      insert: { error: { code: "23505" } },
-    }));
-    expect(await declare()).toEqual({ ok: true, outcome: "unchanged", aliasValue: "0oaAbC123" });
-  });
-
-  it("malformed ids are refused as invalid input, not passed to the database", async () => {
-    const sb = makeSupabase({ source: currentSource });
-    createClient.mockResolvedValue(sb);
-    expect(await declare({ appProductId: "not-a-uuid" })).toEqual({ ok: false, error: "invalid_input" });
-    expect(sb.__queries).toHaveLength(0);
+  it("a FAILED read returns null — distinct from `unresolved`, so a caller can never read an outage as 'no product'", async () => {
+    createClient.mockResolvedValue(makeSupabase({ data: null, error: { code: "08006" } }));
+    expect(await resolveApplicationAlias(TENANT, "provider_app_id", "0oaAbC123")).toBeNull();
   });
 });
 
 // ── Source contracts (tripwires, not behaviour) ──────────────────────────────────────────────────────────────────────
 const read = (p: string) => fs.readFileSync(path.join(process.cwd(), p), "utf8");
-const PHASE_SOURCES = ["src/lib/canonical/application-alias.ts", "src/lib/data/application-aliases.ts", "src/app/(authenticated)/catalog/actions.ts"];
+const PHASE_SOURCES = ["src/lib/canonical/application-alias.ts", "src/lib/data/application-aliases.ts"];
 
-describe("privilege + neutrality contracts", () => {
-  // 17 — service-role usage is ZERO. The canonical control is scripts/check-auth-safety.sh, which greps ALL of src/ on every PR
-  // (review-discipline.yml) and has its own selftest proving it catches positives. Restating its forbidden literals here would
-  // both duplicate an existing gate and put those literals under src/, which is the very thing the gate exists to prevent — so
-  // this proves COVERAGE instead: the guard scans src/, and every file this phase adds lives there.
-  it("17 — every file this phase adds is inside the tree the canonical service-role guard scans", () => {
+describe("boundary contracts", () => {
+  it("no module in this phase reads directory_applications — it is deny-all to authenticated (0057) and has no policy", () => {
+    for (const p of PHASE_SOURCES) expect(read(p)).not.toMatch(/from\(["']directory_/);
+  });
+
+  it("this phase never touches application_matches, and writes nothing at all", () => {
+    for (const p of PHASE_SOURCES) {
+      const code = read(p);
+      expect(code).not.toMatch(/from\(["']application_matches["']\)/);
+      for (const w of [".insert(", ".update(", ".upsert(", ".delete(", '"use server"']) expect(code).not.toContain(w);
+    }
+  });
+
+  // Anti-vacuity: the resolver's PERMISSION to read app_aliases is not proven by any mock in this file. It rests on the 0024
+  // "members read" policy, whose tenant isolation is proven functionally by the RLS suite against a real database. Pin that
+  // dependency here so deleting those assertions cannot silently strip this phase of its only real authorization proof.
+  it("the app_aliases RLS read path this resolver depends on is proven by the real-database RLS suite", () => {
+    const rls = read("supabase/tests/org_rls_test.sql");
+    expect(rls).toContain("T46 Tenant A member reads Tenant A app_alias");
+    expect(rls).toContain("T46 Tenant B member must NOT read Tenant A app_alias");
+    expect(rls).toContain("app_aliases_tenant_type_value_key"); // the 0026 natural key the single-row assumption rests on
+  });
+
+  it("every file this phase adds is inside the tree the canonical service-role guard scans", () => {
     expect(read("scripts/check-auth-safety.sh")).toMatch(/scan_dir "\$REPO\/src"/);
     for (const p of PHASE_SOURCES) expect(p.startsWith("src/")).toBe(true);
   });
@@ -230,21 +139,7 @@ describe("privilege + neutrality contracts", () => {
     }
   });
 
-  it("16 — connector_runner gains no authority: it holds no grant on the canonical catalog anywhere in the schema", () => {
-    const dir = path.join(process.cwd(), "supabase/migrations");
-    const offenders = fs.readdirSync(dir).filter((f) => f.endsWith(".sql")).filter((f) =>
-      fs.readFileSync(path.join(dir, f), "utf8")
-        .split("\n")
-        .some((l) => /grant\s/i.test(l) && /connector_runner/.test(l) && /\b(app_aliases|app_products|vendors)\b/.test(l)));
-    expect(offenders).toEqual([]);
-  });
-
-  it("this phase adds NO migration and does not touch application_matches", () => {
-    for (const p of PHASE_SOURCES) expect(read(p)).not.toMatch(/from\(["']application_matches["']\)/);
-  });
-
   it("no provider-specific branching — provider strings are opaque provenance only", () => {
-    // A provider name may appear in a comment; it must never appear in a comparison or a switch.
     for (const p of PHASE_SOURCES) {
       const code = read(p).split("\n").filter((l) => !l.trim().startsWith("//")).join("\n");
       expect(code).not.toMatch(/["'](okta|slack|google|entra|microsoft|github)["']/i);
