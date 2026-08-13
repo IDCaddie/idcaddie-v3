@@ -109,6 +109,43 @@ describe("native_connector manifests", () => {
     expect(NativeConnectorManifestSchema.safeParse(native({ surprise: 1 })).success).toBe(false);
   });
 
+  // ── `manifest_multi`: constant hosts, but more than one ────────────────────────────────────────────────────
+  // Added for Google Workspace, which neither existing value describes. Its hosts ARE constant, so `server_derived`
+  // would be false; but there are two of them (admin + licensing), and the executor-program kind's `base_url` is a
+  // single string. The exemption is guarded so it cannot become a way around the single-host rule above.
+  describe("manifest_multi", () => {
+    const multi = (over: Record<string, unknown> = {}) =>
+      native({ provider_id: "google_workspace", base_url_source: "manifest_multi", budget_profile: { name: "GOOGLE_WORKSPACE_PRODUCTION_BUDGET", source: "src/connector-sync/google-workspace-pagination.ts" }, ...over });
+
+    it("validates for a provider that allowlists two or more hosts", () => {
+      expect(NativeConnectorManifestSchema.safeParse(multi()).success).toBe(true);
+    });
+
+    it("is REFUSED for a provider with a single allowlisted host", () => {
+      // Otherwise any single-host provider could declare manifest_multi and walk straight past the check above, which
+      // is the whole reason that check exists. Slack allowlists exactly one host.
+      expect(NativeConnectorManifestSchema.safeParse(multi({ provider_id: "slack" })).success).toBe(false);
+      expect(NativeConnectorManifestSchema.safeParse(multi({ provider_id: "microsoft_entra" })).success).toBe(false);
+    });
+
+    it("is REFUSED for a provider with no host allowlist at all", () => {
+      expect(NativeConnectorManifestSchema.safeParse(multi({ provider_id: "not_a_provider" })).success).toBe(false);
+    });
+
+    it("does not weaken the single-host rule for the other values", () => {
+      expect(NativeConnectorManifestSchema.safeParse(multi({ base_url_source: "manifest" })).success).toBe(false);
+      expect(NativeConnectorManifestSchema.safeParse(multi({ base_url_source: "invented" })).success).toBe(false);
+    });
+
+    it("still declares no executor-program keys", () => {
+      const parsed = NativeConnectorManifestSchema.safeParse(multi());
+      expect(parsed.success).toBe(true);
+      if (!parsed.success) return;
+      expect((parsed.data as Record<string, unknown>).base_url).toBeUndefined();
+      expect((parsed.data as Record<string, unknown>).endpoints).toBeUndefined();
+    });
+  });
+
   it("requires at least one resource, capability and entrypoint", () => {
     expect(NativeConnectorManifestSchema.safeParse(native({ resources: [] })).success).toBe(false);
     expect(NativeConnectorManifestSchema.safeParse(native({ capabilities: [] })).success).toBe(false);

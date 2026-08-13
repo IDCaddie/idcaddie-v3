@@ -36,6 +36,15 @@ export const PROVIDER_HOST_ALLOWLIST: Readonly<Record<string, readonly string[]>
   // NO parent domain, NO wildcard/suffix — exact equality only. The `microsoft_entra` provider stays inert (disabled,
   // not connectable); no Graph runtime/manifest/schema/OAuth exists yet.
   microsoft_entra: ["graph.microsoft.com"],
+  // Google Workspace admin discovery. TWO exact hosts, because Google splits this one administrative surface across two
+  // separate APIs — no single host serves both the directory and licences:
+  //   admin.googleapis.com     — Admin SDK Directory API (users, groups, group members)
+  //   licensing.googleapis.com — Enterprise License Manager API (licenceAssignments)
+  // Exact equality only, as for every other provider: no wildcard, no suffix match, and deliberately NOT the parent domain
+  // (`googleapis.com` fronts hundreds of unrelated Google APIs). NO token host either — oauth2.googleapis.com is reached by
+  // the auth module under its own exact-host pin, never by a manifest-declared endpoint. `cloudidentity.googleapis.com` is
+  // deliberately absent: nothing calls it, and an allowlisted host that no code reaches is a widened boundary for free.
+  google_workspace: ["admin.googleapis.com", "licensing.googleapis.com"],
 };
 
 // field_map values are a DOT-PATH into the response item, optionally negated with ONE leading "!". NOTHING ELSE — no
@@ -171,8 +180,14 @@ export const NativeConnectorManifestSchema = z
     manifest_version: z.literal(1),
     manifest_kind: z.literal("native_connector"),
     provider_id: z.string().min(1),
-    // A per-tenant provider has NO manifest-constant base URL. Stated explicitly rather than left as a missing field.
-    base_url_source: z.enum(["manifest", "server_derived"]),
+    // Where the base URL comes from. Stated explicitly rather than left as a missing field.
+    //   server_derived — per-tenant, no constant host can exist (Okta's `https://<org>.okta.com`).
+    //   manifest_multi — constant hosts, but MORE THAN ONE, because the provider splits one administrative surface across
+    //                    several APIs (Google Workspace: admin / cloudidentity / licensing). The executor-program kind
+    //                    cannot express this: its `base_url` is a single string. Declaring `server_derived` here would be
+    //                    false — the hosts ARE constant — and this schema exists to stop a manifest stating something untrue.
+    //   manifest       — a single constant host, which the executor-program kind already describes; refused below.
+    base_url_source: z.enum(["manifest", "manifest_multi", "server_derived"]),
     auth: z.object({ kind: z.enum(AUTH_KINDS), token_kind: z.string().min(1), header: z.enum(AUTH_HEADERS) }).strict(),
     api_base_path: z.string().regex(/^\/[A-Za-z0-9._/-]*$/, "api_base_path must be a leading-slash relative path"),
     lifecycle: LifecycleSchema,
@@ -192,6 +207,14 @@ export const NativeConnectorManifestSchema = z
   .superRefine((m, ctx) => {
     if (m.base_url_source === "manifest") {
       ctx.addIssue({ code: "custom", path: ["base_url_source"], message: "a native_connector with a manifest-constant base URL should use the executor-program manifest kind" });
+    }
+    // `manifest_multi` must EARN its exemption: the provider needs a host allowlist naming at least two hosts. Without this,
+    // any single-host provider could declare `manifest_multi` and walk past the check directly above, which is the whole
+    // reason that check exists. An unlisted provider fails here too — a native connector cannot reach an unallowlisted host.
+    if (m.base_url_source === "manifest_multi") {
+      const hosts = Object.prototype.hasOwnProperty.call(PROVIDER_HOST_ALLOWLIST, m.provider_id) ? PROVIDER_HOST_ALLOWLIST[m.provider_id] : undefined;
+      if (!hosts) ctx.addIssue({ code: "custom", path: ["provider_id"], message: `no host allowlist for provider '${m.provider_id}'` });
+      else if (hosts.length < 2) ctx.addIssue({ code: "custom", path: ["base_url_source"], message: `provider '${m.provider_id}' allowlists ${hosts.length} host(s); manifest_multi requires at least 2` });
     }
     // A read_only provider must not declare a persisting entrypoint for a resource it does not declare, and must declare no
     // capability outside the read/ingest verb set (the enum already guarantees the latter).

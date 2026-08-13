@@ -23,13 +23,27 @@ describe("connector taxonomy — discovery connectors vs deep-sync runners", () 
       expect(p!.category).toBe("identity");
       expect(p!.status).toBe("future"); // inert future connector — no code
       expect(p!.enabled).toBe(false);
-      expect(p!.discoveryCapabilities).toContain("discover_apps");
       expect(p!.discoveryCapabilities).toContain("discover_assigned_users");
       // it is NOT a deep-sync runner and has NO deep-sync read capabilities
       expect(p!.capabilities).toEqual([]);
       expect(isDeepSyncProvider(id)).toBe(false);
       expect(isDiscoveryProvider(id)).toBe(true);
     }
+  });
+
+  // `discover_apps` is NOT universal across identity providers, and asserting it in the loop above hid that. Okta and
+  // Entra both model applications as first-class objects with per-user assignments, so discovering apps from them is
+  // real. Google does not: Workspace has no equivalent app-assignment surface, and the nearest substitutes (Marketplace
+  // app inventory, per-user OAuth token grants) require `admin.directory.user.security` — a per-user, high-blast-radius
+  // scope deliberately excluded from the reviewed set. Declaring the capability anyway would promise a customer a
+  // discovery that cannot run, which is the "fabricate parity" failure the connector design forbids.
+  it("claims app discovery only for the providers that actually expose an application model", () => {
+    for (const id of ["okta", "microsoft_entra"]) {
+      expect(getConnectorProvider(id)!.discoveryCapabilities).toContain("discover_apps");
+    }
+    expect(getConnectorProvider("google_workspace")!.discoveryCapabilities).not.toContain("discover_apps");
+    // Nor SSO metadata, for the same reason: nothing in the reviewed scope set returns it.
+    expect(getConnectorProvider("google_workspace")!.discoveryCapabilities).not.toContain("discover_sso_metadata");
   });
 
   it("classifies discovery providers separately from deep-sync providers", () => {
