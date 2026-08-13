@@ -10,14 +10,22 @@
 --
 -- ══ THE ENDPOINT GAP THIS PHASE DOES NOT CLOSE — READ BEFORE BUILDING THE MATCHER ═══════════════════════════════════════════════
 -- The SaaS side of a match is `apps` (the operational/contract instance), which is correct and consistent across 0075, 0085 and
--- Rule 5. But the canonical evidence Phase 18A produces resolves to `app_products`, and the link between them —
--- `apps.canonical_app_id` — has **zero writers** in the entire schema and is NULL on every row; `apps.external_instance_id` and
--- `apps.instance_domain` are likewise unwritten, and nothing inserts `apps` rows from discovery.
+-- Rule 5, and it is backed by real data: the Slack resolver store upserts `apps` during sync (keyed on tenant_id +
+-- external_instance_id), so `apps`, `external_instance_id` and `instance_domain` all have live writers.
 --
--- So today there is NO deterministic path from a confirmed canonical alias to an `apps` row. That does not block THIS boundary —
--- a human owner/admin can propose and decide a real relationship, and every branch here is exercisable end to end — but a
--- deterministic matcher (18C) would have nothing to propose from. **Populating `apps.canonical_app_id` is a prerequisite for
--- 18C.** Recording it here so the matcher is not built against an empty seam, which is exactly how Phase 18A first went wrong.
+-- The break is one column. Phase 18A's canonical evidence resolves to `app_products`, and the only link from a product to its
+-- operational instance — `apps.canonical_app_id` — has **zero writers** anywhere in migrations, src or the runner, and is NULL on
+-- every row. (`src/lib/server/connector-vault/resolution.ts` says so outright: "nothing populates apps.canonical_app_id yet".)
+-- `app_products` itself is likewise read-only in the product today.
+--
+-- So there is NO deterministic path from a confirmed canonical alias to an `apps` row. That does not block THIS boundary — a
+-- human owner/admin can propose and decide a real relationship against apps rows that genuinely exist, and every branch here is
+-- exercisable end to end — but a deterministic matcher (18C) would have nothing to propose from. **Populating
+-- `apps.canonical_app_id` (and a write path for `app_products`) is the prerequisite for 18C.** Recording it here so the matcher
+-- is not built against an empty seam, which is exactly how Phase 18A first went wrong.
+--
+-- Do NOT "fix" this by repointing `application_matches` at `app_product_id`: that would aim the FK at a table with no writer at
+-- all and leave the matcher more blocked, not less. `app_id -> apps` is the endpoint backed by real data.
 --
 -- ══ WHAT THIS MIGRATION DOES NOT DO ════════════════════════════════════════════════════════════════════════════════════════════
 -- No new read path (0085's `product_application_matches` stays the only one). No table grant, no RLS policy — `application_matches`
