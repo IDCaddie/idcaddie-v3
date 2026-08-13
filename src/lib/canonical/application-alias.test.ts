@@ -59,10 +59,20 @@ describe("resolveCanonicalAlias", () => {
     expect(resolveCanonicalAlias("provider_app_id", { ...row })).toEqual(a);
   });
 
-  it("only a SETTLED judgement resolves — pending is a proposal and rejected is a human 'no'", () => {
-    expect(resolveCanonicalAlias("provider_app_id", { appProductId: "p", reviewStatus: "pending" })).toEqual({ outcome: "unresolved" });
-    expect(resolveCanonicalAlias("provider_app_id", { appProductId: "p", reviewStatus: "rejected" })).toEqual({ outcome: "unresolved" });
-    expect(resolveCanonicalAlias("provider_app_id", { appProductId: "p", reviewStatus: "auto" })).toEqual({ outcome: "resolved", appProductId: "p" });
+  it("ONLY 'confirmed' resolves — every other status in the 0024 CHECK reads as unresolved", () => {
+    // 'auto' is excluded deliberately: the CHECK admits it, but nothing defines it, nothing writes it, and the only implemented
+    // review lifecycle (discovery_facts) goes pending → confirmed | rejected. Resolving an undefined status as canonical truth
+    // is the failure this layer exists to prevent.
+    for (const reviewStatus of ["pending", "rejected", "auto"]) {
+      expect(resolveCanonicalAlias("provider_app_id", { appProductId: "p", reviewStatus })).toEqual({ outcome: "unresolved" });
+    }
+    expect(resolveCanonicalAlias("provider_app_id", { appProductId: "p", reviewStatus: "confirmed" })).toEqual({ outcome: "resolved", appProductId: "p" });
+  });
+
+  it("an unexpected or empty review_status can never resolve", () => {
+    for (const reviewStatus of ["", "needs_review", "CONFIRMED", "accepted"]) {
+      expect(resolveCanonicalAlias("provider_app_id", { appProductId: "p", reviewStatus })).toEqual({ outcome: "unresolved" });
+    }
   });
 });
 

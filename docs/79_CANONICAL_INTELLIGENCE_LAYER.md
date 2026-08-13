@@ -131,8 +131,13 @@ be declared today, because `directory_applications.external_id` is the only curr
 `sso_app_id`, `oauth_client_id`, `external_instance_id` or `instance_domain` means naming the source field it reads from — not
 noticing that the enum contains the word.
 
-**Only a settled judgement resolves.** `confirmed` and `auto` resolve; `pending` is a proposal nobody accepted and `rejected` is a
-human saying these are not the same product — both read as unresolved. Re-declaring the same mapping is an idempotent no-op;
+**Only a settled judgement resolves — and only `confirmed`.** `pending` is a proposal nobody accepted and `rejected` is a human
+saying these are not the same product. `auto` is excluded for a stronger reason: the 0024/0025 CHECK constraints admit it, but
+**nothing in this repository defines what it means and nothing writes it**, and the only implemented review lifecycle
+(`sync-review-actions.ts` over `discovery_facts`) transitions pending → confirmed | rejected without it. Treating an undefined
+status as accepted canonical truth is precisely the "proposal silently becomes fact" failure this layer exists to prevent. A
+future deterministic writer that wants auto-confirmed aliases adds `auto` together with a documented meaning.
+Re-declaring the same mapping is an idempotent no-op;
 pointing an identifier at a *different* product is a conflict requiring an explicit review decision, never a silent overwrite.
 Last-write-wins is not a canonical identity policy.
 

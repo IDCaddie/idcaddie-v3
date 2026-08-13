@@ -38,10 +38,16 @@ export const DETERMINISTIC_ALIAS_TYPES: readonly AliasType[] = ALIAS_TYPES.filte
 // Adding a type to this list means naming the source field it reads from.
 export const DECLARABLE_ALIAS_TYPES: readonly AliasType[] = ["provider_app_id"];
 
-// A canonical alias is a JUDGEMENT, and only a settled judgement resolves. 'pending' is a proposal nobody has accepted and
-// 'rejected' is a human saying "these are not the same product" — neither is canonical truth, so both resolve to UNRESOLVED
-// rather than being quietly treated as a match. 'auto' is a deterministic writer's own settled conclusion (0024 vocabulary).
-export const RESOLVING_REVIEW_STATUSES = ["confirmed", "auto"] as const;
+// A canonical alias is a JUDGEMENT, and only a settled judgement resolves. ONLY 'confirmed' resolves.
+//
+// 'pending' is a proposal nobody has accepted and 'rejected' is a human saying "these are not the same product" — neither is
+// canonical truth. 'auto' is EXCLUDED for a different and more important reason: the 0024/0025 CHECK constraints admit it, but
+// nothing in this repository defines what it means, nothing writes it, and the only implemented review lifecycle
+// (sync-review-actions.ts, over the sibling discovery_facts table) transitions pending → confirmed | rejected and never mentions
+// it. Reading an undefined status as accepted canonical truth is exactly the "proposal silently becomes fact" failure this layer
+// exists to prevent. If a future deterministic writer wants auto-confirmed aliases, that phase adds 'auto' here together with a
+// documented meaning — deciding it now, on no evidence, is the mistake.
+export const RESOLVING_REVIEW_STATUSES = ["confirmed"] as const;
 
 // The subset of an app_aliases row this module reasons about. Structural, so the pure layer does not depend on the generated DB
 // types — a column rename surfaces in the IO layer where the query lives, not here.
