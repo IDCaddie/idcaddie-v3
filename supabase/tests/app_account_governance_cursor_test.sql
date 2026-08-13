@@ -278,3 +278,63 @@ begin
   assert not public.has_tenant_role('e1000000-0000-4000-8000-00000000000a', array['owner']),
     'the has_tenant_role stub must not survive this file';
 end $$;
+
+-- ══ CR1 — THE ROLE VOCABULARY, PROVEN AGAINST REAL MEMBERSHIPS ═══════════════════════════════════════════════════════
+-- Everything above ran against a STUBBED `has_tenant_role`, which proves "when the gate says no, the RPC refuses" and
+-- proves nothing about the gate being asked the RIGHT question. Under the stub, widening the role array to include
+-- 'editor' leaves C0-CE entirely green while a tenant editor gains the ability to enumerate every account in the
+-- estate. This case therefore runs AFTER the restore above, against the REAL gate and REAL tenant_memberships rows —
+-- the #414 B14 technique, applied to 0089. Placement is load-bearing: moved above the restore, it proves nothing.
+insert into auth.users (id, email) values
+  ('e1000000-0000-4000-8000-0000000e0001','cr1_owner@t.test'),
+  ('e1000000-0000-4000-8000-0000000e0002','cr1_admin@t.test'),
+  ('e1000000-0000-4000-8000-0000000e0003','cr1_editor@t.test'),
+  ('e1000000-0000-4000-8000-0000000e0004','cr1_viewer@t.test');
+insert into public.profiles (id, email) values
+  ('e1000000-0000-4000-8000-0000000e0001','cr1_owner@t.test'),
+  ('e1000000-0000-4000-8000-0000000e0002','cr1_admin@t.test'),
+  ('e1000000-0000-4000-8000-0000000e0003','cr1_editor@t.test'),
+  ('e1000000-0000-4000-8000-0000000e0004','cr1_viewer@t.test');
+insert into public.tenant_memberships (tenant_id, user_id, role, status) values
+  ('e1000000-0000-4000-8000-00000000000a','e1000000-0000-4000-8000-0000000e0001','owner','active'),
+  ('e1000000-0000-4000-8000-00000000000a','e1000000-0000-4000-8000-0000000e0002','admin','active'),
+  ('e1000000-0000-4000-8000-00000000000a','e1000000-0000-4000-8000-0000000e0003','editor','active'),
+  ('e1000000-0000-4000-8000-00000000000a','e1000000-0000-4000-8000-0000000e0004','viewer','active');
+
+do $$
+declare v integer;
+begin
+  -- owner and admin may walk the estate.
+  perform set_config('request.jwt.claims','{"sub":"e1000000-0000-4000-8000-0000000e0001"}',false);
+  set local role authenticated;
+  select count(*) into v from public.product_app_accounts_for_governance('e1000000-0000-4000-8000-00000000000a');
+  assert v > 0, format('CR1 an OWNER must walk the estate, got %s', v);
+  reset role;
+
+  perform set_config('request.jwt.claims','{"sub":"e1000000-0000-4000-8000-0000000e0002"}',false);
+  set local role authenticated;
+  select count(*) into v from public.product_app_accounts_for_governance('e1000000-0000-4000-8000-00000000000a');
+  assert v > 0, format('CR1 an ADMIN must walk the estate, got %s', v);
+  reset role;
+
+  -- editor and viewer are members in good standing and must still read NOTHING. This is the assertion that dies if the
+  -- role array is ever widened — the whole reason the case exists.
+  perform set_config('request.jwt.claims','{"sub":"e1000000-0000-4000-8000-0000000e0003"}',false);
+  set local role authenticated;
+  select count(*) into v from public.product_app_accounts_for_governance('e1000000-0000-4000-8000-00000000000a');
+  assert v = 0, format('CR1 ROLE LEAK: a tenant EDITOR walked %s accounts', v);
+  reset role;
+
+  perform set_config('request.jwt.claims','{"sub":"e1000000-0000-4000-8000-0000000e0004"}',false);
+  set local role authenticated;
+  select count(*) into v from public.product_app_accounts_for_governance('e1000000-0000-4000-8000-00000000000a');
+  assert v = 0, format('CR1 ROLE LEAK: a tenant VIEWER walked %s accounts', v);
+  reset role;
+
+  -- A member of ANOTHER tenant is not a member here, however privileged they are there.
+  perform set_config('request.jwt.claims','{"sub":"e1000000-0000-4000-8000-0000000e0001"}',false);
+  set local role authenticated;
+  select count(*) into v from public.product_app_accounts_for_governance('e1000000-0000-4000-8000-00000000000b');
+  assert v = 0, format('CR1 tenant A''s owner walked %s of tenant B''s accounts', v);
+  reset role;
+end $$;

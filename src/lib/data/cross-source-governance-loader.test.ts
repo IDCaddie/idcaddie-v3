@@ -640,3 +640,72 @@ describe("review LENS 2: stable datasets of every boundary size still succeed", 
     expect(r.ok && r.input.appAccounts).toHaveLength(n);
   });
 });
+
+// ── Independent review of #421 — LENS 8 ───────────────────────────────────────────────────────────────────────────
+describe("review LENS 8: an existing finding's subject survives churn on earlier pages", () => {
+  // The load-bearing closure proof, driven through the ORCHESTRATION seam rather than the loader alone — a pagination
+  // property only matters here because of what 0083 does with the result.
+  //
+  // The subject existed before the walk and is present throughout. Earlier pages churn underneath: rows the walk has
+  // already passed are deleted, and new ones appear. Under OFFSET that churn slid the subject across the page boundary
+  // and it was never loaded — its finding lost its evidence and 0083 resolved something still true. Under an id cursor
+  // the subject's place in the walk is its own immutable id, so no earlier movement can reach it.
+  const SUBJECT = "a-subject-0500";
+
+  // Returns the io AND a live handle on what it captured. `Object.assign` copies a getter's VALUE rather than the
+  // accessor, so the handle has to be the state object itself.
+  const churningEstate = (): { io: LoaderIo; state: { synced: Record<string, unknown> | null } } => {
+    const state = { synced: null as Record<string, unknown> | null };
+    let page = 0;
+    const io: LoaderIo = {
+      rpc: async (name, args) => {
+        if (name === "product_application_matcher_state") return ok([{ has_ever_run: false, status: null, last_completed_at: null }]);
+        if (name === "product_connector_capabilities") return ok([cap(SLACK, "app_accounts"), cap(OKTA, "identity")]);
+        if (name === "product_person_account_links") {
+          return args.p_after_id ? ok([]) : ok([linkRow("l1", { app_account_id: SUBJECT, status: "accepted" })]);
+        }
+        if (name === "product_sync_governance_findings") {
+          state.synced = args;
+          return ok({ reported: (args.p_findings as unknown[]).length, opened: 0, reopened: 0, refreshed: 1, closed: 0, withheld_from_closure: 0 });
+        }
+        if (name !== "product_app_accounts_for_governance") return ok([]);
+
+        page++;
+        if (page === 1) {
+          // Page 1: 500 rows, ids a-0000..a-0499. The subject sorts AFTER all of them.
+          return ok(Array.from({ length: 500 }, (_, i) => account(`a-${String(i).padStart(4, "0")}`)));
+        }
+        if (page === 2) {
+          // Between pages the estate churned BELOW the cursor: earlier rows deleted, others inserted. Under OFFSET
+          // this is exactly the shift that hid a surviving row. The cursor asks for ids > a-0499 regardless.
+          expect(args.p_after_id).toBe("a-0499");
+          return ok([account(SUBJECT), account("a-subject-0501")]);
+        }
+        return ok([]);
+      },
+      connectors: async () => ok([{ id: SLACK, provider: "slack" }, { id: OKTA, provider: "okta" }]),
+    };
+    return { io, state };
+  };
+
+  it("loads the subject despite churn on earlier pages", async () => {
+    const { io } = churningEstate();
+    const r = await loadCrossSourceGovernanceInput("t-a", io);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.input.appAccounts.map(a => a.id)).toContain(SUBJECT);
+    expect(r.input.appAccounts).toHaveLength(502);
+  });
+
+  it("reaches the sync with the subject present, so its finding is refreshed rather than resolved", async () => {
+    const { io, state } = churningEstate();
+    const r = await evaluateTenantCrossSourceGovernance(io);
+    expect(r.ok).toBe(true);
+    // The sync happened at all — a paging failure would have aborted before it.
+    expect(state.synced).not.toBeNull();
+    expect(state.synced!.p_engine).toBe("cross_source");
+    // And the walk it was built from saw the subject, which is what stops 0083 resolving a still-true finding. The
+    // closure decision itself is 0083's; what this proves is that the evidence reached it.
+    expect(r.ok && r.summary.closed).toBe(0);
+  });
+});
