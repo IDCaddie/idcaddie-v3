@@ -74,6 +74,55 @@ recorded as a follow-up and deliberately NOT built: there is no matcher and no s
 redesigned for run history. Before concurrent invocation, either `start` refuses while `status = 'running'` or
 execution state gains run identity. `last_completed_at` surviving a later failure is intentional; consumers must read
 `status` and `last_completed_at` together.
+
+### feat(catalog) — Phase 18A2: migration 0087, governed canonical application alias declaration · 2026-08-13
+
+**Phase 18A1 shipped a resolver with nothing to resolve.** `app_aliases` was empty and no product-side path could populate it:
+`directory_applications` enables RLS and defines **no policy at all** (0057), so it is deny-all to `authenticated`, and the 0061
+read RPCs deliberately return "ONLY bounded safe fields … and **NEVER external_id**". A server action that read the identifier
+directly was written, and independent review deleted it because it could never execute — mocked IO had hidden that.
+
+**0087 resolves the impasse without weakening 0061.** That migration's rule governs what is **returned to a browser caller**, not
+what a definer function may **read** — its own RPCs already read `directory_applications` internally and simply do not return the
+identifier. `product_declare_application_alias(p_tenant_id, p_directory_application_id, p_app_product_id)` follows exactly that
+discipline: the caller sends two row ids it already holds, the command verifies authority, reads `external_id` **inside the
+database**, keys the canonical `app_aliases` judgement on it, and returns **one bounded status string**. The product establishes
+canonical identity without ever receiving the identifier. No SELECT policy, no table grant, no read path to `external_id`, and no
+`connector_runner` authority is added anywhere.
+
+**Owner/admin, deliberately not editor.** The 0024 policy lets owner/admin/editor write `app_aliases` directly, so editor looks
+obvious — but an editor cannot see a directory application at all (0061 denies them even the bounded list), so granting editor
+would hand them an authoritative mapping for a row they may not read. Gated at the level that may see directory rows, matching
+0061 and the 0078 command precedent. `p_tenant_id` is verified via `has_tenant_role` against `auth.uid()`, never trusted. Because
+`tenant_memberships.user_id` references `profiles(id)`, any caller passing that gate necessarily has a profiles row, so writing
+`reviewed_by = auth.uid()` cannot violate the `app_aliases.reviewed_by` FK.
+
+**Semantics.** Declaration writes `confirmed` with `reviewed_by`/`reviewed_at` — an owner/admin invoking a command named "declare"
+IS the review, and Phase 18A1 resolves only `confirmed`, so `pending` would produce an unusable judgement while `auto` has no
+defined meaning in this schema. Only a **current** source may mint new identity; that gate is one-directional, since the resolver
+never reads the directory side, so a confirmed alias survives its source going stale. Conflicts are bounded and never destructive:
+`already_confirmed` for the same product, `conflict` for a different product, a pending proposal, or a rejected mapping. The
+command never promotes, resurrects or overwrites, and a concurrent writer taking the natural key is re-read and re-decided so the
+race stays idempotent.
+
+**The anti-vacuity catch worth recording.** The information-hiding test initially passed a mutant that leaked `external_id` on the
+`created` path — because the block only ever exercised `already_confirmed`. The guard was rewritten to walk **every** reachable
+return path (`created`, `already_confirmed`, `conflict`, `source_not_current`, `not_allowed`) and assert on each that the payload
+carries exactly one `status` key and no identifier shape. Only then did the mutant go RED. A guard that has never been shown to
+fail is not yet evidence.
+
+**Proof:** a new real-database suite (`supabase/tests/application_alias_declaration_test.sql`, D0–D8) covering grants and
+SECURITY DEFINER/search_path posture, `directory_applications` still deny-all with no policy, the owner/admin/editor/viewer role
+vocabulary, information hiding on every return path, source eligibility, cross-tenant refusal in both directions plus
+caller-supplied-tenant refusal, conflict/idempotency/rejection-survival, resolver read-back by an ordinary member, and that no
+name-typed alias can be declared. Full `scripts/test-rls.sh` passed. Four mutants, each RED on its intended assertion and
+restored: leak the identifier, admit `viewer`, drop same-tenant scoping, allow a different-product overwrite. Migration-text
+privilege closure is asserted separately from runtime behaviour, because the SQL harness can mask a grant a hosted apply would
+not. 39 focused TypeScript tests; full unit suite green.
+
+**Not built:** no UI, no `application_matches` read or write, no propose/decide boundary, no matcher, no Rule 5 change. Applied to
+no hosted database; no AWS, no provider contact, nothing deployed.
+
 ### feat(connectors) — Google Workspace: migration 0086, the write boundary a second provider needed · 2026-08-12
 
 The first connector after Okta, and the first to prove the write boundary generalizes. Google Workspace stays

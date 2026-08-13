@@ -1,19 +1,23 @@
 import { createClient } from "@/lib/supabase/server";
+import { accessGate } from "./access-repository";
 import {
+  isDeclarationStatus,
   normalizeAliasValue,
   resolveCanonicalAlias,
+  type AliasDeclarationStatus,
   type AliasResolution,
   type CanonicalAliasRow,
 } from "@/lib/canonical/application-alias";
 
-// Phase 18A — the IO half of canonical application-alias resolution. Pure decisions live in
+// Phase 18A1/18A2 — the IO half of canonical application aliases. Pure decisions live in
 // src/lib/canonical/application-alias.ts; this module only talks to the database.
 //
-// READ-ONLY. It performs no insert, update, upsert or delete, and there is no product-side path in this codebase that declares a
-// canonical alias — see docs/79. An earlier draft of this phase carried one and it was removed in review because it could not
-// execute: `directory_applications` is deny-all to `authenticated` (0057 enables RLS and defines NO policy), and the product read
-// RPCs deliberately withhold `external_id` (0061: "NEVER external_id"), so product code cannot obtain the identifier a
-// declaration would record. Mocked IO had hidden that. Declaration is a deliberate T3 design decision, deferred to Phase 18A2.
+// This module NEVER writes a table directly. Resolution is a plain RLS-governed read of `app_aliases`; declaration goes through
+// the 0087 SECURITY DEFINER command, because the identifier it keys on is unreachable from here by design —
+// `directory_applications` is deny-all to `authenticated` (0057 enables RLS and defines NO policy) and the 0061 read RPCs
+// deliberately withhold `external_id`. An earlier draft read that column directly and could not execute at all; mocked IO hid it.
+// The 0087 command reads the identifier INSIDE the database and never returns it, so the product declares the relationship
+// without ever receiving the value. That preserves 0061 rather than overriding it.
 //
 // Boundary: imports the user-scoped server client (which imports next/headers), so it is server-only — importing it from a Client
 // Component fails the build. It NEVER uses a service-role or admin client, NEVER takes a tenant_id from the caller as
@@ -63,4 +67,40 @@ export async function resolveApplicationAlias(tenantId: string, aliasType: strin
   const r = await readAlias(tenantId, aliasType, value);
   if (!r.ok) return null;
   return resolveCanonicalAlias(aliasType, r.row);
+}
+
+/**
+ * Declare that a directory application corresponds to a canonical app product.
+ *
+ * The caller supplies two row ids it already holds; it never supplies — and never receives — the provider identifier. The 0087
+ * command resolves `external_id` internally, keys the canonical `app_aliases` judgement on it, and returns a bounded status.
+ *
+ * Authorization is the command's: it re-verifies owner/admin via `has_tenant_role` against `auth.uid()`. `accessGate()` here
+ * resolves the tenant from trusted server context and short-circuits for anyone below owner/admin — it narrows, it does not
+ * authorize, and a passed tenant id is verified rather than trusted on the other side.
+ */
+export async function declareApplicationAlias(
+  directoryApplicationId: string,
+  appProductId: string,
+): Promise<{ ok: true; status: AliasDeclarationStatus } | { ok: false; error: "not_allowed" | "query_failed" }> {
+  const gate = await accessGate();
+  if (!gate.ok) return { ok: false, error: "not_allowed" };
+
+  const supabase = await createClient();
+  const rpc = supabase.rpc.bind(supabase) as unknown as (n: string, a: Record<string, unknown>) => Promise<{ data: unknown; error: unknown }>;
+  const { data, error } = await rpc("product_declare_application_alias", {
+    p_tenant_id: gate.tenantId,
+    p_directory_application_id: directoryApplicationId,
+    p_app_product_id: appProductId,
+  });
+  // The error label is bounded and carries no DB detail — an RPC failure must not disclose whether a row exists.
+  if (error) { console.error("[data/application-aliases] declaration rpc failed"); return { ok: false, error: "query_failed" }; }
+
+  // Read ONLY the status key. Even if a future change to the command added a field, nothing else would reach a caller from here.
+  const status = (data as { status?: unknown } | null)?.status;
+  if (typeof status !== "string" || !isDeclarationStatus(status)) {
+    console.error("[data/application-aliases] declaration rpc returned an unrecognised status");
+    return { ok: false, error: "query_failed" };
+  }
+  return { ok: true, status };
 }

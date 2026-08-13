@@ -114,19 +114,52 @@ composite FK — but nothing had ever written either column, and `app_aliases` w
 So **building the matcher before this bridge exists would have forced name-based matching or produced a zero-output engine.** The
 missing layer was canonical application evidence, not matching logic.
 
-**Phase 18A resolves; it does not declare.** This is the load-bearing caveat. There is **no product-side path that creates a
-canonical alias**, so `app_aliases` is still empty and the bridge is still unpopulated. What exists is the read seam: given an
-identifier that already has a settled judgement, the product can name its canonical product. Do not read this section as "the
-bridge is built".
+**The product does not need to receive `external_id` to declare the canonical relationship.** That is the whole design, and it
+is what lets identity be established without adding a read path 0061 deliberately withheld.
 
-**Why declaration is missing, and why it is a deliberate T3 decision.** The obvious design — a product action that reads a
-directory application's `external_id` and records it — **cannot execute**. `directory_applications` enables RLS and defines **no
-policy at all** (0057), so it is deny-all to `authenticated`; and the product read RPCs deliberately withhold the identifier
-(0061: returns "ONLY bounded safe fields … and **NEVER external_id**"). Product code therefore cannot obtain the value a
-declaration would record. An earlier draft of this phase shipped exactly that action; mocked IO hid that it was non-functional,
-and independent review removed it. Declaration is deferred to **Phase 18A2**, which must first answer why `external_id` was
-withheld — and should prefer a bounded RPC that takes `directory_application_id` + `app_product_id`, reads `external_id`
-*internally*, and never returns it, over any design that hands the identifier to the product.
+**Be precise about what is hidden.** The command never *returns* the identifier, and adds no read RPC and no SELECT grant. It
+does *write* it to `app_aliases.alias_value`, which any tenant **member** may read (0024). That is not a new disclosure: 0025
+already grants members read on `discovery_facts`, whose `fact_json` carries the same `external_id` for directory-application facts
+— exactly what the 0057 promote RPC reads — and 0024 classifies `alias_value` as "a label/id, never a secret/token". So the
+accurate claim is narrow: **the command does not return it and opens no new disclosure path.** It is *not* "`external_id` is
+invisible to the product", and nothing should be built on that assumption.
+
+**Why a command rather than a read.** `directory_applications` enables RLS and defines **no policy at all** (0057), so it is
+deny-all to `authenticated`; and the 0061 read RPCs deliberately return "ONLY bounded safe fields … and **NEVER external_id**".
+Product code therefore cannot obtain the identifier a declaration would key on. Phase 18A1 shipped a server action that read it
+directly, and independent review deleted it: mocked IO had hidden that it could never execute.
+
+0061's rule is about what is **returned to a browser caller**, not about what a definer function may **read**. Its own RPCs
+already read `directory_applications` internally and simply do not return the identifier. Migration **0087**
+(`product_declare_application_alias(p_tenant_id, p_directory_application_id, p_app_product_id)`) follows exactly that discipline:
+
+```
+caller sends  directory_application_id + app_product_id     (two row ids it already holds)
+0087          verifies owner/admin, reads external_id INTERNALLY, writes the alias
+caller gets   one bounded status string                      (never the identifier)
+```
+
+`external_id` is opaque provider evidence — an Okta application id, stored unencrypted, not a credential, and it reaches no
+product surface anywhere in the app. It was withheld as minimum-disclosure discipline. Using it inside the database boundary
+**preserves** that decision; returning it would break it.
+
+**Authorization is owner/admin, deliberately not editor.** The 0024 policy lets owner/admin/editor write `app_aliases` directly,
+so editor looks like the obvious answer. It is gated at 0061's level because the command acts on a canonical directory row that
+editors may not read. The reasoning is *not* that the identifier is otherwise unobtainable — an editor is a member, and members
+can read `discovery_facts`, where the same value sits in `fact_json`. The question is who may make a canonical **judgement** over
+a directory row, and that is the 0061/0078 level. `p_tenant_id` is **verified, never trusted**:
+`has_tenant_role` resolves the caller from `auth.uid()`.
+
+**Declaration is a human judgement, so it writes `confirmed`** with `reviewed_by = auth.uid()`. Writing `pending` would produce a
+judgement the resolver cannot use; `auto` has no defined meaning anywhere in this schema. Only a **current** directory application
+may mint new identity — a stale, review_required or disconnected row is evidence the provider stopped confirming the application
+exists. That gate is one-directional: an already-confirmed alias keeps resolving forever, because the resolver never reads the
+directory side.
+
+**Conflicts are bounded and never destructive.** The 0026 natural key means one identifier carries at most one judgement.
+Re-declaring the same product is an idempotent `already_confirmed`; a different product, a pending proposal, and a rejected
+mapping are all `conflict`. The command never promotes, resurrects or overwrites — last-write-wins is not a canonical identity
+policy.
 
 **Ownership.** `connector_runner` holds no grant on `app_aliases`, `app_products`, `vendors` or `apps`, and gains none. It writes
 `directory_applications` only through the `runner_*` SECURITY DEFINER functions (0057). Discovery may report an identifier; it may
@@ -154,8 +187,19 @@ future deterministic writer that wants auto-confirmed aliases adds `auto` togeth
 directory side, so a settled judgement keeps resolving after its source goes stale, is superseded, or its connector is
 disconnected. Whether a *stale* source may mint a *new* judgement is a question for the declaration path, and therefore for 18A2.
 
-**A resolution is not a match.** It says "this identifier IS this product". It does not say a directory application has been
-matched to a SaaS application — that decision belongs to `application_matches` (0075) and remains unbuilt.
+**Canonical alias declaration is NOT application matching.** Declaring says "this identifier IS this product"; resolving reads
+that judgement back. Neither says a directory application has been **matched** to a SaaS application — that decision belongs to
+`application_matches` (0075), which is proposal-bearing by design and remains unbuilt. The full seam now reads:
+
+```
+directory_applications.external_id   raw provider evidence, connector-owned (0057) — never leaves the database
+        ↓  0087 governed command (owner/admin, SECURITY DEFINER, reads it internally)
+app_aliases                          human canonical judgement: provider_app_id → app_product (0024/0026)
+        ↓  Phase 18A1 deterministic resolver (confirmed only, name structurally excluded)
+app_products                         canonical application/product identity
+        ↓  still unbuilt
+application_matches                  directory application ↔ SaaS app (0075)
+```
 
 ## Adding a new connector
 
