@@ -1,4 +1,4 @@
--- 0083 — Google Workspace directory PERSISTENCE: the write boundary for identities, groups, group memberships and licence
+-- 0086 — Google Workspace directory PERSISTENCE: the write boundary for identities, groups, group memberships and licence
 -- evidence. CREATE OR REPLACE FUNCTION / CREATE FUNCTION + GRANT/REVOKE only — additive; no table created, no table
 -- teardown, no row purge, no destructive op, and NO new column on any existing table.
 --
@@ -30,8 +30,13 @@
 -- set; promotion clears stale_since (the 0070 invariant); staling is eligibility-gated, first-run-safe, latest-run-only,
 -- serialized by a FOR UPDATE on the connector row, and bounded by the configurable mass-staleness circuit breaker.
 --
--- NOTE ON ORDERING: this file is 0083 because 0082 (the person identity graph) is already on main. 0082 does not touch
--- runner_insert_discovery_fact, so the CREATE OR REPLACE below — which is written from 0077's body — reverts nothing.
+-- NOTE ON ORDERING: this file is 0086, stacked after 0085. The predecessors are 0082 (person identity graph),
+-- 0083 (governance finding persistence), 0084 (contract entitlements) and 0085 (governance canonical read boundary).
+-- It was authored as 0083 and renumbered twice as those landed; the SQL body is unchanged by the renumbering.
+--
+-- What matters for correctness rather than tidiness: NONE of 0082/0083/0084/0085 touches runner_insert_discovery_fact,
+-- so the CREATE OR REPLACE below — written from 0077's body — reverts nothing any of them added. That was re-verified
+-- against each predecessor, not assumed from the fact that they are about different subjects.
 --
 -- ACTIVATES nothing. Staging only. No connector is enabled by this migration; google_workspace remains disabled and
 -- unconnectable in the provider registry, and no Google credential exists.
@@ -64,7 +69,7 @@ begin
   end if;
   -- fact_type allowlist — app_user_account/group (Phase 2) + identity_account (Phase 4) + directory_group (Phase 6) +
   -- directory_group_membership (Phase 8) + directory_application (Phase 10) + the two application-assignment edges
-  -- (Phase 12) + license (0083, Google Workspace licence evidence).
+  -- (Phase 12) + license (0086, Google Workspace licence evidence).
   if p_fact_type not in ('app_user_account', 'group', 'identity_account', 'directory_group', 'directory_group_membership',
                          'directory_application', 'application_user_assignment', 'application_group_assignment',
                          'license') then
@@ -144,7 +149,7 @@ begin
   ) then
     raise exception 'group fact_json contains a non-approved key';
   end if;
-  -- license: MINIMAL positive key ALLOWLIST (0083). ONLY the assignment's identity. No assignment timestamp and no cost
+  -- license: MINIMAL positive key ALLOWLIST (0086). ONLY the assignment's identity. No assignment timestamp and no cost
   -- field is permitted, because the source reports neither — an allowlist entry for a field the provider cannot supply
   -- is an invitation to synthesize one.
   if p_fact_type = 'license' and exists (

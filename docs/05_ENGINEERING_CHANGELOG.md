@@ -12,6 +12,44 @@ from PRs verified via `git log` / `gh pr list`.
 > **as of each PR's date** and are historical — where an older entry says "RISK-007 remains OPEN" / "Phase C remains
 > BLOCKED", that was accurate at that entry's date; this banner is the current state.
 
+### feat(connectors) — Google Workspace: migration 0086, the write boundary a second provider needed · 2026-08-12
+
+The first connector after Okta, and the first to prove the write boundary generalizes. Google Workspace stays
+`enabled: false` / `status: future`: no credential exists, no domain-wide delegation has been granted, nothing is
+scheduled or deployed.
+
+**Why a migration at all.** The Phase 4/6/8 promote+stale RPCs are hard-scoped to Okta by LITERAL, in three places each
+(the connector provider check, the fact filter, the inserted column). A Google run cannot reuse them —
+`runner_promote_okta_directory_users` raises before touching a row. The obvious fix is to copy six functions and swap the
+literal: ~420 lines of duplicated security-critical SQL that provider three would copy again. Instead the semantics are
+written once, provider-parameterized, guarded by an allowlist currently containing only `google_workspace`. **Okta is
+untouched and also unreachable through the new functions** — passing `'okta'` is refused — which is a stronger guarantee
+than care. Migrating Okta later is a one-line allowlist change plus a deletion.
+
+**`manifest_multi`.** Neither existing `base_url_source` described Google: its hosts ARE constant, so `server_derived`
+would be false, but there are two of them and the executor-program kind's `base_url` is one string. A third value is
+added, guarded so a single-host provider cannot use it to dodge the existing rule.
+
+**`license` at the write boundary.** Already in the shared discovery-fact contract, but no connector could write one. The
+key allowlist refuses any cost field and any assignment timestamp because Google reports neither — an allowlist entry for
+a field the provider cannot supply invites synthesizing one. `EMIT_FACT_TYPES` gains the same entry so the manifest layer
+stops being narrower than both the contract and the database. **No normalized licence table is introduced.**
+
+**Numbering, because it moved twice.** Authored as 0083; renumbered when #407 merged `governance_finding_persistence` as
+0083 and #409 merged `contract_entitlements` as 0084; renumbered again to **0086** once #412 merged `0085`
+(`2f1c976`). This PR is based directly on `main` — nothing is stacked. The executable
+SQL is byte-identical across both renumberings (verified by sha256 over the comment-stripped file); every changed line is
+a comment. None of 0082/0083/0084/0085 replaces `runner_insert_discovery_fact` or any other function 0086 replaces, so
+the `CREATE OR REPLACE` reverts nothing — verified per predecessor rather than assumed.
+
+**Risk register: nothing opened or closed.** The new write path sits inside the existing connector-credential risk
+surface (RISK-007) and introduces no new category; Google remains disabled, so no new exposure is created by merging.
+
+**Negative controls (§G).** Widening the provider allowlist to include `okta` initially left the suite GREEN — the
+assertions passed for the wrong reason, since every call raises for two independent reasons and the block only checked
+that *something* raised. Fixed to match the allowlist's own message across all five entrypoints; the same mutant now
+fails. Removing the promotion completeness gate turns the partial-failure group red. Both restored exactly.
+
 ### feat(governance) — Phase 17 prerequisite: migration 0085, the canonical read boundary · 2026-08-12
 
 The Phase 17 loader could not be built: of the engine's six canonical inputs, two had **no authorized read path at all**.

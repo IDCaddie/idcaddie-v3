@@ -1,4 +1,4 @@
--- google_workspace_directory_persistence_test.sql — verifies migration 0083: the 'license' fact type at the write
+-- google_workspace_directory_persistence_test.sql — verifies migration 0086: the 'license' fact type at the write
 -- boundary, the provider allowlist that keeps the parameterized path away from Okta, and the promote/stale semantics for
 -- identities, groups and group memberships. All migrations applied, connector_runner present (0021).
 -- Run with psql -v ON_ERROR_STOP=1. NEVER touches hosted Supabase. certificationOnly; staging only.
@@ -95,7 +95,7 @@ end $$;
 -- run's connector not matching the claimed provider), so widening the allowlist to include 'okta' left the block GREEN.
 -- A negative control caught it. The assertions therefore match the allowlist's OWN message, which no other guard emits.
 do $$ declare raised boolean; msg text; begin
-  -- An Okta run is refused by the allowlist BEFORE any ownership logic, so 0083 can never alter an Okta row.
+  -- An Okta run is refused by the allowlist BEFORE any ownership logic, so 0086 can never alter an Okta row.
   perform pg_temp.open_run('a1111111-0000-4000-8000-000000000001','9c000001-0000-4000-8000-000000000001','40000001-0000-4000-8000-000000000001', true, 0, 'last_page');
   raised := false; msg := '';
   begin perform public.runner_promote_directory_users('40000001-0000-4000-8000-000000000001','a1111111-0000-4000-8000-000000000001','okta');
@@ -240,7 +240,7 @@ end $$;
 -- SUPERSEDES an earlier good run — blocking that earlier run from staling, even though the rejecting run cannot promote
 -- or stale either. The net effect is that nothing is staled at all until a clean run lands.
 --
--- This is faithful to the Okta functions (0053/0070), whose guard is written identically; it is NOT introduced by 0083.
+-- This is faithful to the Okta functions (0053/0070), whose guard is written identically; it is NOT introduced by 0086.
 -- It fails SAFE — the failure mode is "stale nothing", never "stale everything" — so it is pinned here as behaviour
 -- rather than quietly fixed, because changing it would change Okta's semantics too and that is a separate decision.
 do $$ declare r jsonb; begin
@@ -426,11 +426,11 @@ end $$;
 
 -- ════ G12: OKTA IS UNTOUCHED ═════════════════════════════════════════════════════════════════════════════════════════
 do $$ begin
-  -- 0083 must not have altered the Okta write path in any way.
+  -- 0086 must not have altered the Okta write path in any way.
   assert has_function_privilege('connector_runner', 'public.runner_promote_okta_directory_users(uuid,uuid)', 'EXECUTE'), 'G12 okta promote still granted';
   assert has_function_privilege('connector_runner', 'public.runner_mark_absent_okta_identities_stale(uuid,uuid)', 'EXECUTE'), 'G12 okta stale still granted';
   -- Scoped to THIS suite's tenants. The harness runs every *_test.sql against one database, so a repo-wide count would
-  -- be asserting about other suites' fixtures rather than about 0083.
+  -- be asserting about other suites' fixtures rather than about 0086.
   assert (select count(*) from public.identity_accounts
            where provider='okta'
              and tenant_id in ('a1111111-0000-4000-8000-000000000001','a2222222-0000-4000-8000-000000000002')) = 0,
@@ -448,7 +448,7 @@ end $$;
 -- `audit_logs`, which is append-only and refuses it (0068 writes a stale-transition audit row, and G7 triggers exactly
 -- that path). The harness gives every run a throwaway database, so leaving rows costs nothing.
 --
--- The `google_workspace` row in connector_discovery_policy is likewise left: 0083 inserts it as real configuration, and
+-- The `google_workspace` row in connector_discovery_policy is likewise left: 0086 inserts it as real configuration, and
 -- removing it here would undo part of the migration under test.
 
 reset role;
