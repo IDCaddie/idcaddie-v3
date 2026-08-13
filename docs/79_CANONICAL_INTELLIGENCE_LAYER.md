@@ -94,6 +94,52 @@ organization "owns" a contract covering both.
 **No matcher exists.** The table is empty, RLS-locked with no policy, and nothing reads it. Building a matcher before fixing the
 shape of its output is how you get a name-based join.
 
+## Canonical application identity — the bridge a matcher needs (Phase 18A)
+
+Three facts stay separate, permanently. Collapsing any two is the failure mode:
+
+```
+directory_applications.external_id       raw PROVIDER identifier — connector-owned (0057)
+            ↓
+app_aliases                              canonical JUDGEMENT: this identifier IS this product — product-owned (0024/0026)
+            ↓
+app_products                             canonical application/product identity
+            ↓
+application_matches                      directory application ↔ SaaS app — a different decision, still unbuilt (0075)
+```
+
+**Why the matcher could not be built first.** Both endpoints already point at one catalog —
+`directory_applications.catalog_product_id → app_products` and `apps.canonical_app_id → app_products`, each a same-tenant
+composite FK — but nothing had ever written either column, and `app_aliases` was empty. The only other joinable fields are names.
+So **building the matcher before this bridge exists would have forced name-based matching or produced a zero-output engine.** The
+missing layer was canonical application evidence, not matching logic.
+
+**Ownership.** `connector_runner` holds no grant on `app_aliases`, `app_products`, `vendors` or `apps`, and gains none. It writes
+`directory_applications` only through the `runner_*` SECURITY DEFINER functions (0057). Discovery may report an identifier; it may
+not decide what that identifier *is*. The canonical judgement is a product-side editor write governed by the existing 0024 RLS
+policies — members read, owner/admin/editor insert and update, nobody deletes. Phase 18A therefore adds **no migration and no
+SECURITY DEFINER RPC**: a wrapper over an already-governed editor write would catch no failure class RLS does not.
+
+**Ambiguity is not multiple `app_aliases` rows.** The 0026 natural key `UNIQUE(tenant_id, alias_type, alias_value)` means an
+identifier has at most one canonical judgement — that is what makes it a judgement rather than a candidate list. When it is not
+clear which product an identifier belongs to, **leave it unresolved**: write nothing. Competing candidates are a *match* concept
+and belong in `application_matches`, which is proposal-bearing by design. Never weaken the natural key to hold candidates.
+
+**Names are display metadata, never identity.** `alias_type` includes `name`, and deterministic resolution excludes it
+structurally (`DETERMINISTIC_ALIAS_TYPES` = every type except `name`). Declaration is narrower still: only `provider_app_id` may
+be declared today, because `directory_applications.external_id` is the only current source field with those semantics. Enabling
+`sso_app_id`, `oauth_client_id`, `external_instance_id` or `instance_domain` means naming the source field it reads from — not
+noticing that the enum contains the word.
+
+**Only a settled judgement resolves.** `confirmed` and `auto` resolve; `pending` is a proposal nobody accepted and `rejected` is a
+human saying these are not the same product — both read as unresolved. Re-declaring the same mapping is an idempotent no-op;
+pointing an identifier at a *different* product is a conflict requiring an explicit review decision, never a silent overwrite.
+Last-write-wins is not a canonical identity policy.
+
+**Provider freshness and canonical judgement are separate facts.** Only a `current` directory application may mint *new* canonical
+identity, but an already-confirmed alias keeps resolving forever — resolution reads `app_aliases` alone and never consults the
+directory side. A source going stale does not retract a judgement a human already made.
+
 ## Adding a new connector
 
 1. Add the provider to the catalogue (`customer-connectors/catalog.ts`).

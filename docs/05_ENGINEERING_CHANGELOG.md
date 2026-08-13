@@ -12,6 +12,52 @@ from PRs verified via `git log` / `gh pr list`.
 > **as of each PR's date** and are historical — where an older entry says "RISK-007 remains OPEN" / "Phase C remains
 > BLOCKED", that was accurate at that entry's date; this banner is the current state.
 
+### feat(catalog) — Phase 18A: deterministic application alias resolution · 2026-08-13
+
+**Phase 18 was going to be the application matcher; recon said the matcher was not the missing piece.** `application_matches`
+(0075) has been correctly shaped since Phase 7B, but both endpoints already point at one catalog —
+`directory_applications.catalog_product_id → app_products` and `apps.canonical_app_id → app_products`, each a same-tenant
+composite FK — and **neither column had ever been written by anything**, while `app_aliases` (0024) was empty. The only remaining
+joinable fields are names. So a matcher built now would have had to either match on names or emit nothing. The absent layer was
+**canonical application evidence**, not TypeScript matching logic. This PR builds that layer and stops there.
+
+**Zero migration, and that is the finding.** The bridge was already fully provisioned: `app_aliases` carries the alias_type
+vocabulary (`provider_app_id`, `sso_app_id`, `oauth_client_id`, `external_instance_id`, `instance_domain`, `domain`, `name`),
+same-tenant composite FKs, `review_status`/`reviewed_by`/`confidence`, and — since 0026 — the natural key
+`UNIQUE(tenant_id, alias_type, alias_value)` added for exactly this idempotency. Its 0024 RLS policies (members read;
+owner/admin/editor insert and update; no delete) are already the governed write boundary. **No SECURITY DEFINER RPC was added**:
+per ENGINEERING_STANDARDS.md Principle 1, a wrapper over an already-governed editor write catches no failure class RLS does not.
+Baseline tier T2, no semantic escalation — no migration, no new grant, no new policy, no definer, no credential path.
+
+**Ownership is enforced, not documented.** `connector_runner` holds no grant on `app_aliases`/`app_products`/`vendors`/`apps` and
+gains none; it writes `directory_applications` only through the 0057 `runner_*` definer functions. Discovery may report an
+identifier; it may not decide what that identifier *is*. The three facts stay separate: raw provider identifier (connector-owned)
+→ canonical alias judgement (product-owned) → application match decision (18B/18C, untouched here).
+
+**Names are excluded structurally.** `DETERMINISTIC_ALIAS_TYPES` is every alias type except `name`, and a `name` lookup
+short-circuits before any query reaches the database. Declaration is narrower still — only `provider_app_id`, because
+`directory_applications.external_id` is the only current source field with those semantics; enabling another type means naming the
+column it reads. The identifier is read from the directory row, never from the request, so a caller cannot submit a forged one.
+
+**Ambiguity stays unwritten.** The natural key means an identifier has at most one canonical judgement — that is what makes it a
+judgement and not a candidate list. When the product is unclear, nothing is written. Only `confirmed`/`auto` resolve; `pending`
+and `rejected` read as unresolved. Re-declaring is an idempotent no-op; re-pointing an identifier at a different product is a
+bounded conflict, never a silent overwrite. Provider freshness and canonical judgement are separate facts: only a `current`
+directory application may mint new identity, but resolution reads `app_aliases` alone, so a confirmed alias survives its source
+going stale.
+
+**Proof:** 42 focused tests (17 pure resolver + declaration behaviour + privilege/neutrality source contracts), full suite 2746
+passed. Three mutants, each RED on exactly its intended test and restored: allowing `name` as deterministic evidence (3 RED),
+dropping the server-derived tenant filter (1 RED), silently overwriting a different existing mapping (2 RED). One real finding
+along the way — the first draft of the service-role test restated the forbidden literals and tripped
+`check-auth-safety.sh`; the guard was left untouched and the test rewritten to prove coverage instead, since that scanner is
+already the canonical owner of the fact.
+
+**Not built, deliberately:** no UI, no `application_matches` read or write, no propose/decide boundary, no matcher, no Rule 5
+change, no entitlement or billable computation. `directory_applications.catalog_product_id` is deliberately left NULL —
+resolving through `app_aliases` avoids needing a product-side writer on a connector-owned table, which is the only thing that
+would have forced a migration. No hosted Supabase, no AWS, no provider contact, nothing deployed.
+
 ### feat(governance) — Phase 16: the tenant-wide cross-source engine · 2026-08-12
 
 A **sibling** to Phase 14 at `src/lib/server/cross-source-governance/`, not an extension of it. Phase 14 keeps its
