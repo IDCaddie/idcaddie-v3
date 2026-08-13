@@ -242,3 +242,66 @@ run that actually started, so a completion cannot be claimed by a caller that ne
 `resolutionHasRun = personAccountLinks.length > 0` is **not** touched here. Phase 16 reviewed and retained it, and its
 limitation is documented above. 0085 adds an execution signal for the application matcher only, because that is where the
 row-count proxy is actually wrong today — not to generalise a pattern.
+
+## The tenant loader (Phase 17)
+
+```
+canonical persisted evidence
+        ↓   authorized product RPCs (0061 / 0078 / 0085)
+tenant loader            — src/lib/data/cross-source-governance-loader.ts
+        ↓   CrossSourceGraph
+pure cross-source engine — src/lib/server/cross-source-governance/
+        ↓   findings + completeConnectionIds
+0083 evidence-gated lifecycle
+```
+
+**The loader owns availability and completeness truth. The engine owns deterministic governance meaning. 0083 owns the
+finding lifecycle.** Those are three questions, and answering any of them twice is how a product gets two answers. There
+is no rule logic in the loader — no severity, no subject, no threshold — and no SQL in the engine; closing, reopening and
+first/last-seen are never re-derived in TypeScript.
+
+| engine input | source |
+|---|---|
+| `appAccounts` | `product_app_accounts` (0078), offset-paged |
+| `identityAccounts` | `product_list_directory_identities` (0061), cursor-paged |
+| `directoryApplications` | `product_list_directory_applications` (0061), cursor-paged |
+| `personAccountLinks` | `product_person_account_links` (0085), cursor-paged |
+| `applicationMatches` | `product_application_matches` (0085), cursor-paged |
+| `capabilities` | `product_connector_capabilities` (0078) + `connectors` for the provider label |
+| `matcherState` | `product_application_matcher_state` (0085) |
+
+Tenant authority comes from `accessGate()` — the existing RLS-backed tenant context, never a caller-supplied id — and
+every RPC re-verifies it via `has_tenant_role`, so the check happens twice. The user-scoped cookie-bound client is the
+only database access; **no `service_role`, no elevated client, no provider adapter, and no provider name is ever compared
+to a literal.**
+
+### Read failure is not an empty result
+
+A failed read and a successful empty read are the same `[]` in most code, and once they are the same the engine cannot
+tell *"this tenant has no orphaned accounts"* from *"we could not look"* — after which 0083 would close findings on the
+strength of a query that never ran. So **a failed required read fails the whole evaluation**: nothing is synced and
+nothing closes. The bounded error vocabulary is `not_authorized` · `query_failed` · `page_limit_exceeded`, and no SQL,
+URL, PostgREST payload, row or stack ever reaches a caller.
+
+Every read is **paged to exhaustion**. "Page one is enough" is the quiet way a loader lies: the engine would see a
+truthful-looking subset and conclude that accounts beyond row 500 have no owner. A cursor that fails to advance is
+treated as a broken read contract and fails, because a duplicated or truncated estate is worse than no answer.
+
+Stale rows are loaded **deliberately** — the engine decides what staleness means per rule, and a loader that filtered
+them would answer a question the rules exist to answer.
+
+### `complete_connection_ids`
+
+Passed to 0083 as the engine's own `completeConnectionIds`: exactly the connections whose capability was proven
+`available`. A stale, failed, plan-limited, permission-limited, unsupported or simply undeclared source can therefore
+never license a closure. A capability naming a connection the tenant does not own is dropped rather than defaulted — an
+unattributable capability is not evidence.
+
+### Rule 5 now reads execution state, not row count
+
+The engine gates rule 5 on `matcherState.status === "completed"` (0085) and nothing else. `lastCompletedAt` being set is
+deliberately **not** enough: that timestamp survives a later failure, so a run that failed this morning must not present
+yesterday's completeness as today's. Never-ran, running and failed each produce a distinct withheld reason.
+
+**Person resolution is unchanged.** `resolutionHasRun = personAccountLinks.length > 0` remains as Phase 16 reviewed and
+retained it, with the limitation documented above — no new execution marker was introduced.

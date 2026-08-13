@@ -80,10 +80,24 @@ export type PersonAccountLinkRow = {
   readonly status: "proposed" | "accepted" | "rejected";
 };
 
-/** `application_matches` (0075). Empty today — no matcher exists — which rule 5 treats as "unknown", never "unmanaged". */
+/** `application_matches` (0075) — the human judgement about which directory application is which product. */
 export type ApplicationMatchRow = {
   readonly directoryApplicationId: string;
   readonly status: "proposed" | "accepted" | "rejected";
+};
+
+/**
+ * `application_matcher_state` (0085) — whether the matching PROCESS ran, which is a different fact from what it found.
+ *
+ * Rule 5 gates on `status === "completed"` and on nothing else. In particular it does NOT gate on `lastCompletedAt`:
+ * that timestamp survives a later failure on purpose (an old completion stays a fact), so treating "has ever completed"
+ * as "is currently complete" would let a run that failed this morning present yesterday's completeness as today's.
+ * `null` status means the matcher has never run at all — the absence of a row, not a state it reached.
+ */
+export type ApplicationMatcherState = {
+  readonly hasEverRun: boolean;
+  readonly status: "running" | "completed" | "failed" | null;
+  readonly lastCompletedAt: string | null;
 };
 
 export type CrossSourceGraph = {
@@ -94,6 +108,8 @@ export type CrossSourceGraph = {
   readonly personAccountLinks: readonly PersonAccountLinkRow[];
   readonly directoryApplications: readonly DirectoryApplicationRow[];
   readonly applicationMatches: readonly ApplicationMatchRow[];
+  /** Execution evidence for the matcher. Counting `applicationMatches` can never substitute for this — see rule 5. */
+  readonly matcherState: ApplicationMatcherState;
 };
 
 // ── Output ────────────────────────────────────────────────────────────────────────────────────────────────────────

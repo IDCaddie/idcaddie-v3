@@ -12,6 +12,38 @@ from PRs verified via `git log` / `gh pr list`.
 > **as of each PR's date** and are historical — where an older entry says "RISK-007 remains OPEN" / "Phase C remains
 > BLOCKED", that was accurate at that entry's date; this banner is the current state.
 
+### feat(governance) — Phase 17: the tenant loader and cross-source evaluation path · 2026-08-13
+
+Canonical evidence now reaches the engine. `loadCrossSourceGovernanceInput` assembles one tenant's rows from the
+authorized product RPCs (0061 / 0078 / 0085); `evaluateTenantCrossSourceGovernance` authorizes, loads, evaluates the
+pure engine and reconciles through 0083. **No migration.**
+
+**Three owners, kept apart:** the loader owns availability and completeness truth, the engine owns deterministic
+meaning, 0083 owns lifecycle. No rule logic in the loader, no SQL in the engine, no lifecycle arithmetic re-derived in
+TypeScript.
+
+**Read failure is not an empty result.** A failed read and a successful empty read are the same `[]` in most code, and
+once they are the same the engine cannot tell "no orphaned accounts" from "we could not look" — after which 0083 closes
+findings on the strength of a query that never ran. A failed required read therefore fails the whole evaluation:
+nothing syncs, nothing closes. Bounded errors (`not_authorized` / `query_failed` / `page_limit_exceeded`); no SQL, URL,
+PostgREST payload, row or stack escapes.
+
+**Every read pages to exhaustion**, and a cursor that stops advancing is treated as a broken read contract and fails —
+a duplicated or truncated estate is worse than no answer. Stale rows are loaded deliberately, because deciding what
+staleness means is the engine's job.
+
+**Rule 5 now reads execution state rather than counting rows.** The engine gates on `matcherState.status === "completed"`
+(0085); `lastCompletedAt` being set is deliberately not enough, since it survives a later failure and a run that failed
+this morning must not present yesterday's completeness as today's. Never-ran, running and failed each yield a distinct
+withheld reason. Person resolution is untouched.
+
+Tenant authority is the existing `accessGate()` context, re-verified inside every RPC — checked twice. **No
+`service_role`, no elevated client, zero provider adapters, zero provider literals in code.**
+
+**Verified local: 34 loader tests, 55 engine tests, 2780 unit tests, tsc 0, lint 0 errors, build compiled, RLS suite
+passed, migration safety passed.** Four mutants all RED: read failure swallowed into `[]`, incomplete connections
+included in `complete_connection_ids`, rule 5 reverted to the row-count proxy, and the sync retargeted at
+`provider_local`. **No migration. Nothing deployed, no hosted apply, no provider contacted.**
 ### test(governance) — 0085 B14/B15: the two invariants the stubbed fixture cannot observe · 2026-08-13
 
 **Tests only. No migration, no production behaviour change.** 0085's suite stubs `has_tenant_role`, which is the right
