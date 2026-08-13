@@ -100,6 +100,9 @@ revoke all on public.app_account_identity_matches from anon, authenticated, conn
 revoke all on public.connector_capability_state from anon, authenticated, connector_runner;
 -- 0077 adds one more (per-resource run completeness). Same posture, same lockstep rule.
 revoke all on public.connector_run_resource_discovery from anon, authenticated, connector_runner;
+-- 0083 governance_findings: same Tier-2 posture again (RLS on, ZERO policies; the sync and read RPCs are the only path,
+-- and the runner produces evidence rather than conclusions). governance_finding_persistence_test G0 is the backstop.
+revoke all on public.governance_findings from anon, authenticated, connector_runner;
 -- 0082's person<->account link table is the same Tier-2 posture (RLS on, ZERO policies; reads and decisions go through the
 -- product RPCs, and the runner has no business writing a human judgement). Same lockstep rule; the person_identity_graph_test
 -- P0 zero-privilege assertions are the backstop.
