@@ -184,6 +184,180 @@ here instead of silently doubling every proposal.
 confirmed load-bearing by mutation rather than assumed: deleting the bot filter from the person-creation pass fails P2
 with `got 4`, and making the person join case-sensitive fails P12 with `got 0`. `scripts/test-rls.sh` re-revokes the new table in lockstep with the migration so the suite mirrors the real
 deny-all surface. **Not applied to hosted Supabase; nothing deployed. No risk opened or closed.**
+### fix(commercial) — Phase 10 review: four blocking defects in #409, found by attacking it · 2026-08-12
+
+**Two of them fabricated money.** (R1) `provisioned` resolved the `app_accounts` capability across the whole workspace,
+so a workspace holding both a Slack connector (implemented) and an Okta connector (`planned`) answered "available" for
+**both** — and a line declaring the OKTA connector got a correctly-scoped counts call returning 0 rows, read 0
+provisioned, and offered *the entire purchased quantity* as an annual saving. Two clicks to reach: the form lists every
+active connector. (R2) A declared connector with **no account rows at all** did the same thing. Fixed by resolving the
+capability against the **declared connector alone**, and by carrying `totalEvidence` so "discovery has not produced
+accounts" stops being reported as "there are no accounts". A real `current = 0` backed by retained stale rows still
+reads as a measured 0 — that reading is supported.
+
+**(R3) An unsupported quantity was echoing an availability claim.** With a healthy Okta connector, `assignments`
+resolves *available*, so the Assigned cell — which shows no number — read "Application assignments is current from the
+connected directory." `withheld()` now keeps the capability's sentence only when the capability is genuinely
+unavailable, and otherwise states our own constraint.
+
+**(R4) The audit writer re-opened the hole 0081 closed.** 0081 revoked EXECUTE from every trigger-returning function in
+`public` and said future definer trigger writers must inherit the posture; it was a one-time loop and could not reach a
+function created in 0084. Proven on a clean apply with no harness grants: without the fix
+`audit_contract_entitlement_write` carried `<NULL = EXECUTE to PUBLIC>` with `authenticated = t`, while its 0068 sibling
+carried `postgres=X/postgres`. 0084 now revokes its own trigger function. Revoking breaks nothing — a trigger runs with
+the table owner's privileges — it stops an unprivileged role borrowing a SECURITY DEFINER function's authority to forge
+append-only audit rows.
+
+**Three untested boundaries shipped as T12–T14:** cross-org read leak inside one tenant; a procurement manager moving a
+line onto a contract they do not manage (refused with `42501` from `WITH CHECK`, not a silent 0-row update); and direct
+invocation of the audit writer. Five mutations were run and all turned tests RED, including two new ones covering the
+R1 and R2 guards; every mutation was restored byte-identically.
+
+### feat(commercial) — Phase 10: the purchased-line editor, and the client/server split it forced · 2026-08-12
+
+**Without this the table could only be populated by a direct database write**, which made the whole phase verifiable but
+not usable. `/contracts/[id]/entitlements/new` and `.../[entitlementId]/edit` are thin server-rendered shells over one
+client form posting to `entitlement-actions.ts` — the same arrangement as the contract form, with no authorization in
+the UI: 0082's RLS decides whether a save lands, and a denied save is deliberately indistinguishable from "no longer
+exists".
+
+**Every quantity field starts empty and stays optional, deliberately.** A blank seat box records NULL, and a
+`defaultValue={0}` anywhere in this form would silently fill the database with claims nobody made. The edit route
+round-trips NULL → `""` → NULL so clearing a quantity records "unknown" rather than zero.
+
+**The build caught the real bug.** The client form imported the bounded vocabularies from `contract-entitlements.ts`,
+which imports the server Supabase client — dragging `next/headers` into the browser bundle and failing the build. Fixed
+the way the repo already solves this for contracts: the input type, the four vocabularies and the parser moved to a
+pure, IO-free `entitlement-write.ts` (the `contract-write.ts` / `contracts.ts` split), re-exported from the DAL so
+server callers keep one import site. Its test moved with it.
+
+The edit route finds the line in the contract's own RLS-scoped list rather than adding a single-row query: that list is
+already the authorized read, an id the caller may not see simply is not in it, and there is no second query to keep in
+sync.
+
+**ponytail: no vendor / product / application / evidence-document pickers.** Those columns are on 0082 and writable,
+but no picker exists for canonical rows and three of them is a phase of its own. Consequence worth stating —
+`possible_duplicate_entitlement` matches on `app_product_id`, so until a product picker exists that rule cannot fire
+from data entered through this form.
+
+Suite 2627 passing; build, callback-bundle guard, auth-safety, import-boundary and migration-safety all green.
+
+### feat(commercial) — Phase 10: the purchased-vs-discovered panel on contract detail · 2026-08-12
+
+**The panel performs no arithmetic.** Both engines hand it finished values, so there is no second place a commercial
+figure can be derived — the rule `lineage.ts` exists to enforce, and the three new metrics (`purchased_quantity`,
+`provisioned_accounts`, `annual_reduction_opportunity`) are registered there with their formula, unavailable state and
+security boundary.
+
+**`MeasureCell` is the component that keeps the phase honest.** A `measured` quantity renders a number; every other
+state renders its sentence — not a zero, and not a dash a reader would take for one. The UI test asserts the Billable,
+Active and Assigned cells contain **no digit at all**, which is the regression that would quietly undo the whole model.
+
+**The degradation path is the one that needed care.** `contract_entitlements` is readable by anyone who can read the
+contract (0082), but the account evidence behind `product_app_account_counts` is owner/admin only (0078). A
+procurement-org manager therefore sees purchased lines and not accounts — so the loader resolves that to `unavailable`
+with an explanation, never to zero provisioned, which a `?? 0` would have turned into a savings opportunity computed
+against nothing. A failed connector read becomes `readFailed` rather than "no connectors", preserving the difference
+between "not connected" and "we could not look".
+
+The loader takes the contract facts the page **already fetched** rather than re-reading them (Phase 7A's discipline),
+and issues one counts call per DECLARED connection — never one per connector. The two portfolio rules (duplicates
+across contracts, connectors with no contract) are filtered out here: a single contract page cannot see the other
+contracts that would clear them.
+
+`contract-detail.ui.test.tsx` gained a mock for the new loader — without it the import chain reaches
+`access-rpc-types`, whose server-only sentinel throws under jsdom. 6 new UI tests; full suite 2626 passing; build,
+callback-bundle guard, auth-safety, import-boundary and migration-safety all green.
+
+### feat(commercial) — Phase 10: the commercial read layer and findings engine over 0084 · 2026-08-12
+
+**The reconciliation refuses to turn "we cannot know" into a zero.** `reconcileEntitlement` returns a `Measure` per
+quantity whose `value` exists in exactly ONE variant — `measured` — so a caller cannot render a number for a concept
+that has none; the other three states (`not_recorded`, `not_measured`, `unavailable`) carry the sentence that explains
+them. `billable` and `active` resolve through the Phase-7B capability model rather than a hardcoded "Slack cannot do
+this", so the day a licensing or usage feed is built the support matrix changes and this file does not.
+
+**`account_status = 'active'` is never used as the `active` quantity.** It is the provider's lifecycle bucket, and
+using it as usage would be the most misleading thing available here. It surfaces separately as
+`inactive_provisioned_accounts` — a count with **no money attached**, because whether a suspended account is still
+charged for is a vendor billing rule and no billing source exists to answer it.
+
+**The only savings claim is arithmetic anyone can check.** Purchased less what the connector found, valued at the
+recorded unit price × cadence, stopped at the contracted minimum, and reported per currency — never summed across
+currencies, because there is no FX source and a single total would be a conversion nobody performed. A price with no
+cadence yields `not_estimable`, not an assumed annual. Every money figure carries its `basis` string; the presenter
+test asserts money and basis are inseparable.
+
+**Ten rules, and the three that were asked for but cannot be evidenced are absent by design** — "assigned > active",
+"billable > active", and any per-person reclaim list all need sources that do not exist. **Confidence is capped by
+provenance:** the same subtraction over a hand-entered figure yields a low-confidence finding, asserted in
+`evaluate.test.ts`. The engine is pure and clock-free (`now` / `detectedAt` injected), so identical input yields
+identical findings, ids and order.
+
+**The copy boundary is machine-checked, and it is a DIFFERENT boundary from the access one.** docs/71 forbids access
+prose from mentioning cost or savings; commercial prose may, and is instead forbidden from claiming usage, activity,
+"unused", billable, or any removal instruction. `commercial-presenter.test.ts` scans the exhaustive `RULE_PROSE` record
+for all of it, with the one educational-disclaimer exception listed literally and asserted to still exist so the
+carve-out cannot become a loophole. Severity→tone is borrowed from the governance presenter rather than re-declared.
+
+Also: `daysUntil` is now exported from `contract-attention.ts` so notice deadlines use the same arithmetic as the
+renewal buckets — one implementation, not two. 56 new tests; full suite 2620 passing, lint clean.
+
+**`src/lib/database.types.ts` was NOT regenerated.** It is stale (predates 0076–0081), and `gen-types-local.sh` breaks
+two assertions in `oauth-handoff-architecture.test.ts` by naming the `oauth_completer_*` functions in a file that
+merely describes the schema. That is a guard-scope question for the OAuth workstream, not this phase's to settle — so
+only the generated `contract_entitlements` block was spliced in, leaving the rest byte-identical. See docs/84 §9.
+
+### feat(commercial) — Phase 10: migration 0084, `contract_entitlements` — the purchased side of the graph · 2026-08-12
+
+**Numbering, because it moved twice.** Authored as 0082; renumbered to 0083 when #406 merged 0082 (the person layer);
+renumbered again to **0084** because open PR #407 owns **0083** (`governance_finding_persistence`). 0084 was verified
+free across every remote ref before being claimed. `check-migration-safety.sh` enforces a **gapless** sequence, so this
+branch is **stacked on `phase16-findings-persistence` (#407)** rather than on `main` — that is the only arrangement in
+which 0082 → 0083 → 0084 is contiguous and the gate passes; on `main` it fails with `NON-SEQUENTIAL: expected 0083`.
+When #407 merges this rebases onto `main` unchanged. The renumber touched filenames, comments, docs and test references
+only — **no change to the migration's substance**.
+
+**v3 could state a commitment and an observation but never whether they agreed.** `contracts` holds one `total_cost` —
+a commitment, not a quantity. There was no seat count, no unit price, no SKU, and no foreign key from a contract to the
+canonical `vendors` / `app_products` rows that 0024 created; `contracts.vendor_name` and `apps.vendor_name` are free
+text, so "Slack" the contract and "Slack" the connector were two unrelated strings. A contract entitlement is one
+purchased line — this contract bought this much of this product, at this unit price, on this cadence, for this term.
+
+**Five quantities, kept apart permanently.** *purchased* (this table), *assigned*
+(`directory_application_user_assignments`, 0059), *provisioned* (`app_accounts` current, 0076), *billable* (**no source
+exists** — `license_evaluations` has existed since 0001 and has never been written by anything), *active* (**no source
+exists** — the `usage` capability is vocabulary only). `app_accounts.account_status = 'active'` is the provider's
+lifecycle bucket, **not usage**; a reader that renders it as "recently active" is making a claim the evidence does not
+support. Because billable and active have no source they report as *unavailable*, never `0` — the Phase-7B
+capability rule applied to money.
+
+**What the schema enforces rather than documents.** Unknown is NULL, never 0 — a contract nobody has entered seats for
+must not read as "bought none". `unit_amount` requires both `currency` and `billing_frequency`, because a price that
+cannot be annualized is not a price and an engine assuming USD/annual would fabricate the savings figure.
+`minimum_quantity` is present in v1 specifically because reclaim below a contracted floor is still paid for — omitting
+it makes the first savings finding wrong, not merely incomplete. `source` and `confidence` are NOT NULL, defaulting to
+the conservative reading (`manual_entry` / `low`), so an unattributed number can never pass for a verified one.
+
+**Measurement is declared, never inferred.** `measured_by_connection_id` names the connector whose evidence a line is
+compared against. No name or domain matching: two workspaces, two regions, or two vendors can share a word. Same
+reasoning as connector supersession (0071) and application matches (0075).
+
+**Authorization inherited, not reinvented.** Read = the visibility of the parent contract via the 0006 subquery-RLS
+mechanism, so procurement- and paying-org members keep exactly the access they already had. Write = the same two
+authorities that may write the contract (0004: tenant editor+ **or** procurement-org manager); the paying org reads and
+never writes. No DELETE policy — financial evidence is evidence. Accepted writes append to `audit_logs` through the
+0010 SECURITY DEFINER trigger pattern, recording the quantity and deliberately **not** the price, per 0010's convention.
+
+`supabase/tests/contract_entitlement_test.sql` (T1–T11) asserts all of it, including the escalation cases (viewer,
+paying manager, cross-tenant) and the seven CHECK refusals. Full RLS suite green.
+
+**Deliberately absent:** discounts, pricing tiers, termination provisions, notice-period days, minimum commitment
+*amount* — real contract facts, but none is required by any finding in this phase and each would be a column with no
+reader. No AI, no PDF extraction, no invoice ingestion, no observed-spend events (docs/63 stays design-only). Nothing
+reads this table yet. No change to connector authentication, OAuth, the connector runner, AWS worker infrastructure,
+the shared connector framework, or the Slack / Google / Okta implementations. Staging apply pending; production
+untouched. Design and the full pre-work audit: `docs/84_CONTRACT_ENTITLEMENT_INTELLIGENCE.md`.
 
 ### feat(vault) — Phase 8M: handoff protocol v2 carries `nonceHash` and `subject` · 2026-08-03
 
