@@ -35,12 +35,24 @@ const RULES = [
   { tier: "T3", re: /^supabase\/tests\//, why: "RLS / tenant-isolation proof suite" },
   { tier: "T3", re: /^\.github\/workflows\//, why: "CI workflow (can disable or weaken a security gate)" },
   { tier: "T3", re: /(^|\/)deploy\//, why: "deploy/infra template (task role, IAM, secrets wiring)" },
+  // The authentication/session enforcement layer. Neither of these carries a T3 keyword in its path, and both gate
+  // every request: src/proxy.ts is the Next 16 Proxy (ex-Middleware) whose `matcher` decides which routes are
+  // protected — its `.well-known/` exclusion is load-bearing for Okta JWKS — and src/lib/supabase/ holds the
+  // RLS-bearing client factories plus the updateSession/redirect-to-login helper the Proxy delegates to.
+  { tier: "T3", re: /^src\/(proxy|middleware)\.[jt]sx?$/, why: "Next.js Proxy/Middleware — route protection + session refresh on every request" },
+  { tier: "T3", re: /^src\/lib\/supabase\//, why: "Supabase client factory / session refresh — the RLS-bearing auth transport" },
   { tier: "T3", re: T3_WORDS, why: "trust-boundary path (auth/OAuth/OIDC/callback/credential/secret/token/KMS/IAM/vault/RLS/tenant/migration/cert)" },
 
   // T2 — business workflow / connector behaviour.
   { tier: "T2", re: /^src\/lib\/server\//, why: "server behaviour (connector discovery, sync, normalization, governance computation)" },
   { tier: "T2", re: /^src\/lib\/(canonical|data|customer-connectors|files)\//, why: "canonical/read layer or contract & file handling" },
   { tier: "T2", re: /^src\/app\/api\//, why: "API route (server-side workflow)" },
+  // Server entry points colocated with pages. `src/app/**/actions.ts` are Server Actions and `route.ts` are Route
+  // Handlers — privileged mutation and data-export surfaces, NOT presentation, even though they sit under src/app.
+  // Without this they fall through to the T1 UI rule below. The T3 rules above still win (…/oauth/callback/route.ts).
+  // `.ts`/`.js` only, never `.tsx`: a JSX file is a component. `connector-actions.tsx` is a "use client" form that
+  // merely *calls* the server actions in the sibling `actions.ts`, and stays correctly at T1.
+  { tier: "T2", re: /^src\/app\/.*\/(route|actions|[^/]*-actions)(\.test)?\.[jt]s$/, why: "server entry point under src/app (Route Handler / Server Action) — not presentation" },
   { tier: "T2", re: /^src\/lib\//, why: "shared library used by server code" },
   { tier: "T2", re: /^(scripts|runner|contracts)\//, why: "verification script, runner deployable, or cross-repo contract" },
   { tier: "T2", re: /^supabase\//, why: "supabase config/fixture/snippet (non-migration)" },

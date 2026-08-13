@@ -51,9 +51,10 @@ integration, migration review, KMS/IAM review, or concurrency review.
 > cited as justification for de-escalating a change whose actual behavior crosses a higher-risk
 > boundary.
 
-Concretely: a file under `src/app/` or `src/components/` baselines as **T1**. The moment it forwards
-a credential, calls a privileged or `SECURITY DEFINER` RPC, writes connector state, or constructs an
-outbound `Authorization` header, semantic review escalates it. A path classifier cannot see that.
+Concretely: a page or component under `src/app/` or `src/components/` baselines as **T1**. The moment
+it forwards a credential, calls a privileged or `SECURITY DEFINER` RPC, writes connector state,
+crosses a tenant boundary, or constructs an outbound `Authorization` header, semantic review
+escalates it. A path classifier cannot see that.
 
 ## D · Provider fact ≠ normalized fact ≠ governance truth
 

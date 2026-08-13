@@ -30,6 +30,31 @@ describe("baselineRiskTier — single-category diffs", () => {
     expect(tier(["supabase/migrations/0099_example.sql"])).toBe("T3");
   });
 
+  // Found by classifying every tracked file during review of #408: nine real server entry points were sitting in the
+  // T1 "UI / presentation surface" bucket, including the audited contract write path and three CSV export handlers.
+  it("Server Actions and Route Handlers under src/app are server surfaces, never T1", () => {
+    for (const p of [
+      "src/app/(authenticated)/contracts/actions.ts",
+      "src/app/(authenticated)/contracts/[id]/file-actions.ts",
+      "src/app/(authenticated)/connectors/manage/actions.ts",
+      "src/app/(authenticated)/connectors/review/actions.test.ts",
+      "src/app/(authenticated)/access/findings/export/route.ts",
+    ]) expect(tier([p])).toBe("T2");
+    // …but the T3 rules still outrank the server-entry rule, or the repo's most sensitive route would drop to T2.
+    expect(tier(["src/app/(authenticated)/connectors/oauth/callback/route.ts"])).toBe("T3");
+    // and ordinary pages/components are untouched by the new rule — including a "use client" form whose name ends
+    // in -actions.tsx but which only *calls* the server actions in its sibling actions.ts.
+    expect(tier(["src/app/(authenticated)/contracts/page.tsx", "src/components/badge.tsx"])).toBe("T1");
+    expect(tier(["src/app/(authenticated)/connectors/manage/connector-actions.tsx"])).toBe("T1");
+  });
+
+  // Also found by the same sweep: the auth layer carries no T3 keyword in its path.
+  it("the authentication / session enforcement layer => T3", () => {
+    expect(tier(["src/proxy.ts"])).toBe("T3");            // Next 16 Proxy — decides which routes are protected
+    expect(tier(["src/lib/supabase/proxy.ts"])).toBe("T3"); // updateSession + redirect-to-login
+    expect(tier(["src/lib/supabase/server.ts"])).toBe("T3"); // the RLS-bearing client factory
+  });
+
   it("OAuth / KMS / RLS / credentials => T3, wherever in the tree they live", () => {
     // The OAuth callback route lives under src/app/ — a naive `src/app/ => T1` rule would tier the single most
     // security-sensitive route in the repo as presentation.

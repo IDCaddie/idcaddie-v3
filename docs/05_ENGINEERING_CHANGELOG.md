@@ -44,6 +44,20 @@ cross-system, deployment-skew and provider-truth prompts it did not have. The P0
 applies at every tier. Short pointers added to `AGENTS.md` (→ `CLAUDE.md`), `README_START_HERE.md`, and this index;
 the standards text is not duplicated anywhere.
 
+**Independent review found two false negatives and they are fixed in this PR.** Classifying all 784 tracked files —
+rather than only the canonical examples, which all passed — showed the tier rules were reading `src/app/` as
+presentation and missing the auth layer entirely. Ten server entry points sat in the T1 "UI / presentation surface"
+bucket, including the audited contract write path (`contracts/actions.ts`), the file upload/delete actions, the
+connector connect/manage/review Server Actions, and three CSV export Route Handlers; and the authentication layer —
+`src/proxy.ts` (the Next 16 Proxy, whose `matcher` decides which routes are protected and whose `.well-known/`
+exclusion is load-bearing for Okta JWKS) plus `src/lib/supabase/` (the RLS-bearing client factories and the
+`updateSession`/redirect-to-login helper) — carried no T3 keyword in its path and baselined T2. Two deterministic
+path rules fix both: Route Handlers and Server Action modules under `src/app/` floor at T2 (T3 keywords still win, so
+`.../oauth/callback/route.ts` stays T3), and the Proxy + `src/lib/supabase/` are T3. The rule is `.ts`/`.js`-only —
+a first attempt using `.tsx?` pulled in `connector-actions.tsx`, a `"use client"` form that merely calls its sibling
+`actions.ts`, which correctly stays T1. Net effect on the repo: exactly 16 files change tier, all of them genuine
+server or auth surfaces, none in the other direction.
+
 **Zero product, DB, connector, or provider change.** No migration, no hosted Supabase, no AWS, no Vercel, no provider
 call, no production access. Re-evaluation is gated on **5–10 substantive PRs across at least two tiers** plus recorded
 friction evidence — not a calendar date. Follow-up (deliberately not in this PR, which is v3-only): a one-line pointer
