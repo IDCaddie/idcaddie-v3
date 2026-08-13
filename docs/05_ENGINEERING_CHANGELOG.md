@@ -112,6 +112,18 @@ assertions passed for the wrong reason, since every call raises for two independ
 that *something* raised. Fixed to match the allowlist's own message across all five entrypoints; the same mutant now
 fails. Removing the promotion completeness gate turns the partial-failure group red. Both restored exactly.
 
+**A second review pass, run in parallel, found a second defect in the same lens family — malformed pagination.** The
+cursor contract was verified against the merged SQL (all four 0061/0085 reads are `where id > p_after_id order by id`)
+and is now *enforced* rather than trusted: a repeated, backward or non-advancing id returns
+`pagination_contract_violated`, and no graph is produced, no rule evaluated and no finding synced. The offset read
+needed it more — `product_app_accounts` (0078) orders by `display_name nulls last, email nulls last, external_id`, and
+`external_id` is unique only per `(tenant, connection, provider)`, so that ORDER BY is **not a total order** and each
+page is a separate statement against a live table. Silent deduplication was rejected: it would hide a broken RPC *and*
+present incomplete evidence as complete. The concrete harm avoided is a duplicated `app_account` reaching rule 4 as one
+person holding two active accounts in one connection — a finding accusing somebody of a duplicate that does not exist.
+**Honest limit:** a duplicate is detectable from inside the loader, a silently *skipped* row is not; giving that read a
+cursor is the right follow-up.
+
 ### feat(governance) — Phase 17 prerequisite: migration 0085, the canonical read boundary · 2026-08-12
 
 The Phase 17 loader could not be built: of the engine's six canonical inputs, two had **no authorized read path at all**.

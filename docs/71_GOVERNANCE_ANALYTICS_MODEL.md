@@ -284,8 +284,25 @@ nothing closes. The bounded error vocabulary is `not_authorized` · `query_faile
 URL, PostgREST payload, row or stack ever reaches a caller.
 
 Every read is **paged to exhaustion**. "Page one is enough" is the quiet way a loader lies: the engine would see a
-truthful-looking subset and conclude that accounts beyond row 500 have no owner. A cursor that fails to advance is
-treated as a broken read contract and fails, because a duplicated or truncated estate is worse than no answer.
+truthful-looking subset and conclude that accounts beyond row 500 have no owner.
+
+**Malformed pagination fails closed rather than being repaired.** The cursor reads (0061 / 0085) are
+`where id > p_after_id order by id`, so ids are strictly increasing — a property verified against the merged SQL, not
+assumed, and then *enforced*: a repeated, backward or non-advancing id returns `pagination_contract_violated`, and no
+graph is produced, no rule evaluated and no finding synced.
+
+The offset read needs that check more, not less. `product_app_accounts` (0078) orders by
+`display_name nulls last, email nulls last, external_id`, and `external_id` is unique only per
+`(tenant, connection, provider)` — so the ORDER BY is **not a total order**, and tied rows have no guaranteed ordering
+between statements. Each page is also a separate statement against a live table, so a concurrent connector run shifts
+rows under the offset. Both produce the same symptom: one row served twice while another is skipped.
+
+Deduplicating silently was rejected. A duplicate means the canonical read is malformed, and quietly repairing it would
+hide the broken RPC *and* present incomplete evidence as complete — after which 0083 could close findings against a
+graph nobody should have trusted. The concrete harm is specific: a duplicated `app_account` reaches rule 4 as one person
+holding two active accounts in one connection, i.e. a governance finding accusing someone of a duplicate that does not
+exist. **The honest limit:** a duplicate is detectable from inside the loader; a silently *skipped* row is not. Giving
+that read a cursor would be strictly better than detecting the symptom, and is the right follow-up.
 
 Stale rows are loaded **deliberately** — the engine decides what staleness means per rule, and a loader that filtered
 them would answer a question the rules exist to answer.

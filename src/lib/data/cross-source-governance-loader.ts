@@ -38,7 +38,7 @@ if (typeof (globalThis as { window?: unknown }).window !== "undefined") {
 // ── Bounded failure vocabulary ───────────────────────────────────────────────────────────────────────────────────────
 // Deliberately three values. A caller may render or log any of them; none can carry SQL, a URL, a PostgREST payload, a
 // row, a token or a stack. The raw error is dropped at the boundary below and never returned.
-export type LoaderError = "not_authorized" | "query_failed" | "page_limit_exceeded";
+export type LoaderError = "not_authorized" | "query_failed" | "page_limit_exceeded" | "pagination_contract_violated";
 export type LoadResult =
   | { readonly ok: true; readonly input: CrossSourceGraph }
   | { readonly ok: false; readonly error: LoaderError };
@@ -131,6 +131,16 @@ async function callRpc(io: LoaderIo, name: string, args: Record<string, unknown>
   }
 }
 
+/** Ids must strictly increase within a page and past the cursor that produced it. */
+function strictlyIncreasing<T extends { id: string }>(batch: readonly T[], after: string | null): boolean {
+  let prev = after;
+  for (const row of batch) {
+    if (prev !== null && row.id <= prev) return false;
+    prev = row.id;
+  }
+  return true;
+}
+
 const parseRows = <T>(schema: z.ZodType<T>, data: unknown): T[] =>
   Array.isArray(data) ? data.flatMap(r => { const p = schema.safeParse(r); return p.success ? [p.data] : []; }) : [];
 
@@ -150,18 +160,26 @@ async function loadAllByCursor<T extends { id: string }>(
     const r = await callRpc(io, name, { ...baseArgs, p_after_id: after, p_limit: pageSize });
     if (!r.ok) return r;
     const batch = parseRows(schema, r.data);
+    // Strict monotonicity, enforced rather than trusted. A repeated or backward id means the canonical read is
+    // malformed — and a duplicated app_account would reach rule 4 as one person holding two accounts in one
+    // connection, i.e. a governance finding accusing somebody of a duplicate that does not exist. Deduplicating
+    // silently would hide the broken read AND present incomplete evidence as complete, so this FAILS instead.
+    if (!strictlyIncreasing(batch, after)) {
+      console.error(`[governance/loader] non-monotonic cursor page: ${name}`);
+      return { ok: false, error: "pagination_contract_violated" };
+    }
     rows.push(...batch);
     // A short page is the last page. A full page whose rows all failed validation would otherwise stall the cursor, so
     // the raw length decides continuation and the parsed rows decide the cursor.
     const raw = Array.isArray(r.data) ? r.data.length : 0;
     if (raw < pageSize) return { ok: true, rows };
     const last = batch.length > 0 ? batch[batch.length - 1].id : null;
-    // Every 0061/0085 read orders by `id` and filters `id > p_after_id`, so the cursor advances strictly. A full page
-    // that does not advance it means the read contract is broken, and continuing would either loop or silently
-    // accumulate duplicate rows. Fail: a duplicated or truncated estate is worse than no answer.
+    // Every 0061/0085 cursor read is `where id > p_after_id order by id`, so ids are STRICTLY increasing — verified
+    // against the merged SQL, not assumed. A page that does not advance the cursor means the read contract is broken,
+    // and continuing would either loop or accumulate the same row twice.
     if (last === null || last === after) {
       console.error(`[governance/loader] cursor did not advance: ${name}`);
-      return { ok: false, error: "query_failed" };
+      return { ok: false, error: "pagination_contract_violated" };
     }
     after = last;
   }
@@ -170,14 +188,30 @@ async function loadAllByCursor<T extends { id: string }>(
 }
 
 /** `product_app_accounts` pages by OFFSET rather than a cursor, so it gets its own loop. Same exhaustion rule. */
-async function loadAllByOffset<T>(
+async function loadAllByOffset<T extends { id: string }>(
   io: LoaderIo, name: string, schema: z.ZodType<T>, baseArgs: Record<string, unknown>, pageSize: number,
 ): Promise<Fetched<T>> {
   const rows: T[] = [];
+  const seen = new Set<string>();
   for (let page = 0; page < MAX_PAGES; page++) {
     const r = await callRpc(io, name, { ...baseArgs, p_limit: pageSize, p_offset: page * pageSize });
     if (!r.ok) return r;
-    rows.push(...parseRows(schema, r.data));
+    const batch = parseRows(schema, r.data);
+    // OFFSET paging is weaker than a cursor and this read needs the check MORE, not less. `product_app_accounts`
+    // (0078) orders by `display_name nulls last, email nulls last, external_id`, and external_id is unique only per
+    // (tenant, connection, provider) — so that ORDER BY is not a TOTAL order, and tied rows have no guaranteed
+    // inter-statement ordering. Each page is also its own statement against a live table, so a concurrent connector
+    // run shifts rows under the offset. Both produce the same symptom: a row served twice while another is skipped.
+    // The duplicate is detectable and fails here; the SKIP is not detectable from inside the loader, which is the
+    // honest limit of this defence and the reason a cursor on that read would be strictly better.
+    for (const row of batch) {
+      if (seen.has(row.id)) {
+        console.error(`[governance/loader] duplicate row across offset pages: ${name}`);
+        return { ok: false, error: "pagination_contract_violated" };
+      }
+      seen.add(row.id);
+    }
+    rows.push(...batch);
     const raw = Array.isArray(r.data) ? r.data.length : 0;
     if (raw < pageSize) return { ok: true, rows };
   }
