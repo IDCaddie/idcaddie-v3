@@ -12,6 +12,43 @@ from PRs verified via `git log` / `gh pr list`.
 > **as of each PR's date** and are historical — where an older entry says "RISK-007 remains OPEN" / "Phase C remains
 > BLOCKED", that was accurate at that entry's date; this banner is the current state.
 
+### feat(governance) — Phase 17 prerequisite: migration 0085, the canonical read boundary · 2026-08-12
+
+The Phase 17 loader could not be built: of the engine's six canonical inputs, two had **no authorized read path at all**.
+`person_account_links` (0082) shipped propose/decide only, and `application_matches` (0075) shipped deny-all with the
+note *"the read contract will be a product RPC when a consumer exists."* 0085 adds those two reads and nothing that
+could be inferred instead.
+
+**Both tables stay deny-all** — no SELECT policy, no weakened revoke, no direct table grant, no `service_role`. The
+definer functions remain the only path (the 0061 reasoning: ordinary tenant membership is not evidence that a member may
+enumerate who is linked to whom).
+
+**A static guard was required, and mutation proved it.** `scripts/test-rls.sh` blanket-grants and then re-revokes, so a
+migration handing `connector_runner` a table SELECT still produced a GREEN SQL suite. That mutation was caught only by
+`scripts/governance-read-boundary-migration.test.ts`, which reads the migration text — the same technique 0079 needed
+for the same reason.
+
+**The third part is a table, and the reason is semantic.** Rule 5 must distinguish never-ran / running / failed /
+completed, and a row count over `application_matches` collapses the first three into one answer — silently withholding a
+true finding forever once a real matcher exists. **A complete run that found nothing is a result; never having looked is
+not.** `connector_capability_state` was the obvious reuse candidate and was rejected: its key requires a NOT NULL
+`connection_id`, and application matching is tenant-level with no connection, so fitting it would mean inventing a
+synthetic connector row. `application_matcher_state` is one row per tenant, three states, no counters and no job
+infrastructure; absence of a row *is* "never ran". `last_completed_at` survives a later failure so neither fact masks the
+other.
+
+Matcher execution state is **not** match truth: `application_matches` still owns which application relates to which
+product. 0085 implements no matching logic — only the `start` / `complete` / `fail` contract the matcher lane will call.
+Person resolution is untouched.
+
+**Stacked on #409** (`0084_contract_entitlements`) because `check-migration-safety.sh` requires a gapless sequence:
+from `main` there was no number available that neither duplicated 0084 nor left a gap.
+
+**Verified local: full `scripts/test-rls.sh` passed, 36 static-guard tests, 2663 unit tests, tsc 0, lint 0 errors,
+build compiled, migration safety passed.** Three negative controls all RED: tenant predicate removed, `connector_runner`
+granted a direct SELECT, and never-run collapsed into complete-zero. **Not applied to any hosted database; nothing
+deployed. No risk opened or closed.**
+
 ### feat(governance) — Phase 16: the tenant-wide cross-source engine · 2026-08-12
 
 A **sibling** to Phase 14 at `src/lib/server/cross-source-governance/`, not an extension of it. Phase 14 keeps its

@@ -100,6 +100,12 @@ revoke all on public.app_account_identity_matches from anon, authenticated, conn
 revoke all on public.connector_capability_state from anon, authenticated, connector_runner;
 -- 0077 adds one more (per-resource run completeness). Same posture, same lockstep rule.
 revoke all on public.connector_run_resource_discovery from anon, authenticated, connector_runner;
+-- 0085 application_matcher_state: same Tier-2 posture again (RLS on, ZERO policies; the product RPCs are the only path,
+-- and the runner does not drive a tenant-level process). governance_canonical_read_boundary_test B0 is the backstop.
+revoke all on public.application_matcher_state from anon, authenticated, connector_runner;
+-- application_matches (0075) has been deny-all since it landed, but nothing asserted it until 0085 opened its READ PATH.
+-- The blanket grant above re-broadens it, so re-revoke in lockstep; B0 is the backstop.
+revoke all on public.application_matches from anon, authenticated, connector_runner;
 -- 0083 governance_findings: same Tier-2 posture again (RLS on, ZERO policies; the sync and read RPCs are the only path,
 -- and the runner produces evidence rather than conclusions). governance_finding_persistence_test G0 is the backstop.
 revoke all on public.governance_findings from anon, authenticated, connector_runner;
