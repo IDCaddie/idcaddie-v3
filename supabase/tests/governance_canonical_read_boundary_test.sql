@@ -392,3 +392,145 @@ begin
   assert not public.has_tenant_role('a7000000-0000-4000-8000-00000000000a', array['owner']),
     'the has_tenant_role stub must not survive this file';
 end $$;
+
+-- ══ B14-B15 — THE TWO INVARIANTS THE STUBBED FIXTURE CANNOT OBSERVE ══════════════════════════════════════════════════
+-- Everything above runs against a STUBBED `has_tenant_role`, which is the right tool for proving "when the gate says no,
+-- the RPC refuses" — and the wrong tool for proving the gate is asked the RIGHT QUESTION. Under the stub, widening the
+-- role array from ['owner','admin'] to ['owner','admin','editor'] leaves B0-B13 entirely green while a tenant editor
+-- gains the ability to enumerate who is linked to whom. These two cases therefore run AFTER the restore above, against
+-- the REAL gate and REAL tenant_memberships rows. Placement is load-bearing: moved above the restore, they prove nothing.
+
+insert into auth.users (id, email) values
+  ('fa000000-0000-4000-8000-00000000e001','b14_owner@t.test'),
+  ('fa000000-0000-4000-8000-00000000e002','b14_admin@t.test'),
+  ('fa000000-0000-4000-8000-00000000e003','b14_editor@t.test'),
+  ('fa000000-0000-4000-8000-00000000e004','b14_viewer@t.test');
+insert into public.profiles (id, email) values
+  ('fa000000-0000-4000-8000-00000000e001','b14_owner@t.test'),
+  ('fa000000-0000-4000-8000-00000000e002','b14_admin@t.test'),
+  ('fa000000-0000-4000-8000-00000000e003','b14_editor@t.test'),
+  ('fa000000-0000-4000-8000-00000000e004','b14_viewer@t.test');
+insert into public.tenants (id, name, slug) values
+  ('fa000000-0000-4000-8000-00000000000a','B14 Tenant','b14-t');
+insert into public.tenant_memberships (tenant_id, user_id, role, status) values
+  ('fa000000-0000-4000-8000-00000000000a','fa000000-0000-4000-8000-00000000e001','owner','active'),
+  ('fa000000-0000-4000-8000-00000000000a','fa000000-0000-4000-8000-00000000e002','admin','active'),
+  ('fa000000-0000-4000-8000-00000000000a','fa000000-0000-4000-8000-00000000e003','editor','active'),
+  ('fa000000-0000-4000-8000-00000000000a','fa000000-0000-4000-8000-00000000e004','viewer','active');
+
+insert into public.people (id, tenant_id, primary_email) values
+  ('fa000000-0000-4000-8000-0000000000a1','fa000000-0000-4000-8000-00000000000a','ada@b14.test');
+insert into public.identity_accounts (id, tenant_id, provider, email) values
+  ('fa000000-0000-4000-8000-0000000000e1','fa000000-0000-4000-8000-00000000000a','okta','ada@b14.test');
+insert into public.person_account_links
+  (tenant_id, person_id, identity_account_id, method, confidence, status) values
+  ('fa000000-0000-4000-8000-00000000000a','fa000000-0000-4000-8000-0000000000a1','fa000000-0000-4000-8000-0000000000e1',
+   'normalized_email','high','proposed');
+
+insert into public.connectors (id, tenant_id, provider, status, connection_state) values
+  ('fa000000-0000-4000-8000-0000000000c1','fa000000-0000-4000-8000-00000000000a','okta','pending','verified');
+insert into public.apps (id, tenant_id, name) values
+  ('fa000000-0000-4000-8000-0000000000b1','fa000000-0000-4000-8000-00000000000a','Slack');
+insert into public.directory_applications
+  (id, tenant_id, connection_id, provider, external_id, label, sync_status) values
+  ('fa000000-0000-4000-8000-0000000000d1','fa000000-0000-4000-8000-00000000000a','fa000000-0000-4000-8000-0000000000c1',
+   'okta','A1','Slack','current');
+insert into public.application_matches
+  (tenant_id, directory_application_id, app_id, method, confidence, status) values
+  ('fa000000-0000-4000-8000-00000000000a','fa000000-0000-4000-8000-0000000000d1','fa000000-0000-4000-8000-0000000000b1',
+   'manual','high','proposed');
+
+-- ── B14 — the ALLOWED-ROLE VOCABULARY, proven against real memberships ──────────────────────────────────────────────
+-- owner and admin may read; editor and viewer are members in good standing and must still read NOTHING and write NOTHING.
+do $$
+declare v integer; refused boolean;
+begin
+  -- owner
+  perform set_config('request.jwt.claims','{"sub":"fa000000-0000-4000-8000-00000000e001"}',false);
+  set local role authenticated;
+  select count(*) into v from public.product_person_account_links('fa000000-0000-4000-8000-00000000000a');
+  assert v = 1, format('B14 an OWNER must read the links, got %s', v);
+  select count(*) into v from public.product_application_matches('fa000000-0000-4000-8000-00000000000a');
+  assert v = 1, format('B14 an OWNER must read the matches, got %s', v);
+  select count(*) into v from public.product_application_matcher_state('fa000000-0000-4000-8000-00000000000a');
+  assert v = 1, format('B14 an OWNER must get exactly one state row, got %s', v);
+  reset role;
+
+  -- admin
+  perform set_config('request.jwt.claims','{"sub":"fa000000-0000-4000-8000-00000000e002"}',false);
+  set local role authenticated;
+  select count(*) into v from public.product_person_account_links('fa000000-0000-4000-8000-00000000000a');
+  assert v = 1, format('B14 an ADMIN must read the links, got %s', v);
+  reset role;
+end $$;
+
+do $$
+declare v integer; refused boolean := false;
+begin
+  -- EDITOR: a real member, and the exact role a widened array would admit.
+  perform set_config('request.jwt.claims','{"sub":"fa000000-0000-4000-8000-00000000e003"}',false);
+  set local role authenticated;
+  select count(*) into v from public.product_person_account_links('fa000000-0000-4000-8000-00000000000a');
+  assert v = 0, format('B14 ROLE LEAK: a tenant EDITOR read %s person_account_links', v);
+  select count(*) into v from public.product_application_matches('fa000000-0000-4000-8000-00000000000a');
+  assert v = 0, format('B14 ROLE LEAK: a tenant EDITOR read %s application_matches', v);
+  select count(*) into v from public.product_application_matcher_state('fa000000-0000-4000-8000-00000000000a');
+  assert v = 0, format('B14 ROLE LEAK: a tenant EDITOR read matcher state (%s rows)', v);
+  begin
+    perform public.product_start_application_matcher_run('fa000000-0000-4000-8000-00000000000a');
+  exception when insufficient_privilege then refused := true;
+  end;
+  assert refused, 'B14 ROLE ESCALATION: a tenant EDITOR started a matcher run';
+  reset role;
+end $$;
+
+do $$
+declare v integer; refused boolean := false;
+begin
+  -- VIEWER
+  perform set_config('request.jwt.claims','{"sub":"fa000000-0000-4000-8000-00000000e004"}',false);
+  set local role authenticated;
+  select count(*) into v from public.product_person_account_links('fa000000-0000-4000-8000-00000000000a');
+  assert v = 0, format('B14 ROLE LEAK: a tenant VIEWER read %s person_account_links', v);
+  select count(*) into v from public.product_application_matcher_state('fa000000-0000-4000-8000-00000000000a');
+  assert v = 0, format('B14 ROLE LEAK: a tenant VIEWER read matcher state (%s rows)', v);
+  begin
+    perform public.product_complete_application_matcher_run('fa000000-0000-4000-8000-00000000000a');
+  exception when insufficient_privilege then refused := true;
+  end;
+  assert refused, 'B14 ROLE ESCALATION: a tenant VIEWER completed a matcher run';
+  reset role;
+end $$;
+
+-- ── B15 — a FAILED run cannot be completed without starting again ───────────────────────────────────────────────────
+-- B5 proves only the NO-ROW case, where the UPDATE matches nothing whether or not the `status = 'running'` guard exists.
+-- The guard's real job is refusing to resurrect a run that EXISTS but is not running. Without that, a caller that never
+-- looked at anything could stamp `last_completed_at` and make "complete with zero matches" assertable — the exact claim
+-- Part 3 of 0085 exists to keep honest.
+do $$
+declare r jsonb; st text; hc boolean; lc timestamptz;
+begin
+  perform set_config('request.jwt.claims','{"sub":"fa000000-0000-4000-8000-00000000e001"}',false);
+  set local role authenticated;
+
+  perform public.product_start_application_matcher_run('fa000000-0000-4000-8000-00000000000a');
+  perform public.product_fail_application_matcher_run('fa000000-0000-4000-8000-00000000000a');
+
+  r := public.product_complete_application_matcher_run('fa000000-0000-4000-8000-00000000000a');
+  assert (r->>'updated')::int = 0,
+    format('B15 FABRICATION: a failed run was completed without restarting, got %s', r);
+
+  select s.status, s.has_completed, s.last_completed_at into st, hc, lc
+    from public.product_application_matcher_state('fa000000-0000-4000-8000-00000000000a') s;
+  assert st = 'failed', format('B15 FABRICATION: the status became %s instead of staying failed', st);
+  assert hc = false, 'B15 FABRICATION: a run that never completed reports has_completed';
+  assert lc is null, 'B15 FABRICATION: a completion timestamp was stamped by a refused completion';
+
+  -- And the legitimate path still works: start again, then complete.
+  perform public.product_start_application_matcher_run('fa000000-0000-4000-8000-00000000000a');
+  r := public.product_complete_application_matcher_run('fa000000-0000-4000-8000-00000000000a');
+  assert (r->>'updated')::int = 1, format('B15 a restarted run must be completable, got %s', r);
+  reset role;
+end $$;
+
+reset role;

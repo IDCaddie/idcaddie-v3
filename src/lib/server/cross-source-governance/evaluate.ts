@@ -298,11 +298,12 @@ function ruleDuplicateAccounts(ctx: Ctx): CrossSourceFinding[] {
 // ══ RULE 5 ═══════════════════════════════════════════════════════════════════════════════════════════════════════════
 // DISCOVERED_APPLICATION_UNMANAGED_BY_IDP.
 //
-// OPEN REQUIRES:  the application's connection with `directory_applications` available, AND `application_matches` to
-//                 contain at least one row. That second clause is the whole point: the matcher does not exist yet
-//                 (docs/79 — "No matcher exists. The table is empty"), so an empty table means NOT YET LOOKED, not
-//                 "nothing is managed". Firing on it would declare a customer's entire estate unmanaged on the strength
-//                 of code nobody has written. The rule therefore ships correct and SILENT until a matcher runs.
+// OPEN REQUIRES:  the application's connection with `directory_applications` available, AND the matcher's CURRENT
+//                 status to be `completed` (migration 0085). Counting `application_matches` rows cannot substitute:
+//                 an empty table means NOT YET LOOKED just as readily as "nothing is managed", and firing on it would
+//                 declare a customer's whole estate unmanaged on the strength of code nobody had run. `completed` is
+//                 also deliberately stricter than `lastCompletedAt is not null` — that timestamp survives a later
+//                 failure, so a run that failed this morning must not present yesterday's completeness as today's.
 // CLOSE REQUIRES: that application's connection.
 function ruleUnmanagedApplications(ctx: Ctx): CrossSourceFinding[] {
   const matched = new Set(
@@ -329,6 +330,51 @@ function ruleUnmanagedApplications(ctx: Ctx): CrossSourceFinding[] {
       source_providers: sorted([app.provider]),
       evidence_connection_ids: [app.connectionId],
     }));
+}
+
+/**
+ * Why rule 5 is staying quiet. Each of these is a DIFFERENT reason an application has no accepted match, and only
+ * `completed` licenses the conclusion that the absence is real.
+ */
+function matcherWithheldReason(m: CrossSourceGraph["matcherState"]): string {
+  if (!m.hasEverRun || m.status === null) {
+    return "the application matcher has never run, so an unmatched application is unknown rather than unmanaged";
+  }
+  if (m.status === "running") return "an application matcher run is still in flight, so its output is not yet complete";
+  return "the most recent application matcher run did not complete, so absence of a match proves nothing";
+}
+
+/**
+ * The connections whose evidence is complete enough to CLOSE a finding.
+ *
+ * This is deliberately NOT the union of the three per-capability sets, and the difference is a real defect rather than
+ * a refinement. 0083 closes a finding when `evidence_connection_ids <@ p_complete_connection_ids` — a FLAT subset test
+ * that cannot know which capability a given finding rested on. So a connection that is `available` for `identity` but
+ * `incomplete` for `app_accounts` would, under a union, license the closure of an app-account finding that this very
+ * run withheld for lack of app-account completeness. The engine would say "no connection has proven its SaaS account
+ * list is complete" and, in the same payload, hand 0083 the proof it needs to close exactly that finding.
+ *
+ * The rule here: a connection is closure-eligible only when EVERY capability it has DECLARED (among the three this
+ * engine understands) is `available`. A capability a connector never attempted has no row at all — the writer
+ * (`runner_record_capability_state`) only records what was tried — so a connector that legitimately has no directory
+ * identity is unaffected, while one that tried and came back degraded is excluded.
+ *
+ * The per-capability sets above are UNCHANGED: they decide whether a rule may OPEN, and that decision is already
+ * correctly scoped. Only the CLOSURE licence is narrowed, because only the closure test is flat.
+ *
+ * The precise long-term fix is per-capability closure scope in 0083's contract, which needs a migration; this is the
+ * correct behaviour available without one, and it errs toward withholding rather than closing.
+ */
+function closureEligibleConnections(graph: CrossSourceGraph, ctx: Ctx): string[] {
+  const degraded = new Set(
+    graph.capabilities
+      .filter(c => (c.capability === "identity" || c.capability === "app_accounts" || c.capability === "directory_applications")
+        && c.state !== "available")
+      .map(c => c.connectionId),
+  );
+  return sorted(
+    [...ctx.identityComplete, ...ctx.accountsComplete, ...ctx.appsComplete].filter(id => !degraded.has(id)),
+  );
 }
 
 /**
@@ -379,11 +425,12 @@ export function evaluateCrossSourceGovernance(graph: CrossSourceGraph): CrossSou
     "no connection has proven its SaaS account list is complete",
     () => ruleDuplicateAccounts(ctx),
   );
+  const matcher = graph.matcherState;
   gate(
     "discovered_application_unmanaged_by_idp",
-    ctx.appsComplete.size > 0 && graph.applicationMatches.length > 0,
-    graph.applicationMatches.length === 0
-      ? "no application matcher has run, so an unmatched application is unknown rather than unmanaged"
+    ctx.appsComplete.size > 0 && matcher.status === "completed",
+    matcher.status !== "completed"
+      ? matcherWithheldReason(matcher)
       : "no connection has proven its directory application list is complete",
     () => ruleUnmanagedApplications(ctx),
   );
@@ -404,6 +451,6 @@ export function evaluateCrossSourceGovernance(graph: CrossSourceGraph): CrossSou
     withheldRules,
     // Handed to 0083 as `p_complete_connection_ids`: a finding may only be resolved by a run that could actually see
     // every source it rests on.
-    completeConnectionIds: sorted([...ctx.identityComplete, ...ctx.accountsComplete, ...ctx.appsComplete]),
+    completeConnectionIds: closureEligibleConnections(graph, ctx),
   };
 }

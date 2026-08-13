@@ -12,6 +12,69 @@ from PRs verified via `git log` / `gh pr list`.
 > **as of each PR's date** and are historical — where an older entry says "RISK-007 remains OPEN" / "Phase C remains
 > BLOCKED", that was accurate at that entry's date; this banner is the current state.
 
+### feat(governance) — Phase 17: the tenant loader and cross-source evaluation path · 2026-08-13
+
+Canonical evidence now reaches the engine. `loadCrossSourceGovernanceInput` assembles one tenant's rows from the
+authorized product RPCs (0061 / 0078 / 0085); `evaluateTenantCrossSourceGovernance` authorizes, loads, evaluates the
+pure engine and reconciles through 0083. **No migration.**
+
+**Three owners, kept apart:** the loader owns availability and completeness truth, the engine owns deterministic
+meaning, 0083 owns lifecycle. No rule logic in the loader, no SQL in the engine, no lifecycle arithmetic re-derived in
+TypeScript.
+
+**Read failure is not an empty result.** A failed read and a successful empty read are the same `[]` in most code, and
+once they are the same the engine cannot tell "no orphaned accounts" from "we could not look" — after which 0083 closes
+findings on the strength of a query that never ran. A failed required read therefore fails the whole evaluation:
+nothing syncs, nothing closes. Bounded errors (`not_authorized` / `query_failed` / `page_limit_exceeded`); no SQL, URL,
+PostgREST payload, row or stack escapes.
+
+**Every read pages to exhaustion**, and a cursor that stops advancing is treated as a broken read contract and fails —
+a duplicated or truncated estate is worse than no answer. Stale rows are loaded deliberately, because deciding what
+staleness means is the engine's job.
+
+**Rule 5 now reads execution state rather than counting rows.** The engine gates on `matcherState.status === "completed"`
+(0085); `lastCompletedAt` being set is deliberately not enough, since it survives a later failure and a run that failed
+this morning must not present yesterday's completeness as today's. Never-ran, running and failed each yield a distinct
+withheld reason. Person resolution is untouched.
+
+Tenant authority is the existing `accessGate()` context, re-verified inside every RPC — checked twice. **No
+`service_role`, no elevated client, zero provider adapters, zero provider literals in code.**
+
+**Verified local: 34 loader tests, 55 engine tests, 2780 unit tests, tsc 0, lint 0 errors, build compiled, RLS suite
+passed, migration safety passed.** Four mutants all RED: read failure swallowed into `[]`, incomplete connections
+included in `complete_connection_ids`, rule 5 reverted to the row-count proxy, and the sync retargeted at
+`provider_local`. **No migration. Nothing deployed, no hosted apply, no provider contacted.**
+### test(governance) — 0085 B14/B15: the two invariants the stubbed fixture cannot observe · 2026-08-13
+
+**Tests only. No migration, no production behaviour change.** 0085's suite stubs `has_tenant_role`, which is the right
+tool for proving "when the gate says no, the RPC refuses" and the wrong one for proving the gate is asked the right
+question. Both new cases run **after** the restore block, against the real gate and real `tenant_memberships` rows —
+placement is load-bearing, because above the restore they prove nothing.
+
+**B14 — the allowed-role vocabulary, behaviourally.** Owner and admin read; **editor and viewer are members in good
+standing and must still read nothing and write nothing** across all three RPCs. `governance-read-boundary-migration.test.ts`
+already pins the array in the migration SOURCE, so widening it was never unguarded — but a source-text pin asserts what
+the migration *says*, not that the composition RPC → `has_tenant_role` → `tenant_memberships.role` denies an editor.
+B14 proves that one layer lower.
+
+**B15 — a failed run cannot be completed without starting again.** B5 claims "cannot complete a run that never started"
+but only covers the NO-ROW case, where the UPDATE matches nothing whether or not the guard exists. Removing
+`and status = 'running'` from the complete transition passes the static guard **and** passed B0–B13. B15 is the only
+thing that catches it: `start` → `fail` → `complete` must refuse, leave `status = 'failed'`, `has_completed = false`
+and `last_completed_at` NULL, and a restarted run must still complete. Without the guard a caller that never looked at
+anything could stamp a completion — making "complete with zero matches" assertable, the exact claim Part 3 of 0085
+exists to keep honest.
+
+Negative controls, each restored byte-identically: M1 remove tenant predicate → B2; M2 grant `connector_runner` direct
+SELECT → static guard; M3 collapse never-ran/complete-zero → B4; M4 widen roles → static guard **+ B14**; M5 remove the
+terminal guard → **B15 only**.
+
+Finding C (overlapping runs are conflated — `start A`/`start B`/`complete A`/`fail B` loses the newer failure) is
+recorded as a follow-up and deliberately NOT built: there is no matcher and no scheduler, and #412 must not be
+redesigned for run history. Before concurrent invocation, either `start` refuses while `status = 'running'` or
+execution state gains run identity. `last_completed_at` surviving a later failure is intentional; consumers must read
+`status` and `last_completed_at` together.
+
 ### feat(catalog) — Phase 18A2: migration 0087, governed canonical application alias declaration · 2026-08-13
 
 **Phase 18A1 shipped a resolver with nothing to resolve.** `app_aliases` was empty and no product-side path could populate it:
