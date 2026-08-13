@@ -26,11 +26,6 @@ function makeIo(rows: Rows, opts: { fail?: string[]; connectorsError?: boolean; 
   const calls: string[] = [];
   const paged = (all: unknown[], args: Record<string, unknown>): unknown[] => {
     const limit = Number(args.p_limit ?? 500);
-    if (args.p_offset !== undefined) {
-      // 0078 returns `count(*) over ()` on every row: the size of the whole matching set, not of the page.
-      const slice = all.slice(Number(args.p_offset), Number(args.p_offset) + limit);
-      return slice.map(r => ({ ...(r as object), total_count: all.length }));
-    }
     const after = args.p_after_id as string | null;
     const start = after ? all.findIndex(r => (r as { id: string }).id === after) + 1 : 0;
     return all.slice(start, start + limit);
@@ -45,7 +40,7 @@ function makeIo(rows: Rows, opts: { fail?: string[]; connectorsError?: boolean; 
       if (name === "product_sync_governance_findings") {
         return ok({ reported: (args.p_findings as unknown[]).length, opened: (args.p_findings as unknown[]).length, reopened: 0, refreshed: 0, closed: 0, withheld_from_closure: 0 });
       }
-      const key = { product_app_accounts: "accounts", product_list_directory_identities: "identities", product_list_directory_applications: "applications", product_person_account_links: "links", product_application_matches: "matches" }[name];
+      const key = { product_app_accounts_for_governance: "accounts", product_list_directory_identities: "identities", product_list_directory_applications: "applications", product_person_account_links: "links", product_application_matches: "matches" }[name];
       return ok(paged(rows[key as string] ?? [], args));
     },
     connectors: async () =>
@@ -111,7 +106,7 @@ describe("happy path and shape", () => {
 
 describe("read failure is not an empty result", () => {
   it.each([
-    "product_app_accounts", "product_list_directory_identities", "product_list_directory_applications",
+    "product_app_accounts_for_governance", "product_list_directory_identities", "product_list_directory_applications",
     "product_person_account_links", "product_application_matches", "product_connector_capabilities",
     "product_application_matcher_state",
   ])("a failed %s fails the whole load rather than returning []", async name => {
@@ -128,7 +123,7 @@ describe("read failure is not an empty result", () => {
   });
 
   it("never leaks SQL, a connection string or a raw error into the result", async () => {
-    const io = makeIo({}, { fail: ["product_app_accounts"] });
+    const io = makeIo({}, { fail: ["product_app_accounts_for_governance"] });
     const r = await loadCrossSourceGovernanceInput("t-a", io);
     const serialized = JSON.stringify(r);
     expect(serialized).not.toMatch(/relation|does not exist|5432|db\.internal|select |at 1:2/i);
@@ -199,7 +194,7 @@ describe("pagination loads everything, exactly once", () => {
     expect(r.ok && new Set(r.input.applicationMatches.map(m => m.directoryApplicationId)).size).toBe(1000);
   });
 
-  it("pages the offset-based account read to exhaustion", async () => {
+  it("pages the account cursor read to exhaustion", async () => {
     const accounts = many(1300, i => account(`a${String(i).padStart(5, "0")}`));
     const r = await loadCrossSourceGovernanceInput("t-a", makeIo({ accounts, capabilities: BOTH_AVAILABLE }));
     expect(r.ok && r.input.appAccounts).toHaveLength(1300);
@@ -290,7 +285,7 @@ describe("orchestration: authorize -> load -> evaluate -> 0083", () => {
   });
 
   it("a load failure syncs NOTHING, so a failed read can never close a finding", async () => {
-    const io = makeIo(orphanRows, { fail: ["product_app_accounts"] });
+    const io = makeIo(orphanRows, { fail: ["product_app_accounts_for_governance"] });
     const r = await evaluateTenantCrossSourceGovernance(io);
     expect(r.ok === false && r.error).toBe("query_failed");
     expect(io.calls).not.toContain("product_sync_governance_findings");
@@ -365,8 +360,8 @@ describe("review: page-boundary arithmetic", () => {
   });
 
   it.each([
-    ["offset, exactly one page", 500],
-    ["offset, one more than a page", 501],
+    ["accounts, exactly one page", 500],
+    ["accounts, one more than a page", 501],
   ])("%s loads every account once", async (_label, n) => {
     const accounts = many(n, i => account(id("a", i)));
     const r = await loadCrossSourceGovernanceInput("t-a", makeIo({ accounts, capabilities: BOTH_AVAILABLE }));
@@ -408,24 +403,22 @@ describe("review: page-boundary arithmetic", () => {
     expect(served).toBeGreaterThan(100); // it really did try, rather than giving up early
   });
 
-  // The recovered probe from the paused review. Its ORIGINAL expectation was silent deduplication; review rejected
-  // that. A duplicate id means the canonical read is MALFORMED, and deduplicating would hide the broken RPC while
-  // presenting incomplete evidence as complete — the loader would then hand the engine a graph it has no right to
-  // trust, and 0083 could close findings against it. Fail closed instead: no graph, no evaluation, no sync.
-  it("FAILS CLOSED when an offset page repeats a row, rather than deduplicating it away", async () => {
-    let call = 0;
-    const overlapping: LoaderIo = {
-      rpc: async name => {
+  // The recovered probe from the paused review, now expressed on the cursor path that actually serves this read.
+  // Its ORIGINAL expectation was silent deduplication; review rejected that. A duplicate id means the canonical read
+  // is MALFORMED, and deduplicating would hide the broken RPC while presenting incomplete evidence as complete.
+  it("FAILS CLOSED when the account read repeats a row across pages", async () => {
+    const dupPage: LoaderIo = {
+      rpc: async (name, args) => {
         if (name === "product_application_matcher_state") return ok([{ has_ever_run: false, status: null, last_completed_at: null }]);
-        if (name !== "product_app_accounts") return ok([]);
-        call++;
-        if (call === 1) return ok(Array.from({ length: 500 }, (_, i) => account(id("a", i))));
-        if (call === 2) return ok([account(id("a", 499)), account(id("a", 500))]);
-        return ok([]);
+        if (name !== "product_app_accounts_for_governance") return ok([]);
+        // A full page whose last row repeats the cursor it was given: the walk cannot advance.
+        return args.p_after_id === null
+          ? ok(Array.from({ length: 500 }, (_, i) => account(id("a", i))))
+          : ok(Array.from({ length: 500 }, () => account(id("a", 499))));
       },
       connectors: async () => ok([]),
     };
-    const r = await loadCrossSourceGovernanceInput("t-a", overlapping);
+    const r = await loadCrossSourceGovernanceInput("t-a", dupPage);
     expect(r.ok).toBe(false);
     expect(r.ok === false && r.error).toBe("pagination_contract_violated");
   });
@@ -457,7 +450,7 @@ describe("review: page-boundary arithmetic", () => {
         if (name === "product_person_account_links") {
           return Number(args.p_after_id ?? 0) ? ok([]) : ok([linkRow("l1", { app_account_id: "a-dup", status: "accepted" })]);
         }
-        if (name !== "product_app_accounts") return ok([]);
+        if (name !== "product_app_accounts_for_governance") return ok([]);
         call++;
         // The same real account served on two consecutive offset pages.
         return call <= 2 ? ok(Array.from({ length: 500 }, (_, i) => (i === 0 ? dup : account(id(`p${call}`, i))))) : ok([]);
@@ -470,52 +463,6 @@ describe("review: page-boundary arithmetic", () => {
   });
 });
 
-describe("review: a SKIPPED row is caught by the server's own set size", () => {
-  // The dangerous half of offset instability. A duplicate is visible; a skip is not — and a missing account silently
-  // withholds its finding while its connection stays closure-eligible, so 0083 resolves something still true.
-  // `count(*) over ()` (0078) makes it observable without a migration.
-  it("FAILS CLOSED when fewer rows are assembled than the server says exist", async () => {
-    const io: LoaderIo = {
-      rpc: async (name, args) => {
-        if (name === "product_application_matcher_state") return ok([{ has_ever_run: false, status: null, last_completed_at: null }]);
-        if (name !== "product_app_accounts") return ok([]);
-        // The server reports 501 rows exist, but the pages only ever yield 500 — one row fell through the boundary.
-        if (Number(args.p_offset) === 0) {
-          return ok(Array.from({ length: 500 }, (_, i) => ({ ...(account(id("a", i)) as object), total_count: 501 })));
-        }
-        return ok([]);
-      },
-      connectors: async () => ok([]),
-    };
-    const r = await loadCrossSourceGovernanceInput("t-a", io);
-    expect(r.ok).toBe(false);
-    expect(r.ok === false && r.error).toBe("pagination_contract_violated");
-  });
-
-  it("FAILS CLOSED when the set size changes between pages", async () => {
-    const io: LoaderIo = {
-      rpc: async (name, args) => {
-        if (name === "product_application_matcher_state") return ok([{ has_ever_run: false, status: null, last_completed_at: null }]);
-        if (name !== "product_app_accounts") return ok([]);
-        const off = Number(args.p_offset);
-        // A connector run inserted rows underneath the read: the second statement sees a bigger set.
-        const total = off === 0 ? 1000 : 1001;
-        const page = Array.from({ length: off === 0 ? 500 : 500 }, (_, i) => ({ ...(account(id("a", off + i)) as object), total_count: total }));
-        return ok(off >= 1000 ? [] : page);
-      },
-      connectors: async () => ok([]),
-    };
-    const r = await loadCrossSourceGovernanceInput("t-a", io);
-    expect(r.ok === false && r.error).toBe("pagination_contract_violated");
-  });
-
-  it("accepts a read whose assembled size matches the server's count", async () => {
-    const accounts = Array.from({ length: 501 }, (_, i) => account(id("a", i)));
-    const r = await loadCrossSourceGovernanceInput("t-a", makeIo({ accounts, capabilities: BOTH_AVAILABLE }));
-    expect(r.ok).toBe(true);
-    expect(r.ok && r.input.appAccounts).toHaveLength(501);
-  });
-});
 
 describe("review: the io seam cannot prove what the real RPCs could not satisfy", () => {
   it("sends each read exactly the arguments its migration declares", async () => {
@@ -528,8 +475,11 @@ describe("review: the io seam cannot prove what the real RPCs could not satisfy"
     // Every read is tenant-scoped, and the tenant is the verified one.
     for (const s of seen) expect(s.args.p_tenant_id).toBe("t-a");
     // 0078's account read pages by OFFSET; 0061/0085 page by CURSOR. A mock that got this wrong would prove nothing.
-    expect(argsFor("product_app_accounts")).toMatchObject({ p_offset: 0, p_include_stale: true, p_connection_id: null });
-    expect(argsFor("product_app_accounts").p_after_id).toBeUndefined();
+    // 0089 is a pure cursor read: tenant, cursor, limit. It takes no connection filter and no include-stale flag —
+    // it always returns every account, and the engine decides what staleness means.
+    expect(argsFor("product_app_accounts_for_governance")).toMatchObject({ p_after_id: null, p_limit: 500 });
+    expect(argsFor("product_app_accounts_for_governance").p_offset).toBeUndefined();
+    expect(argsFor("product_app_accounts_for_governance").p_include_stale).toBeUndefined();
     expect(argsFor("product_list_directory_identities")).toMatchObject({ p_after_id: null, p_include_stale: true });
     expect(argsFor("product_person_account_links")).toMatchObject({ p_after_id: null, p_limit: 500 });
     expect(argsFor("product_application_matches")).toMatchObject({ p_after_id: null, p_limit: 500 });
@@ -539,10 +489,9 @@ describe("review: the io seam cannot prove what the real RPCs could not satisfy"
     expect(Object.keys(argsFor("product_application_matcher_state"))).toEqual(["p_tenant_id"]);
   });
 
-  // BEHAVIOUR CHANGE, deliberate: a row that fails validation used to be dropped and the load continued. The server's
-  // own `count(*) over ()` now shows that for what it is — the loader assembled fewer rows than exist, i.e. missing
-  // evidence. Continuing would withhold that account's finding while leaving its connection closure-eligible, which is
-  // the same false-closure harm as a skipped page. It never coerces the bad row; it refuses the whole read.
+  // #418 made this fail via 0078's `count(*) over ()`. 0089 has no total, so the guarantee is kept directly instead:
+  // a row we could not parse is a row we did not read, and continuing would withhold that account's finding while
+  // leaving its connection closure-eligible. It never coerces the bad row; it refuses the whole read.
   it("FAILS CLOSED on a malformed row rather than quietly assembling a short set", async () => {
     const io = makeIo({
       accounts: [account("a1"), { id: "bad", connection_id: SLACK, provider: "slack", sync_status: "who_knows", account_kind: "human", account_status: "active" }],
@@ -553,15 +502,16 @@ describe("review: the io seam cannot prove what the real RPCs could not satisfy"
     expect(r.ok === false && r.error).toBe("pagination_contract_violated");
   });
 
-  // A cursor read has no server-side total, so a malformed row there is still dropped — stated so the difference
-  // between the two families is a recorded decision rather than an accident.
-  it("drops a malformed row on a CURSOR read, which carries no server-side set size", async () => {
+  // The same rule now applies to a cursor read: there is no server-side total to notice a short set, so the drop
+  // itself is the signal. The asymmetry #418 had to live with is gone.
+  it("FAILS CLOSED on a malformed row in a CURSOR read too", async () => {
     const io = makeIo({
       links: [linkRow("l1", { app_account_id: "a1" }), { id: "l2", person_id: "p1", status: "nonsense" }],
       capabilities: BOTH_AVAILABLE,
     });
     const r = await loadCrossSourceGovernanceInput("t-a", io);
-    expect(r.ok && r.input.personAccountLinks).toHaveLength(1);
+    expect(r.ok).toBe(false);
+    expect(r.ok === false && r.error).toBe("pagination_contract_violated");
   });
 
   it("rejects a non-array payload where rows are expected", async () => {
@@ -616,51 +566,6 @@ describe("review: person links reach the engine unfiltered", () => {
 });
 
 // ── Independent review of #418 ────────────────────────────────────────────────────────────────────────────────────
-describe("review LENS 7: a moving server total is itself evidence the snapshot changed", () => {
-  const pagesWithTotals = (totals: number[]): LoaderIo => ({
-    rpc: async (name, args) => {
-      if (name === "product_application_matcher_state") return ok([{ has_ever_run: false, status: null, last_completed_at: null }]);
-      if (name !== "product_app_accounts") return ok([]);
-      const page = Math.floor(Number(args.p_offset) / 500);
-      if (page >= totals.length) return ok([]);
-      return ok(Array.from({ length: 500 }, (_, i) => ({ ...(account(id("a", page * 500 + i)) as object), total_count: totals[page] })));
-    },
-    connectors: async () => ok([]),
-  });
-
-  it.each([
-    ["the set grows between pages", [1000, 1001]],
-    ["the set shrinks between pages", [1000, 999]],
-    ["it moves only on a later page", [1000, 1000, 1001]],
-  ])("FAILS CLOSED when %s", async (_label, totals) => {
-    const r = await loadCrossSourceGovernanceInput("t-a", pagesWithTotals(totals as number[]));
-    expect(r.ok).toBe(false);
-    expect(r.ok === false && r.error).toBe("pagination_contract_violated");
-  });
-
-  // THE CASE THAT ISOLATES THE PIN. Every test above also fails on the final assembled-size check, so none of them
-  // proves the page-to-page comparison exists. Here the arithmetic deliberately BALANCES: 1000 rows are assembled and
-  // the LAST page reports exactly 1000, so a loader that only compared the final size to the final total would call
-  // this complete. The set nevertheless changed mid-read (1001 -> 1000), which is precisely the insertion-cancels-skip
-  // shape — and only the pin catches it.
-  it("FAILS CLOSED when a moved total is balanced out by the final assembled size", async () => {
-    const io: LoaderIo = {
-      rpc: async (name, args) => {
-        if (name === "product_application_matcher_state") return ok([{ has_ever_run: false, status: null, last_completed_at: null }]);
-        if (name !== "product_app_accounts") return ok([]);
-        const off = Number(args.p_offset);
-        if (off >= 1000) return ok([]);
-        // page 0 reports 1001, page 1 reports 1000; 1000 rows are assembled in total.
-        const total = off === 0 ? 1001 : 1000;
-        return ok(Array.from({ length: 500 }, (_, i) => ({ ...(account(id("a", off + i)) as object), total_count: total })));
-      },
-      connectors: async () => ok([]),
-    };
-    const r = await loadCrossSourceGovernanceInput("t-a", io);
-    expect(r.ok).toBe(false);
-    expect(r.ok === false && r.error).toBe("pagination_contract_violated");
-  });
-});
 
 describe("review LENS 8: duplicate detection keys on the canonical row id, not a scoped one", () => {
   // The motivating tie: one person in two workspaces, IDENTICAL external_id/display_name/email, different rows.
@@ -711,11 +616,11 @@ describe("review LENS 6: the skipped-row harm — a real finding must not close"
         calls.push(name);
         if (name === "product_application_matcher_state") return ok([{ has_ever_run: false, status: null, last_completed_at: null }]);
         if (name === "product_connector_capabilities") return ok(BOTH_AVAILABLE);
-        if (name !== "product_app_accounts") return ok([]);
-        // The server says 501 accounts exist; paging yields 500. One row was skipped by the unstable order.
-        return Number(args.p_offset) === 0
-          ? ok(Array.from({ length: 500 }, (_, i) => ({ ...(account(id("a", i)) as object), total_count: 501 })))
-          : ok([]);
+        if (name !== "product_app_accounts_for_governance") return ok([]);
+        // A full page that fails to advance the cursor: the read is broken, so the evidence is incomplete.
+        return args.p_after_id === null
+          ? ok(Array.from({ length: 500 }, (_, i) => account(id("a", i))))
+          : ok(Array.from({ length: 500 }, () => account(id("a", 499))));
       },
       connectors: async () => ok([{ id: OKTA, provider: "okta" }, { id: SLACK, provider: "slack" }]),
     };

@@ -12,6 +12,37 @@ from PRs verified via `git log` / `gh pr list`.
 > **as of each PR's date** and are historical — where an older entry says "RISK-007 remains OPEN" / "Phase C remains
 > BLOCKED", that was accurate at that entry's date; this banner is the current state.
 
+### feat(governance) — Phase 17D: a stable cursor read for the app-account evidence walk · 2026-08-13
+
+Migration **0089** adds `product_app_accounts_for_governance`: `id` cursor, bounded columns, no total.
+`product_app_accounts` (0078) is **untouched** and still serves the SaaS accounts page — it has a real UI caller that
+depends on OFFSET, `count(*) over ()` and the alphabetical order, and converting it in place would have handed that
+table UUID-ordered pages, the mistake 0061's read path already documents. Two questions, two contracts.
+
+**What OFFSET could not give the walk.** 0078 orders by `display_name, email, external_id` while governance reads with
+`p_connection_id = null`, and `external_id` is unique only per `(tenant, connection, provider)` — so the order is not
+total in the scope read. A row deleted before the offset shifts every later row left and skips one at the boundary,
+which withholds that account's finding while its connection stays closure-eligible, so 0083 closes something still
+true. #418 made the detectable half fail closed; only a cursor makes the read stable, because `id` is immutable and the
+boundary becomes a value rather than a position.
+
+**Cursor-stable, not snapshot-consistent, and that is sufficient.** A row present throughout the walk cannot be missed;
+a row deleted mid-walk is genuinely gone; a row inserted mid-walk is seen only if its id sorts above the cursor. The
+only row a walk can miss is one created during it — which under-reports a new finding rather than falsely closing an
+existing one. Stated rather than glossed: this is not point-in-time isolation and does not claim to be.
+
+**#418's guards are kept, not retired.** Strict monotonicity and the duplicate check now cover the account read too.
+The one guarantee that rode on 0078's total — a validation-dropped row failing the read — is preserved directly, and now
+holds for **every** paged read rather than only the one that happened to return a count. The offset loader is deleted
+rather than left as scaffolding; its seen-set and total-pinning existed to compensate for a contract this replaces.
+
+**Verified local: 122 focused tests, 2886 unit tests, tsc 0, lint 0 errors, build compiled, full RLS suite passed
+(C0-C9 including a delete-before-cursor concurrency case that OFFSET could not pass), migration safety passed.**
+Mutants: cursor predicate removed, ORDER BY replaced with display ordering, cursor failure returning accumulated rows,
+and the loader pointed back at the OFFSET RPC — all RED. The non-advancing-cursor guard is now SUBSUMED by the
+monotonicity and drop checks; it survives mutation and is documented as such rather than claimed as tested.
+**Not applied to any hosted database; nothing deployed.**
+
 ### feat(governance) — Phase 18B: migration 0088, the application match review boundary · 2026-08-13
 
 **The lifecycle `application_matches` was shaped for in 0075, finally given its two mutations — and nothing else.** 0075 built the
