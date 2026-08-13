@@ -21,7 +21,15 @@ export const PAGINATION_STYLES = ["cursor", "page", "offset", "link", "none"] as
 // "group" is INCLUDED: the standalone `group` fact exists as of PR #252 (docs/54 §7 — additive, no schema-version bump).
 // NOTE: this only allowlists the emit *type*. The per-item schema (e.g. `slack_usergroup`) is validated by the executor's
 // item-schema registry (Phase 1b) — not yet built; the manifest layer treats `item_schema_ref` as an opaque string.
-export const EMIT_FACT_TYPES = ["none", "app_user_account", "app_discovery", "app_instance_identity", "group", "group_membership"] as const;
+// "license" added by 0083. It was already a member of the shared contract's FactTypeSchema AND is now accepted by the
+// write boundary (runner_insert_discovery_fact), so this allowlist being narrower than both was the last place the three
+// disagreed — a declarative connector could not DECLARE a licence read that the database would happily store.
+//
+// Google Workspace does not depend on this: it is a native connector and declares no `endpoints`, so it never consults
+// this list. The entry closes the framework gap for the NEXT provider whose licences are reachable by a plain GET.
+// `role_admin` and `usage_activity` are also in the shared contract and are deliberately still absent here — nothing
+// persists them, and an emit type the write boundary would reject is worse than no entry at all.
+export const EMIT_FACT_TYPES = ["none", "app_user_account", "app_discovery", "app_instance_identity", "group", "group_membership", "license"] as const;
 
 // Per-provider host allowlist. base_url's host must be listed here (EXACT hostname match — no wildcard, no suffix match).
 // Extended one reviewed provider at a time.

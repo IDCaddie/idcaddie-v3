@@ -14,6 +14,7 @@ import { join } from "node:path";
 import {
   ProviderManifestSchema, NativeConnectorManifestSchema, ExecutorProgramManifestSchema, LifecycleSchema,
   isNativeConnectorManifest, PROVIDER_LIFECYCLE_STATUSES, PROVIDER_ACCESS_MODES, PROVIDER_CAPABILITIES,
+  EMIT_FACT_TYPES,
 } from "./manifest-schema";
 import { validateManifestsDir } from "./manifest-validate";
 
@@ -107,6 +108,29 @@ describe("native_connector manifests", () => {
 
   it("is strict — an unknown field is rejected", () => {
     expect(NativeConnectorManifestSchema.safeParse(native({ surprise: 1 })).success).toBe(false);
+  });
+
+  // ── the emit allowlist tracks the write boundary, and nothing more ─────────────────────────────────────────
+  describe("EMIT_FACT_TYPES", () => {
+    it("permits 'license', which the write boundary now accepts", () => {
+      expect(EMIT_FACT_TYPES).toContain("license");
+    });
+
+    it("still refuses fact kinds nothing persists", () => {
+      // Both are members of the shared discovery-fact contract, and both are REJECTED by
+      // runner_insert_discovery_fact. An emit type the database would refuse is worse than no entry: it lets a manifest
+      // declare a read whose facts can never be stored.
+      expect(EMIT_FACT_TYPES).not.toContain("role_admin");
+      expect(EMIT_FACT_TYPES).not.toContain("usage_activity");
+    });
+
+    it("refuses an unknown emit type on a real executor-program manifest", () => {
+      const slack = JSON.parse(readFileSync(join(MANIFESTS, "slack.v1.json"), "utf8")) as { endpoints: Record<string, unknown>[] };
+      expect(ExecutorProgramManifestSchema.safeParse(slack).success).toBe(true);
+      const emitting = slack.endpoints.findIndex((e) => e.emits !== "none");
+      const bad = { ...slack, endpoints: slack.endpoints.map((e, i) => (i === emitting ? { ...e, emits: "invented_fact" } : e)) };
+      expect(ExecutorProgramManifestSchema.safeParse(bad).success).toBe(false);
+    });
   });
 
   // ── `manifest_multi`: constant hosts, but more than one ────────────────────────────────────────────────────
