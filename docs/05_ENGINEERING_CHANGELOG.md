@@ -49,6 +49,56 @@ build compiled, migration safety passed.** Three negative controls all RED: tena
 granted a direct SELECT, and never-run collapsed into complete-zero. **Not applied to any hosted database; nothing
 deployed. No risk opened or closed.**
 
+### feat(catalog) — Phase 18A: deterministic application alias resolution (resolver only) · 2026-08-13
+
+**Phase 18 was going to be the application matcher; recon said the matcher was not the missing piece.** `application_matches`
+(0075) has been correctly shaped since Phase 7B, but both endpoints already point at one catalog —
+`directory_applications.catalog_product_id → app_products` and `apps.canonical_app_id → app_products`, each a same-tenant
+composite FK — and **neither column had ever been written by anything**, while `app_aliases` (0024) was empty. The only remaining
+joinable fields are names. So a matcher built now would have had to match on names or emit nothing. The absent layer was
+**canonical application evidence**, not TypeScript matching logic.
+
+**This PR ships the read half only, and says so.** Given an identifier that already carries a settled canonical judgement, the
+product can name its canonical product: `provider identifier → app_aliases → app_products`. It does **not** create aliases.
+`app_aliases` remains empty and **the bridge remains unpopulated** — this is a usable seam, not a built bridge.
+
+**A declaration action was written, and independent review deleted it.** The obvious design — a product action reading a directory
+application's `external_id` and recording it — **cannot execute against the real authorization model.**
+`directory_applications` enables RLS and defines **no policy at all** (0057), so it is deny-all to `authenticated`; and the
+product read RPCs deliberately withhold the identifier (0061 returns "ONLY bounded safe fields … and **NEVER external_id**").
+Product code cannot obtain the value a declaration would record, so every call would have returned `not_allowed` in production.
+**Mocked Supabase IO hid this**: the unit tests proved the decision logic and never that the query is permitted — exactly the
+ENGINEERING_STANDARDS.md §E/§F failure (mocked IO is a tripwire, not behavioural proof; a guard never demonstrated to fail is not
+yet evidence). Catching a non-functional feature before merge is the Engineering OS working, not a setback. Declaration is a
+deliberate T3 decision deferred to Phase 18A2, which must first answer *why* `external_id` was withheld and should prefer an RPC
+that takes `directory_application_id` + `app_product_id` and reads the identifier **internally, never returning it**.
+
+**A second review finding: `auto` was resolving on no evidence.** The resolver had treated `review_status='auto'` as settled
+canonical truth on the strength of a comment. `auto` appears in exactly two CHECK constraints (0024, 0025), is **defined nowhere
+in the repository**, is **written by nothing**, and the only implemented review lifecycle (`sync-review-actions.ts` over
+`discovery_facts`) transitions pending → confirmed | rejected without it. Only **`confirmed`** resolves now; `pending`,
+`rejected`, `auto` and any unexpected or empty value read as unresolved.
+
+**Zero migration, zero new privilege.** No table, column, index, policy, grant or function. Reads run under the existing 0024
+"members read app_aliases" policy, whose tenant isolation is proven functionally against a real database by
+`supabase/tests/org_rls_test.sql` T46 — cited rather than duplicated, and pinned by a tripwire so deleting those assertions cannot
+silently strip this phase of its only real authorization proof. `connector_runner` gains nothing. Baseline tier **T2**, no
+semantic escalation: read-only, existing RLS path, no migration, no `SECURITY DEFINER`, no credential boundary.
+
+**Names can never be identity.** `DETERMINISTIC_ALIAS_TYPES` is every alias type except `name`, and a name lookup short-circuits
+before any query reaches the database. No fuzzy, substring, vendor-similarity or display-label fallback exists anywhere in the
+path. Ambiguity is represented by **writing nothing** — the 0026 natural key means one identifier has at most one judgement, and
+competing candidates are an `application_matches` concept. Resolution reads `app_aliases` alone, so a settled judgement survives
+its source going stale, superseded or disconnected. A failed read returns `null`, never `unresolved`, so an outage can never be
+read as "no canonical product".
+
+**Proof:** 28 focused tests, full suite 2733 passed, plus the real-Postgres RLS suite. Three mutants, each RED on exactly its
+intended test and restored: allowing `name` as deterministic evidence, re-admitting `auto`, and dropping the tenant filter from
+the resolver read.
+
+**Not built, deliberately:** no declaration path, no UI, no `application_matches` read or write, no propose/decide boundary, no
+matcher, no Rule 5 change, no entitlement computation. No hosted Supabase, no AWS, no provider contact, nothing deployed.
+
 ### feat(governance) — Phase 16: the tenant-wide cross-source engine · 2026-08-12
 
 A **sibling** to Phase 14 at `src/lib/server/cross-source-governance/`, not an extension of it. Phase 14 keeps its
