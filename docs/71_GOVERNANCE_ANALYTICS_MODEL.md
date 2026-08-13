@@ -88,3 +88,89 @@ ticket, or remove anything.
 Phase 15 separately designs the SELECT-only canonical graph reads, tenant-safe server loaders, and the access-explanation + governance
 findings UI (message-key → prose resolution, search/filter, empty/error/loading states, customer-language truthfulness). Phase 14 adds
 none of that. RISK-007 remains OPEN; Phase C remains BLOCKED; production untouched.
+
+---
+
+# Phase 16 — the tenant-wide cross-source sibling
+
+**Phase 14, described above, is unchanged.** Its scope contract is still `(tenant, connection, provider)`, its rule
+catalog and finding-id function are untouched, and nothing in this section widens either. What follows is a **sibling**
+engine at `src/lib/server/cross-source-governance/`, not an extension of that one.
+
+| | Phase 14 — provider-local | Phase 16 — cross-source |
+|---|---|---|
+| scope | tenant + connection + provider | **tenant** |
+| reads | `directory_*` | `app_accounts`, `identity_accounts`, `person_account_links`, `directory_applications`, `application_matches`, capability state |
+| key domain | `governance:` | `cross-source:` |
+| answers | "is this connector's access graph coherent?" | "does this human's access make sense across every source?" |
+
+Two engines because the questions have different scopes, and one column that means two scopes is how a metric starts
+lying. They **share** severity, confidence (still separate axes), the message-key indirection, the PII-free evidence
+discipline, and migration **0083** — which owns finding persistence and lifecycle for both, keeping them apart with
+`gf_scope_chk` and `gf_key_domain_chk`. They share **no** rule implementation.
+
+## Who owns which fact
+
+- **`person_account_links` (0082)** owns the human ↔ provider-account judgement. It is evidence-bearing and
+  human-decided; the engine only ever *reads* `accepted` / `proposed` and never infers a link.
+- **0083** owns lifecycle. The engine emits what is true now; first/last seen, reopen and closure are not its business.
+- **The connector layer** owns evidence. The engine reads canonical rows and capability state, never a provider module.
+
+## Unsupported never means zero — restated as code
+
+Every rule declares what must be **available** before it may open, and every finding declares the connections it rests
+on. When the requirement is unmet the rule is **withheld** and reported in `withheldRules` with a reason — never
+evaluated to zero. A rule returning no findings because it could not look is a lie in the shape of good news.
+
+Two guards are worth naming because they are counter-intuitive:
+
+- **An empty `person_account_links` is unknown, not "every account is an orphan."** Rules 1 and 3 stay silent until
+  resolution has produced output, so shipping 0082 does not flag an entire estate.
+- **An empty `application_matches` is unknown, not "nothing is managed."** No matcher exists yet (see
+  [79](./79_CANONICAL_INTELLIGENCE_LAYER.md)), so **rule 5 ships correct and permanently silent** until one runs.
+
+Both guards are **row-count proxies for "did this process run"**, and neither can distinguish a *partial* run from a
+complete one. That is sound today — no matcher exists at all, and 0082's proposer links every current human account
+carrying an address in one pass, so an orphan candidate cannot come back link-less from a real run unless it has no
+address. It stops being sound the moment either process gains partial or incremental execution, at which point each
+needs a real completeness signal of its own, in the shape `connector_capability_state` already uses for connectors.
+Recorded here so the replacement is a decision rather than a discovery.
+
+## Rule catalog
+
+| rule | subject | severity | must be `available` to open |
+|---|---|---|---|
+| `active_saas_account_without_accepted_identity` | app account | medium | the account's `app_accounts` + ≥1 `identity` source + resolution has run |
+| `privileged_saas_account_without_accepted_identity` | app account | high | as above; fires only where the provider actually reported admin, and **only an ACCEPTED owner silences it** |
+| `inactive_identity_with_active_saas_account` | person | high | ≥1 `identity` **and** ≥1 `app_accounts` — the finding asserts both sides |
+| `duplicate_active_accounts_for_one_person` | person | medium | that connection's `app_accounts` |
+| `discovered_application_unmanaged_by_idp` | directory application | low | that connection's `directory_applications` **and** a matcher having run |
+
+`isActive` / `isAdmin` are nullable: **only an explicit `false` / `true` counts.** Null means the provider did not say,
+and treating unknown as inactive would accuse a live employee.
+
+**A pending proposal shields an ordinary account, but never a privileged one.** For an ordinary account a `proposed`
+link means "a candidate exists, a human has not decided", and reporting that as an orphan hands the reviewer their own
+queue back as a governance problem. For an admin account it is not enough: a proposal never expires, so a wrong one — or
+simply nobody reviewing — would hide an unowned privileged account for as long as the queue is ignored. That is a false
+negative with an indefinite lifetime, on exactly the account class worth not hiding.
+
+**Rule 4 counts only `human` accounts.** 0082's proposer links only humans, but a *manual* link can attach anything, and
+a rule must not depend on another component's filter. A person who owns their login plus a service account has one
+account and a robot, not two duplicates.
+
+**Rule 4 is deliberately narrow.** Holding many accounts is normal — one person legitimately has several providers — so
+the rule fires only on two or more active accounts **within a single connection**. Across connections it is not a
+finding even for the same provider: two Okta organisations legitimately hold one human, which is what 0071 supersession
+describes.
+
+**`ACTIVE_ENTITLEMENT_ON_INACTIVE_IDENTITY` is DEFERRED, not implemented.** No entitlement or licence evidence model
+exists in the schema; there is nothing to read. It is absent rather than stubbed, because a rule that cannot be
+evaluated must not appear as one that found nothing.
+
+## Provider neutrality
+
+The engine imports **zero** provider modules — its only imports are `node:crypto` and two sibling *type* modules.
+`provider` is carried as an opaque string for provenance and grouping; it is never compared to a literal. Google plugs
+in by landing rows in `app_accounts` plus a capability row, and no file here changes; a test asserts an unknown provider
+evaluates identically to a known one.
