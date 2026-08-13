@@ -90,23 +90,52 @@ do $$ begin
 end $$;
 
 -- ════ G2: the provider allowlist — this path CANNOT touch Okta ═══════════════════════════════════════════════════════
-do $$ declare raised boolean; begin
+-- NOTE ON HOW THESE ARE ASSERTED. An earlier version of this block only checked that SOMETHING was raised. That is
+-- too weak to be a proof: every one of these calls raises for at least two independent reasons (the allowlist, and the
+-- run's connector not matching the claimed provider), so widening the allowlist to include 'okta' left the block GREEN.
+-- A negative control caught it. The assertions therefore match the allowlist's OWN message, which no other guard emits.
+do $$ declare raised boolean; msg text; begin
   -- An Okta run is refused by the allowlist BEFORE any ownership logic, so 0083 can never alter an Okta row.
   perform pg_temp.open_run('a1111111-0000-4000-8000-000000000001','9c000001-0000-4000-8000-000000000001','40000001-0000-4000-8000-000000000001', true, 0, 'last_page');
-  raised := false;
+  raised := false; msg := '';
   begin perform public.runner_promote_directory_users('40000001-0000-4000-8000-000000000001','a1111111-0000-4000-8000-000000000001','okta');
-  exception when others then raised := true; end;
+  exception when others then raised := true; msg := SQLERRM; end;
   assert raised, 'G2 provider okta must be refused by the parameterized path';
+  assert msg like '%not served by the parameterized directory write path%',
+    format('G2 okta must be refused BY THE ALLOWLIST, not incidentally; got: %s', msg);
 
-  raised := false;
+  raised := false; msg := '';
   begin perform public.runner_promote_directory_users('40000001-0000-4000-8000-000000000001','a1111111-0000-4000-8000-000000000001','microsoft_entra');
-  exception when others then raised := true; end;
+  exception when others then raised := true; msg := SQLERRM; end;
   assert raised, 'G2 an unmigrated provider must be refused';
+  assert msg like '%not served by the parameterized directory write path%', 'G2 entra must be refused by the allowlist';
 
-  raised := false;
+  raised := false; msg := '';
   begin perform public.runner_promote_directory_users('40000001-0000-4000-8000-000000000001','a1111111-0000-4000-8000-000000000001', null);
-  exception when others then raised := true; end;
+  exception when others then raised := true; msg := SQLERRM; end;
   assert raised, 'G2 a null provider must be refused';
+  assert msg like '%not served by the parameterized directory write path%', 'G2 null must be refused by the allowlist';
+
+  -- The SAME assertion for every other entrypoint: one guarded function does not prove the set is guarded.
+  raised := false; msg := '';
+  begin perform public.runner_mark_absent_directory_users_stale('40000001-0000-4000-8000-000000000001','a1111111-0000-4000-8000-000000000001','okta');
+  exception when others then raised := true; msg := SQLERRM; end;
+  assert raised and msg like '%not served by the parameterized directory write path%', 'G2 stale-users is allowlist-guarded';
+
+  raised := false; msg := '';
+  begin perform public.runner_promote_directory_groups('40000001-0000-4000-8000-000000000001','a1111111-0000-4000-8000-000000000001','okta');
+  exception when others then raised := true; msg := SQLERRM; end;
+  assert raised and msg like '%not served by the parameterized directory write path%', 'G2 promote-groups is allowlist-guarded';
+
+  raised := false; msg := '';
+  begin perform public.runner_promote_directory_group_memberships('40000001-0000-4000-8000-000000000001','a1111111-0000-4000-8000-000000000001','okta');
+  exception when others then raised := true; msg := SQLERRM; end;
+  assert raised and msg like '%not served by the parameterized directory write path%', 'G2 promote-memberships is allowlist-guarded';
+
+  raised := false; msg := '';
+  begin perform public.runner_record_directory_discovery_metrics('40000001-0000-4000-8000-000000000001','a1111111-0000-4000-8000-000000000001','okta',1,1,1,1,0,'last_page',true,'1','1','1',null);
+  exception when others then raised := true; msg := SQLERRM; end;
+  assert raised and msg like '%not served by the parameterized directory write path%', 'G2 metrics is allowlist-guarded';
 
   -- Claiming google_workspace for a run whose connector is actually Okta is refused too (the provider must MATCH).
   insert into public.connector_runs (id, tenant_id, connector_id, status, started_at)
