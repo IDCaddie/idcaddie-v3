@@ -12,6 +12,53 @@ from PRs verified via `git log` / `gh pr list`.
 > **as of each PR's date** and are historical — where an older entry says "RISK-007 remains OPEN" / "Phase C remains
 > BLOCKED", that was accurate at that entry's date; this banner is the current state.
 
+### feat(governance) — Phase 18B: migration 0088, the application match review boundary · 2026-08-13
+
+**The lifecycle `application_matches` was shaped for in 0075, finally given its two mutations — and nothing else.** 0075 built the
+table and deliberately ran no matcher; 0085 added the bounded read and the matcher-run state. 0088 adds
+`product_propose_application_match` and `product_decide_application_match`, so a candidate can be proposed, then accepted or
+rejected by a human. **PROPOSED ≠ MATCHED. REJECTED ≠ ABSENT EVIDENCE. ACCEPTED = CANONICAL RELATIONSHIP.**
+
+**Auto-accept is structurally impossible, and the mutant proved it the hard way.** Forcing propose to write `accepted` did not fail
+one of the new assertions — it failed 0075's own `application_matches_decided_chk`, because an accepted row without a `decided_at`
+cannot exist. Dropping the same-tenant checks likewise failed the composite FK rather than a test. Both guards are the database's,
+not this suite's, so both are now pinned by assertion so a later migration cannot quietly remove them.
+
+**Candidate identity is the pair (tenant, directory application, app).** 0075 constrained only accepted rows, so a matcher
+re-running every sync would have deposited a duplicate each time and a rejected candidate would have silently reappeared. One row
+per pair for all time makes three properties structural: re-proposing is a no-op, a rejected candidate can never be resurrected,
+and an accepted one can never be duplicated. Method is deliberately not in the key — two methods reaching the same pair are one
+candidate with two lines of evidence, not two candidates.
+
+**Ambiguity is preserved rather than resolved.** Different targets are different pairs, so one directory application may carry
+several competing proposals; nothing picks by confidence or arrival order. Cardinality stays 0075's: at most one accepted match per
+directory application, and deliberately many-to-one on the SaaS side, since two directory applications may both legitimately accept
+one `apps` row. Two concurrent accepts cannot both win — the loser receives a bounded `accepted_exists`, never a Postgres error.
+A decided row is immutable through `decide`; re-opening is a separate future workflow, not a hidden toggle.
+
+**Methods admitted: `manual`, `exact_external_id`, `vendor_catalog`.** `exact_domain` is refused because the directory side has no
+domain column, and `suggested` because nothing produces it and admitting the weak-evidence bucket before a producer exists invites
+the name-similarity matching this line of work exists to prevent.
+
+**Privilege posture unchanged:** `application_matches` keeps 0075's deny-all — RLS on, no policy, no table grant to any browser
+role — and 0085's bounded read stays the only read path. Both new functions are owner/admin, SECURITY DEFINER with pinned
+search_path, revoked from public/anon/connector_runner and granted to `authenticated` alone. No `connector_runner` authority, no
+`service_role`, no new machine identity: proposal generation is product-side orchestration.
+
+**The gap this phase records but does not close.** The SaaS endpoint is `apps`, consistent across 0075/0085/Rule 5 — but Phase 18A's
+canonical evidence resolves to `app_products`, and `apps.canonical_app_id` has **zero writers** and is NULL on every row
+(`external_instance_id`/`instance_domain` likewise; nothing inserts `apps` from discovery). **There is no deterministic path from a
+confirmed alias to an `apps` row today.** A human can propose and decide a real relationship now, but a deterministic matcher would
+have nothing to propose, so **populating `apps.canonical_app_id` is a prerequisite for 18C**. Recorded here rather than discovered
+later, which is exactly how Phase 18A first went wrong.
+
+**Proof:** new real-database suite (B0–B13) covering privilege closure and deny-all posture, the owner/admin/editor/viewer
+vocabulary for both commands, proposal carrying no decision, idempotent replay, ambiguity, method/confidence vocabulary,
+cross-tenant refusal of source/target/tenant/decision, accepted cardinality and its concurrent-accept loser, decided-row
+immutability, replay against rejected and accepted candidates, many-to-one acceptance, Rule 5 read-contract stability, and matcher
+run state staying untouched. Full `scripts/test-rls.sh` passed. Five mutants, each RED and restored. Applied to no hosted database;
+no deployment, no provider contact, no UI, no matcher, no Rule 5 change.
+
 ### feat(catalog) — Phase 18B0: the canonical product layer gets its first writer · 2026-08-13
 
 **No migration. The schema was never the problem.** `app_products`, `app_aliases` and the nullable `apps.canonical_app_id`
