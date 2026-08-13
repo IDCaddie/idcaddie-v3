@@ -550,3 +550,29 @@ the point of the node · **P11** the endpoint is exactly one: neither zero nor t
 **P12** one person per `(tenant, lowered address)` is a DATABASE guarantee, not a convention of this function — a second
 `people` row differing only in case is refused by 0036 `people_tenant_email_lower_key` — and an address a tenant already
 has is REUSED case-insensitively rather than duplicated beside it, with the same person chosen on every re-run.
+
+### `governance_finding_persistence_test.sql` — 0083, persisted findings
+
+The property this suite protects: **a finding must never close because a source went quiet.** G5 is the one that
+matters; its failure mode is silent and reads as progress.
+
+**G0** deny-all table, no policy, no direct read for `authenticated`, no write for `connector_runner`, both RPCs pinned
+and `authenticated`-only · **G1** the role gate refuses and a refused sync writes nothing · **G2** the two engines carry
+**different scope shapes and the database enforces the difference** — `provider_local` requires connection+provider,
+`cross_source` refuses both, and neither engine's key may live in the other's id space · **G3** opening, then an
+idempotent re-sync: no second row, `first_seen_at` never moves, `last_seen_at` advances (split across two transactions
+because `now()` is the transaction timestamp) · **G4** a second open row for one deterministic identity is refused by
+the unique constraint, not by the function · **G5** **a finding whose evidence source was INCOMPLETE stays open, is not
+stamped resolved, is not even touched, and is counted in `withheld_from_closure`** — while a sibling finding whose
+sources were all complete closes on the same run · **G6** once every source reports, absence IS evidence and the
+finding closes with `resolved_at` stamped · **G7** reopen: the row survives the close, `reopen_count` advances,
+`resolved_at` clears, `first_seen_at` is still the original, and refreshing an already-open finding is **not** counted
+as another reopen · **G8** the two engines do not close each other by omission · **G9** cross-tenant isolation — another
+tenant's empty evaluation declaring every connection complete closes nothing, the same deterministic key in two tenants
+is two findings, and the read never crosses · **G10** the read orders by severity and filters by engine and status ·
+**G11** a non-array payload and an unknown engine are each refused for their stated reason ·
+**G12** a finding declaring NO evidence sources is refused by the sync *and* by the table CHECK — an empty array
+satisfies `<@` against any complete set, so such a finding would have closed on pure silence · **G13** completeness
+cannot be declared with another tenant's connection or an invented UUID, a finding cannot depend on a connection its
+tenant does not own, and a refused sync leaves the estate untouched · **G14** a provider-local finding naming another
+tenant's connection is refused by the composite FK — impossible, not merely unused.
