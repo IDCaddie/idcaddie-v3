@@ -184,6 +184,35 @@ here instead of silently doubling every proposal.
 confirmed load-bearing by mutation rather than assumed: deleting the bot filter from the person-creation pass fails P2
 with `got 4`, and making the person join case-sensitive fails P12 with `got 0`. `scripts/test-rls.sh` re-revokes the new table in lockstep with the migration so the suite mirrors the real
 deny-all surface. **Not applied to hosted Supabase; nothing deployed. No risk opened or closed.**
+### fix(commercial) — Phase 10 review: four blocking defects in #409, found by attacking it · 2026-08-12
+
+**Two of them fabricated money.** (R1) `provisioned` resolved the `app_accounts` capability across the whole workspace,
+so a workspace holding both a Slack connector (implemented) and an Okta connector (`planned`) answered "available" for
+**both** — and a line declaring the OKTA connector got a correctly-scoped counts call returning 0 rows, read 0
+provisioned, and offered *the entire purchased quantity* as an annual saving. Two clicks to reach: the form lists every
+active connector. (R2) A declared connector with **no account rows at all** did the same thing. Fixed by resolving the
+capability against the **declared connector alone**, and by carrying `totalEvidence` so "discovery has not produced
+accounts" stops being reported as "there are no accounts". A real `current = 0` backed by retained stale rows still
+reads as a measured 0 — that reading is supported.
+
+**(R3) An unsupported quantity was echoing an availability claim.** With a healthy Okta connector, `assignments`
+resolves *available*, so the Assigned cell — which shows no number — read "Application assignments is current from the
+connected directory." `withheld()` now keeps the capability's sentence only when the capability is genuinely
+unavailable, and otherwise states our own constraint.
+
+**(R4) The audit writer re-opened the hole 0081 closed.** 0081 revoked EXECUTE from every trigger-returning function in
+`public` and said future definer trigger writers must inherit the posture; it was a one-time loop and could not reach a
+function created in 0084. Proven on a clean apply with no harness grants: without the fix
+`audit_contract_entitlement_write` carried `<NULL = EXECUTE to PUBLIC>` with `authenticated = t`, while its 0068 sibling
+carried `postgres=X/postgres`. 0084 now revokes its own trigger function. Revoking breaks nothing — a trigger runs with
+the table owner's privileges — it stops an unprivileged role borrowing a SECURITY DEFINER function's authority to forge
+append-only audit rows.
+
+**Three untested boundaries shipped as T12–T14:** cross-org read leak inside one tenant; a procurement manager moving a
+line onto a contract they do not manage (refused with `42501` from `WITH CHECK`, not a silent 0-row update); and direct
+invocation of the audit writer. Five mutations were run and all turned tests RED, including two new ones covering the
+R1 and R2 guards; every mutation was restored byte-identically.
+
 ### feat(commercial) — Phase 10: the purchased-line editor, and the client/server split it forced · 2026-08-12
 
 **Without this the table could only be populated by a direct database write**, which made the whole phase verifiable but

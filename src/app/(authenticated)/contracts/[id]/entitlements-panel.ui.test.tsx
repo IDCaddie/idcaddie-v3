@@ -26,7 +26,7 @@ const line: EntitlementInput = {
   unitAmount: 12.5, currency: "USD", billingFrequency: "monthly", measuredByConnectionId: "conn-1",
   source: "order_form", confidence: "high", hasEvidenceDocument: true,
 };
-const counts: DiscoveredCounts = { current: 3011, stale: 0, inactive: 0, lastSeenAt: null };
+const counts: DiscoveredCounts = { current: 3011, stale: 0, inactive: 0, totalEvidence: 3011, lastSeenAt: null };
 
 const view = (over: Partial<ContractCommercialView> = {}): ContractCommercialView => ({
   reconciliations: [reconcileEntitlement(line, counts, CAPS)],

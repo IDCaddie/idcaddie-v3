@@ -30,7 +30,7 @@ const line = (over: Partial<EntitlementInput> = {}): EntitlementInput => ({
 });
 
 const counts = (over: Partial<DiscoveredCounts> = {}): DiscoveredCounts => ({
-  current: 3011, stale: 0, inactive: 0, lastSeenAt: "2026-08-12T00:00:00Z", ...over,
+  current: 3011, stale: 0, inactive: 0, totalEvidence: 3011, lastSeenAt: "2026-08-12T00:00:00Z", ...over,
 });
 
 describe("the five quantities stay apart", () => {

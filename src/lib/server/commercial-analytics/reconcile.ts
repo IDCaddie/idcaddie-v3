@@ -53,10 +53,28 @@ export type DiscoveredCounts = {
   readonly current: number;
   readonly stale: number;
   readonly inactive: number;      // provider lifecycle bucket among current accounts — NOT "unused"
+  // Every retained row, current and stale. Load-bearing: it is the ONLY way to tell "discovery ran and found none"
+  // apart from "this connector has never produced account evidence", and only the first supports a reading of 0.
+  readonly totalEvidence: number;
   readonly lastSeenAt: string | null;
 };
 
 const unavailable = (c: { explanation: string }): Measure => ({ state: "unavailable", explanation: c.explanation });
+
+// A quantity THIS PRODUCT cannot read, whatever the source could do. Echoing the capability sentence unconditionally was
+// a truthfulness bug: with a healthy Okta connector `assignments` resolves *available*, so an Assigned cell showing no
+// number read "Application assignments is current from the connected directory" — telling a customer the count was
+// available when nothing here can produce it. The capability sentence is kept only when the capability is genuinely
+// unavailable (it is the more specific answer); otherwise the binding constraint is ours, and we say which.
+const withheld = (c: { state: string; explanation: string }, reason: string): Measure =>
+  c.state === "available" || c.state === "stale"
+    ? { state: "unavailable", explanation: reason }
+    : { state: "unavailable", explanation: c.explanation };
+
+const NO_ASSIGNED_READER =
+  "Directory assignment counts require an accepted match between this product and a directory application. No such match is represented.";
+const NO_BILLABLE_SOURCE = "No licence source is implemented, so billable seats are not represented.";
+const NO_ACTIVE_SOURCE = "No usage source is implemented, so actual use is not represented.";
 
 // A capability may contribute a NUMBER only when it is genuinely available; `canShowValue` is the Phase-7B guard and this mirrors
 // it rather than re-deciding. Stale still shows, because a retained observation is evidence — flagged, not hidden.
@@ -84,6 +102,14 @@ export function reconcileEntitlement(
     provisioned = unavailable(capabilities.provisioned);
   } else if (discovered === null) {
     provisioned = { state: "unavailable", explanation: "The declared connector's account evidence could not be read. This is not a statement that there are none." };
+  } else if (discovered.totalEvidence === 0) {
+    // No rows at all — not even stale ones. "Discovery has not produced accounts for this connector" and "this
+    // connector has no accounts" are different claims and only the first is supported. Returning 0 here would make the
+    // ENTIRE purchased quantity look reclaimable, which is the most expensive wrong number this feature can produce.
+    provisioned = {
+      state: "unavailable",
+      explanation: "The declared connector has not produced any account evidence yet, so there is nothing to compare against. This is not a count of zero.",
+    };
   } else {
     provisioned = {
       state: "measured",
@@ -93,14 +119,15 @@ export function reconcileEntitlement(
     };
   }
 
-  // Assigned, billable and active are answered ENTIRELY by the capability model. When a licensing or usage feed is built, this
-  // file does not change — the support matrix does.
+  // Assigned, billable and active have no reader in this phase. `withheld` keeps the capability model's answer when the
+  // capability itself is unavailable, and states OUR constraint when the capability would otherwise claim availability —
+  // so a connected Okta directory can never make an empty Assigned cell read as "current".
   const measures: Record<Concept, Measure> = {
     purchased,
-    assigned: unavailable(capabilities.assigned),
+    assigned: withheld(capabilities.assigned, NO_ASSIGNED_READER),
     provisioned,
-    billable: unavailable(capabilities.billable),
-    active: unavailable(capabilities.active),
+    billable: withheld(capabilities.billable, NO_BILLABLE_SOURCE),
+    active: withheld(capabilities.active, NO_ACTIVE_SOURCE),
   };
 
   const gap = compareGap(purchased, provisioned);

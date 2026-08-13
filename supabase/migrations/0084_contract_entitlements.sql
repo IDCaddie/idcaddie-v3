@@ -286,6 +286,19 @@ create trigger contract_entitlements_audit_on_write
 -- `updated_at` is maintained by the write path (the DAL sets it), consistent with `contracts` — no trigger, so there
 -- is one convention for the whole commercial model rather than two.
 
+-- The trigger function is REVOKED, inheriting the posture 0081 established.
+--
+-- 0081 revoked EXECUTE from every trigger-returning function in `public` and said in as many words that a future definer
+-- trigger writer must inherit the posture rather than re-open the hole. That revoke was a one-time loop over the
+-- functions that existed then, so it cannot reach this one: created later, `audit_contract_entitlement_write` would
+-- carry hosted Supabase's default `=X/postgres` (0045's ALTER DEFAULT PRIVILEGES also hands EXECUTE straight to
+-- anon/authenticated, and `revoke from public` alone does not remove that — hence every role is named).
+--
+-- Revoking breaks nothing: a trigger fires with the table owner's privileges and never consults the invoker's EXECUTE
+-- right. What it stops is an unprivileged role attaching this SECURITY DEFINER function to a trigger of its own and
+-- borrowing its authority to append forged rows to the append-only audit log. `postgres` (the owner) keeps its grant.
+revoke execute on function public.audit_contract_entitlement_write() from public, anon, authenticated, service_role;
+
 -- Explicit table privilege, for the reason 0015 records: a policy permits, it does not grant, and the harness-level
 -- `grant ... on all tables` is not part of this migration chain. DELETE is withheld — no DELETE policy exists and no
 -- privilege should imply one.

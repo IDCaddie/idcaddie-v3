@@ -173,7 +173,51 @@ backfill.
 **Not before a source exists** — anything that claims billable or active. Those stay `unavailable` until a licensing or
 usage feed is built, and no finding may imply them.
 
-## 9. One thing found on the way, for another workstream
+## 9. Independent review — four blocking defects, found and fixed
+
+Review of #409 attacked the shipped code rather than re-reading it. Four defects were real; all are fixed in this PR.
+
+**R1 — a connector that cannot answer answered zero (false savings).** `provisioned` resolved the `app_accounts`
+capability across the WHOLE workspace. A workspace with both a Slack connector (`app_accounts` implemented) and an Okta
+connector (`app_accounts` merely `planned`) answered "available" for **both**, because Slack satisfied the
+workspace-level question. A line declaring the **Okta** connector then got a correctly-scoped counts call that returned
+0 rows, read **0 provisioned**, and offered *the entire purchased quantity* as an annual saving. Reachable in two
+clicks — the form's "Measured by" select lists every active connector. Fixed: `provisionedCapabilityFor` resolves the
+capability against the **declared connector alone**, so a connector whose provider cannot produce account evidence
+returns `unavailable` instead of a number.
+
+**R2 — no evidence read as zero evidence (false savings).** A declared connector holding **no account rows at all**
+(`current = 0`, `totalEvidence = 0`) produced `provisioned = 0` and the same whole-contract saving. "Discovery has not
+produced accounts" and "there are no accounts" are different claims and only the first is supported. Fixed:
+`DiscoveredCounts` now carries `totalEvidence`, and zero total evidence is `unavailable`. A genuine `current = 0` with
+retained stale rows still reads as a measured 0 — that reading *is* supported.
+
+**R3 — an unsupported quantity echoed an availability claim.** `assigned`/`billable`/`active` passed the capability
+model's sentence through unconditionally. With a healthy Okta connector, `assignments` resolves **available**, so an
+Assigned cell showing no number read *"Application assignments is current from the connected directory."* — telling the
+customer the count was available when nothing here can produce it. Fixed: `withheld()` keeps the capability sentence
+only when the capability is genuinely unavailable, and otherwise states our own constraint (no accepted application
+match / no licence source / no usage source).
+
+**R4 — the audit writer re-opened a hole 0081 closed.** 0081 revoked EXECUTE from every trigger-returning function in
+`public` and stated that a future definer trigger writer must inherit the posture. That revoke was a one-time loop, so
+it could not reach a function created in 0084. Proven on a clean apply with no test-harness grants:
+
+| function | without the fix | with the fix |
+|---|---|---|
+| `audit_contract_entitlement_write` | `<NULL = EXECUTE to PUBLIC>`, `authenticated = t` | `postgres=X/postgres`, `authenticated = f` |
+| `audit_okta_stale_transition` (0068 sibling) | `postgres=X/postgres`, `authenticated = f` | unchanged |
+
+Fixed: 0084 revokes its own trigger function from `public, anon, authenticated, service_role`. Revoking breaks nothing
+(a trigger runs with the table owner's privileges and never consults the invoker's EXECUTE right); it stops an
+unprivileged role attaching this SECURITY DEFINER function to a trigger of its own to forge append-only audit rows.
+
+**Three boundaries were also found untested and are now shipped as T12–T14:** an org manager of a *different* org in
+the same tenant reading another org's purchased lines (cross-org leak); a procurement manager *moving* a line onto a
+contract they do not manage (refused with `42501` from `WITH CHECK`, not a silent 0-row update); and direct invocation
+of the audit writer (refused, and the log does not grow).
+
+## 10. One thing found on the way, for another workstream
 
 > **Global `database.types.ts` regeneration remains a separate repository-health item because the current generated file
 > predates several merged migrations and a full regeneration currently interacts with OAuth architecture assertions.**

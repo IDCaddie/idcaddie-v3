@@ -1,7 +1,7 @@
 import { listEntitlementsForContract, type ContractEntitlement } from "./contract-entitlements";
 import { loadConnectorManagement, type ConnectorSummary } from "./connector-management";
 import { accessGate, getSaasCounts } from "./saas-accounts";
-import { resolveCapability, type ConnectorFacts } from "@/lib/canonical/capabilities";
+import { resolveCapability, type CapabilityStatus, type ConnectorFacts } from "@/lib/canonical/capabilities";
 import { reconcileEntitlement, type DiscoveredCounts } from "@/lib/server/commercial-analytics/reconcile";
 import { evaluateCommercial, summarize, type ConnectionFacts, type ContractFacts } from "@/lib/server/commercial-analytics/evaluate";
 import type { ConceptCapabilities, EntitlementReconciliation, CommercialSummary } from "@/lib/server/commercial-analytics/types";
@@ -44,13 +44,32 @@ const toConnectorFacts = (c: ConnectorSummary): ConnectorFacts => ({
   hasStaleData: c.lifecycle === "discovering" || c.lifecycle === "failed",
 });
 
-// Resolve the four concept capabilities once. `readFailed` propagates the difference between "no connector" and "we could not
-// look", which the capability model already distinguishes and which must not be flattened here.
-function conceptCapabilities(connectors: readonly ConnectorSummary[], readFailed: boolean): ConceptCapabilities {
+// PROVISIONED IS RESOLVED AGAINST THE DECLARED CONNECTOR ALONE — not the workspace.
+//
+// Resolving it workspace-wide was a false-savings bug. A workspace with a Slack connector (app_accounts implemented) and
+// an Okta connector (app_accounts merely 'planned') answered "available" for BOTH, because Slack satisfied the
+// workspace-level question. A line that declared the OKTA connector then got a real counts call scoped to a connector
+// that holds no app_accounts rows, read 0 provisioned, and offered the entire purchased quantity as a saving. The
+// declared connector is the only one that can answer for the line, so it is the only one asked.
+//
+// Exported for test: this is the guard, so it is checked directly rather than through a mocked Supabase client.
+export function provisionedCapabilityFor(declared: ConnectorSummary | undefined, readFailed: boolean): CapabilityStatus {
+  // An id we cannot resolve (superseded, disconnected, or hidden from this reader) is not a source. The empty candidate
+  // set makes the capability model answer "not connected"/"unavailable" rather than inventing a reading.
+  return resolveCapability("app_accounts", declared ? [toConnectorFacts(declared)] : [], readFailed);
+}
+
+// The three quantities with no reader stay workspace-resolved: they are statements about what ID Caddie has built, not
+// about one connector. `reconcileEntitlement` refuses to echo an availability claim for them regardless.
+function conceptCapabilities(
+  connectors: readonly ConnectorSummary[],
+  declared: ConnectorSummary | undefined,
+  readFailed: boolean,
+): ConceptCapabilities {
   const facts = connectors.map(toConnectorFacts);
   return {
     assigned: resolveCapability("assignments", facts, readFailed),
-    provisioned: resolveCapability("app_accounts", facts, readFailed),
+    provisioned: provisionedCapabilityFor(declared, readFailed),
     billable: resolveCapability("licenses", facts, readFailed),
     active: resolveCapability("usage", facts, readFailed),
   };
@@ -66,7 +85,7 @@ export async function loadContractCommercialView(
   // determined" instead of "not connected", which would send someone to connect something they already have.
   const connectors = await loadConnectorManagement();
   const connectorList = connectors.ok ? connectors.data.connectors : [];
-  const capabilities = conceptCapabilities(connectorList, !connectors.ok);
+  const connectorById = new Map(connectorList.map((c) => [c.id, c]));
 
   const gate = await accessGate();
   const discovered = new Map<string, DiscoveredCounts | null>();
@@ -86,6 +105,8 @@ export async function loadContractCommercialView(
         current: counts.data.accounts.current,
         stale: counts.data.accounts.stale,
         inactive: counts.data.accounts.inactive,
+        // Carried so the engine can tell "discovery found none" from "this connector has never produced accounts".
+        totalEvidence: counts.data.accounts.totalEvidence,
         // The RPC omits lastSeenAt when there is nothing current to date-stamp, so the schema makes it optional. Absent and
         // null mean the same thing here — "no observation to timestamp" — and both must arrive as null, never as undefined.
         lastSeenAt: counts.data.accounts.lastSeenAt ?? null,
@@ -99,8 +120,17 @@ export async function loadContractCommercialView(
     }
   }
 
+  // Capabilities are resolved PER LINE, because `provisioned` depends on which connector the line declares.
   const reconciliations = lines.data.map((l) =>
-    reconcileEntitlement(l, l.measuredByConnectionId ? (discovered.get(l.measuredByConnectionId) ?? null) : null, capabilities),
+    reconcileEntitlement(
+      l,
+      l.measuredByConnectionId ? (discovered.get(l.measuredByConnectionId) ?? null) : null,
+      conceptCapabilities(
+        connectorList,
+        l.measuredByConnectionId ? connectorById.get(l.measuredByConnectionId) : undefined,
+        !connectors.ok,
+      ),
+    ),
   );
 
   // Scoped to THIS contract: the portfolio rules (duplicates across contracts, connectors with no contract at all) belong to a

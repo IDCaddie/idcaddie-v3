@@ -26,7 +26,7 @@ const contract = (over: Partial<ContractFacts> = {}): ContractFacts => ({
   id: "c1", renewalDate: null, endDate: null, noticeDeadline: null, autoRenew: false, ...over,
 });
 const counts = (over: Partial<DiscoveredCounts> = {}): DiscoveredCounts => ({
-  current: 3011, stale: 0, inactive: 0, lastSeenAt: null, ...over,
+  current: 3011, stale: 0, inactive: 0, totalEvidence: 3011, lastSeenAt: null, ...over,
 });
 
 // Assemble an input the way a loader would: reconcile first, then evaluate over the result.

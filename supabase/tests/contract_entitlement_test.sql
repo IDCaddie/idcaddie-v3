@@ -325,3 +325,68 @@ begin
 end $$;
 
 reset role;
+
+-- ── T12 — an org manager of a DIFFERENT org in the SAME tenant reads none of another org's purchased lines ──────────
+-- Review of PR #409 found this untested. T6 covers an unaffiliated user and T7 covers another tenant, but the sharpest
+-- case is the one in between: an org-only steward who legitimately reads their OWN contract in this tenant must not
+-- inherit the commercial detail of a contract procured by a different org.
+insert into public.organizations (id, tenant_id, name) values
+  ('ce000000-0000-4000-8000-0000000000a3','ce000000-0000-4000-8000-000000000011','CE Other Procurement');
+insert into auth.users (id, email) values ('ce000000-0000-4000-8000-00000000e007','ce_othermgr@t1.test');
+insert into public.profiles (id, email) values ('ce000000-0000-4000-8000-00000000e007','ce_othermgr@t1.test');
+insert into public.organization_memberships (organization_id, user_id, role) values
+  ('ce000000-0000-4000-8000-0000000000a3','ce000000-0000-4000-8000-00000000e007','manager');
+insert into public.contracts (id, tenant_id, contract_name, procurement_org_id) values
+  ('ce000000-0000-4000-8000-0000000000c3','ce000000-0000-4000-8000-000000000011','CE Other Org Agreement',
+   'ce000000-0000-4000-8000-0000000000a3');
+
+select set_config('request.jwt.claims','{"sub":"ce000000-0000-4000-8000-00000000e007"}',false);
+set role authenticated;
+do $$
+declare v integer;
+begin
+  select count(*) into v from public.contracts;
+  assert v = 1, format('T12 precondition: this manager should read exactly their own contract, saw %s', v);
+  select count(*) into v from public.contract_entitlements;
+  assert v = 0, format('T12 CROSS-ORG LEAK: an unrelated org manager read %s purchased lines', v);
+end $$;
+reset role;
+
+-- ── T13 — a procurement manager cannot MOVE a line onto a contract they do not manage ───────────────────────────────
+-- USING passes (they manage the OLD row's contract) and WITH CHECK rejects the NEW row, so the correct outcome is a
+-- 42501 refusal — NOT a silent 0-row update. Asserting the refusal AND that nothing moved pins both halves.
+select set_config('request.jwt.claims','{"sub":"ce000000-0000-4000-8000-00000000e003"}',false);   -- manager of CE Procurement
+set role authenticated;
+do $$
+declare refused boolean := false; c uuid;
+begin
+  begin
+    update public.contract_entitlements
+       set contract_id = 'ce000000-0000-4000-8000-0000000000c3'      -- another org's contract
+     where id = 'ce000000-0000-4000-8000-0000000000f2';
+  exception when insufficient_privilege then refused := true;
+  end;
+  assert refused, 'T13 ESCALATION: a procurement manager moved a line onto a contract they do not manage';
+  select contract_id into c from public.contract_entitlements where id = 'ce000000-0000-4000-8000-0000000000f2';
+  assert c = 'ce000000-0000-4000-8000-0000000000c1', 'T13 ESCALATION: the line moved anyway';
+end $$;
+reset role;
+
+-- ── T14 — the audit writer cannot be invoked directly to forge a row ────────────────────────────────────────────────
+-- The 0084 revoke (inheriting 0081's posture) removes EXECUTE from every browser role; Postgres additionally refuses a
+-- direct call to a trigger-returning function. Both belts are asserted here, plus that the append-only log did not grow.
+select set_config('request.jwt.claims','{"sub":"ce000000-0000-4000-8000-00000000e001"}',false);
+set role authenticated;
+do $$
+declare refused boolean := false; before_n integer; after_n integer;
+begin
+  select count(*) into before_n from public.audit_logs;
+  begin
+    perform public.audit_contract_entitlement_write();
+  exception when others then refused := true;
+  end;
+  assert refused, 'T14 FORGERY: the audit writer was directly invocable';
+  select count(*) into after_n from public.audit_logs;
+  assert before_n = after_n, 'T14 FORGERY: a direct call appended an audit row';
+end $$;
+reset role;
