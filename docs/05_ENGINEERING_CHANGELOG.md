@@ -12,6 +12,36 @@ from PRs verified via `git log` / `gh pr list`.
 > **as of each PR's date** and are historical — where an older entry says "RISK-007 remains OPEN" / "Phase C remains
 > BLOCKED", that was accurate at that entry's date; this banner is the current state.
 
+### test(governance) — 0085 B14/B15: the two invariants the stubbed fixture cannot observe · 2026-08-13
+
+**Tests only. No migration, no production behaviour change.** 0085's suite stubs `has_tenant_role`, which is the right
+tool for proving "when the gate says no, the RPC refuses" and the wrong one for proving the gate is asked the right
+question. Both new cases run **after** the restore block, against the real gate and real `tenant_memberships` rows —
+placement is load-bearing, because above the restore they prove nothing.
+
+**B14 — the allowed-role vocabulary, behaviourally.** Owner and admin read; **editor and viewer are members in good
+standing and must still read nothing and write nothing** across all three RPCs. `governance-read-boundary-migration.test.ts`
+already pins the array in the migration SOURCE, so widening it was never unguarded — but a source-text pin asserts what
+the migration *says*, not that the composition RPC → `has_tenant_role` → `tenant_memberships.role` denies an editor.
+B14 proves that one layer lower.
+
+**B15 — a failed run cannot be completed without starting again.** B5 claims "cannot complete a run that never started"
+but only covers the NO-ROW case, where the UPDATE matches nothing whether or not the guard exists. Removing
+`and status = 'running'` from the complete transition passes the static guard **and** passed B0–B13. B15 is the only
+thing that catches it: `start` → `fail` → `complete` must refuse, leave `status = 'failed'`, `has_completed = false`
+and `last_completed_at` NULL, and a restarted run must still complete. Without the guard a caller that never looked at
+anything could stamp a completion — making "complete with zero matches" assertable, the exact claim Part 3 of 0085
+exists to keep honest.
+
+Negative controls, each restored byte-identically: M1 remove tenant predicate → B2; M2 grant `connector_runner` direct
+SELECT → static guard; M3 collapse never-ran/complete-zero → B4; M4 widen roles → static guard **+ B14**; M5 remove the
+terminal guard → **B15 only**.
+
+Finding C (overlapping runs are conflated — `start A`/`start B`/`complete A`/`fail B` loses the newer failure) is
+recorded as a follow-up and deliberately NOT built: there is no matcher and no scheduler, and #412 must not be
+redesigned for run history. Before concurrent invocation, either `start` refuses while `status = 'running'` or
+execution state gains run identity. `last_completed_at` surviving a later failure is intentional; consumers must read
+`status` and `last_completed_at` together.
 ### feat(connectors) — Google Workspace: migration 0086, the write boundary a second provider needed · 2026-08-12
 
 The first connector after Okta, and the first to prove the write boundary generalizes. Google Workspace stays
