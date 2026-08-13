@@ -90,3 +90,13 @@ export function resolveCanonicalAlias(aliasType: string, row: CanonicalAliasRow 
   if (!(RESOLVING_REVIEW_STATUSES as readonly string[]).includes(row.reviewStatus)) return { outcome: "unresolved" };
   return { outcome: "resolved", appProductId: row.appProductId };
 }
+
+// ── Phase 18A2 — the bounded result vocabulary of the 0087 declaration command ────────────────────────────────────────────────
+// The command returns a status and nothing else: never the provider identifier, never the source row, never a DB error. This list
+// is the whole contract, so an unrecognised value is treated as a failure rather than passed through.
+export const DECLARATION_STATUSES = ["created", "already_confirmed", "conflict", "not_allowed", "source_not_current"] as const;
+export type AliasDeclarationStatus = (typeof DECLARATION_STATUSES)[number];
+
+export function isDeclarationStatus(value: string): value is AliasDeclarationStatus {
+  return (DECLARATION_STATUSES as readonly string[]).includes(value);
+}
