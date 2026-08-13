@@ -82,12 +82,14 @@ role — and 0085's bounded read stays the only read path. Both new functions ar
 search_path, revoked from public/anon/connector_runner and granted to `authenticated` alone. No `connector_runner` authority, no
 `service_role`, no new machine identity: proposal generation is product-side orchestration.
 
-**The gap this phase records but does not close.** The SaaS endpoint is `apps`, consistent across 0075/0085/Rule 5 — but Phase 18A's
-canonical evidence resolves to `app_products`, and `apps.canonical_app_id` has **zero writers** and is NULL on every row
-(`external_instance_id`/`instance_domain` likewise; nothing inserts `apps` from discovery). **There is no deterministic path from a
-confirmed alias to an `apps` row today.** A human can propose and decide a real relationship now, but a deterministic matcher would
-have nothing to propose, so **populating `apps.canonical_app_id` is a prerequisite for 18C**. Recorded here rather than discovered
-later, which is exactly how Phase 18A first went wrong.
+**The gap this phase records but does not close — and a correction made during review.** The first draft of this entry claimed
+nothing inserts `apps` from discovery. That was wrong: the Slack resolver store upserts `apps` during sync, so `apps`,
+`external_instance_id` and `instance_domain` all have live writers, and the endpoint is backed by real data. **The break is exactly
+one column** — `apps.canonical_app_id`, the only link from a canonical product to its operational instance, has zero writers
+anywhere and is NULL on every row (`resolution.ts` says so outright), and `app_products` is read-only in the product. **There is
+still no deterministic path from a confirmed alias to an `apps` row**, so a human can propose today but a matcher would have
+nothing to propose: populating `apps.canonical_app_id` plus an `app_products` write path is the prerequisite for 18C. Repointing
+`application_matches` at `app_product_id` would make it worse, not better — that table has no writer at all.
 
 **Proof:** new real-database suite (B0–B13) covering privilege closure and deny-all posture, the owner/admin/editor/viewer
 vocabulary for both commands, proposal carrying no decision, idempotent replay, ambiguity, method/confidence vocabulary,

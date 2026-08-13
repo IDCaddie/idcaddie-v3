@@ -238,12 +238,19 @@ a producer exists invites the name-similarity matching this work exists to preve
 
 ### The gap 18C must close first
 
-The SaaS endpoint is `apps` — correct and consistent across 0075, 0085 and Rule 5. But the canonical evidence Phase 18A produces
-resolves to `app_products`, and the link between them, `apps.canonical_app_id`, has **zero writers** and is NULL on every row
-(`apps.external_instance_id` and `apps.instance_domain` likewise, and nothing inserts `apps` rows from discovery). **So there is no
-deterministic path from a confirmed canonical alias to an `apps` row today.** A human can propose and decide a real relationship
-now; a deterministic matcher would have nothing to propose. **Populating `apps.canonical_app_id` is a prerequisite for 18C** — and
-recording it here is how the matcher avoids being built against an empty seam, which is exactly how Phase 18A first went wrong.
+The SaaS endpoint is `apps` — correct, consistent across 0075/0085/Rule 5, and **backed by real data**: the Slack resolver store
+upserts `apps` during sync (keyed on `tenant_id, external_instance_id`), so `apps`, `external_instance_id` and `instance_domain`
+all have live writers.
+
+**The break is exactly one column.** Phase 18A's canonical evidence resolves to `app_products`, and the only link from a product to
+its operational instance — `apps.canonical_app_id` — has **zero writers** anywhere and is NULL on every row; `resolution.ts` states
+it plainly ("nothing populates apps.canonical_app_id yet"), and `app_products` is read-only in the product today. **So there is no
+deterministic path from a confirmed canonical alias to an `apps` row.** A human can propose and decide a real relationship now; a
+deterministic matcher would have nothing to propose. **Populating `apps.canonical_app_id`, plus a write path for `app_products`, is
+the prerequisite for 18C.**
+
+Do **not** "fix" this by repointing `application_matches` at `app_product_id` — that aims the FK at a table with no writer at all
+and leaves the matcher more blocked, not less.
 
 
 ## Adding a new connector
