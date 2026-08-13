@@ -19,17 +19,23 @@
 -- two row ids it already holds and receives one bounded status string. That PRESERVES the information-hiding decision — it does
 -- not override it. No SELECT policy is added, no table grant is added, and no read path to `external_id` is created.
 --
--- `external_id` is opaque provider evidence (0057: "Okta app id (0oa...) — immutable provider identity"), stored unencrypted, not
--- a credential, and it reaches no product surface anywhere in the app. It was withheld as minimum-disclosure discipline, not
--- because internal use is unsafe.
+-- `external_id` is opaque provider evidence (0057: "Okta app id (0oa...) — immutable provider identity"), stored unencrypted and
+-- not a credential. It was withheld from the canonical READ RPCs as minimum-disclosure discipline, not because it is secret.
+--
+-- BE PRECISE ABOUT WHAT THIS COMMAND HIDES. It never RETURNS the identifier — but it does WRITE it to app_aliases.alias_value,
+-- and 0024 lets any tenant MEMBER read that table. So after a declaration the identifier is member-readable. That is not a new
+-- disclosure and not a widened audience: 0025 already grants members read on discovery_facts, whose fact_json carries the same
+-- `external_id` for directory_application facts — it is literally what the 0057 promote RPC reads — and 0024 classifies
+-- alias_value as "a label/id, never a secret/token". The honest claim is therefore narrow: THE COMMAND DOES NOT RETURN IT, AND
+-- ADDS NO NEW DISCLOSURE PATH. It is NOT "external_id is invisible to the product", and nothing should be built on that.
 --
 -- ══ AUTHORIZATION — owner/admin, and why NOT editor ═════════════════════════════════════════════════════════════════════════════
 -- The `app_aliases` RLS policy (0024) lets owner/admin/EDITOR write the table directly, so it would be easy to assume editor here.
--- It is deliberately owner/admin, matching 0061 (the gate on the data this command reads internally) and the 0078 product-command
--- precedent. An editor cannot see a directory application AT ALL — 0061 denies them even the bounded list — so granting editor
--- would hand them a correct, authoritative mapping for a row they may not read. An editor can still write app_aliases directly
--- with a value they already know; this command is the only path that turns a directory row into the RIGHT value, so it is gated at
--- the level that may see directory rows.
+-- It is deliberately owner/admin, matching 0061 (the gate on the canonical directory rows this command acts on) and the 0078
+-- product-command precedent. An editor cannot read `directory_applications` at all, and 0061 denies them even its bounded list,
+-- so this command is gated at the level that may see the canonical directory surface it operates on. Note the rationale is NOT
+-- that the identifier is otherwise unobtainable — an editor is a member, and members can read discovery_facts (0025) where the
+-- same external_id sits in fact_json. The gate is about who may make a canonical judgement over a directory row, not secrecy.
 --
 -- `p_tenant_id` is VERIFIED, never trusted: has_tenant_role() resolves the caller from auth.uid() and an active membership. Because
 -- tenant_memberships.user_id references public.profiles(id), any caller that passes the gate necessarily has a profiles row, so

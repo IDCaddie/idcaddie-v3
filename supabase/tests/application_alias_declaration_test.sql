@@ -49,6 +49,7 @@ insert into public.directory_applications (id, tenant_id, connection_id, provide
   ('87000000-0000-4000-8000-0000000000d3', '87000000-0000-4000-8000-00000000000a', '87000000-0000-4000-8000-0000000000c1', 'okta', '0oaDISCONN03', 'Gone app',    'disconnected'),
   ('87000000-0000-4000-8000-0000000000d4', '87000000-0000-4000-8000-00000000000a', '87000000-0000-4000-8000-0000000000c1', 'okta', '0oaSECOND04',  'Second app',  'current'),
   ('87000000-0000-4000-8000-0000000000d7', '87000000-0000-4000-8000-00000000000a', '87000000-0000-4000-8000-0000000000c1', 'okta', '0oaFRESH0007', 'Fresh app',   'current'),
+  ('87000000-0000-4000-8000-0000000000d8', '87000000-0000-4000-8000-00000000000a', '87000000-0000-4000-8000-0000000000c1', 'okta', '0oaREVIEWRQ8', 'Review app',  'review_required'),
   ('87000000-0000-4000-8000-0000000000e1', '87000000-0000-4000-8000-00000000000b', '87000000-0000-4000-8000-0000000000c2', 'okta', '0oaTENANTB01', 'Foreign app', 'current');
 
 insert into public.app_products (id, tenant_id, name, normalized_name) values
@@ -162,7 +163,9 @@ do $$ begin
     'D4 a stale source must not mint a new alias';
   assert pg_temp.declare_alias('87000000-0000-4000-8000-00000000000a','87000000-0000-4000-8000-0000000000d3','87000000-0000-4000-8000-0000000000b2') = 'source_not_current',
     'D4 a disconnected source must not mint a new alias';
-  assert not exists (select 1 from public.app_aliases where alias_value in ('0oaSTALE0002','0oaDISCONN03')),
+  assert pg_temp.declare_alias('87000000-0000-4000-8000-00000000000a','87000000-0000-4000-8000-0000000000d8','87000000-0000-4000-8000-0000000000b2') = 'source_not_current',
+    'D4 a review_required source must not mint a new alias';
+  assert not exists (select 1 from public.app_aliases where alias_value in ('0oaSTALE0002','0oaDISCONN03','0oaREVIEWRQ8')),
     'D4 no alias row may exist for an ineligible source';
 end $$;
 
@@ -232,6 +235,25 @@ select pg_temp.act('87000000-0000-4000-8000-0000000000f5');  -- tenant B owner
 do $$ begin
   assert not exists (select 1 from public.app_aliases where alias_value = '0oaCURRENT01'),
     'D7 a foreign tenant must not read the alias — the composite FK and RLS are both in force';
+end $$;
+
+-- ════ D7b: what a declaration DOES disclose — stated plainly rather than implied away ════════════════════════════════════════
+-- The command never RETURNS external_id, but it stores it in app_aliases.alias_value, and 0024 lets any tenant MEMBER read that
+-- table. So after a declaration the identifier is readable by members. This is not a new disclosure: 0025 already grants members
+-- read on discovery_facts, whose fact_json carries the same `external_id` for directory_application facts (it is exactly what the
+-- 0057 promote RPC reads). 0024 also classifies alias_value as "a label/id, never a secret/token".
+--
+-- Pinned as a test because the honest claim is narrow — "the command does not return it, and adds no new disclosure" — and a
+-- future reader must not upgrade that into "external_id is invisible to the product" and build on a secrecy that never existed.
+set role authenticated;
+select pg_temp.act('87000000-0000-4000-8000-0000000000f4');  -- a VIEWER: denied the RPC and denied 0061's directory list
+do $$
+begin
+  assert exists (select 1 from public.app_aliases
+                  where tenant_id = '87000000-0000-4000-8000-00000000000a'
+                    and alias_type = 'provider_app_id'
+                    and alias_value = '0oaCURRENT01'),
+         'D7b a member CAN read the declared identifier from app_aliases — 0087 does not make it secret';
 end $$;
 
 -- ════ D8: name is never a declarable identity ═══════════════════════════════════════════════════════════════════════════════

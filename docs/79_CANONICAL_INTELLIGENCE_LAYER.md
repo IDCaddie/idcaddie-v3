@@ -115,7 +115,14 @@ So **building the matcher before this bridge exists would have forced name-based
 missing layer was canonical application evidence, not matching logic.
 
 **The product does not need to receive `external_id` to declare the canonical relationship.** That is the whole design, and it
-is what lets identity be established without weakening 0061.
+is what lets identity be established without adding a read path 0061 deliberately withheld.
+
+**Be precise about what is hidden.** The command never *returns* the identifier, and adds no read RPC and no SELECT grant. It
+does *write* it to `app_aliases.alias_value`, which any tenant **member** may read (0024). That is not a new disclosure: 0025
+already grants members read on `discovery_facts`, whose `fact_json` carries the same `external_id` for directory-application facts
+— exactly what the 0057 promote RPC reads — and 0024 classifies `alias_value` as "a label/id, never a secret/token". So the
+accurate claim is narrow: **the command does not return it and opens no new disclosure path.** It is *not* "`external_id` is
+invisible to the product", and nothing should be built on that assumption.
 
 **Why a command rather than a read.** `directory_applications` enables RLS and defines **no policy at all** (0057), so it is
 deny-all to `authenticated`; and the 0061 read RPCs deliberately return "ONLY bounded safe fields … and **NEVER external_id**".
@@ -137,9 +144,10 @@ product surface anywhere in the app. It was withheld as minimum-disclosure disci
 **preserves** that decision; returning it would break it.
 
 **Authorization is owner/admin, deliberately not editor.** The 0024 policy lets owner/admin/editor write `app_aliases` directly,
-so editor looks like the obvious answer. But an editor cannot see a directory application at all — 0061 denies them even the
-bounded list — so granting editor would hand them an authoritative mapping for a row they may not read. The command is gated at
-the level that may see directory rows, matching 0061 and the 0078 command precedent. `p_tenant_id` is **verified, never trusted**:
+so editor looks like the obvious answer. It is gated at 0061's level because the command acts on a canonical directory row that
+editors may not read. The reasoning is *not* that the identifier is otherwise unobtainable — an editor is a member, and members
+can read `discovery_facts`, where the same value sits in `fact_json`. The question is who may make a canonical **judgement** over
+a directory row, and that is the 0061/0078 level. `p_tenant_id` is **verified, never trusted**:
 `has_tenant_role` resolves the caller from `auth.uid()`.
 
 **Declaration is a human judgement, so it writes `confirmed`** with `reviewed_by = auth.uid()`. Writing `pending` would produce a
