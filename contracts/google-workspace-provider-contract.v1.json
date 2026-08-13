@@ -1,0 +1,23 @@
+{
+  "contract_version": "1.0.0",
+  "provider": "google_workspace",
+  "auth_mode": "service_account_jwt_bearer",
+  "approved_scopes": [
+    "https://www.googleapis.com/auth/admin.directory.group.member.readonly",
+    "https://www.googleapis.com/auth/admin.directory.group.readonly",
+    "https://www.googleapis.com/auth/admin.directory.user.readonly",
+    "https://www.googleapis.com/auth/apps.licensing"
+  ],
+  "write_capable_scopes": [
+    "https://www.googleapis.com/auth/apps.licensing"
+  ],
+  "allowed_hosts": [
+    "admin.googleapis.com",
+    "licensing.googleapis.com"
+  ],
+  "token_host": "oauth2.googleapis.com",
+  "delegated_admin_required": true,
+  "lifecycle_status": "certificationOnly",
+  "read_only": true,
+  "live_key_verification": "outstanding"
+}

@@ -21,11 +21,32 @@ describe("connector provider registry — safe metadata only", () => {
       expect(Object.keys(p).every((k) => SAFE_FIELDS.has(k))).toBe(true);
       // scan the STRUCTURAL fields for secret/token/url values; helpCopy is display prose (it may safely say
       // "no token storage") so it is asserted separately as a plain string, not value-scanned.
-      const { helpCopy, ...structural } = p;
+      //
+      // `requiredScopes` is scanned too, but under a narrower URL rule. The `http`/`://` ban exists to keep an ENDPOINT —
+      // an authorize URL, a redirect URI, a provider API base — out of display metadata. Google's scope identifiers are
+      // genuinely URI-shaped (`https://www.googleapis.com/auth/...`) and are not endpoints: nothing is served at them, and
+      // the full URI is the literal string an admin pastes into the domain-wide-delegation console, so a short label here
+      // would be a fiction. Banning them outright would force exactly that fiction, so the rule is tightened rather than
+      // dropped: a URI is permitted ONLY under the Google scope namespace, and every other URL shape stays forbidden.
+      const { helpCopy, requiredScopes, ...structural } = p;
       expect(typeof helpCopy).toBe("string");
       const flat = JSON.stringify(structural).toLowerCase();
       for (const bad of ["token", "secret", "client_id", "client_secret", "authorize", "redirect_uri", "http", "://"]) {
         expect(flat).not.toContain(bad);
+      }
+
+      const GOOGLE_SCOPE_PREFIX = "https://www.googleapis.com/auth/";
+      for (const scope of requiredScopes) {
+        const s = scope.toLowerCase();
+        for (const bad of ["token", "secret", "client_id", "client_secret", "authorize", "redirect_uri"]) {
+          expect(s, `scope '${scope}' looks like a credential or endpoint`).not.toContain(bad);
+        }
+        // A URI-shaped scope must be a Google scope identifier and nothing else — no other host, and no other protocol.
+        if (s.includes("://")) {
+          expect(s.startsWith(GOOGLE_SCOPE_PREFIX), `scope '${scope}' is URI-shaped but is not a Google scope identifier`).toBe(true);
+          // Defence in depth: a Google scope has no query, fragment, port or userinfo — anything richer is an endpoint.
+          expect(s).not.toMatch(/[?#@]|:\d/);
+        }
       }
     }
   });

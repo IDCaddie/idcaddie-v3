@@ -21,7 +21,15 @@ export const PAGINATION_STYLES = ["cursor", "page", "offset", "link", "none"] as
 // "group" is INCLUDED: the standalone `group` fact exists as of PR #252 (docs/54 §7 — additive, no schema-version bump).
 // NOTE: this only allowlists the emit *type*. The per-item schema (e.g. `slack_usergroup`) is validated by the executor's
 // item-schema registry (Phase 1b) — not yet built; the manifest layer treats `item_schema_ref` as an opaque string.
-export const EMIT_FACT_TYPES = ["none", "app_user_account", "app_discovery", "app_instance_identity", "group", "group_membership"] as const;
+// "license" added by 0086. It was already a member of the shared contract's FactTypeSchema AND is now accepted by the
+// write boundary (runner_insert_discovery_fact), so this allowlist being narrower than both was the last place the three
+// disagreed — a declarative connector could not DECLARE a licence read that the database would happily store.
+//
+// Google Workspace does not depend on this: it is a native connector and declares no `endpoints`, so it never consults
+// this list. The entry closes the framework gap for the NEXT provider whose licences are reachable by a plain GET.
+// `role_admin` and `usage_activity` are also in the shared contract and are deliberately still absent here — nothing
+// persists them, and an emit type the write boundary would reject is worse than no entry at all.
+export const EMIT_FACT_TYPES = ["none", "app_user_account", "app_discovery", "app_instance_identity", "group", "group_membership", "license"] as const;
 
 // Per-provider host allowlist. base_url's host must be listed here (EXACT hostname match — no wildcard, no suffix match).
 // Extended one reviewed provider at a time.
@@ -36,6 +44,15 @@ export const PROVIDER_HOST_ALLOWLIST: Readonly<Record<string, readonly string[]>
   // NO parent domain, NO wildcard/suffix — exact equality only. The `microsoft_entra` provider stays inert (disabled,
   // not connectable); no Graph runtime/manifest/schema/OAuth exists yet.
   microsoft_entra: ["graph.microsoft.com"],
+  // Google Workspace admin discovery. TWO exact hosts, because Google splits this one administrative surface across two
+  // separate APIs — no single host serves both the directory and licences:
+  //   admin.googleapis.com     — Admin SDK Directory API (users, groups, group members)
+  //   licensing.googleapis.com — Enterprise License Manager API (licenceAssignments)
+  // Exact equality only, as for every other provider: no wildcard, no suffix match, and deliberately NOT the parent domain
+  // (`googleapis.com` fronts hundreds of unrelated Google APIs). NO token host either — oauth2.googleapis.com is reached by
+  // the auth module under its own exact-host pin, never by a manifest-declared endpoint. `cloudidentity.googleapis.com` is
+  // deliberately absent: nothing calls it, and an allowlisted host that no code reaches is a widened boundary for free.
+  google_workspace: ["admin.googleapis.com", "licensing.googleapis.com"],
 };
 
 // field_map values are a DOT-PATH into the response item, optionally negated with ONE leading "!". NOTHING ELSE — no
@@ -171,8 +188,14 @@ export const NativeConnectorManifestSchema = z
     manifest_version: z.literal(1),
     manifest_kind: z.literal("native_connector"),
     provider_id: z.string().min(1),
-    // A per-tenant provider has NO manifest-constant base URL. Stated explicitly rather than left as a missing field.
-    base_url_source: z.enum(["manifest", "server_derived"]),
+    // Where the base URL comes from. Stated explicitly rather than left as a missing field.
+    //   server_derived — per-tenant, no constant host can exist (Okta's `https://<org>.okta.com`).
+    //   manifest_multi — constant hosts, but MORE THAN ONE, because the provider splits one administrative surface across
+    //                    several APIs (Google Workspace: admin / cloudidentity / licensing). The executor-program kind
+    //                    cannot express this: its `base_url` is a single string. Declaring `server_derived` here would be
+    //                    false — the hosts ARE constant — and this schema exists to stop a manifest stating something untrue.
+    //   manifest       — a single constant host, which the executor-program kind already describes; refused below.
+    base_url_source: z.enum(["manifest", "manifest_multi", "server_derived"]),
     auth: z.object({ kind: z.enum(AUTH_KINDS), token_kind: z.string().min(1), header: z.enum(AUTH_HEADERS) }).strict(),
     api_base_path: z.string().regex(/^\/[A-Za-z0-9._/-]*$/, "api_base_path must be a leading-slash relative path"),
     lifecycle: LifecycleSchema,
@@ -192,6 +215,14 @@ export const NativeConnectorManifestSchema = z
   .superRefine((m, ctx) => {
     if (m.base_url_source === "manifest") {
       ctx.addIssue({ code: "custom", path: ["base_url_source"], message: "a native_connector with a manifest-constant base URL should use the executor-program manifest kind" });
+    }
+    // `manifest_multi` must EARN its exemption: the provider needs a host allowlist naming at least two hosts. Without this,
+    // any single-host provider could declare `manifest_multi` and walk past the check directly above, which is the whole
+    // reason that check exists. An unlisted provider fails here too — a native connector cannot reach an unallowlisted host.
+    if (m.base_url_source === "manifest_multi") {
+      const hosts = Object.prototype.hasOwnProperty.call(PROVIDER_HOST_ALLOWLIST, m.provider_id) ? PROVIDER_HOST_ALLOWLIST[m.provider_id] : undefined;
+      if (!hosts) ctx.addIssue({ code: "custom", path: ["provider_id"], message: `no host allowlist for provider '${m.provider_id}'` });
+      else if (hosts.length < 2) ctx.addIssue({ code: "custom", path: ["base_url_source"], message: `provider '${m.provider_id}' allowlists ${hosts.length} host(s); manifest_multi requires at least 2` });
     }
     // A read_only provider must not declare a persisting entrypoint for a resource it does not declare, and must declare no
     // capability outside the read/ingest verb set (the enum already guarantees the latter).

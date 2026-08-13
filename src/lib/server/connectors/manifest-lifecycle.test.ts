@@ -14,6 +14,7 @@ import { join } from "node:path";
 import {
   ProviderManifestSchema, NativeConnectorManifestSchema, ExecutorProgramManifestSchema, LifecycleSchema,
   isNativeConnectorManifest, PROVIDER_LIFECYCLE_STATUSES, PROVIDER_ACCESS_MODES, PROVIDER_CAPABILITIES,
+  EMIT_FACT_TYPES,
 } from "./manifest-schema";
 import { validateManifestsDir } from "./manifest-validate";
 
@@ -107,6 +108,66 @@ describe("native_connector manifests", () => {
 
   it("is strict — an unknown field is rejected", () => {
     expect(NativeConnectorManifestSchema.safeParse(native({ surprise: 1 })).success).toBe(false);
+  });
+
+  // ── the emit allowlist tracks the write boundary, and nothing more ─────────────────────────────────────────
+  describe("EMIT_FACT_TYPES", () => {
+    it("permits 'license', which the write boundary now accepts", () => {
+      expect(EMIT_FACT_TYPES).toContain("license");
+    });
+
+    it("still refuses fact kinds nothing persists", () => {
+      // Both are members of the shared discovery-fact contract, and both are REJECTED by
+      // runner_insert_discovery_fact. An emit type the database would refuse is worse than no entry: it lets a manifest
+      // declare a read whose facts can never be stored.
+      expect(EMIT_FACT_TYPES).not.toContain("role_admin");
+      expect(EMIT_FACT_TYPES).not.toContain("usage_activity");
+    });
+
+    it("refuses an unknown emit type on a real executor-program manifest", () => {
+      const slack = JSON.parse(readFileSync(join(MANIFESTS, "slack.v1.json"), "utf8")) as { endpoints: Record<string, unknown>[] };
+      expect(ExecutorProgramManifestSchema.safeParse(slack).success).toBe(true);
+      const emitting = slack.endpoints.findIndex((e) => e.emits !== "none");
+      const bad = { ...slack, endpoints: slack.endpoints.map((e, i) => (i === emitting ? { ...e, emits: "invented_fact" } : e)) };
+      expect(ExecutorProgramManifestSchema.safeParse(bad).success).toBe(false);
+    });
+  });
+
+  // ── `manifest_multi`: constant hosts, but more than one ────────────────────────────────────────────────────
+  // Added for Google Workspace, which neither existing value describes. Its hosts ARE constant, so `server_derived`
+  // would be false; but there are two of them (admin + licensing), and the executor-program kind's `base_url` is a
+  // single string. The exemption is guarded so it cannot become a way around the single-host rule above.
+  describe("manifest_multi", () => {
+    const multi = (over: Record<string, unknown> = {}) =>
+      native({ provider_id: "google_workspace", base_url_source: "manifest_multi", budget_profile: { name: "GOOGLE_WORKSPACE_PRODUCTION_BUDGET", source: "src/connector-sync/google-workspace-pagination.ts" }, ...over });
+
+    it("validates for a provider that allowlists two or more hosts", () => {
+      expect(NativeConnectorManifestSchema.safeParse(multi()).success).toBe(true);
+    });
+
+    it("is REFUSED for a provider with a single allowlisted host", () => {
+      // Otherwise any single-host provider could declare manifest_multi and walk straight past the check above, which
+      // is the whole reason that check exists. Slack allowlists exactly one host.
+      expect(NativeConnectorManifestSchema.safeParse(multi({ provider_id: "slack" })).success).toBe(false);
+      expect(NativeConnectorManifestSchema.safeParse(multi({ provider_id: "microsoft_entra" })).success).toBe(false);
+    });
+
+    it("is REFUSED for a provider with no host allowlist at all", () => {
+      expect(NativeConnectorManifestSchema.safeParse(multi({ provider_id: "not_a_provider" })).success).toBe(false);
+    });
+
+    it("does not weaken the single-host rule for the other values", () => {
+      expect(NativeConnectorManifestSchema.safeParse(multi({ base_url_source: "manifest" })).success).toBe(false);
+      expect(NativeConnectorManifestSchema.safeParse(multi({ base_url_source: "invented" })).success).toBe(false);
+    });
+
+    it("still declares no executor-program keys", () => {
+      const parsed = NativeConnectorManifestSchema.safeParse(multi());
+      expect(parsed.success).toBe(true);
+      if (!parsed.success) return;
+      expect((parsed.data as Record<string, unknown>).base_url).toBeUndefined();
+      expect((parsed.data as Record<string, unknown>).endpoints).toBeUndefined();
+    });
   });
 
   it("requires at least one resource, capability and entrypoint", () => {

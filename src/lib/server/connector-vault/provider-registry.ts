@@ -142,20 +142,39 @@ const GOOGLE_WORKSPACE: ConnectorProviderDefinition = {
   id: "google_workspace",
   displayName: "Google Workspace",
   category: "identity",
-  authKind: "oauth2",
+  authKind: "oauth2", // a service-account JWT-bearer grant (RFC 7523) — OAuth 2.0, but NO browser consent and NO refresh token
   kind: "identity_provider_discovery",
   capabilities: [],
-  discoveryCapabilities: [
-    "discover_apps", "discover_assigned_users", "discover_groups", "discover_sso_metadata",
-    "discover_login_activity", "discover_domains",
-  ],
+  // What the CONNECTOR implements, not what Google could theoretically expose. `discover_apps` and `discover_sso_metadata`
+  // are deliberately ABSENT: Google has no Okta-style application-assignment model, and the nearest equivalents (Marketplace
+  // app inventory, per-user OAuth token grants) need `admin.directory.user.security`, a per-user high-blast-radius scope
+  // that is NOT in the reviewed set. Claiming them here would be the "fabricate parity" failure the design forbids.
+  discoveryCapabilities: ["discover_assigned_users", "discover_groups", "discover_login_activity"],
   status: "future",
   reviewGate: "provider-specific-reviewed-pr",
   riskLevel: "medium",
-  requiredScopes: ["admin.directory.user.readonly", "admin.directory.group.readonly"], // display-only labels
+  // The REVIEWED set, mirrored from contracts/google-workspace-provider-contract.v1.json and asserted equal by
+  // google-workspace-contract.test.ts. Full URIs, because that is the literal string a Workspace super-admin pastes into
+  // the domain-wide-delegation console — a short label there authorizes nothing, so a label here would be a fiction.
+  //
+  // FOUR scopes, one per declared resource. Each is the NARROWEST Google publishes for that read:
+  //   user.readonly         — users; also yields aliases, suspended/archived, orgUnitPath, lastLoginTime, isAdmin and 2SV
+  //                           state, so the org-unit, alias and admin resources need NO scope of their own.
+  //   group.readonly        — groups and their aliases.
+  //   group.member.readonly — memberships and the member's role in the group (OWNER/MANAGER/MEMBER). Narrower than
+  //                           group.readonly for this read, so it is requested separately rather than folded in.
+  //   apps.licensing        — licence assignments. HONEST CAVEAT: Google publishes NO `.readonly` variant of this scope,
+  //                           so it is the minimum obtainable, not a read-only one. The connector issues GET only, and
+  //                           google-workspace-contract.test.ts asserts that no non-GET method reaches the licensing host.
+  requiredScopes: [
+    "https://www.googleapis.com/auth/admin.directory.user.readonly",
+    "https://www.googleapis.com/auth/admin.directory.group.readonly",
+    "https://www.googleapis.com/auth/admin.directory.group.member.readonly",
+    "https://www.googleapis.com/auth/apps.licensing",
+  ],
   helpCopy:
-    "Future identity-provider discovery connector — not connected. Google Workspace would discover many SaaS " +
-    "apps and assigned users quickly; no credentials are stored, and discovery/sync are not built.",
+    "Future identity-provider discovery connector — not connected. Google Workspace would discover directory users, " +
+    "groups, group membership and licence assignments; no credentials are stored, and discovery/sync are not built.",
   enabled: false,
 };
 const MICROSOFT_ENTRA: ConnectorProviderDefinition = {
