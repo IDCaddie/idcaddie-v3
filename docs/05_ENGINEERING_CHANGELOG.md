@@ -12,10 +12,10 @@ from PRs verified via `git log` / `gh pr list`.
 > **as of each PR's date** and are historical — where an older entry says "RISK-007 remains OPEN" / "Phase C remains
 > BLOCKED", that was accurate at that entry's date; this banner is the current state.
 
-### feat(governance) — Phase 18B: migration 0088, the application match review boundary · 2026-08-13
+### feat(governance) — Phase 18B: migration 0089, the application match review boundary · 2026-08-13
 
 **The lifecycle `application_matches` was shaped for in 0075, finally given its two mutations — and nothing else.** 0075 built the
-table and deliberately ran no matcher; 0085 added the bounded read and the matcher-run state. 0088 adds
+table and deliberately ran no matcher; 0085 added the bounded read and the matcher-run state. 0089 adds
 `product_propose_application_match` and `product_decide_application_match`, so a candidate can be proposed, then accepted or
 rejected by a human. **PROPOSED ≠ MATCHED. REJECTED ≠ ABSENT EVIDENCE. ACCEPTED = CANONICAL RELATIONSHIP.**
 

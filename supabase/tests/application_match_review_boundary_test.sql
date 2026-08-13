@@ -1,4 +1,4 @@
--- 0088 — the governed propose/decide boundary over application_matches.
+-- 0089 — the governed propose/decide boundary over application_matches.
 --
 -- The property this suite exists to protect: **a proposal can never become truth by itself.** Only a human accept produces a
 -- canonical relationship, only one per directory application, and a rejected candidate stays rejected however many times a
@@ -143,7 +143,7 @@ begin
   assert exists (select 1 from pg_indexes where indexname = 'application_matches_one_accepted_dir_idx'),
          'B2 the one-accepted-per-directory-application index must exist (0075)';
   assert exists (select 1 from pg_indexes where indexname = 'application_matches_candidate_idx'),
-         'B2 the candidate identity index this phase adds must exist (0088)';
+         'B2 the candidate identity index this phase adds must exist (0089)';
 end $$;
 
 -- ════ B3: idempotency — re-proposing the same pair changes nothing ═══════════════════════════════════════════════════════════
@@ -308,7 +308,7 @@ begin
          = array['product_application_matcher_state','product_application_matches','product_complete_application_matcher_run',
                  'product_decide_application_match','product_fail_application_matcher_run','product_propose_application_match',
                  'product_start_application_matcher_run'],
-         'B12 the product application-match surface is 0085 (read + state + start/complete/fail) plus exactly 0088 propose/decide';
+         'B12 the product application-match surface is 0085 (read + state + start/complete/fail) plus exactly 0089 propose/decide';
 end $$;
 
 -- ════ B13: matcher execution state stays decoupled from human decisions ═════════════════════════════════════════════════════

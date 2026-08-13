@@ -203,7 +203,7 @@ application_matches                  directory application ↔ SaaS app (0075)
 
 ## The application match review boundary (Phase 18B)
 
-Migration **0088** adds the only two mutations `application_matches` will ever need, and nothing else:
+Migration **0089** adds the only two mutations `application_matches` will ever need, and nothing else:
 
 ```
 deterministic evidence  →  PROPOSED match  →  human ACCEPT / REJECT  →  accepted relationship  →  governance truth
@@ -222,7 +222,7 @@ Both are owner/admin, matching 0085's read and the 0078/0087 precedent. `connect
 is product-side orchestration, so no new machine identity was introduced. `application_matches` keeps its 0075 deny-all posture —
 RLS on, no policy, no table grant — and 0085's bounded read stays the only read path.
 
-**Candidate identity is the pair `(tenant, directory application, app)`** — one row per pair for all time (0088's unique index).
+**Candidate identity is the pair `(tenant, directory application, app)`** — one row per pair for all time (0089's unique index).
 That makes three properties structural: re-proposing is a no-op, a **rejected candidate can never be resurrected** by proposing
 again, and an accepted one can never be duplicated. Method is deliberately not part of the key: two methods reaching the same pair
 are one candidate with two lines of evidence.
