@@ -174,3 +174,71 @@ The engine imports **zero** provider modules — its only imports are `node:cryp
 `provider` is carried as an opaque string for provenance and grouping; it is never compared to a literal. Google plugs
 in by landing rows in `app_accounts` plus a capability row, and no file here changes; a test asserts an unknown provider
 evaluates identically to a known one.
+
+## The read boundary (migration 0085)
+
+```
+canonical facts  →  authorized read RPCs  →  [Phase 17 tenant loader]  →  pure engine  →  0083 lifecycle
+```
+
+The engine consumes six canonical inputs. Four already had authorized reads — `product_app_accounts` /
+`product_connector_capabilities` (0078) and `product_list_directory_identities` / `product_list_directory_applications`
+(0061). Two did not: `person_account_links` (0082) shipped propose/decide only, and `application_matches` (0075) shipped
+with the note *"the read contract will be a product RPC when a consumer exists."* 0085 adds exactly those two, plus the
+one fact neither table can express.
+
+**Both tables stay deny-all.** No SELECT policy was added, no existing revoke weakened, no direct table grant exists, and
+`service_role` is never used — the definer functions remain the only path, as 0061 chose for the directory graph.
+Because `scripts/test-rls.sh` blanket-grants and then re-revokes (masking a broadened grant from the SQL suite),
+`scripts/governance-read-boundary-migration.test.ts` asserts the privilege closure statically. That masking is real: a
+mutation adding `grant select … to connector_runner` passed the DB suite and was caught only by the static guard.
+
+### Three different facts, three different owners
+
+| fact | owner | question it answers |
+|---|---|---|
+| `person_account_links` (0082) | canonical **human ↔ account** judgement | *is this account this person's?* |
+| `application_matches` (0075) | canonical **application relationship** judgement | *is this directory app that SaaS product?* |
+| `application_matcher_state` (0085) | **execution** evidence | *did matching run to completion at all?* |
+
+**Matcher execution state is not match truth.** The first two are decided by a human; the third is a fact about a
+process. Neither is ever derived from the other.
+
+### MATCHER RAN + ZERO MATCHES ≠ MATCHER NEVER RAN
+
+This is the whole reason 0085 adds a table rather than another read. Rule 5 must separate four states, and a row count
+separates only two:
+
+| state | representation |
+|---|---|
+| never ran | **no row** — absence is the answer, so there is no `has_ever_run` column duplicating it |
+| running | `status='running'`, `last_completed_at` unchanged |
+| failed | `status='failed'`, `last_completed_at` unchanged |
+| completed | `status='completed'`, `last_completed_at` set |
+
+A complete run that found nothing is a **result**; never having looked is an **unanswered question**. Counting
+`application_matches` rows gives the same zero for both, and the answer it picks — *unknown* — would silently withhold a
+true finding forever.
+
+`last_completed_at` deliberately survives a later failure. An older completion remains a fact when a newer run fails, and
+the newer failure remains a fact too, so a stale completion cannot mask a fresh failure and a fresh failure cannot erase
+a real completion. The reader decides which matters.
+
+**Reuse was rejected on semantics.** `connector_capability_state` (0076) is keyed
+`(tenant_id, connection_id, capability)` with `connection_id NOT NULL`. Application matching is a tenant-level process
+over already-persisted rows and has no connection; making it fit would mean inventing a synthetic connector row, which is
+a lie in the shape of a foreign key. `connector_runs` and `connector_run_resource_discovery` are connector-scoped for the
+same reason.
+
+### What the matcher lane must call
+
+`product_start_application_matcher_run` → do the matching (writing `application_matches` itself) →
+`product_complete_application_matcher_run` **or** `product_fail_application_matcher_run`. Both terminal verbs move only a
+run that actually started, so a completion cannot be claimed by a caller that never looked at anything. 0085 implements
+**no matching logic**.
+
+### Person resolution is unchanged
+
+`resolutionHasRun = personAccountLinks.length > 0` is **not** touched here. Phase 16 reviewed and retained it, and its
+limitation is documented above. 0085 adds an execution signal for the application matcher only, because that is where the
+row-count proxy is actually wrong today — not to generalise a pattern.
