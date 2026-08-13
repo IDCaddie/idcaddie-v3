@@ -184,6 +184,35 @@ here instead of silently doubling every proposal.
 confirmed load-bearing by mutation rather than assumed: deleting the bot filter from the person-creation pass fails P2
 with `got 4`, and making the person join case-sensitive fails P12 with `got 0`. `scripts/test-rls.sh` re-revokes the new table in lockstep with the migration so the suite mirrors the real
 deny-all surface. **Not applied to hosted Supabase; nothing deployed. No risk opened or closed.**
+### feat(commercial) — Phase 10: the purchased-line editor, and the client/server split it forced · 2026-08-12
+
+**Without this the table could only be populated by a direct database write**, which made the whole phase verifiable but
+not usable. `/contracts/[id]/entitlements/new` and `.../[entitlementId]/edit` are thin server-rendered shells over one
+client form posting to `entitlement-actions.ts` — the same arrangement as the contract form, with no authorization in
+the UI: 0082's RLS decides whether a save lands, and a denied save is deliberately indistinguishable from "no longer
+exists".
+
+**Every quantity field starts empty and stays optional, deliberately.** A blank seat box records NULL, and a
+`defaultValue={0}` anywhere in this form would silently fill the database with claims nobody made. The edit route
+round-trips NULL → `""` → NULL so clearing a quantity records "unknown" rather than zero.
+
+**The build caught the real bug.** The client form imported the bounded vocabularies from `contract-entitlements.ts`,
+which imports the server Supabase client — dragging `next/headers` into the browser bundle and failing the build. Fixed
+the way the repo already solves this for contracts: the input type, the four vocabularies and the parser moved to a
+pure, IO-free `entitlement-write.ts` (the `contract-write.ts` / `contracts.ts` split), re-exported from the DAL so
+server callers keep one import site. Its test moved with it.
+
+The edit route finds the line in the contract's own RLS-scoped list rather than adding a single-row query: that list is
+already the authorized read, an id the caller may not see simply is not in it, and there is no second query to keep in
+sync.
+
+**ponytail: no vendor / product / application / evidence-document pickers.** Those columns are on 0082 and writable,
+but no picker exists for canonical rows and three of them is a phase of its own. Consequence worth stating —
+`possible_duplicate_entitlement` matches on `app_product_id`, so until a product picker exists that rule cannot fire
+from data entered through this form.
+
+Suite 2627 passing; build, callback-bundle guard, auth-safety, import-boundary and migration-safety all green.
+
 ### feat(commercial) — Phase 10: the purchased-vs-discovered panel on contract detail · 2026-08-12
 
 **The panel performs no arithmetic.** Both engines hand it finished values, so there is no second place a commercial

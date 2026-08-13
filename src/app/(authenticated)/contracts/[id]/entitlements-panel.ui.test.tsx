@@ -39,7 +39,7 @@ const view = (over: Partial<ContractCommercialView> = {}): ContractCommercialVie
 
 describe("the entitlements panel", () => {
   it("shows the measured quantities and the estimate, with the arithmetic beside it", () => {
-    const { container } = render(<EntitlementsPanel view={view()} />);
+    const { container } = render(<EntitlementsPanel view={view()} contractId="c1" />);
     const text = container.textContent ?? "";
 
     expect(text).toContain("3,200");
@@ -50,7 +50,7 @@ describe("the entitlements panel", () => {
   });
 
   it("renders a sentence — never a number and never a bare dash — for a quantity with no source", () => {
-    const { container } = render(<EntitlementsPanel view={view()} />);
+    const { container } = render(<EntitlementsPanel view={view()} contractId="c1" />);
     const text = container.textContent ?? "";
 
     // The two quantities nothing produces today.
@@ -67,13 +67,13 @@ describe("the entitlements panel", () => {
   });
 
   it("says a contract with no purchased line is unrecorded, not zero", () => {
-    render(<EntitlementsPanel view={view({ reconciliations: [], entitlementCount: 0 })} />);
+    render(<EntitlementsPanel view={view({ reconciliations: [], entitlementCount: 0 })} contractId="c1" />);
     expect(screen.getByText(/This is not a quantity of zero/)).toBeTruthy();
   });
 
   it("explains an unreadable comparison instead of showing an empty one", () => {
     const unreadable = reconcileEntitlement(line, null, CAPS);
-    render(<EntitlementsPanel view={view({ reconciliations: [unreadable], discoveredEvidenceReadable: false })} />);
+    render(<EntitlementsPanel view={view({ reconciliations: [unreadable], discoveredEvidenceReadable: false })} contractId="c1" />);
     expect(screen.getByText(/not readable with your access/)).toBeTruthy();
     // Three times, deliberately: the Provisioned cell, the comparison row, and the estimate row. Every place a reader might
     // look for a number carries the explanation instead of a blank — repetition is the cheaper mistake here.
@@ -81,14 +81,21 @@ describe("the entitlements panel", () => {
   });
 
   it("carries the truthfulness disclaimer about usage and inactive accounts", () => {
-    const { container } = render(<EntitlementsPanel view={view()} />);
+    const { container } = render(<EntitlementsPanel view={view()} contractId="c1" />);
     const text = container.textContent ?? "";
     expect(text).toContain("do not represent application usage");
     expect(text).toContain("not evidence that a licence is being charged for");
   });
 
+  it("offers the write affordances that make the panel reachable", () => {
+    // Shown to any reader for usability; RLS decides whether the save lands (the contract form's posture).
+    const { container } = render(<EntitlementsPanel view={view()} contractId="c1" />);
+    expect(container.querySelector('a[href="/contracts/c1/entitlements/new"]')).toBeTruthy();
+    expect(container.querySelector('a[href="/contracts/c1/entitlements/e1/edit"]')).toBeTruthy();
+  });
+
   it("renders a load failure as a failure, never as an empty contract", () => {
-    render(<EntitlementsPanel view={null} />);
+    render(<EntitlementsPanel view={null} contractId="c1" />);
     expect(screen.getByText(/Could not load the purchased lines/)).toBeTruthy();
   });
 });

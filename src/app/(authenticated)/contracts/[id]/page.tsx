@@ -195,7 +195,7 @@ export default async function ContractDetailPage({
             )}
           </section>
 
-          <EntitlementsPanel view={commercial && commercial.ok ? commercial.data : null} />
+          <EntitlementsPanel view={commercial && commercial.ok ? commercial.data : null} contractId={result.data.id} />
 
           <ContractFiles
             contractId={result.data.id}

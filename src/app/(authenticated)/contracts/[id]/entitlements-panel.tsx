@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { Badge } from "@/components/badge";
 import { CONCEPTS, CONCEPT_DEFINITION, CONCEPT_LABEL, type EntitlementReconciliation, type Measure } from "@/lib/server/commercial-analytics/types";
 import type { ContractCommercialView } from "@/lib/data/commercial-loader";
@@ -80,7 +81,7 @@ function OpportunityRow({ r }: { r: EntitlementReconciliation }) {
   );
 }
 
-export function EntitlementsPanel({ view }: { view: ContractCommercialView | null }) {
+export function EntitlementsPanel({ view, contractId }: { view: ContractCommercialView | null; contractId: string }) {
   if (view === null) {
     return (
       <section className="space-y-2 text-sm">
@@ -94,12 +95,20 @@ export function EntitlementsPanel({ view }: { view: ContractCommercialView | nul
 
   return (
     <section className="space-y-4 text-sm">
-      <div>
-        <h2 className="font-medium">Purchased entitlements</h2>
-        <p className="text-xs text-zinc-500">
-          What this contract records as bought, compared with what the declared connector found. Purchased, assigned,
-          provisioned, billable and active are different measurements and are never combined.
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="font-medium">Purchased entitlements</h2>
+          <p className="text-xs text-zinc-500">
+            What this contract records as bought, compared with what the declared connector found. Purchased, assigned,
+            provisioned, billable and active are different measurements and are never combined.
+          </p>
+        </div>
+        <Link
+          href={`/contracts/${contractId}/entitlements/new`}
+          className="rounded border border-zinc-300 px-3 py-1.5 text-sm dark:border-zinc-700"
+        >
+          Add purchased line
+        </Link>
       </div>
 
       {view.entitlementCount === 0 ? (
@@ -115,6 +124,12 @@ export function EntitlementsPanel({ view }: { view: ContractCommercialView | nul
               <div className="flex flex-wrap items-center gap-2">
                 {r.staleEvidence ? <Badge tone="attention">Some evidence is stale</Badge> : null}
                 <Badge tone="neutral">{r.provenance.confidence} confidence</Badge>
+                <Link
+                  href={`/contracts/${contractId}/entitlements/${r.entitlementId}/edit`}
+                  className="text-xs text-zinc-500 underline"
+                >
+                  Edit
+                </Link>
               </div>
             </header>
 

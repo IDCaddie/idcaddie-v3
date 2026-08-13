@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseEntitlementWriteInput, type EntitlementWriteInput } from "./contract-entitlements";
+import { parseEntitlementWriteInput, type EntitlementWriteInput } from "./entitlement-write";
 
 const CONTRACT = "11111111-1111-4111-8111-111111111111";
 const CONN = "22222222-2222-4222-8222-222222222222";
