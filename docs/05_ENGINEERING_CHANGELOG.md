@@ -53,6 +53,58 @@ passed, build compiled.** Four load-bearing properties confirmed by mutation: cl
 G7; engine isolation → G8; and weakening finding identity breaks the sync outright, so identity is structurally
 load-bearing rather than merely asserted. **Not applied to hosted Supabase; nothing deployed. No risk opened or closed.**
 
+### chore(engineering) — Engineering OS v0.1: risk-based engineering standards · 2026-08-12
+
+**The Slack/OIDC/connector-credential work proved a set of engineering controls, and nothing wrote them down — so
+every session either reconstructed them from the last high-risk PR or, worse, applied Phase-8R-level ceremony to a
+copy fix.** This PR makes the rigor-vs-risk trade explicit and canonical, and it is deliberately **v0.1**: no internal
+platform, no `policy.json`, no boundary registry, no new CI framework, no speculative automation.
+
+Adds root-level [`ENGINEERING_STANDARDS.md`](../ENGINEERING_STANDARDS.md) — canonical for **both** `idcaddie-v3` and
+`idcaddie-connector-runner`. Four gates (correctness · security+operability · maintainability · speed), four risk
+tiers **T0–T3**, and the load-bearing rules already learned the hard way: automated classification is a **baseline,
+not semantic proof** and may never justify de-escalation; **provider fact ≠ normalized fact ≠ governance conclusion**;
+a security guard that has never been demonstrated to fail is not yet strong evidence; **pain before platform** —
+two recorded examples of real wasted time before any new internal automation, with the exception list closed to
+secret scanning, authn/authz enforcement, credential/key protection, and migration-integrity controls. The
+stated optimization target is **maximum safety per minute of engineering effort**.
+
+**Extends the existing classifier rather than adding a new one.** `scripts/pr-review-summary.sh` already categorized
+the diff; it now also prints `baselineRiskTier` + `riskReasons`. The tier rules were extracted into a pure,
+unit-tested `scripts/change-risk-lib.mjs` (14 cases in `change-risk-lib.test.ts`) so they have exactly one owner
+instead of a bash re-statement. Two properties are pinned by test because they are the ones that fail silently:
+highest-tier-wins is **order-independent** (a `max()` quietly becoming last-match-wins is invisible if the T3 path
+happens to sort first — verified RED with a deliberate mutant), and an **unrecognised path defaults UP to T2**, never
+down. Docs short-circuit to T0 first, so `docs/02_SECURITY_AND_RLS.md` is not tiered T3 by reading "RLS" out of its
+own filename; keyword matching is delimiter-anchored, so the `(authenticated)` route group does not tier the entire
+UI as a trust boundary while `.../oauth/callback/route.ts` still does.
+
+The PR template is **restructured, not extended**: a `## Risk` block up top, and the nine-bullet impact list became
+`## High-risk considerations` that a T0/T1 PR deletes outright — so low-risk PRs get *faster* while T3 gains the
+cross-system, deployment-skew and provider-truth prompts it did not have. The P0 checklist is unchanged and still
+applies at every tier. Short pointers added to `AGENTS.md` (→ `CLAUDE.md`), `README_START_HERE.md`, and this index;
+the standards text is not duplicated anywhere.
+
+**Independent review found two false negatives and they are fixed in this PR.** Classifying all 784 tracked files —
+rather than only the canonical examples, which all passed — showed the tier rules were reading `src/app/` as
+presentation and missing the auth layer entirely. Ten server entry points sat in the T1 "UI / presentation surface"
+bucket, including the audited contract write path (`contracts/actions.ts`), the file upload/delete actions, the
+connector connect/manage/review Server Actions, and three CSV export Route Handlers; and the authentication layer —
+`src/proxy.ts` (the Next 16 Proxy, whose `matcher` decides which routes are protected and whose `.well-known/`
+exclusion is load-bearing for Okta JWKS) plus `src/lib/supabase/` (the RLS-bearing client factories and the
+`updateSession`/redirect-to-login helper) — carried no T3 keyword in its path and baselined T2. Two deterministic
+path rules fix both: Route Handlers and Server Action modules under `src/app/` floor at T2 (T3 keywords still win, so
+`.../oauth/callback/route.ts` stays T3), and the Proxy + `src/lib/supabase/` are T3. The rule is `.ts`/`.js`-only —
+a first attempt using `.tsx?` pulled in `connector-actions.tsx`, a `"use client"` form that merely calls its sibling
+`actions.ts`, which correctly stays T1. Net effect on the repo: exactly 16 files change tier, all of them genuine
+server or auth surfaces, none in the other direction.
+
+**Zero product, DB, connector, or provider change.** No migration, no hosted Supabase, no AWS, no Vercel, no provider
+call, no production access. Re-evaluation is gated on **5–10 substantive PRs across at least two tiers** plus recorded
+friction evidence — not a calendar date. Follow-up (deliberately not in this PR, which is v3-only): a one-line pointer
+from the connector-runner README. Vendoring the standard through `VENDOR.lock` was **rejected** — a byte-pin on prose
+would break runner CI on every wording edit while catching no failure class the pointer does not.
+
 ### feat(governance) — Phase 16: migration 0082, the person layer · 2026-08-12
 
 **The estate could describe every provider account and no human.** `identity_accounts` (0053) holds the IdP side,
