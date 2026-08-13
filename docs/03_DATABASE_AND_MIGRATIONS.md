@@ -530,3 +530,64 @@ It belongs in 0081 because 0081 is where the assertion "no OTHER security-define
 revoke itself — a harness statement whose comment claimed to restore a "migration-intended posture" that existed in no
 migration. Shipping a test that certifies a property the database does not have is worse than shipping no test. Firing a
 trigger uses the table owner's rights and never consults the invoker's EXECUTE, so nothing existing changes behaviour.
+
+## 0082 — The person layer (Phase 16, cross-source identity graph)
+
+The estate already had two parallel **provider-account** models — `identity_accounts` (the IdP/directory side, 0053) and
+`app_accounts` (the SaaS side, 0076) — and 0076/0078 already linked a SaaS account to **one** IdP identity, pairwise,
+by verified address, refusing ambiguity. What it had no node for was the **human**. Without one:
+
+- two IdP accounts for one person (two Okta orgs — an estate this product demonstrably has, see 0071) are unrelated rows;
+- two SaaS accounts with no IdP account between them (Slack + Google in a directory-less tenant) have no path at all;
+- "this person left and still holds a licence" has no subject it can be a finding *about*.
+
+So 0082 adds the node and the **evidence-bearing edge** to it — `public.person_account_links` — and nothing else. It adds
+no second account model, computes no finding, and touches no connector.
+
+**Why a table rather than `identity_accounts.person_id`.** That nullable FK has shipped since 0001 and **nothing has ever
+written it**. It carries no method, no confidence, no author, and no way to say *proposed*. A person link is a
+**judgement**, which is the same reasoning that made 0075 `application_matches` and 0076 `app_account_identity_matches`
+tables rather than joins: **declare, never infer**. `identity_accounts.person_id` is deliberately left untouched and
+unwritten — two writers for one fact is how you get two answers.
+
+**Shape.** `person_account_links (id, tenant_id, person_id, identity_account_id, app_account_id, method, confidence,
+status, rationale, decided_by, decided_at, created_at)`. Exactly one endpoint is non-null (`pal_one_endpoint_chk` on
+`num_nonnulls`), so the endpoint is a real FK to one of the two account tables rather than a polymorphic `(kind, id)`
+pair — a polymorphic reference cannot carry the same-tenant composite FK (the 0005 pattern) that makes a cross-tenant
+link *impossible* rather than merely unused, and that guarantee is worth more than the column. All three endpoints
+(`person`, `identity_account`, `app_account`) carry that composite FK; a NULL account column passes MATCH SIMPLE, which
+is exactly what the one-endpoint CHECK intends. Section A adds the one missing parent unique
+`identity_accounts_id_tenant_key (id, tenant_id)` (0056 gave only the 4-tuple) — additive and safe for 0056's reason:
+`id` is the PK, so the 2-tuple is already unique.
+
+Partial unique indexes carry the invariants: **one accepted person per provider account** (`pal_one_accepted_identity_idx`
+/ `pal_one_accepted_app_account_idx`) — an account belongs to at most one human, while the person side is deliberately
+unconstrained, which is the whole point of the node — and one row per `(person, account)` pair, which is what makes
+re-proposal idempotent and a human's rejection permanent.
+
+**`product_propose_person_links(tenant)`** is deterministic and never accepts anything. One person per
+`(tenant, lowered address)` is already a **database** guarantee — `people_tenant_email_lower_key`, migration **0036**,
+which refused to create itself while any duplicate existed — so the proposer leans on that index rather than holding a
+lock: the person insert is `on conflict (tenant_id, lower(primary_email)) do nothing`, which makes concurrent proposals
+idempotent by construction, and the same index serves the `lower(primary_email)` joins. It then runs two passes:
+**address** — every *current* account carrying a `normalized_email`
+is proposed against the person for that address, creating the person if the tenant has none; and **transitive** — a SaaS
+account whose 0076 match a human already **accepted** belongs to that identity's person, which is the only path by which
+two *different* addresses ever become one person. **`product_decide_person_link(tenant, link, decision)`** takes
+`decided_by` from `auth.uid()`, never a parameter, and moves only a `proposed` row.
+
+**What it refuses to do,** each because guessing here attributes one human's access to another: no display-name or fuzzy
+matching (0076 excluded the method from its CHECK on purpose); no domain-only matching (a shared domain is a colleague);
+no auto-acceptance — every proposal lands `proposed`; and two different addresses stay two persons until a human says
+otherwise. Bots are excluded on the SaaS side via `account_kind`; `identity_accounts` has no kind column, so an IdP
+service account is proposed like any other and the decision gate is what catches it.
+
+RLS on, **zero policies**, `revoke all` from `anon`/`authenticated`/`connector_runner` — the posture of every
+`directory_*` and `app_account_*` table. The runner is revoked because a person link is a human judgement, not connector
+evidence. `scripts/test-rls.sh` re-revokes the table after its blanket grant, in lockstep with the migration, so the
+suite reflects the real deny-all surface. Proven by **P0–P11** in `supabase/tests/person_identity_graph_test.sql`.
+
+**Verified local: full `scripts/test-rls.sh` suite passed (`==> RLS migration tests passed`, 33 test files, exit 0), and
+the suite was confirmed load-bearing by mutation — removing the bot filter from the person-creation pass fails P2 with
+`one person per resolvable address (ada@, dup@, ada.l@), got 4`, and making the person join case-sensitive fails P12
+with `one account yields one link, got 0`. NOT applied to hosted Supabase.**
