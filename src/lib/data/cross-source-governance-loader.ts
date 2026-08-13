@@ -63,10 +63,6 @@ const appAccountSchema = z.object({
   account_kind: z.enum(["human", "bot", "service", "unknown"]),
   account_status: z.enum(["active", "inactive", "deleted", "unknown"]),
   is_admin: nullableBool,
-  // `count(*) over ()` from 0078 — the size of the whole matching set, not of this page. It is what lets an OFFSET
-  // read verify it assembled everything; a bigint arrives as a string over PostgREST, so accept both.
-  total_count: z.union([z.number(), z.string()]).nullable().optional()
-    .transform(v => (v === null || v === undefined ? null : Number(v))),
 });
 const identitySchema = z.object({
   id: uuid, connection_id: uuid, provider: z.string().min(1), sync_status: syncStatus, is_active: nullableBool,
@@ -145,8 +141,26 @@ function strictlyIncreasing<T extends { id: string }>(batch: readonly T[], after
   return true;
 }
 
-const parseRows = <T>(schema: z.ZodType<T>, data: unknown): T[] =>
-  Array.isArray(data) ? data.flatMap(r => { const p = schema.safeParse(r); return p.success ? [p.data] : []; }) : [];
+/**
+ * Parse a page, reporting how many rows were DROPPED rather than silently swallowing them.
+ *
+ * #418 made a validation-dropped row fail the app-account read, because 0078's `count(*) over ()` exposed the short
+ * set. 0089 has no total — a cursor does not need one — so that guarantee has to be kept some other way, and the
+ * honest way is the direct one: a row we could not parse is a row we did not read. Continuing would withhold that
+ * account's finding while leaving its connection closure-eligible, which is the same false-closure harm the total was
+ * catching. So it now holds for EVERY read rather than only the one that happened to return a count.
+ */
+function parsePage<T>(schema: z.ZodType<T>, data: unknown): { rows: T[]; dropped: number } {
+  if (!Array.isArray(data)) return { rows: [], dropped: 0 };
+  const rows: T[] = [];
+  let dropped = 0;
+  for (const r of data) {
+    const p = schema.safeParse(r);
+    if (p.success) rows.push(p.data);
+    else dropped++;
+  }
+  return { rows, dropped };
+}
 
 /**
  * Page a cursor-based RPC to EXHAUSTION.
@@ -163,7 +177,12 @@ async function loadAllByCursor<T extends { id: string }>(
   for (let page = 0; page < MAX_PAGES; page++) {
     const r = await callRpc(io, name, { ...baseArgs, p_after_id: after, p_limit: pageSize });
     if (!r.ok) return r;
-    const batch = parseRows(schema, r.data);
+    const parsed = parsePage(schema, r.data);
+    if (parsed.dropped > 0) {
+      console.error(`[governance/loader] ${parsed.dropped} row(s) failed their contract: ${name}`);
+      return { ok: false, error: "pagination_contract_violated" };
+    }
+    const batch = parsed.rows;
     // Strict monotonicity, enforced rather than trusted. A repeated or backward id means the canonical read is
     // malformed — and a duplicated app_account would reach rule 4 as one person holding two accounts in one
     // connection, i.e. a governance finding accusing somebody of a duplicate that does not exist. Deduplicating
@@ -178,9 +197,11 @@ async function loadAllByCursor<T extends { id: string }>(
     const raw = Array.isArray(r.data) ? r.data.length : 0;
     if (raw < pageSize) return { ok: true, rows };
     const last = batch.length > 0 ? batch[batch.length - 1].id : null;
-    // Every 0061/0085 cursor read is `where id > p_after_id order by id`, so ids are STRICTLY increasing — verified
-    // against the merged SQL, not assumed. A page that does not advance the cursor means the read contract is broken,
-    // and continuing would either loop or accumulate the same row twice.
+    // The terminal guard on the loop itself. It is SUBSUMED today — a page that failed to advance would already have
+    // tripped `strictlyIncreasing` above, and a page that parsed to nothing would have tripped the drop check — so
+    // mutating it away leaves the suite green. It stays because loop termination should not depend implicitly on two
+    // guards written for other reasons: if either is ever relaxed, this is what still stops an infinite walk. Noted
+    // rather than deleted, and noted rather than claimed as tested.
     if (last === null || last === after) {
       console.error(`[governance/loader] cursor did not advance: ${name}`);
       return { ok: false, error: "pagination_contract_violated" };
@@ -191,60 +212,13 @@ async function loadAllByCursor<T extends { id: string }>(
   return { ok: false, error: "page_limit_exceeded" };
 }
 
-/** `product_app_accounts` pages by OFFSET rather than a cursor, so it gets its own loop. Same exhaustion rule. */
-async function loadAllByOffset<T extends { id: string; total_count?: number | null }>(
-  io: LoaderIo, name: string, schema: z.ZodType<T>, baseArgs: Record<string, unknown>, pageSize: number,
-): Promise<Fetched<T>> {
-  const rows: T[] = [];
-  const seen = new Set<string>();
-  let expectedTotal: number | null = null;
-  for (let page = 0; page < MAX_PAGES; page++) {
-    const r = await callRpc(io, name, { ...baseArgs, p_limit: pageSize, p_offset: page * pageSize });
-    if (!r.ok) return r;
-    const batch = parseRows(schema, r.data);
-    // OFFSET paging is weaker than a cursor and this read needs the check MORE, not less. `product_app_accounts`
-    // (0078) orders by `display_name nulls last, email nulls last, external_id`, and external_id is unique only per
-    // (tenant, connection, provider) — while the loader queries with `p_connection_id = null`, i.e. ACROSS
-    // connections. So the ORDER BY is not a TOTAL order in the scope actually read (proven against a database: two
-    // rows for one person in two workspaces tie on all three keys), and tied rows have no guaranteed inter-statement
-    // ordering. Each page is also its own statement against a live table. Both produce the same symptom: a row served
-    // twice while another is skipped.
-    for (const row of batch) {
-      if (seen.has(row.id)) {
-        console.error(`[governance/loader] duplicate row across offset pages: ${name}`);
-        return { ok: false, error: "pagination_contract_violated" };
-      }
-      seen.add(row.id);
-    }
-    // The set size, as the SERVER computed it for this statement. A duplicate is the visible half of instability; the
-    // SKIP is the dangerous half, because a missing account silently withholds its finding while its connection stays
-    // closure-eligible — so 0083 would resolve a finding that is still true. `count(*) over ()` makes that half
-    // observable without a migration: if the total moves between statements the set changed underneath us, and if the
-    // assembled size does not equal it we did not read the whole set.
-    const pageTotal = batch.length > 0 ? batch[0].total_count ?? null : null;
-    if (pageTotal !== null) {
-      if (expectedTotal !== null && pageTotal !== expectedTotal) {
-        console.error(`[governance/loader] set size changed mid-read: ${name}`);
-        return { ok: false, error: "pagination_contract_violated" };
-      }
-      expectedTotal = pageTotal;
-    }
-    rows.push(...batch);
-    const raw = Array.isArray(r.data) ? r.data.length : 0;
-    if (raw < pageSize) {
-      if (expectedTotal !== null && seen.size !== expectedTotal) {
-        console.error(`[governance/loader] assembled ${seen.size} of ${expectedTotal} rows: ${name}`);
-        return { ok: false, error: "pagination_contract_violated" };
-      }
-      return { ok: true, rows };
-    }
-  }
-  console.error(`[governance/loader] page limit exceeded: ${name}`);
-  return { ok: false, error: "page_limit_exceeded" };
-}
-
 /**
  * Assemble one tenant's canonical evidence into the engine's exact input.
+ *
+ * Every read is a CURSOR walk. `product_app_accounts_for_governance` (0089) exists precisely so this one can be:
+ * `product_app_accounts` (0078) still serves the SaaS accounts page, where a human needs alphabetical order, an offset
+ * pager and a total — and where cursor-paging would hand them an alphabetically random page. Governance asks a
+ * different question ("every account, exactly once"), so it gets its own contract rather than bending that one.
  *
  * `tenantId` MUST already be verified by `accessGate()`. Passing an unverified id is not a hole — every RPC re-checks
  * it — but it is the caller's contract, and the double check is the defence in depth worth keeping.
@@ -255,8 +229,8 @@ async function loadAllByOffset<T extends { id: string; total_count?: number | nu
  */
 export async function loadCrossSourceGovernanceInput(tenantId: string, io: LoaderIo): Promise<LoadResult> {
   const [accounts, identities, applications, links, matches] = await Promise.all([
-    loadAllByOffset(io, "product_app_accounts", appAccountSchema,
-      { p_tenant_id: tenantId, p_connection_id: null, p_include_stale: true }, PAGE_WIDE),
+    loadAllByCursor(io, "product_app_accounts_for_governance", appAccountSchema,
+      { p_tenant_id: tenantId }, PAGE_WIDE),
     loadAllByCursor(io, "product_list_directory_identities", identitySchema,
       { p_tenant_id: tenantId, p_connection_id: null, p_provider: null, p_include_stale: true }, PAGE_DIRECTORY),
     loadAllByCursor(io, "product_list_directory_applications", directoryApplicationSchema,
@@ -296,9 +270,9 @@ export async function loadCrossSourceGovernanceInput(tenantId: string, io: Loade
   // a connection this tenant does not own is DROPPED rather than defaulted — an unattributable capability cannot be
   // evidence, and inventing a provider label for it would put a fabricated source into the completeness set.
   const providerByConnection = new Map(
-    parseRows(connectorSchema, connectorsResult.data).map(c => [c.id, c.provider] as const),
+    parsePage(connectorSchema, connectorsResult.data).rows.map(c => [c.id, c.provider] as const),
   );
-  const capabilities: SourceCapability[] = parseRows(capabilitySchema, capabilitiesRaw.data).flatMap(c => {
+  const capabilities: SourceCapability[] = parsePage(capabilitySchema, capabilitiesRaw.data).rows.flatMap(c => {
     const provider = providerByConnection.get(c.connection_id);
     if (provider === undefined) return [];
     // The engine's capability vocabulary is a closed set; anything outside it is not a capability it can reason about.
@@ -310,7 +284,7 @@ export async function loadCrossSourceGovernanceInput(tenantId: string, io: Loade
 
   // The matcher read returns exactly one row for an authorized caller. Zero rows means the tenant-role gate refused —
   // which cannot be reported as "never ran", because that is a claim about the estate rather than about our access.
-  const matcherRows = parseRows(matcherStateSchema, matcherRaw.data);
+  const matcherRows = parsePage(matcherStateSchema, matcherRaw.data).rows;
   if (matcherRows.length !== 1) {
     console.error("[governance/loader] matcher state unreadable");
     return { ok: false, error: "not_authorized" };
