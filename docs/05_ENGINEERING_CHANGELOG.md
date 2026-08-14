@@ -12,6 +12,20 @@ from PRs verified via `git log` / `gh pr list`.
 > **as of each PR's date** and are historical — where an older entry says "RISK-007 remains OPEN" / "Phase C remains
 > BLOCKED", that was accurate at that entry's date; this banner is the current state.
 
+### docs(governance) — a match rejection is instance-scoped, not product-wide · 2026-08-13
+
+#422 wrote down the 0/1/many instance semantics but left the **lifecycle** half unstated, and it is the half that settled the
+architecture. A reviewer is shown *"is this IdP application the same thing as this operational/contract record?"*, so `rejected`
+answers exactly that: a later candidate for a **different instance of the same product** is a new question, not a resurrection.
+
+Recorded because the apparent flaw invites the wrong fix. Keying rejection on the product would refuse a question nobody was
+asked, and would seat a product-wide `rejected` verdict in `application_matches` beside a `confirmed` `app_aliases` row asserting
+the same directory application IS that product — one fact in two tables with independently mutable lifecycles and nothing to
+reconcile them. That is precisely why the product-authoritative variant was rejected; without this paragraph the next reader
+re-derives it as an improvement.
+
+Docs only. No schema, no runtime, no migration.
+
 ### feat(governance) — Phase 17D: a stable cursor read for the app-account evidence walk · 2026-08-13
 
 Migration **0089** adds `product_app_accounts_for_governance`: `id` cursor, bounded columns, no total.
