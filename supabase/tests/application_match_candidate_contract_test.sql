@@ -1,7 +1,7 @@
 -- application_match_candidate_contract_test.sql — migration 0090.
 --
--- Two contracts under test. The METHOD DOMAIN must admit `canonical_product` without loosening anything else, and the
--- CANDIDATE READ must hand a future matcher facts it can act on without ever disclosing the identifier it joined on.
+-- ONE contract under test: the CANDIDATE READ must hand a future matcher facts it can act on without ever disclosing the
+-- identifier it joined on — and it must do so without changing anything else, which the J-series pins from the other side.
 --
 -- The load-bearing case is E-series: paging bounds PARENTS, never the exploded join. A many-instance group split across a
 -- page boundary would let a matcher propose half an ambiguity and call the run complete — deciding by truncation.
@@ -79,7 +79,12 @@ insert into public.app_aliases (tenant_id, app_product_id, alias_type, alias_val
   ('e0000000-0000-4000-8000-00000000000a','e0000000-0000-4000-8000-0000000000b1','provider_app_id','0oaREVRQ009','product_declaration',100,'confirmed'),
   ('e0000000-0000-4000-8000-00000000000a','e0000000-0000-4000-8000-0000000000b1','provider_app_id','0oaSUPER010','product_declaration',100,'confirmed'),
   ('e0000000-0000-4000-8000-00000000000a','e0000000-0000-4000-8000-0000000000b1','provider_app_id','0oaDISC0011','product_declaration',100,'confirmed'),
-  ('e0000000-0000-4000-8000-00000000000b','e0000000-0000-4000-8000-0000000000b9','provider_app_id','0oaFOREIGN1','product_declaration',100,'confirmed');
+  ('e0000000-0000-4000-8000-00000000000b','e0000000-0000-4000-8000-0000000000b9','provider_app_id','0oaFOREIGN1','product_declaration',100,'confirmed'),
+  -- DELIBERATE CROSS-TENANT IDENTIFIER COLLISION. Tenant 2 confirms the SAME identifier value that tenant 1's `d1` carries,
+  -- pointing at tenant 2's own product. Nothing in the schema forbids two tenants observing the same provider identifier, and
+  -- without a collision the tenant predicates on the alias and product legs are UNTESTABLE — no value would collide, so
+  -- removing them would change nothing and a mutant would pass. C7 below is what that fixture makes provable.
+  ('e0000000-0000-4000-8000-00000000000b','e0000000-0000-4000-8000-0000000000b9','provider_app_id','0oaMANY0001','product_declaration',100,'confirmed');
 
 create or replace function pg_temp.act(p_user uuid) returns void language plpgsql as $$
 begin perform set_config('request.jwt.claims', json_build_object('sub', p_user)::text, false); end $$;
@@ -111,11 +116,12 @@ begin
   assert (select count(*) from pg_policy p join pg_class c on c.oid = p.polrelid
            where c.relname = 'directory_applications') = 0,
     'A0 directory_applications must still have NO policy';
-  -- The method domain, asserted on the CONSTRAINT DEFINITION and BEFORE any write. Proving it only by inserting would
-  -- surface a raw check_violation naming Postgres's constraint rather than the invariant that broke.
+  -- The method domain must be EXACTLY what 0075 shipped. This migration adds no literal, so the constraint definition is
+  -- asserted whole rather than by substring: a widened domain would slip past a `like '%…%'` check.
   assert (select pg_get_constraintdef(oid) from pg_constraint where conname = 'application_matches_method_chk')
-         like '%canonical_product%',
-    'A0 the method CHECK must admit canonical_product';
+         = 'CHECK ((method = ANY (ARRAY[''manual''::text, ''exact_domain''::text, ''exact_external_id''::text, ''vendor_catalog''::text, ''suggested''::text])))',
+    format('A0 the 0075 method domain must be untouched, saw %s',
+           (select pg_get_constraintdef(oid) from pg_constraint where conname = 'application_matches_method_chk'));
 end $$;
 
 -- ════ B: authority, on REAL memberships ═════════════════════════════════════════════════════════════════════════════
@@ -201,6 +207,29 @@ begin
               or app_id = 'e0000000-0000-4000-8000-0000000000a9') = 0,
     'C6 CROSS-TENANT: a foreign product or app must never appear';
 end $$;
+
+-- C7 the collision case: tenant 2 confirms the SAME provider identifier as tenant 1's many-instance application. Tenant 1's
+-- feed must still resolve ONLY its own product, and tenant 2's must resolve only its own. Without this the alias-leg and
+-- product-leg tenant predicates are unprovable — the mutant that drops them would pass.
+do $$
+declare v_a uuid[]; v_b uuid[];
+begin
+  select array_agg(distinct app_product_id) into v_a
+    from pg_temp.cand('e0000000-0000-4000-8000-00000000000a')
+   where directory_application_id = 'e0000000-0000-4000-8000-0000000000d1';
+  assert v_a = array['e0000000-0000-4000-8000-0000000000b1']::uuid[],
+    format('C7 a colliding foreign identifier must not bridge into this tenant, saw %s', v_a);
+end $$;
+set role authenticated;
+select pg_temp.act('e0000000-0000-4000-8000-0000000000f9');
+do $$
+declare v_b uuid[];
+begin
+  select array_agg(distinct app_product_id) into v_b from pg_temp.cand('e0000000-0000-4000-8000-00000000000b');
+  assert v_b = array['e0000000-0000-4000-8000-0000000000b9']::uuid[],
+    format('C7 tenant 2 must resolve only its own product despite the shared identifier, saw %s', v_b);
+end $$;
+reset role;
 
 -- ════ D: disclosure — the identifier that was joined on never comes back ════════════════════════════════════════════
 do $$
@@ -319,45 +348,45 @@ do $$ begin
 end $$;
 reset role;
 
--- ════ J: METHOD DOMAIN ══════════════════════════════════════════════════════════════════════════════════════════════
-insert into public.application_matches (tenant_id, directory_application_id, app_id, method, confidence, status) values
-  ('e0000000-0000-4000-8000-00000000000a','e0000000-0000-4000-8000-0000000000d1','e0000000-0000-4000-8000-0000000000a1',
-   'canonical_product','low','proposed');
-do $$
-declare ok boolean := false;
-begin
-  assert (select count(*) from public.application_matches where method = 'canonical_product') = 1,
-    'J1 canonical_product must be an accepted method';
-  -- every pre-existing value still accepted
-  insert into public.application_matches (tenant_id, directory_application_id, app_id, method, confidence, status) values
-    ('e0000000-0000-4000-8000-00000000000a','e0000000-0000-4000-8000-0000000000d2','e0000000-0000-4000-8000-0000000000a3',
-     'manual','high','proposed');
-  assert (select count(*) from public.application_matches where method = 'manual') = 1,
-    'J2 existing method values must remain accepted';
-  begin
-    insert into public.application_matches (tenant_id, directory_application_id, app_id, method, confidence, status) values
-      ('e0000000-0000-4000-8000-00000000000a','e0000000-0000-4000-8000-0000000000d3','e0000000-0000-4000-8000-0000000000a1',
-       'guessed','high','proposed');
-  exception when check_violation then ok := true; end;
-  assert ok, 'J3 an unknown method must still be refused';
-end $$;
-
--- The propose command must admit the new literal, or it would be legal in the table and unreachable through the writer.
+-- ════ J: THE METHOD DOMAIN IS UNTOUCHED, AND ALREADY SUFFICIENT ═════════════════════════════════════════════════════
+-- An earlier draft of 0090 added a sixth literal and re-created 0088's propose command to admit it. Both were removed:
+-- 0075 defines `method` as HOW the candidate was produced (provenance), and 0088 already defines `vendor_catalog` as
+-- "an existing canonical catalog mapping" — which is exactly this evidence chain. These assertions pin that nothing was
+-- widened AND that the method Phase 18C will actually use already works, so no schema change was needed.
 set role authenticated;
 select pg_temp.act('e0000000-0000-4000-8000-0000000000f1');
 do $$
-declare s text;
+declare s text; ok boolean := false;
 begin
+  -- J1 the method 18C will propose with is accepted TODAY, through 0088's unmodified writer
   s := public.product_propose_application_match(
          'e0000000-0000-4000-8000-00000000000a','e0000000-0000-4000-8000-0000000000d3',
-         'e0000000-0000-4000-8000-0000000000a2','canonical_product','low') ->> 'status';
-  assert s = 'proposed', format('J4 propose must admit canonical_product, got %s', s);
+         'e0000000-0000-4000-8000-0000000000a2','vendor_catalog','low') ->> 'status';
+  assert s = 'proposed', format('J1 vendor_catalog must already be proposable, got %s', s);
+
+  -- J2 the refusals 0088 established still hold — this migration loosened nothing
   s := public.product_propose_application_match(
-         'e0000000-0000-4000-8000-00000000000a','e0000000-0000-4000-8000-0000000000d3',
+         'e0000000-0000-4000-8000-00000000000a','e0000000-0000-4000-8000-0000000000d1',
          'e0000000-0000-4000-8000-0000000000a1','suggested','low') ->> 'status';
-  assert s = 'invalid_method', format('J5 propose must still refuse suggested, got %s', s);
+  assert s = 'invalid_method', format('J2 propose must still refuse suggested, got %s', s);
+  s := public.product_propose_application_match(
+         'e0000000-0000-4000-8000-00000000000a','e0000000-0000-4000-8000-0000000000d1',
+         'e0000000-0000-4000-8000-0000000000a1','canonical_product','low') ->> 'status';
+  assert s = 'invalid_method', format('J3 the withdrawn literal must NOT be proposable, got %s', s);
 end $$;
 reset role;
+
+-- J4 the table itself still refuses it, so nothing can write it behind the writer's back
+do $$
+declare ok boolean := false;
+begin
+  begin
+    insert into public.application_matches (tenant_id, directory_application_id, app_id, method, confidence, status) values
+      ('e0000000-0000-4000-8000-00000000000a','e0000000-0000-4000-8000-0000000000d2','e0000000-0000-4000-8000-0000000000a3',
+       'canonical_product','low','proposed');
+  exception when check_violation then ok := true; end;
+  assert ok, 'J4 canonical_product must be refused by the 0075 CHECK — this migration did not widen it';
+end $$;
 
 -- ════ CLEANUP ═══════════════════════════════════════════════════════════════════════════════════════════════════════
 -- The J-series wrote real rows to prove the method domain. `application_matches` is a shared table and the 0088 suite

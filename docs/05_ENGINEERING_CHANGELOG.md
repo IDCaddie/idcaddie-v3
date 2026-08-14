@@ -17,13 +17,13 @@ from PRs verified via `git log` / `gh pr list`.
 **The contract 18C will need, and nothing that uses it.** Two additions, one migration, because shipping them apart
 would leave an interval where the read exists and nothing may truthfully label its output.
 
-**A sixth `method`: `canonical_product`.** The identifier proves the PRODUCT; it never touches the `apps` row, so it does
-not prove the INSTANCE — true at N=1 too, where the set is exhaustive by cardinality rather than evidence.
-`exact_external_id` would overstate exactly that. `vendor_catalog` was never defined by 0075, nothing writes it, and
-`vendors` is a different noun from `app_products`, so reusing it would hollow the vocabulary out. `suggested` is the
-weak-evidence bucket and this derivation is deterministic. Existing values untouched; widening a CHECK invalidates no
-row. The propose command admits the literal too — otherwise it would be legal in the table and unreachable through the
-only writer.
+**No new `method` — `vendor_catalog` already says it.** The identifier proves the PRODUCT; it never touches the `apps` row, so it
+does not prove the instance. 0075 defines `method` as "HOW the match was decided" (provenance) and 0088 defines `vendor_catalog`
+as "an existing canonical catalog mapping" — exactly this evidence. An earlier draft of this migration added a sixth literal
+(`canonical_product`) and re-created 0088's propose command to admit it; both were **removed** after review, because a literal
+that duplicates an existing one's meaning is a schema change with no semantic gain. The counter-argument (that `vendors` is a
+different noun from `app_products`) is recorded in docs/79 rather than buried. `exact_external_id` stays false for the same
+reason it always was. Phase 18C will propose with `vendor_catalog`; confidence stays planner logic.
 
 **Confidence is documented, not encoded**: one instance → `medium`, many → `low` each, zero → no proposal. It is 0075's
 weighing field, so unlike method it MAY vary with cardinality; encoding it here would put a rule in the schema the
@@ -43,7 +43,7 @@ of only such parents from stalling.
 catch it. Kept for explicitness, documented so it is not mistaken for the guarantee.
 
 Mutants: return external_id RED · pending alias RED · name alias RED · INNER JOIN erasing zero-instance rows RED ·
-admit editor RED · LIMIT the exploded join RED · remove `canonical_product` RED. No matcher, no planner, no Rule 5
+admit editor RED · LIMIT the exploded join RED · break resolved-parent continuation RED. No matcher, no planner, no Rule 5
 change, no UI, no scheduler, no background principal, no hosted apply.
 
 ### docs(governance) — a match rejection is instance-scoped, not product-wide · 2026-08-13

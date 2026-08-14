@@ -304,17 +304,26 @@ coherent rather than contradictory.
 
 ### The 18C candidate contract (migration 0090)
 
-**`canonical_product` — a sixth `method`, because none of the five was true.** The chain
-`external_id → confirmed provider_app_id alias → app_product → apps WHERE canonical_app_id = product` proves the
-**product**; the identifier never touches the `apps` row, so it does not prove the **instance** — and that stays true at
-N=1, where the candidate set is exhaustive by *cardinality*, not by evidence. `exact_external_id` would claim the
-identifier matched this instance. `vendor_catalog` was never defined by 0075, nothing writes it, and `vendors`
-(Atlassian) is a different noun from `app_products` (Jira), so it reads as an external catalogue — retrofitting it would
-hollow out the vocabulary. `suggested` is the weak-evidence bucket 0088 refuses to keep name-similarity out, and this
-derivation is deterministic. `manual` is an operator. So:
+**No new `method` literal: Phase 18C proposes with `vendor_catalog`.** The chain
+`external_id → confirmed provider_app_id alias → app_product → apps WHERE canonical_app_id = product` proves the **product**; the
+identifier never touches the `apps` row, so it does not prove the **instance** — and that stays true at N=1, where the candidate
+set is exhaustive by *cardinality*, not by evidence.
 
-> **`canonical_product`** — candidate derived deterministically from a confirmed canonical-product mapping and the
-> tenant's operational instances of that product; the evidence does not itself identify this instance as the correct one.
+0075 defines `method` as *"HOW the match was decided"* — provenance, never proof the pair is correct — and 0088 defines
+`vendor_catalog` as **"an existing canonical catalog mapping"**. That is precisely this provenance: the candidate exists because a
+confirmed alias maps the identifier into the canonical product catalog. It claims neither instance identity, nor acceptance, nor
+confidence.
+
+`exact_external_id` would claim the identifier matched *this instance*, which is false. `suggested` is the weak-evidence bucket
+0088 refuses in order to keep name-similarity out, and this derivation is deterministic. `manual` is an operator.
+
+> **The counter-argument, recorded rather than buried.** An earlier draft of 0090 added a sixth literal, `canonical_product`, on
+> the grounds that 0075 never defined `vendor_catalog` per-value, that nothing writes it, and that `vendors` (Atlassian) is a
+> different noun from `app_products` (Jira) — so the name reads as an *external* catalogue. That is a fair reading of the word.
+> It was not adopted because the operative definition is 0088's, which is merged and canonical, and it says *canonical* catalog
+> mapping — the thing `app_products` is. Adding a literal that duplicates an existing one's meaning is the larger cost. If a
+> future phase finds a semantic property `vendor_catalog` genuinely cannot express, that is the moment to extend the domain,
+> with the evidence in hand.
 
 **method is provenance; confidence is the weighing.** 0075: *"HOW the match was decided … the automated methods are
 recorded distinctly so a low-quality heuristic can be found and revisited later"* versus *"a match without one is an
@@ -323,8 +332,43 @@ assertion nobody can weigh."* So method must NOT vary with cardinality and confi
 | operational instances | proposal | method | confidence |
 |---|---|---|---|
 | **zero** | none | — | — |
-| **one** | one candidate | `canonical_product` | **medium** — exhaustive, but still inferential; the zero case proves a product may own no instance at all |
-| **many** | one per instance | `canonical_product` | **low** for every candidate — nothing distinguishes them |
+| **one** | one candidate | `vendor_catalog` | **medium** — exhaustive, but still inferential; the zero case proves a product may own no instance at all |
+| **many** | one per instance | `vendor_catalog` | **low** for every candidate — nothing distinguishes them |
+
+Confidence stays planner logic and is never written by this migration.
+
+**This RPC is a FEED, not a census.** The parent CTE joins the confirmed alias *before* the LIMIT, so it pages **resolved**
+directory applications — not the tenant's whole current directory-application population. A parent with no confirmed alias never
+enters a page and never appears in the output. That is deliberate: it keeps the contract (*no confirmed product → no row*) and it
+guarantees the cursor always advances, since every selected parent yields at least one row. But it means
+
+> **absence from the candidate feed does NOT mean "not examined".**
+
+Phase 18C must therefore read **two** inputs and keep them distinct:
+
+| input | RPC | answers |
+|---|---|---|
+| **directory census** | `product_list_directory_applications(tenant, connection, provider, include_stale, after_id, limit)` | which current directory applications exist at all |
+| **candidate feed** | `product_application_match_candidates(tenant, after_directory_application_id, limit)` | which of them resolve, and to which instances |
+
+Subtracting one from the other is what makes the three outcomes nameable: *unresolved product* (in the census, absent from the
+feed), *resolved with zero instances* (in the feed with `app_id NULL`), and *resolved with candidates* (in the feed with concrete
+`app_id`s). A matcher that reads only the feed cannot tell "unresolved" from "not looked at", and must not claim a complete run.
+
+**Rule 5 completeness — the five states are all representable.** Rule 5 fires on a current directory application with no accepted
+match, gated on the matcher's status being `completed`.
+
+| state | representation | Rule 5 |
+|---|---|---|
+| accepted match exists | `application_matches.status = 'accepted'` | managed — no finding |
+| resolved product, zero instances | feed row, `app_id NULL`; no proposal is possible | unmanaged at the instance layer — finding is truthful |
+| unresolved product | in the census, absent from the feed | unmanaged — we cannot even name the software |
+| candidate-feed read fails | matcher must `fail` the run | **withheld** — absence proves nothing |
+| directory-census read fails | matcher must `fail` the run | **withheld** |
+
+So a *completed* run can be told apart from a negative evaluation, and the responsibility for that lives with the 18C planner:
+**it must read both inputs and fail the run if either read fails.** Nothing here changes Rule 5.
+
 
 Never propagate alias/product confidence into instance confidence: a high-confidence *product* identification says
 nothing about which instance is right.

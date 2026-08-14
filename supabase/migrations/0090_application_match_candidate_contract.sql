@@ -1,48 +1,23 @@
 -- 0090_application_match_candidate_contract.sql
 --
--- Phase 18C0 — the truthful contract the deterministic matcher will need, and NOTHING that uses it.
+-- Phase 18C0 — the ONE bounded read the deterministic matcher will need, and nothing that uses it.
 --
--- Two additions, both prerequisites of the same future matcher and therefore one migration: a method literal that can
--- describe what the matcher will actually know, and the bounded read that can hand it candidates without widening the
--- disclosure boundary. Shipping them apart would leave an interval in which the read exists but nothing may truthfully
--- label its output.
+-- ══ 1. WHY NO NEW METHOD LITERAL ════════════════════════════════════════════════════════════════════════════════════════════════
+-- An earlier draft of this migration added a sixth `application_matches.method` value and re-created 0088's propose command to
+-- admit it. Both are removed: the existing vocabulary already says the true thing, so a new literal would be a schema change with
+-- no semantic gain.
 --
--- ══ 1. WHY A NEW METHOD, AND WHY NONE OF THE FIVE WOULD DO ══════════════════════════════════════════════════════════════════════
--- The evidence chain 18C will walk is:
+-- 0075 defines `method` as "HOW the match was decided" — PROVENANCE, never proof the pair is correct — and `confidence` as what
+-- lets a reviewer weigh the assertion. 0088 then defines `vendor_catalog` as "an existing canonical catalog mapping". The evidence
+-- 18C will walk is exactly that: a confirmed `provider_app_id` alias resolves to a canonical `app_product`, and the tenant's
+-- operational instances of that product become candidates. The provenance IS the catalog mapping.
 --
---     directory_applications.external_id  →  CONFIRMED provider_app_id alias (0087)  →  app_product
---                                         →  apps WHERE canonical_app_id = app_product   →  0 / 1 / N instances
+-- `exact_external_id` stays inappropriate for the same reason it always was: the identifier proves the PRODUCT, and an `apps`
+-- row's own identifier is never compared, so claiming an exact identifier match against that app would be false. `vendor_catalog`
+-- claims neither instance identity nor acceptance nor confidence, which is precisely the shape of what the matcher will know.
 --
--- The identifier proves the PRODUCT. It never touches the `apps` row, so it does not prove the INSTANCE — and that stays
--- true when exactly one instance exists. A candidate set of size one is exhaustive by CARDINALITY, not by evidence; the
--- zero case is the proof, since a recognised product may legitimately own no operational instance at all.
---
--- Against that, every existing value is false:
---   manual             an operator's judgement — the matcher is not an operator
---   exact_domain       nothing in this chain is a domain, and 0088 already refuses it
---   exact_external_id  claims the external identifier matched THIS instance. It matched the product. False at N=1 too
---   vendor_catalog     0075 never defined it; its only description is 0088's "an existing canonical catalog mapping",
---                      nothing writes it, no test pins it, and `vendors` is a modelled noun (Atlassian) distinct from
---                      `app_products` (Jira) — so it reads as an EXTERNAL vendor catalogue. Retrofitting a convenient
---                      meaning onto an old enum value is how a vocabulary stops meaning anything
---   suggested          the weak-evidence bucket 0088 refuses precisely to keep name-similarity out; and this derivation
---                      is deterministic, so the label would understate as badly as exact_external_id overstates
---
--- METHOD IS PROVENANCE, NOT PROOF. 0075 says so in its own words — "HOW the match was decided … the automated methods are
--- recorded distinctly so a low-quality heuristic can be found and revisited later". Nothing reads it: the 0085 read
--- returns (id, directory_application_id, app_id, status), no engine branches on it, no UI renders it. So the honest fix is
--- a provenance literal that names where the candidate came from, and leaves how much to believe it to `confidence`.
---
---     canonical_product   Candidate derived deterministically from a confirmed canonical-product mapping and the tenant's
---                         operational instances belonging to that product; the evidence does not itself identify this
---                         instance as the correct one.
---
--- Existing values are untouched, and widening a CHECK invalidates no existing row.
---
--- THE CONFIDENCE CONTRACT IS DOCUMENTED, NOT ENCODED. `confidence` is 0075's weighing field — "a match without one is an
--- assertion nobody can weigh" — so it, unlike method, MAY vary with cardinality: one instance → `medium` (exhaustive but
--- still inferential), many → `low` for every candidate (nothing distinguishes them). It is pinned in docs/79 and will be
--- pinned in the planner that writes it; encoding it here would put a rule in the schema that the schema cannot check.
+-- Phase 18C will therefore propose with `method = 'vendor_catalog'`. Confidence stays planner logic and is never written here.
+-- 0075 and 0088 are untouched.
 --
 -- ══ 2. WHY THE READ MUST BE A DEFINER FUNCTION ══════════════════════════════════════════════════════════════════════════════════
 -- `directory_applications` is deny-all (0057: RLS on, no policy) and 0061 deliberately withholds `external_id` from every
@@ -78,70 +53,11 @@
 -- ══ WHAT THIS MIGRATION DOES NOT DO ═════════════════════════════════════════════════════════════════════════════════════════════
 -- No matcher, no planner, no proposal loop, no matcher-state orchestration, no Rule 5 change, no scheduler, no UI, no
 -- provider code, no background principal, no `service_role`, no `connector_runner` authority, no new table, no RLS policy,
--- no table grant. 0075/0085/0087/0088/0089 are untouched apart from the two edits named above. Staging only; applied to no
--- hosted database.
+-- no table grant, and NO change to the method domain or to 0088's governed writer. Every historical migration —
+-- 0075/0085/0087/0088/0089 — is untouched. This migration creates exactly one function. Staging only; applied to no hosted
+-- database.
 
 begin;
-
--- ══ 1. METHOD DOMAIN ════════════════════════════════════════════════════════════════════════════════════════════════════════════
--- Dropped and re-added rather than "if not exists": the constraint is created unconditionally by 0075 in this same ordered
--- chain, so if it is absent the chain is broken and that must fail loudly.
-alter table public.application_matches drop constraint application_matches_method_chk;
-alter table public.application_matches add constraint application_matches_method_chk
-  check (method in ('manual', 'exact_domain', 'exact_external_id', 'vendor_catalog', 'suggested', 'canonical_product'));
-
-comment on column public.application_matches.method is
-  'Provenance of how the candidate was produced, never proof that it is correct. canonical_product = derived deterministically from a confirmed canonical-product mapping and the tenant operational instances of that product; the evidence does not identify which instance is correct.';
-
--- The propose command must admit the literal, or the value would be legal in the table and unreachable through the only
--- writer — a contract that cannot be exercised. Byte-identical to 0088 apart from the admitted list.
-create or replace function public.product_propose_application_match(
-  p_tenant_id uuid,
-  p_directory_application_id uuid,
-  p_app_id uuid,
-  p_method text,
-  p_confidence text
-) returns jsonb language plpgsql security definer set search_path = public volatile as $$
-declare
-  v_existing text;
-  v_inserted integer := 0;
-begin
-  if not public.has_tenant_role(p_tenant_id, array['owner', 'admin']) then
-    return jsonb_build_object('status', 'not_allowed');
-  end if;
-  if p_method not in ('manual', 'exact_external_id', 'vendor_catalog', 'canonical_product') then
-    return jsonb_build_object('status', 'invalid_method');
-  end if;
-  if p_confidence not in ('high', 'medium', 'low') then
-    return jsonb_build_object('status', 'invalid_confidence');
-  end if;
-
-  -- Both endpoints must belong to the verified tenant. A foreign or missing row is indistinguishable from an unauthorized one —
-  -- the composite FKs are the final backstop, but the caller must not learn which of the two it was.
-  if not exists (select 1 from public.directory_applications d where d.id = p_directory_application_id and d.tenant_id = p_tenant_id)
-     or not exists (select 1 from public.apps a where a.id = p_app_id and a.tenant_id = p_tenant_id) then
-    return jsonb_build_object('status', 'not_allowed');
-  end if;
-
-  insert into public.application_matches
-    (tenant_id, directory_application_id, app_id, method, confidence, status)
-  values
-    (p_tenant_id, p_directory_application_id, p_app_id, p_method, p_confidence, 'proposed')
-  on conflict (tenant_id, directory_application_id, app_id) do nothing;
-  get diagnostics v_inserted = row_count;
-  if v_inserted = 1 then
-    return jsonb_build_object('status', 'proposed');
-  end if;
-
-  -- The pair already exists. Report its state and change nothing: a decided candidate is never re-opened by re-proposing, and a
-  -- live proposal is never duplicated or re-scored.
-  select m.status into v_existing
-    from public.application_matches m
-   where m.tenant_id = p_tenant_id
-     and m.directory_application_id = p_directory_application_id
-     and m.app_id = p_app_id;
-  return jsonb_build_object('status', 'already_' || coalesce(v_existing, 'proposed'));
-end $$;
 
 -- ══ 2. THE BOUNDED CANDIDATE READ ═══════════════════════════════════════════════════════════════════════════════════════════════
 -- Returns FACTS ONLY: which directory application resolved to which product, and which operational instances belong to
