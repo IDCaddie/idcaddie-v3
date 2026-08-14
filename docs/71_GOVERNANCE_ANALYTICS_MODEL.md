@@ -339,3 +339,61 @@ yesterday's completeness as today's. Never-ran, running and failed each produce 
 
 **Person resolution is unchanged.** `resolutionHasRun = personAccountLinks.length > 0` remains as Phase 16 reviewed and
 retained it, with the limitation documented above — no new execution marker was introduced.
+
+## Phase 18C — the deterministic application matcher
+
+```
+start run
+  → directory census        (product_list_directory_applications, current only)
+  → resolved candidate feed (product_application_match_candidates, 0090)
+  → cross-feed validation
+  → proposal plan           (pure)
+  → proposal writes         (product_propose_application_match)
+  → complete run
+```
+
+**The matcher proposes. It never accepts or rejects.** `product_decide_application_match` is not called from matcher
+code, and a static guard pins that at zero rather than sampling it at runtime. Human decisions stay authoritative.
+
+### Two feeds, because one cannot tell two states apart
+
+The census is every **current** directory application. The candidate feed is only those whose canonical product is
+**resolved** — an application with no confirmed `provider_app_id` alias has no row there at all. Reading only the feed
+would silently merge *"no product evidence yet"* with *"a product exists but nothing operational sits under it"*, and
+those need opposite remediations. So the matcher reads both and keeps four states apart:
+
+| state | evidence | proposal |
+|---|---|---|
+| **product unresolved** | in census, absent from feed | none |
+| **resolved, zero instances** | feed row with `app_id` NULL | none |
+| **one candidate** | one concrete `app_id` | 1 × `canonical_product` / **medium** |
+| **many candidates** | N concrete `app_id`s | N × `canonical_product` / **low each** |
+
+`high` is unreachable. A deterministic product mapping still does not prove *which* operational instance a directory
+application is, and N=1 is a fact about the estate's size rather than about the strength of the evidence. In an
+ambiguous group every candidate gets `low` and none is preferred — no ranking, no "best", no first-row tie-break.
+
+### Reads are all-or-nothing, and completion is what licenses Rule 5
+
+`completed` is exactly what lets Rule 5 call an unmatched application unmanaged, so a run may only record it over
+evidence it actually read in full. A failed read, a broken pagination contract or a cross-feed disagreement fails the
+run **before any proposal is written**, and the failure is recorded so Rule 5 stays withheld. Disagreements that fail
+rather than being repaired: a candidate whose application is not in the census, two products for one application, a
+NULL row alongside concrete ones, and a duplicated candidate.
+
+`completed` means *"the matcher processed its complete readable inputs"* — **not** *"there were candidates"*. An empty
+estate, an entirely unresolved one, and one where every product has zero instances all complete with zero proposals.
+
+### What this run is, and is not
+
+It is **cursor-complete relative to the evidence it read**, not a single transaction snapshot: the census and the
+candidate feed are separate bounded reads. A directory application created behind a completed census cursor, or an app
+created after its group was read, is picked up by the **next** run. Nothing is re-queried per proposal.
+
+**Rule 5 is unchanged, and carries known copy debt.** Under the current broad wording both *unresolved product* and
+*resolved-with-zero-instances* can open the same "unmanaged" finding — truthful at the level of "no accepted
+operational relationship exists", but the two need different remediation (canonicalise the product, versus record the
+contract instance). Recorded here rather than solved, because the existing text is not yet factually wrong.
+
+**Request-driven only.** Owner/admin, tenant from the server access context, no scheduler, no worker, no background
+identity, no UI. Provider-neutral by construction — the planner's inputs contain no provider field to branch on.

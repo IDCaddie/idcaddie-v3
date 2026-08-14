@@ -12,6 +12,32 @@ from PRs verified via `git log` / `gh pr list`.
 > **as of each PR's date** and are historical — where an older entry says "RISK-007 remains OPEN" / "Phase C remains
 > BLOCKED", that was accurate at that entry's date; this banner is the current state.
 
+### feat(governance) — Phase 18C: the deterministic application matcher · 2026-08-14
+
+**Zero migrations.** A pure planner (`src/lib/server/application-matcher/plan.ts`) and a request-driven orchestrator
+(`src/lib/data/application-matcher.ts`) over contracts that already shipped: the 0061 census, the 0090 candidate feed,
+0090's proposal RPC and 0085's matcher state.
+
+**It proposes and never decides.** Even one confirmed canonical product with exactly one operational instance produces
+`proposed` at `medium`; `high` is unreachable, because N=1 is a fact about the estate's size rather than the strength of
+the evidence. Ambiguous groups get `low` for every candidate, with no ranking and no first-row preference.
+
+**Two feeds, because one cannot distinguish two states.** The census is every current directory application; the feed is
+only the resolved ones. Reading only the feed would merge "no product evidence yet" with "a product with nothing
+operational under it" — opposite remediations. Unresolved and zero-instance both propose nothing, and are counted
+separately.
+
+**Reads are all-or-nothing, and that is the point.** `completed` is what licenses Rule 5 to call an application
+unmanaged, so a failed read, a broken pagination contract or a cross-feed disagreement fails the run before a single
+proposal is written, and records the failure so Rule 5 stays withheld. `already_accepted` and `already_rejected` are
+successes: failing on a rejection would let one reviewer's "no" break every future run.
+
+**Verified: 60 focused tests, 2952 unit tests, full RLS incl. a real-DB seam proof (D1–D10) that the adapter's exact
+argument lists and the merged RPC vocabulary agree.** 13 mutants RED. One found a genuine hole in my own guard: the
+provider-neutrality check stripped string literals, so `provider === "okta"` — the commonest shape a provider branch
+takes — was invisible; it now reads comment-free code *with* literals. Rule 5 unchanged; its remediation-copy debt is
+recorded in docs/71. **No migration, no hosted apply, nothing deployed, no scheduler, no UI.**
+
 ### feat(governance) — Phase 18C0: migration 0090, the candidate evidence contract · 2026-08-14
 
 **The contract 18C will need, and nothing that uses it.** Two additions, one migration, because shipping them apart
