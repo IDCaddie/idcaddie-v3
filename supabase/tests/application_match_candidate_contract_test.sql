@@ -111,6 +111,11 @@ begin
   assert (select count(*) from pg_policy p join pg_class c on c.oid = p.polrelid
            where c.relname = 'directory_applications') = 0,
     'A0 directory_applications must still have NO policy';
+  -- The method domain, asserted on the CONSTRAINT DEFINITION and BEFORE any write. Proving it only by inserting would
+  -- surface a raw check_violation naming Postgres's constraint rather than the invariant that broke.
+  assert (select pg_get_constraintdef(oid) from pg_constraint where conname = 'application_matches_method_chk')
+         like '%canonical_product%',
+    'A0 the method CHECK must admit canonical_product';
 end $$;
 
 -- ════ B: authority, on REAL memberships ═════════════════════════════════════════════════════════════════════════════
@@ -260,6 +265,38 @@ begin
   assert n = 0, format('F1 the walk must terminate after the last parent, got %s', n);
 end $$;
 
+-- ════ F2: a resolved parent ABOVE a long unresolved run ════════════════════════════════════════════════════════════
+-- The feed's parents are RESOLVED applications only, so the walk must step straight over an arbitrarily long block of
+-- unresolved ids to reach the next resolved one. Without this case the fixture only ever proved the easy shape, where
+-- every resolved parent sorts below every unresolved one.
+reset role;
+insert into public.directory_applications (id, tenant_id, connection_id, provider, external_id, label, sync_status) values
+  ('e0000000-0000-4000-8000-0000000000df','e0000000-0000-4000-8000-00000000000a','e0000000-0000-4000-8000-0000000000c1',
+   'okta','0oaTAIL0099','Tail','current');
+insert into public.app_aliases (tenant_id, app_product_id, alias_type, alias_value, source, confidence, review_status) values
+  ('e0000000-0000-4000-8000-00000000000a','e0000000-0000-4000-8000-0000000000b2','provider_app_id','0oaTAIL0099','product_declaration',100,'confirmed');
+set role authenticated;
+select pg_temp.act('e0000000-0000-4000-8000-0000000000f1');
+do $$
+declare v uuid; n int;
+begin
+  -- Cursor parked on d3, the last resolved id below the unresolved block d4..dc. The next page must be `df`.
+  select directory_application_id into v
+    from pg_temp.cand('e0000000-0000-4000-8000-00000000000a', 'e0000000-0000-4000-8000-0000000000d3', 1)
+   order by directory_application_id desc limit 1;
+  assert v = 'e0000000-0000-4000-8000-0000000000df',
+    format('F2 the walk must step over the whole unresolved run and land on the next RESOLVED parent, got %s', v);
+  select count(*) into n from pg_temp.cand('e0000000-0000-4000-8000-00000000000a', v, 1);
+  assert n = 0, format('F2 the unresolved tail must terminate the walk, got %s', n);
+
+  -- And the complement is NOT knowable from this feed: four parents now, but twelve current applications exist.
+  select count(distinct directory_application_id) into n from pg_temp.cand('e0000000-0000-4000-8000-00000000000a');
+  assert n = 4, format('F2 the feed reports only RESOLVED applications, got %s', n);
+end $$;
+reset role;
+set role authenticated;
+select pg_temp.act('e0000000-0000-4000-8000-0000000000f1');
+
 -- ════ G: ordering is a total order the caller can cursor on ═════════════════════════════════════════════════════════
 do $$
 declare prev uuid := null; r record; ok boolean := true;
@@ -277,8 +314,8 @@ do $$ begin
     'H1 a zero limit clamps to one parent';
   assert (select count(distinct directory_application_id) from pg_temp.cand('e0000000-0000-4000-8000-00000000000a', null, -5)) = 1,
     'H1 a negative limit clamps to one parent';
-  assert (select count(distinct directory_application_id) from pg_temp.cand('e0000000-0000-4000-8000-00000000000a', null, 9999)) = 3,
-    'H1 an oversized limit returns only what exists';
+  assert (select count(distinct directory_application_id) from pg_temp.cand('e0000000-0000-4000-8000-00000000000a', null, 9999)) = 4,
+    'H1 an oversized limit returns only what exists (four resolved parents after F2)';
 end $$;
 reset role;
 

@@ -63,6 +63,18 @@
 -- it and the LEFT JOIN guarantees every selected parent appears at least once — including zero-instance parents, which is
 -- what stops a page made entirely of them from stalling the walk.
 --
+-- WHAT THE CURSOR TRAVERSES, precisely: RESOLVED directory applications only. The confirmed-alias join lives inside the
+-- parent CTE, so an application with no settled canonical product is never a parent and never appears — a page simply
+-- skips over any run of unresolved ids, however long, and lands on the next resolved one. This feed therefore answers
+-- "which applications have candidates", NOT "which applications exist".
+--
+-- 18C MUST NOT INFER THE COMPLEMENT FROM THIS FEED'S SILENCE. The authorized complete census is
+-- `product_list_directory_applications` (0061, redefined 0073), whose eligibility is IDENTICAL when called with
+-- p_include_stale := false — same owner/admin gate, same superseded/disconnected exclusion, same sync_status = 'current',
+-- same ascending `id` cursor. Walking both and taking the difference is what distinguishes PRODUCT UNRESOLVED (in the
+-- census, absent here) from RESOLVED WITH ZERO INSTANCES (present here with a NULL app_id). Absence from this feed alone
+-- means only "no candidates", and a caller that reads it as "no such application" has invented a fact.
+--
 -- ══ WHAT THIS MIGRATION DOES NOT DO ═════════════════════════════════════════════════════════════════════════════════════════════
 -- No matcher, no planner, no proposal loop, no matcher-state orchestration, no Rule 5 change, no scheduler, no UI, no
 -- provider code, no background principal, no `service_role`, no `connector_runner` authority, no new table, no RLS policy,
