@@ -576,3 +576,12 @@ satisfies `<@` against any complete set, so such a finding would have closed on 
 cannot be declared with another tenant's connection or an invented UUID, a finding cannot depend on a connection its
 tenant does not own, and a refused sync leaves the estate untouched · **G14** a provider-local finding naming another
 tenant's connection is refused by the composite FK — impossible, not merely unused.
+
+### `app_account_governance_cursor_test.sql` — **CR1**, the role vocabulary against real memberships
+
+C0–CE run with `has_tenant_role` stubbed to `select true`, which proves "when the gate says no the RPC refuses" and
+proves nothing about the gate being asked the **right question**. Widening 0089's role array from `['owner','admin']`
+to include `'editor'` left that entire suite green while a tenant editor could enumerate every app account in the
+estate. **CR1** therefore runs *after* the gate restore, against real `tenant_memberships` rows: owner and admin walk
+the estate, editor and viewer read zero, and another tenant's owner reads zero. Placement is load-bearing — moved above
+the restore it proves nothing. The mutation now fails with `CR1 ROLE LEAK: a tenant EDITOR walked 9 accounts`.

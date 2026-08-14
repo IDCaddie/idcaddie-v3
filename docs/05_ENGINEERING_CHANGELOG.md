@@ -26,6 +26,26 @@ re-derives it as an improvement.
 
 Docs only. No schema, no runtime, no migration.
 
+### test(governance) — pin cursor authority and closure safety (follow-up to #421) · 2026-08-13
+
+Tests only. No runtime change, no migration, no RPC or RLS change — the two invariants below were **unproven**, not
+broken, and the independent review of #421 found no defect.
+
+**The 0089 ACL was only ever proven against a stub.** `app_account_governance_cursor_test.sql` runs C0–CE with
+`has_tenant_role` replaced by `select true`, so widening the role array to include `'editor'` left the whole suite green
+while a tenant editor gained the ability to enumerate every app account. **CR1** runs after the restore against real
+`tenant_memberships`, and that mutation now fails with `CR1 ROLE LEAK: a tenant EDITOR walked 9 accounts`.
+
+**Closure safety was proven at the RPC, not through the seam.** CD shows in SQL that a subject survives earlier-row
+churn; what matters to the product is that the evidence reaches 0083. The new orchestration test puts the subject on a
+later page, churns the pages beneath it, and asserts the cursor still asks for `id > last id`, the subject loads, the
+sync is reached and nothing closes. Breaking cursor continuation turns both halves red.
+
+**Verified: 2892 unit tests, full RLS suite, tsc 0, lint 0 errors, build compiled, migration safety, auth safety,
+import boundary, docs, diff --check.** `git diff origin/main..HEAD -- supabase/migrations` is empty. No hosted apply,
+nothing deployed.
+
+
 ### feat(governance) — Phase 17D: a stable cursor read for the app-account evidence walk · 2026-08-13
 
 Migration **0089** adds `product_app_accounts_for_governance`: `id` cursor, bounded columns, no total.
