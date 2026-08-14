@@ -315,10 +315,11 @@ begin
   -- The whole product surface over application matching, named rather than counted, so an accidental extra path is visible.
   assert (select array_agg(p.proname::text order by p.proname) from pg_proc p join pg_namespace n on n.oid = p.pronamespace
            where n.nspname = 'public' and p.proname like 'product_%application_match%')
-         = array['product_application_matcher_state','product_application_matches','product_complete_application_matcher_run',
-                 'product_decide_application_match','product_fail_application_matcher_run','product_propose_application_match',
+         = array['product_application_match_candidates','product_application_matcher_state','product_application_matches',
+                 'product_complete_application_matcher_run','product_decide_application_match',
+                 'product_fail_application_matcher_run','product_propose_application_match',
                  'product_start_application_matcher_run'],
-         'B12 the product application-match surface is 0085 (read + state + start/complete/fail) plus exactly 0088 propose/decide';
+         'B12 the product application-match surface is 0085 (read + state + start/complete/fail), 0088 propose/decide, and 0090 candidates';
 end $$;
 
 -- ════ B13: matcher execution state stays decoupled from human decisions ═════════════════════════════════════════════════════

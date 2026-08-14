@@ -12,6 +12,40 @@ from PRs verified via `git log` / `gh pr list`.
 > **as of each PR's date** and are historical — where an older entry says "RISK-007 remains OPEN" / "Phase C remains
 > BLOCKED", that was accurate at that entry's date; this banner is the current state.
 
+### feat(governance) — Phase 18C0: migration 0090, the candidate evidence contract · 2026-08-14
+
+**The contract 18C will need, and nothing that uses it.** Two additions, one migration, because shipping them apart
+would leave an interval where the read exists and nothing may truthfully label its output.
+
+**A sixth `method`: `canonical_product`.** The identifier proves the PRODUCT; it never touches the `apps` row, so it does
+not prove the INSTANCE — true at N=1 too, where the set is exhaustive by cardinality rather than evidence.
+`exact_external_id` would overstate exactly that. `vendor_catalog` was never defined by 0075, nothing writes it, and
+`vendors` is a different noun from `app_products`, so reusing it would hollow the vocabulary out. `suggested` is the
+weak-evidence bucket and this derivation is deterministic. Existing values untouched; widening a CHECK invalidates no
+row. The propose command admits the literal too — otherwise it would be legal in the table and unreachable through the
+only writer.
+
+**Confidence is documented, not encoded**: one instance → `medium`, many → `low` each, zero → no proposal. It is 0075's
+weighing field, so unlike method it MAY vary with cardinality; encoding it here would put a rule in the schema the
+schema cannot check.
+
+**`product_application_match_candidates`** returns three ids and nothing else. `directory_applications` is deny-all and
+0061 withholds `external_id`, so the join key is unreachable from product code; the definer reads it internally and
+never returns it — 0087's discipline, not a weakening of it.
+
+**Paging bounds PARENTS.** A limit over the exploded join would split a many-instance group across a page, and a matcher
+seeing half a group would propose half an ambiguity and call the run complete. Parents are paged by immutable id, then
+expanded completely; a zero-instance parent still emits an `app_id NULL` row, which carries the cursor and stops a page
+of only such parents from stalling.
+
+**Honest note on one predicate:** `ap.tenant_id = p_tenant_id` on the apps join is defence in depth and *subsumed* —
+0024's composite FK already makes a cross-tenant grouping impossible, so removing it cannot change a row and no test can
+catch it. Kept for explicitness, documented so it is not mistaken for the guarantee.
+
+Mutants: return external_id RED · pending alias RED · name alias RED · INNER JOIN erasing zero-instance rows RED ·
+admit editor RED · LIMIT the exploded join RED · remove `canonical_product` RED. No matcher, no planner, no Rule 5
+change, no UI, no scheduler, no background principal, no hosted apply.
+
 ### docs(governance) — a match rejection is instance-scoped, not product-wide · 2026-08-13
 
 #422 wrote down the 0/1/many instance semantics but left the **lifecycle** half unstated, and it is the half that settled the
