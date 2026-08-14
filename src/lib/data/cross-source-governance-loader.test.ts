@@ -132,9 +132,11 @@ describe("the 0090 candidate feed", () => {
     ]);
   });
 
-  // THE ONE A ROW CURSOR GETS WRONG. 0090's page counts PARENTS, so a page of 2 parents can legitimately return 5 rows.
-  // A loader that ended the walk on a row count would stop after the first multi-instance application and reclassify
-  // every application after it as `product_unresolved` — silently, and only for the largest tenants.
+  // GROUP INTEGRITY ACROSS A PAGE BOUNDARY — the property the parent cursor exists for. 0090's page counts PARENTS, so
+  // a page of 2 parents can legitimately return 5 rows, and `unmanagedReason` classifies from whether ANY row of a
+  // group carries a concrete `app_id`. A group split across a boundary, or re-served after the cursor, would be
+  // classified from half of itself. (It is NOT about truncation — see the call-count test below for what a row count
+  // would actually cost.)
   // 201 parents against 0090's real 200-parent page, with the first parent owning four instances: the walk must cross
   // the page boundary and carry the multi-instance group whole.
   it("walks past a full parent page, carrying a multi-instance group whole", async () => {

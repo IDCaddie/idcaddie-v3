@@ -220,11 +220,25 @@ async function loadAllByCursor<T extends { id: string }>(
 /**
  * Walk 0090's candidate feed to exhaustion. Phase 18D — the ONE read that lets rule 5 say WHY it is open.
  *
- * It cannot use `loadAllByCursor`, and the reason is the contract rather than the code: 0090 pages by PARENT, so a page
- * legitimately returns several rows per directory application and may return more rows than `p_limit`. Row count says
- * nothing about whether the walk is done — the number of distinct parents does — and the cursor is the last PARENT, so
- * an application's instance set is never split across a boundary. Reusing the row cursor here would end the walk early
- * on the first multi-instance application and silently reclassify every application after it as `product_unresolved`.
+ * ══ THE CONTRACT, EXACTLY ════════════════════════════════════════════════════════════════════════════════════════════
+ *   * `p_limit` bounds RESOLVED PARENT DIRECTORY APPLICATIONS. The limit lives inside 0090's parent CTE and nowhere else.
+ *   * One parent expands to one or more candidate rows — one per operational instance of its canonical product.
+ *   * A LEFT JOIN guarantees at least one row for every selected parent, INCLUDING a zero-instance parent, which comes
+ *     back as a single row with a NULL `app_id`. That row is the feed's explicit "recognised, nothing to link"
+ *     statement, and it is what lets a page made entirely of zero-instance parents still advance the cursor.
+ *   * Row count may therefore EXCEED `p_limit` on any page containing a multi-instance parent.
+ *
+ * ══ WHY THE TRAVERSAL IS PARENT-AWARE ════════════════════════════════════════════════════════════════════════════════
+ * Ordering and cursor advancement operate on PARENT IDENTITY, and completion is measured in parents, because those are
+ * the units the contract above bounds. The property this protects is GROUP INTEGRITY: a parent's instance set must
+ * arrive whole and be seen exactly once, since `unmanagedReason` classifies from whether ANY row of a group carries a
+ * concrete `app_id`. A group split across a page boundary, or re-served after the cursor, would be classified from
+ * half of itself — the resolved/zero-instance/candidates distinction decided on a partial read.
+ *
+ * It is NOT about truncation. A row-count termination could not truncate this feed: since every parent yields at least
+ * one row, `rows < limit` implies `parents < limit`, so the walk cannot end early. What a row count would cost is round
+ * trips — one wasted page per multi-instance parent — which is why the test that pins this counts CALLS rather than
+ * rows. Stated precisely because the weaker claim is the one a future maintainer would try to simplify away.
  *
  * Every violation FAILS the read rather than repairing it, for the same reason as every other read in this module: a
  * short candidate feed is indistinguishable from a tenant whose products are genuinely unsettled, and the engine would

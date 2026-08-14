@@ -151,12 +151,19 @@ export const CROSS_SOURCE_PROSE: Record<string, RuleProse> = {
  * has never heard of still describes a finding whose broad claim is true, and the broad sentence is the one that stays
  * true for all of them. An unknown RULE returns null — there is nothing truthful to say about a rule we do not have.
  * Nothing from the finding's evidence is ever interpolated, so no id, name or payload can reach the page this way.
+ *
+ * OWN PROPERTIES ONLY. The argument is an arbitrary string, and a plain object literal inherits from `Object.prototype`
+ * — so a bare `CROSS_SOURCE_PROSE[key]` answers `constructor`, `toString`, `valueOf` and `__proto__` with a function or
+ * with the prototype itself. Each is truthy and typed `RuleProse` here, so the guard below would pass it straight
+ * through and a renderer would print `undefined` for every field. `Object.hasOwn` is what makes the declared return
+ * contract — reviewed copy, broad fallback, or null — actually true for every input rather than for the inputs we
+ * happen to send today.
  */
 export function crossSourceProse(titleKey: string): RuleProse | null {
   const stem = titleKey.replace(/\.title$/, "");
-  const exact = CROSS_SOURCE_PROSE[stem];
-  if (exact) return exact;
-  return CROSS_SOURCE_PROSE[stem.split(".").slice(0, 2).join(".")] ?? null;
+  const at = (key: string): RuleProse | null =>
+    Object.hasOwn(CROSS_SOURCE_PROSE, key) ? CROSS_SOURCE_PROSE[key] : null;
+  return at(stem) ?? at(stem.split(".").slice(0, 2).join("."));
 }
 
 const SEVERITY_TONE: Record<GovernanceSeverity, StatusTone> = { high: "danger", medium: "attention", low: "neutral", info: "neutral" };

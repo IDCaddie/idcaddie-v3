@@ -31,8 +31,13 @@ broad condition and not the customer's next step. The `completed`-status gate is
 cannot make the rule speak while the matcher has not currently completed, and an accepted match still ends the finding
 whatever the subtype would have been.
 
-The loader gains one read, with its own parent-cursor walk — 0090 pages by PARENT, so a row-counting walk would stop at
-the first multi-instance application and silently reclassify everything after it as `product_unresolved`. A failed
+The loader gains one read, with its own parent-cursor walk. 0090's `p_limit` bounds resolved PARENTS, one parent expands
+to one row per operational instance, and its LEFT JOIN returns at least one row for every selected parent — including a
+zero-instance parent's single NULL row. So ordering, cursor advancement and completion all operate on parent identity,
+and what that protects is GROUP INTEGRITY: `unmanagedReason` classifies from whether any row of a group carries a
+concrete `app_id`, so a group split across a page or re-served after the cursor would be classified from half of itself.
+It is not about truncation — since every parent yields at least one row, a row count could not end the walk early; it
+would only cost a wasted round trip per multi-instance parent, which is what the call-counting test pins. A failed
 candidate read fails the whole evaluation, for the same reason every other read here does.
 
 Copy closes the debt docs/79 recorded: `crossSourceProse()` in `governance-presenter.ts` resolves the persisted

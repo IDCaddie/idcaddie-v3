@@ -119,6 +119,35 @@ describe("cross-source presenter — resolvable + truthful", () => {
     expect(blobOf(RULE)).not.toMatch(/recognized|identification|candidates/);
   });
 
+  // REVIEW FIX 2. The argument is an arbitrary persisted string and `CROSS_SOURCE_PROSE` is a plain object literal, so
+  // every `Object.prototype` member is reachable by name. Each of these returned a FUNCTION (or the prototype) before
+  // the `Object.hasOwn` guard — truthy, typed `RuleProse`, and `undefined` in every field a renderer would print.
+  it.each(["constructor", "toString", "valueOf", "hasOwnProperty", "__proto__", "completely_unknown_key"])(
+    "the prototype key %s takes the broad fallback, not an inherited property",
+    key => {
+      for (const form of [key, `${key}.title`, `${RULE}.${key}`, `${RULE}.${key}.title`]) {
+        const p = crossSourceProse(form);
+        // A rule-scoped form falls back to the broad rule copy; a bare prototype name names no rule at all.
+        const expected = form.startsWith(`${RULE}.`) ? CROSS_SOURCE_PROSE[RULE] : null;
+        expect(p, `crossSourceProse(${JSON.stringify(form)})`).toEqual(expected);
+        if (p === null) continue;
+        // Not truthiness — the actual fields, and the actual type.
+        expect(typeof p).toBe("object");
+        expect(typeof p.title).toBe("string");
+        expect(typeof p.summary).toBe("string");
+        expect(typeof p.guidance).toBe("string");
+        expect(p.title.trim().length).toBeGreaterThan(0);
+        expect(p.summary.trim().length).toBeGreaterThan(0);
+        expect((p.guidance ?? "").trim().length).toBeGreaterThan(0);
+        // Nothing internal leaks: no function, no enum name, no key echo.
+        for (const v of [p.title, p.summary, p.guidance ?? ""]) {
+          expect(v).not.toMatch(/function|\[object|crossSource\.|product_unresolved|operational_/);
+          expect(v).not.toContain(key);
+        }
+      }
+    },
+  );
+
   it("no cross-source copy uses a forbidden/unsupported term", () => {
     for (const stem of Object.keys(CROSS_SOURCE_PROSE)) {
       const blob = blobOf(stem);
@@ -159,5 +188,40 @@ describe("cross-source presenter — resolvable + truthful", () => {
     const c = blobOf(`${RULE}.operational_match_unaccepted`);
     expect(c).not.toMatch(/\bthe candidate\b|\bexactly one\b|\bthe correct candidate\b/);
     expect(c).toContain("candidates");
+  });
+
+  // REVIEW FIX 3. AVAILABLE IS PROVEN; PROPOSED IS NOT.
+  //
+  // `operational_match_unaccepted` means the feed returned at least one concrete `app_id` and no match is accepted. It
+  // does NOT establish that those candidates currently sit at `status = 'proposed'` — a reviewer may already have
+  // REJECTED every one of them, and this subtype deliberately covers both. Proving proposal state needs per-candidate
+  // match statuses, which this phase does not read.
+  //
+  // Asserted FIELD BY FIELD. The blob check above passes on the summary's "candidates" alone, so a guidance line
+  // rewritten to "review the proposed matches" survived it — the reviewer's M19. Each field now carries its own claim.
+  it("the candidates variant says AVAILABLE and never asserts a proposal exists", () => {
+    const p = crossSourceProse(`${RULE}.operational_match_unaccepted.title`)!;
+    const fields = { title: p.title, summary: p.summary, guidance: p.guidance ?? "" };
+
+    // The wording that IS proven: candidates exist, none accepted, a human should review them.
+    expect(fields.title.toLowerCase()).toContain("review");
+    expect(fields.summary.toLowerCase()).toContain("available");
+    expect(fields.summary.toLowerCase()).toContain("none has been accepted");
+    expect(fields.guidance.toLowerCase()).toContain("review");
+    expect(fields.guidance.toLowerCase()).toContain("available");
+
+    for (const [name, value] of Object.entries(fields)) {
+      const v = value.toLowerCase();
+      // Proposal state — the claim the read does not support, in any inflection.
+      for (const term of ["proposed", "proposal", "proposals", "pending review", "awaiting review", "suggested"]) {
+        expect(v.includes(term), `${name} must not claim "${term}": ${value}`).toBe(false);
+      }
+      // Singling out a candidate, or asserting how many there are.
+      for (const term of ["the candidate", "this candidate", "exactly one", "the only", "a single", "best match"]) {
+        expect(v.includes(term), `${name} must not claim "${term}": ${value}`).toBe(false);
+      }
+      // Plural or nothing: the read proves ">= 1", never "1".
+      expect(v, `${name}: ${value}`).not.toMatch(/\ba candidate\b|\bone candidate\b/);
+    }
   });
 });
