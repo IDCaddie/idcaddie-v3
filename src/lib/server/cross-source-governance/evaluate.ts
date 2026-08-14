@@ -20,12 +20,14 @@ import {
   CAPABILITY,
   CROSS_SOURCE_RULE_VERSION,
   type AppAccountRow,
+  type ApplicationCandidateRow,
   type CapabilityName,
   type CrossSourceEvaluation,
   type CrossSourceFinding,
   type CrossSourceGraph,
   type CrossSourceRuleId,
   type PersonAccountLinkRow,
+  type UnmanagedApplicationReason,
 } from "./types";
 
 if (typeof (globalThis as { window?: unknown }).window !== "undefined") {
@@ -55,6 +57,11 @@ type Ctx = {
   acceptedIdentitiesByPerson: Map<string, string[]>;
   acceptedAppAccountsByPerson: Map<string, string[]>;
   /**
+   * directoryApplicationId -> its 0090 candidate rows. A MISSING key and an empty array mean different things — see
+   * `unmanagedReason` — so this is built by presence, and no default is ever supplied for a key that is not there.
+   */
+  candidatesByApplication: Map<string, ApplicationCandidateRow[]>;
+  /**
    * Has person resolution produced ANY output for this tenant? An empty link table is indistinguishable from "every
    * account is an orphan", and treating it as the latter would flag a whole estate the moment 0082 shipped. Empty
    * matcher state is UNKNOWN, never a conclusion — the same rule that keeps rule 5 silent today.
@@ -80,8 +87,15 @@ function buildCtx(graph: CrossSourceGraph): Ctx {
     if (cur) cur.push(id);
     else target.set(l.personId, [id]);
   }
+  const candidatesByApplication = new Map<string, ApplicationCandidateRow[]>();
+  for (const c of graph.applicationCandidates) {
+    const cur = candidatesByApplication.get(c.directoryApplicationId);
+    if (cur) cur.push(c);
+    else candidatesByApplication.set(c.directoryApplicationId, [c]);
+  }
   return {
     graph,
+    candidatesByApplication,
     identityComplete: completeFor(graph, CAPABILITY.identity),
     accountsComplete: completeFor(graph, CAPABILITY.appAccounts),
     appsComplete: completeFor(graph, CAPABILITY.applications),
@@ -305,31 +319,65 @@ function ruleDuplicateAccounts(ctx: Ctx): CrossSourceFinding[] {
 //                 also deliberately stricter than `lastCompletedAt is not null` — that timestamp survives a later
 //                 failure, so a run that failed this morning must not present yesterday's completeness as today's.
 // CLOSE REQUIRES: that application's connection.
+//
+// ── PHASE 18D: THE SUBTYPE DECIDES THE REMEDIATION, NEVER THE FINDING ────────────────────────────────────────────────
+// Whether the finding OPENS is decided exactly as it was before: current application, complete application source,
+// completed matcher, no accepted match. The candidate feed is consulted only AFTERWARDS, to say which of the three
+// distinguishable situations the subject is in — because "confirm what this software is" and "link it to an operational
+// record" are not the same instruction, and one of them is useless in the other's state.
+//
+// The subtype is deliberately absent from the finding key, so a subject moving between states is a REFRESH of one
+// finding (0083 updates the copy keys and evidence on conflict, and never moves `first_seen_at`) rather than a close
+// and a re-open. An administrator watching a queue sees the advice change, not the problem restart.
 function ruleUnmanagedApplications(ctx: Ctx): CrossSourceFinding[] {
   const matched = new Set(
     ctx.graph.applicationMatches.filter(m => m.status === "accepted").map(m => m.directoryApplicationId),
   );
   return ctx.graph.directoryApplications
     .filter(app => isCurrent(app) && ctx.appsComplete.has(app.connectionId) && !matched.has(app.id))
-    .map(app => ({
-      finding_key: crossSourceFindingKey({
-        ruleId: "discovered_application_unmanaged_by_idp",
-        tenantId: ctx.graph.tenantId,
-        subjectType: "directory_application",
-        subjectId: app.id,
-      }),
-      rule_id: "discovered_application_unmanaged_by_idp" as const,
-      subject_type: "directory_application" as const,
-      subject_id: app.id,
-      severity: "low" as const,
-      confidence: "medium" as const,
-      title_key: "crossSource.discovered_application_unmanaged_by_idp.title",
-      summary_key: "crossSource.discovered_application_unmanaged_by_idp.summary",
-      remediation_key: "crossSource.discovered_application_unmanaged_by_idp.remediation",
-      evidence: { counts: { applications: 1 }, supportingIds: [app.id] },
-      source_providers: sorted([app.provider]),
-      evidence_connection_ids: [app.connectionId],
-    }));
+    .map(app => {
+      const reason = unmanagedReason(ctx, app.id);
+      const stem = `crossSource.discovered_application_unmanaged_by_idp.${reason}`;
+      return {
+        finding_key: crossSourceFindingKey({
+          ruleId: "discovered_application_unmanaged_by_idp",
+          tenantId: ctx.graph.tenantId,
+          subjectType: "directory_application",
+          subjectId: app.id,
+        }),
+        rule_id: "discovered_application_unmanaged_by_idp" as const,
+        subject_type: "directory_application" as const,
+        subject_id: app.id,
+        // Unchanged by the subtype. Severity and confidence describe the BROAD condition — one unmanaged application —
+        // and the customer's next action is not evidence that the finding is more or less certain than it was.
+        severity: "low" as const,
+        confidence: "medium" as const,
+        title_key: `${stem}.title`,
+        summary_key: `${stem}.summary`,
+        remediation_key: `${stem}.remediation`,
+        evidence: { counts: { applications: 1 }, supportingIds: [app.id], reason },
+        source_providers: sorted([app.provider]),
+        evidence_connection_ids: [app.connectionId],
+      };
+    });
+}
+
+/**
+ * Which of the three states this application is in, from 0090's feed and nothing else.
+ *
+ * ABSENCE FROM THE FEED IS THE UNRESOLVED SIGNAL, and it is only readable because the two feeds are eligible for
+ * exactly the same applications: `product_list_directory_applications` and 0090's parent CTE share the owner/admin
+ * gate, the superseded/disconnected exclusion and `sync_status = 'current'` — which `isCurrent` above has already
+ * applied. The feed then narrows on one further thing, a confirmed `provider_app_id` alias, so an application this rule
+ * can speak about is missing from the feed for exactly one reason: its canonical product is not settled.
+ *
+ * A NULL `appId` is the feed's explicit zero-instance statement rather than the absence of a row (0090 LEFT JOINs to
+ * say so), which is what keeps "recognised, nothing to link" apart from "not recognised".
+ */
+function unmanagedReason(ctx: Ctx, directoryApplicationId: string): UnmanagedApplicationReason {
+  const rows = ctx.candidatesByApplication.get(directoryApplicationId);
+  if (rows === undefined) return "product_unresolved";
+  return rows.some(r => r.appId !== null) ? "operational_match_unaccepted" : "operational_instance_absent";
 }
 
 /**

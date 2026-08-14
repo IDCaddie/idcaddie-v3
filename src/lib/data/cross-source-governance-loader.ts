@@ -8,7 +8,7 @@
 // no SQL in the engine and no lifecycle arithmetic here: closing, reopening and first/last-seen are 0083's, and
 // re-deriving them in TypeScript would give the product two answers to one question.
 //
-// It reads ONLY the authorized product RPCs (0061 / 0078 / 0085) plus `connectors`, through the user-scoped,
+// It reads ONLY the authorized product RPCs (0061 / 0078 / 0085 / 0089 / 0090) plus `connectors`, through the user-scoped,
 // cookie-bound, RLS-governed server client — the same one `access-repository` uses. NEVER service-role. Every RPC
 // re-verifies the tenant via `has_tenant_role`, so the tenant id is checked twice: once here by `accessGate()` and
 // again inside each function. No provider adapter is imported and no provider name is ever compared to a literal.
@@ -27,8 +27,8 @@ import { createClient } from "@/lib/supabase/server";
 import { accessGate } from "./access-repository";
 import { evaluateCrossSourceGovernance } from "@/lib/server/cross-source-governance/evaluate";
 import type {
-  AppAccountRow, ApplicationMatchRow, ApplicationMatcherState, CrossSourceGraph, DirectoryApplicationRow,
-  IdentityAccountRow, PersonAccountLinkRow, SourceCapability,
+  AppAccountRow, ApplicationCandidateRow, ApplicationMatchRow, ApplicationMatcherState, CrossSourceGraph,
+  DirectoryApplicationRow, IdentityAccountRow, PersonAccountLinkRow, SourceCapability,
 } from "@/lib/server/cross-source-governance/types";
 
 if (typeof (globalThis as { window?: unknown }).window !== "undefined") {
@@ -47,6 +47,8 @@ export type LoadResult =
 // clamped server-side, so one constant per family is enough and none of them can widen a page.
 const PAGE_DIRECTORY = 100;
 const PAGE_WIDE = 500;
+// 0090 clamps to 200, and its page counts PARENTS rather than rows — see `loadApplicationCandidates`.
+const PAGE_CANDIDATES = 200;
 // A backstop against a cursor that stops advancing: 400 pages of 500 is 200k rows, far beyond any real tenant, and an
 // evaluation that needs more is a bug rather than a big customer. Hitting it FAILS rather than silently truncating —
 // a partial load would understate the estate and could close findings that are still true.
@@ -78,6 +80,9 @@ const personLinkSchema = z.object({
 });
 const applicationMatchSchema = z.object({
   id: uuid, directory_application_id: uuid, status: z.enum(["proposed", "accepted", "rejected"]),
+});
+const applicationCandidateSchema = z.object({
+  directory_application_id: uuid, app_product_id: uuid, app_id: uuid.nullable().optional().transform(v => v ?? null),
 });
 const capabilitySchema = z.object({
   connection_id: uuid, capability: z.string().min(1),
@@ -213,6 +218,83 @@ async function loadAllByCursor<T extends { id: string }>(
 }
 
 /**
+ * Walk 0090's candidate feed to exhaustion. Phase 18D — the ONE read that lets rule 5 say WHY it is open.
+ *
+ * ══ THE CONTRACT, EXACTLY ════════════════════════════════════════════════════════════════════════════════════════════
+ *   * `p_limit` bounds RESOLVED PARENT DIRECTORY APPLICATIONS. The limit lives inside 0090's parent CTE and nowhere else.
+ *   * One parent expands to one or more candidate rows — one per operational instance of its canonical product.
+ *   * A LEFT JOIN guarantees at least one row for every selected parent, INCLUDING a zero-instance parent, which comes
+ *     back as a single row with a NULL `app_id`. That row is the feed's explicit "recognised, nothing to link"
+ *     statement, and it is what lets a page made entirely of zero-instance parents still advance the cursor.
+ *   * Row count may therefore EXCEED `p_limit` on any page containing a multi-instance parent.
+ *
+ * ══ WHY THE TRAVERSAL IS PARENT-AWARE ════════════════════════════════════════════════════════════════════════════════
+ * Ordering and cursor advancement operate on PARENT IDENTITY, and completion is measured in parents, because those are
+ * the units the contract above bounds. The property this protects is GROUP INTEGRITY: a parent's instance set must
+ * arrive whole and be seen exactly once, since `unmanagedReason` classifies from whether ANY row of a group carries a
+ * concrete `app_id`. A group split across a page boundary, or re-served after the cursor, would be classified from
+ * half of itself — the resolved/zero-instance/candidates distinction decided on a partial read.
+ *
+ * It is NOT about truncation. A row-count termination could not truncate this feed: since every parent yields at least
+ * one row, `rows < limit` implies `parents < limit`, so the walk cannot end early. What a row count would cost is round
+ * trips — one wasted page per multi-instance parent — which is why the test that pins this counts CALLS rather than
+ * rows. Stated precisely because the weaker claim is the one a future maintainer would try to simplify away.
+ *
+ * Every violation FAILS the read rather than repairing it, for the same reason as every other read in this module: a
+ * short candidate feed is indistinguishable from a tenant whose products are genuinely unsettled, and the engine would
+ * turn that into remediation advice telling a customer to identify software they have already identified.
+ */
+async function loadApplicationCandidates(
+  io: LoaderIo, tenantId: string,
+): Promise<Fetched<z.infer<typeof applicationCandidateSchema>>> {
+  const rows: z.infer<typeof applicationCandidateSchema>[] = [];
+  let after: string | null = null;
+  for (let page = 0; page < MAX_PAGES; page++) {
+    const r = await callRpc(io, "product_application_match_candidates", {
+      p_tenant_id: tenantId, p_after_directory_application_id: after, p_limit: PAGE_CANDIDATES,
+    });
+    if (!r.ok) return r;
+    const parsed = parsePage(applicationCandidateSchema, r.data);
+    if (parsed.dropped > 0) {
+      console.error("[governance/loader] candidate row failed its contract: product_application_match_candidates");
+      return { ok: false, error: "pagination_contract_violated" };
+    }
+
+    // 0090 orders by (parent, app), so parents must STRICTLY ASCEND across the whole walk and each one's rows must be
+    // contiguous. One comparison enforces all of it: a parent at or before the cursor means this page overlaps one
+    // already consumed, a parent below the previous one means the ordering broke, and a parent reappearing after
+    // another intervened is the same violation — the read split a group and rule 5 would classify from half of it.
+    let parentCount = 0;
+    let lastParent: string | null = null;
+    for (const row of parsed.rows) {
+      const parent = row.directory_application_id;
+      if (parent !== lastParent) {
+        // `<= after` rejects the page that re-serves the cursor's own parent, which `< lastParent` cannot see because
+        // that parent is the first one on the page and has nothing before it to compare against.
+        if ((lastParent !== null && parent < lastParent) || (after !== null && parent <= after)) {
+          console.error("[governance/loader] non-monotonic candidate cursor");
+          return { ok: false, error: "pagination_contract_violated" };
+        }
+        lastParent = parent;
+        parentCount++;
+      }
+      rows.push(row);
+    }
+
+    if (parentCount === 0) return { ok: true, rows };
+    after = lastParent;
+    // A short PARENT page is the last page, because the limit is on parents. Comparing ROW count would not TRUNCATE —
+    // the LEFT JOIN yields at least one row per parent, so `rows < limit` implies `parents < limit` and the walk cannot
+    // end early — but it would keep asking for pages after the estate is exhausted, once per multi-instance
+    // application. Stated as the round-trip fact it is rather than the data-loss one it is not; the test that fails on
+    // a row count is counting calls, not rows.
+    if (parentCount < PAGE_CANDIDATES) return { ok: true, rows };
+  }
+  console.error("[governance/loader] page limit exceeded: product_application_match_candidates");
+  return { ok: false, error: "page_limit_exceeded" };
+}
+
+/**
  * Assemble one tenant's canonical evidence into the engine's exact input.
  *
  * Every read is a CURSOR walk. `product_app_accounts_for_governance` (0089) exists precisely so this one can be:
@@ -228,7 +310,7 @@ async function loadAllByCursor<T extends { id: string }>(
  * it" would become indistinguishable from "it is not there".
  */
 export async function loadCrossSourceGovernanceInput(tenantId: string, io: LoaderIo): Promise<LoadResult> {
-  const [accounts, identities, applications, links, matches] = await Promise.all([
+  const [accounts, identities, applications, links, matches, candidates] = await Promise.all([
     loadAllByCursor(io, "product_app_accounts_for_governance", appAccountSchema,
       { p_tenant_id: tenantId }, PAGE_WIDE),
     loadAllByCursor(io, "product_list_directory_identities", identitySchema,
@@ -237,6 +319,7 @@ export async function loadCrossSourceGovernanceInput(tenantId: string, io: Loade
       { p_tenant_id: tenantId, p_connection_id: null, p_provider: null, p_include_stale: true }, PAGE_DIRECTORY),
     loadAllByCursor(io, "product_person_account_links", personLinkSchema, { p_tenant_id: tenantId }, PAGE_WIDE),
     loadAllByCursor(io, "product_application_matches", applicationMatchSchema, { p_tenant_id: tenantId }, PAGE_WIDE),
+    loadApplicationCandidates(io, tenantId),
   ]);
 
   // Checked one at a time rather than in a loop: a loop cannot narrow each union member for the compiler, and the
@@ -246,6 +329,9 @@ export async function loadCrossSourceGovernanceInput(tenantId: string, io: Loade
   if (!applications.ok) return { ok: false, error: applications.error };
   if (!links.ok) return { ok: false, error: links.error };
   if (!matches.ok) return { ok: false, error: matches.error };
+  // A failed candidate read must NOT fall through as an empty feed: rule 5 reads absence from that feed as "this
+  // application's canonical product is unresolved", so a read we never completed would become remediation advice.
+  if (!candidates.ok) return { ok: false, error: candidates.error };
 
   const capabilitiesRaw = await callRpc(io, "product_connector_capabilities",
     { p_tenant_id: tenantId, p_connection_id: null });
@@ -302,6 +388,7 @@ export async function loadCrossSourceGovernanceInput(tenantId: string, io: Loade
     directoryApplications: applications.rows.map(toDirectoryApplication),
     personAccountLinks: links.rows.map(toPersonLink),
     applicationMatches: matches.rows.map(toApplicationMatch),
+    applicationCandidates: candidates.rows.map(toApplicationCandidate),
     matcherState,
   };
   return { ok: true, input };
@@ -324,6 +411,9 @@ const toPersonLink = (r: z.infer<typeof personLinkSchema>): PersonAccountLinkRow
 });
 const toApplicationMatch = (r: z.infer<typeof applicationMatchSchema>): ApplicationMatchRow => ({
   directoryApplicationId: r.directory_application_id, status: r.status,
+});
+const toApplicationCandidate = (r: z.infer<typeof applicationCandidateSchema>): ApplicationCandidateRow => ({
+  directoryApplicationId: r.directory_application_id, appProductId: r.app_product_id, appId: r.app_id,
 });
 
 // ── Orchestration ────────────────────────────────────────────────────────────────────────────────────────────────────

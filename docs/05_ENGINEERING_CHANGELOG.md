@@ -12,6 +12,43 @@ from PRs verified via `git log` / `gh pr list`.
 > **as of each PR's date** and are historical — where an older entry says "RISK-007 remains OPEN" / "Phase C remains
 > BLOCKED", that was accurate at that entry's date; this banner is the current state.
 
+### feat(governance) — Phase 18D: Rule 5's remediation split · 2026-08-14
+
+**No migration, and no matcher change.** `git diff origin/main..HEAD -- supabase/migrations` is empty;
+`application-matcher.ts` and `application-matcher-plan.ts` are byte-identical to 18C. Everything needed was already
+merged: 0090's candidate feed carries the distinction, and 0083 already refreshes copy keys and evidence on conflict.
+
+`discovered_application_unmanaged_by_idp` truthfully said one thing about two situations that need opposite actions.
+It now carries a bounded `evidence.reason` and subtype-specific copy keys — `product_unresolved` (in the census, absent
+from the feed), `operational_instance_absent` (feed row, NULL `app_id`), `operational_match_unaccepted` (feed row with
+instances). Absence from the feed is readable as "unresolved" only because that feed's parent eligibility is identical
+to the census under `p_include_stale := false`, narrowed by exactly one predicate: a confirmed `provider_app_id` alias.
+
+**One rule, one finding.** The subtype is applied AFTER the open decision, never as part of it, and is absent from the
+finding key — so a subject moving between subtypes REFRESHES one finding rather than closing one and opening another.
+`first_seen_at`, age and reopen count all survive; severity and confidence are unchanged, because they describe the
+broad condition and not the customer's next step. The `completed`-status gate is untouched: a full candidate feed
+cannot make the rule speak while the matcher has not currently completed, and an accepted match still ends the finding
+whatever the subtype would have been.
+
+The loader gains one read, with its own parent-cursor walk. 0090's `p_limit` bounds resolved PARENTS, one parent expands
+to one row per operational instance, and its LEFT JOIN returns at least one row for every selected parent — including a
+zero-instance parent's single NULL row. So ordering, cursor advancement and completion all operate on parent identity,
+and what that protects is GROUP INTEGRITY: `unmanagedReason` classifies from whether any row of a group carries a
+concrete `app_id`, so a group split across a page or re-served after the cursor would be classified from half of itself.
+It is not about truncation — since every parent yields at least one row, a row count could not end the walk early; it
+would only cost a wasted round trip per multi-instance parent, which is what the call-counting test pins. A failed
+candidate read fails the whole evaluation, for the same reason every other read here does.
+
+Copy closes the debt docs/79 recorded: `crossSourceProse()` in `governance-presenter.ts` resolves the persisted
+`title_key` stem, falling back to the broad rule sentence for an unknown subtype and for rows written before 18D. The
+unresolved variant may not claim a contract or spend fact; the operational variants may not call the software
+unidentified. **Still no customer renderer** — nothing reads `product_governance_findings` — so this is implemented and
+not surfaced, pinned as a contract test rather than a screen. Known limit: rejected candidates and unreviewed
+candidates are one subtype, and the copy is worded to stay true of both.
+
+No scheduler, no background principal, no UI, no hosted apply, no provider contact.
+
 ### feat(governance) — Phase 18C: the deterministic application matcher · 2026-08-14
 
 **No migration.** Everything it needs merged in 0085, 0088 and 0090; this is the orchestration those contracts were

@@ -295,12 +295,12 @@ It does **not** mean the canonical product is unknown, the software unidentified
 `app_product` with zero operational instances is therefore still "unmanaged" *at the operational-instance layer*, and that is
 coherent rather than contradictory.
 
-**Recorded debt, deliberately not fixed here:**
-- the rule's name reads backwards from its implementation — it is subjected on the IdP's own record, not on a SaaS-discovered one;
-- its `title_key` / `summary_key` / `remediation_key` resolve to **no copy anywhere in the repository**, so the sentence a customer
-  eventually reads is still undefined;
-- whoever writes that copy must say **instance/contract management, not product recognition**, or the finding will contradict this
-  model.
+**Recorded debt:**
+- the rule's name reads backwards from its implementation — it is subjected on the IdP's own record, not on a SaaS-discovered one
+  (still open);
+- ~~its copy keys resolve to no copy anywhere in the repository~~ — **closed by Phase 18D**, below. The copy says
+  instance/operational-record management rather than product recognition, exactly as this model requires, and the
+  `product_unresolved` variant is the one case where product recognition IS the missing fact.
 
 ### The 18C candidate contract (migration 0090)
 
@@ -393,14 +393,54 @@ over, because claiming snapshot consistency we do not have would be the more dan
 
 Request-driven, owner/admin, tenant from `accessGate()`. No scheduler, no background principal, no UI, no migration.
 
-### What Rule 5 still cannot say — and what must change with it
+### Rule 5's remediation split (Phase 18D)
 
-After a completed run, an application whose product is UNRESOLVED and one whose product is resolved with ZERO
-operational instances are genuinely different states, and Rule 5 sees one thing about each: no accepted match. That is
-truthful at the level the rule speaks, and it is why both produce the same finding, severity and copy keys — pinned by a
-test, not only described here. The **remediation** differs completely: one needs a canonical alias declared, the other
-needs an operational record. Whoever writes that copy must resolve the distinction; the pinning test fails the moment
-the rule starts making it, which is exactly when the copy has to change too.
+**One rule, one finding, three remediations.** The broad claim is unchanged and still the only thing the rule proves:
+*after a completed matcher run, no accepted operational application relationship exists for this current directory
+application.* What 18D adds is WHY, in the only three states the evidence distinguishes — because "confirm what this
+software is" and "link it to an operational record" are not interchangeable instructions, and each is useless in the
+other's state.
+
+| `evidence.reason` | Evidence | Customer action |
+|---|---|---|
+| `product_unresolved` | in the census, absent from 0090's feed | confirm which software product this is |
+| `operational_instance_absent` | feed row with `app_id` NULL | create the operational record, then link |
+| `operational_match_unaccepted` | feed row with ≥1 instance | review the available candidates and accept one |
+
+**The subtype is read from the same two feeds 18C reconciles**, so no migration and no matcher change: the loader walks
+`product_application_match_candidates` (0090) and absence from it means one thing only, because that feed's parent
+eligibility is IDENTICAL to `product_list_directory_applications` under `p_include_stale := false` — same owner/admin
+gate, same superseded/disconnected exclusion, same `sync_status = 'current'` — narrowed by exactly one further predicate,
+a confirmed `provider_app_id` alias.
+
+**The subtype never decides whether the finding exists.** It is applied after the open decision, which is unchanged:
+current application · complete application source · matcher status currently `completed` · no accepted match. A
+populated candidate feed cannot make the rule speak while the matcher has not completed, and `lastCompletedAt` is still
+not the gate.
+
+**Finding identity survives a subtype change.** The key folds (rule, tenant, subject type, subject) and never a message
+key, so an application moving `product_unresolved → operational_instance_absent → operational_match_unaccepted` is ONE
+finding being REFRESHED — 0083 overwrites the copy keys and evidence on conflict and never moves `first_seen_at`. The
+queue shows the advice changing, not the problem restarting. Severity and confidence are likewise unchanged by subtype:
+they describe the broad condition, and the customer's next action is not evidence that it is more or less certain.
+
+**An accepted match still ends the finding**, whatever the subtype would have been — including for an application whose
+product was never resolved and which a human linked by hand.
+
+**What the copy may not say.** The unresolved variant must not claim a contract, spend or licence fact: the rule read
+directory applications, matches and one alias feed, and never looked at a contract. The two operational variants must
+not call the software unidentified — a confirmed alias has already identified it. And the candidates variant says
+"candidates", never "the candidate": the rule does not carry a cardinality.
+
+**The one thing it still cannot distinguish:** candidates a reviewer has already REJECTED from candidates nobody has
+looked at. Both are `operational_match_unaccepted`, and the copy is worded to stay true of both ("available", not
+"proposed"). Separating them needs the match statuses per candidate, which is a wider read than this phase takes.
+
+**Copy exists; a customer-facing renderer still does not.** `crossSourceProse()` in
+`src/lib/data/governance-presenter.ts` is the single resolver, keyed by the persisted `title_key` stem, with the broad
+sentence as the fallback for an unknown subtype (and for rows written before 18D). Nothing in `src/` reads
+`product_governance_findings` yet — `/access/findings` renders the Phase-14 engine over the live access graph — so this
+is **implemented but not surfaced**, and pinned as a contract test rather than a screen.
 
 ### What 18C still needs
 

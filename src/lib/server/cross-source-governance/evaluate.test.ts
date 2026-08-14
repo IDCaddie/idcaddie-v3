@@ -7,6 +7,7 @@
 import { describe, expect, it } from "vitest";
 import { evaluateCrossSourceGovernance } from "./evaluate";
 import { crossSourceFindingKey } from "./finding-id";
+import { planApplicationMatches, type CandidateRow } from "./application-matcher-plan";
 import type {
   AppAccountRow,
   CrossSourceGraph,
@@ -51,6 +52,7 @@ const graph = (o: Partial<CrossSourceGraph> = {}): CrossSourceGraph => ({
   personAccountLinks: [],
   directoryApplications: [],
   applicationMatches: [],
+  applicationCandidates: [],
   matcherState: NEVER_RAN,
   ...o,
 });
@@ -270,10 +272,17 @@ describe("rule 4 — duplicate active accounts for one person", () => {
 });
 
 describe("rule 5 — application unmanaged by the IdP", () => {
-  const apps: DirectoryApplicationRow[] = [
-    { id: "app1", connectionId: OKTA, provider: "okta", syncStatus: "current" },
-  ];
+  const app = (id: string): DirectoryApplicationRow => ({
+    id, connectionId: OKTA, provider: "okta", syncStatus: "current",
+  });
+  const apps: DirectoryApplicationRow[] = [app("app1")];
   const appCaps = caps([OKTA, "okta", "directory_applications", "available"]);
+  // One 0090 feed row. `appId: null` is the feed's explicit ZERO-INSTANCE statement, which is a different fact from the
+  // application having no row at all — that is the whole distinction this rule now draws.
+  const candidate = (directoryApplicationId: string, appId: string | null): CandidateRow =>
+    ({ directoryApplicationId, appProductId: "prod1", appId });
+  const reasonOf = (f: readonly { subject_id: string; evidence: { reason?: string } }[], subjectId: string) =>
+    f.find(x => x.subject_id === subjectId)?.evidence.reason;
 
   const reasonFor = (g: CrossSourceGraph) =>
     evaluateCrossSourceGovernance(g).withheldRules.find(w => w.ruleId === "discovered_application_unmanaged_by_idp")
@@ -314,27 +323,176 @@ describe("rule 5 — application unmanaged by the IdP", () => {
     expect(evaluateCrossSourceGovernance(g).evaluatedRules).toContain("discovered_application_unmanaged_by_idp");
   });
 
-  // PHASE 18C DEBT, PINNED AS A FACT rather than only described in docs/79. After a completed matcher run these two
-  // applications are in genuinely different states — `app1`'s canonical product is UNRESOLVED (no confirmed alias), and
-  // `app2`'s product IS resolved but owns zero operational instances — yet Rule 5 sees one thing about each: no
-  // accepted match. That is truthful at the level the rule speaks ("no accepted operational relationship exists") and
-  // it is why the two findings are indistinguishable here.
-  //
-  // The REMEDIATION differs completely: one needs a canonical alias declared, the other needs an operational record.
-  // Whoever writes the customer copy must resolve that; this test fails the moment the rule starts distinguishing
-  // them, which is exactly when the copy has to change too.
-  it("cannot distinguish an unresolved product from a resolved one with zero instances — recorded debt", () => {
-    const g = graph({
+  // PHASE 18D — the 18C debt, closed. These two applications are in genuinely different states after a completed run:
+  // `app1`'s canonical product is UNRESOLVED (absent from the candidate feed), `app2`'s IS resolved and owns zero
+  // operational instances (present with a NULL appId). The rule's broad claim is identical for both, which is why they
+  // are ONE rule at ONE severity — but the remediation is not interchangeable, so the copy keys now differ.
+  it("distinguishes an unresolved product from a resolved one with zero instances", () => {
+    const f = evaluateCrossSourceGovernance(graph({
       capabilities: appCaps,
-      directoryApplications: [...apps, { id: "app2", connectionId: OKTA, provider: "okta", syncStatus: "current" }],
-      applicationMatches: [],
+      directoryApplications: [...apps, app("app2")],
+      applicationCandidates: [candidate("app2", null)],
       matcherState: COMPLETED,
-    });
-    const f = evaluateCrossSourceGovernance(g).findings;
+    })).findings;
     expect(f.map(x => x.subject_id).sort()).toEqual(["app1", "app2"]);
-    // Same rule, same severity, same copy keys — nothing in the finding carries the distinction.
-    expect(new Set(f.map(x => x.remediation_key)).size).toBe(1);
+    expect(reasonOf(f, "app1")).toBe("product_unresolved");
+    expect(reasonOf(f, "app2")).toBe("operational_instance_absent");
+    // Different remediation, SAME broad rule: one rule id, one severity, one confidence.
+    expect(new Set(f.map(x => x.remediation_key)).size).toBe(2);
+    expect(new Set(f.map(x => x.rule_id)).size).toBe(1);
     expect(new Set(f.map(x => x.severity)).size).toBe(1);
+    expect(new Set(f.map(x => x.confidence)).size).toBe(1);
+  });
+
+  // R7 / R10 / R11 — each subtype's keys, and the two sentences neither may ever imply.
+  it("stamps title, summary and remediation from the subtype, and carries it in evidence", () => {
+    const f = evaluateCrossSourceGovernance(graph({
+      capabilities: appCaps,
+      directoryApplications: [...apps, app("app2"), app("app3")],
+      applicationCandidates: [candidate("app2", null), candidate("app3", "opsapp1")],
+      matcherState: COMPLETED,
+    })).findings;
+    const keys = (subjectId: string) => {
+      const x = f.find(y => y.subject_id === subjectId)!;
+      return [x.title_key, x.summary_key, x.remediation_key];
+    };
+    expect(keys("app1")).toEqual([
+      "crossSource.discovered_application_unmanaged_by_idp.product_unresolved.title",
+      "crossSource.discovered_application_unmanaged_by_idp.product_unresolved.summary",
+      "crossSource.discovered_application_unmanaged_by_idp.product_unresolved.remediation",
+    ]);
+    expect(keys("app2")[2]).toMatch(/\.operational_instance_absent\.remediation$/);
+    expect(keys("app3")[2]).toMatch(/\.operational_match_unaccepted\.remediation$/);
+    // The subtype is ALSO evidence, and evidence is a bounded enum plus counts — never a product id, an alias, a name.
+    expect(f.map(x => x.evidence.reason).sort()).toEqual(
+      ["operational_instance_absent", "operational_match_unaccepted", "product_unresolved"],
+    );
+    for (const x of f) {
+      expect(Object.keys(x.evidence).sort()).toEqual(["counts", "reason", "supportingIds"]);
+      expect(x.evidence.supportingIds).toEqual([x.subject_id]);
+    }
+  });
+
+  // R7 (C) — one candidate and many candidates are the SAME remediation. The rule's advice is "review the candidates";
+  // how many there are is not a different instruction, and claiming there is exactly one would be a fact the finding
+  // does not carry.
+  it("gives one candidate and several candidates the same review remediation", () => {
+    const f = evaluateCrossSourceGovernance(graph({
+      capabilities: appCaps,
+      directoryApplications: [...apps, app("app2")],
+      applicationCandidates: [
+        candidate("app1", "opsapp1"),
+        candidate("app2", "opsapp2"), candidate("app2", "opsapp3"),
+      ],
+      matcherState: COMPLETED,
+    })).findings;
+    expect(f.map(x => x.evidence.reason)).toEqual(["operational_match_unaccepted", "operational_match_unaccepted"]);
+    expect(new Set(f.map(x => x.remediation_key)).size).toBe(1);
+  });
+
+  // R8 — THE LIFECYCLE PROPERTY. A subject moving between subtypes must refresh ONE finding, not close one and open
+  // another: 0083 keys on (tenant, finding_key), so an unchanged key is what preserves first_seen_at and reopen_count.
+  it("keeps the same finding identity when the subtype changes", () => {
+    const base = {
+      capabilities: appCaps, directoryApplications: apps, matcherState: COMPLETED,
+    } as const;
+    const unresolved = evaluateCrossSourceGovernance(graph({ ...base, applicationCandidates: [] })).findings[0];
+    const zero = evaluateCrossSourceGovernance(
+      graph({ ...base, applicationCandidates: [candidate("app1", null)] })).findings[0];
+    const candidates = evaluateCrossSourceGovernance(
+      graph({ ...base, applicationCandidates: [candidate("app1", "opsapp1")] })).findings[0];
+
+    expect(new Set([unresolved.finding_key, zero.finding_key, candidates.finding_key]).size).toBe(1);
+    expect(unresolved.finding_key).toBe(crossSourceFindingKey({
+      ruleId: "discovered_application_unmanaged_by_idp", tenantId: TENANT,
+      subjectType: "directory_application", subjectId: "app1",
+    }));
+    // ...while the advice genuinely changed.
+    expect(new Set([unresolved.remediation_key, zero.remediation_key, candidates.remediation_key]).size).toBe(3);
+  });
+
+  // R12 — an accepted match resolves the finding whatever the subtype would have been. `app2` has candidates AND an
+  // accepted one; `app3` is unresolved and accepted (a human linked it by hand). Neither may stay open.
+  it("an accepted match ends the finding regardless of subtype", () => {
+    const f = evaluateCrossSourceGovernance(graph({
+      capabilities: appCaps,
+      directoryApplications: [...apps, app("app2"), app("app3")],
+      applicationCandidates: [candidate("app2", "opsapp2"), candidate("app2", "opsapp9")],
+      applicationMatches: [
+        { directoryApplicationId: "app2", status: "accepted" },
+        { directoryApplicationId: "app3", status: "accepted" },
+      ],
+      matcherState: COMPLETED,
+    })).findings;
+    expect(f.map(x => x.subject_id)).toEqual(["app1"]);
+  });
+
+  // R13 — the engine is handed one tenant's rows and folds the tenant into every key. A candidate naming an
+  // application this graph does not contain cannot reclassify anything, because classification is looked up BY the
+  // subject rather than scanned across the feed.
+  it("a candidate for an application outside this graph changes nothing", () => {
+    const f = evaluateCrossSourceGovernance(graph({
+      capabilities: appCaps, directoryApplications: apps, matcherState: COMPLETED,
+      applicationCandidates: [candidate("app-from-another-tenant", "opsapp1")],
+    })).findings;
+    expect(f).toHaveLength(1);
+    expect(f[0].evidence.reason).toBe("product_unresolved");
+  });
+
+  // R6 — the subtype must never change WHETHER the rule fires, only what it advises. Both graphs below differ solely in
+  // the candidate feed, and the finding set is identical.
+  it("the candidate feed never opens or suppresses a finding", () => {
+    const withFeed = evaluateCrossSourceGovernance(graph({
+      capabilities: appCaps, directoryApplications: apps, matcherState: COMPLETED,
+      applicationCandidates: [candidate("app1", "opsapp1")],
+    }));
+    const without = evaluateCrossSourceGovernance(graph({
+      capabilities: appCaps, directoryApplications: apps, matcherState: COMPLETED,
+    }));
+    expect(withFeed.findings.map(x => x.subject_id)).toEqual(without.findings.map(x => x.subject_id));
+    expect(withFeed.evaluatedRules).toEqual(without.evaluatedRules);
+    expect(withFeed.withheldRules).toEqual(without.withheldRules);
+  });
+
+  // R1-R4, restated over the feed: a populated candidate feed cannot make rule 5 speak while the matcher has not
+  // currently completed. The feed says what is resolved; only the run says whether we looked.
+  it.each([
+    ["never run", NEVER_RAN],
+    ["running", { hasEverRun: true, status: "running", lastCompletedAt: null }],
+    ["failed after an earlier completion", { hasEverRun: true, status: "failed", lastCompletedAt: "2026-01-01T00:00:00Z" }],
+  ] as const)("stays silent with a full candidate feed while the matcher is %s", (_label, matcherState) => {
+    const g = graph({
+      capabilities: appCaps, directoryApplications: apps, matcherState,
+      applicationCandidates: [candidate("app1", "opsapp1")],
+    });
+    expect(evaluateCrossSourceGovernance(g).findings).toHaveLength(0);
+  });
+
+  // THE ANTI-DRIFT GUARD. Two modules now classify the same feed: the matcher's planner (to decide what to PROPOSE) and
+  // this engine (to decide what to SAY). They are deliberately not one function — the planner also validates the census
+  // and emits proposals — so this pins that they agree on every state, over one fixture exercising all four.
+  it("classifies exactly as the 18C planner counts, state for state", () => {
+    const census = ["app1", "app2", "app3", "app4"];
+    const rows: CandidateRow[] = [
+      candidate("app2", null),
+      candidate("app3", "opsapp1"),
+      candidate("app4", "opsapp2"), candidate("app4", "opsapp3"),
+    ];
+    const planned = planApplicationMatches(census, rows);
+    expect(planned.ok).toBe(true);
+    if (!planned.ok) return;
+
+    const f = evaluateCrossSourceGovernance(graph({
+      capabilities: appCaps, directoryApplications: census.map(app),
+      applicationCandidates: rows, matcherState: COMPLETED,
+    })).findings;
+    const count = (r: string) => f.filter(x => x.evidence.reason === r).length;
+    expect(count("product_unresolved")).toBe(planned.plan.counts.unresolvedProductCount);
+    expect(count("operational_instance_absent")).toBe(planned.plan.counts.zeroInstanceCount);
+    expect(count("operational_match_unaccepted")).toBe(
+      planned.plan.counts.oneCandidateCount + planned.plan.counts.ambiguousApplicationCount,
+    );
+    expect(f).toHaveLength(planned.plan.counts.directoryApplicationCount);
   });
 
   it("recognises a managed application once a completed run produced an accepted match", () => {
@@ -347,6 +505,22 @@ describe("rule 5 — application unmanaged by the IdP", () => {
     const f = evaluateCrossSourceGovernance(g).findings;
     expect(f.map(x => x.subject_id)).toEqual(["app1"]);
     expect(f[0].confidence).toBe("medium");
+  });
+
+  // THE BOUNDARY THE SUBTYPE RESTS ON. Absence from the candidate feed may only mean "no confirmed alias", which holds
+  // solely because the two feeds are eligible for the same applications: 0090 admits `sync_status = 'current'` on an
+  // active connector (proven against real Postgres by C5 in `application_match_candidate_contract_test.sql`), and this
+  // rule applies exactly that filter before classifying. A stale application is therefore outside BOTH — it can never
+  // be classified `product_unresolved` on the strength of a feed that was never going to mention it.
+  it("never classifies an application the candidate feed is not eligible to mention", () => {
+    const r = evaluateCrossSourceGovernance(graph({
+      capabilities: appCaps,
+      directoryApplications: [{ id: "app1", connectionId: OKTA, provider: "okta", syncStatus: "stale" }],
+      applicationCandidates: [],
+      matcherState: COMPLETED,
+    }));
+    expect(r.findings).toHaveLength(0);
+    expect(r.evaluatedRules).toContain("discovered_application_unmanaged_by_idp");
   });
 
   it("treats a proposed match as not yet accepted", () => {

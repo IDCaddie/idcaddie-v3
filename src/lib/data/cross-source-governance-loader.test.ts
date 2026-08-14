@@ -37,6 +37,16 @@ function makeIo(rows: Rows, opts: { fail?: string[]; connectorsError?: boolean; 
       if (opts.fail?.includes(name)) return { data: null, error: { message: "relation \"x\" does not exist at 1:2" } };
       if (name === "product_application_matcher_state") return ok(rows.matcher ?? [{ has_ever_run: false, status: null, last_completed_at: null }]);
       if (name === "product_connector_capabilities") return ok(rows.capabilities ?? []);
+      // 0090 pages by PARENT and returns every row of each selected parent — so the fake must page that way too, or it
+      // would quietly prove the loader correct against a contract the database does not offer.
+      if (name === "product_application_match_candidates") {
+        const all = (rows.candidates ?? []) as { directory_application_id: string }[];
+        const limit = Number(args.p_limit ?? 200);
+        const after = args.p_after_directory_application_id as string | null;
+        const eligible = after ? all.filter(r => r.directory_application_id > after) : all;
+        const parents = [...new Set(eligible.map(r => r.directory_application_id))].slice(0, limit);
+        return ok(eligible.filter(r => parents.includes(r.directory_application_id)));
+      }
       if (name === "product_sync_governance_findings") {
         return ok({ reported: (args.p_findings as unknown[]).length, opened: (args.p_findings as unknown[]).length, reopened: 0, refreshed: 0, closed: 0, withheld_from_closure: 0 });
       }
@@ -104,11 +114,102 @@ describe("happy path and shape", () => {
   });
 });
 
+// ── Phase 18D — the candidate feed ────────────────────────────────────────────────────────────────────────────────────
+// Rule 5 reads ABSENCE from this feed as "this application's canonical product is unresolved", which makes a short or
+// silently-truncated read indistinguishable from a customer who has canonicalized nothing. Every case below is that
+// property.
+describe("the 0090 candidate feed", () => {
+  const cand = (parent: string, appId: string | null) =>
+    ({ directory_application_id: parent, app_product_id: "prod1", app_id: appId });
+
+  it("carries every row through to the engine input, NULL app_id included", async () => {
+    const io = makeIo({ candidates: [cand("d1", null), cand("d2", "ops1")], capabilities: BOTH_AVAILABLE });
+    const r = await loadCrossSourceGovernanceInput("t-a", io);
+    expect(r.ok).toBe(true);
+    expect(r.ok && r.input.applicationCandidates).toEqual([
+      { directoryApplicationId: "d1", appProductId: "prod1", appId: null },
+      { directoryApplicationId: "d2", appProductId: "prod1", appId: "ops1" },
+    ]);
+  });
+
+  // GROUP INTEGRITY ACROSS A PAGE BOUNDARY — the property the parent cursor exists for. 0090's page counts PARENTS, so
+  // a page of 2 parents can legitimately return 5 rows, and `unmanagedReason` classifies from whether ANY row of a
+  // group carries a concrete `app_id`. A group split across a boundary, or re-served after the cursor, would be
+  // classified from half of itself. (It is NOT about truncation — see the call-count test below for what a row count
+  // would actually cost.)
+  // 201 parents against 0090's real 200-parent page, with the first parent owning four instances: the walk must cross
+  // the page boundary and carry the multi-instance group whole.
+  it("walks past a full parent page, carrying a multi-instance group whole", async () => {
+    const parents = Array.from({ length: 201 }, (_, i) => `d${String(i).padStart(4, "0")}`);
+    const candidates = parents.flatMap(p =>
+      p === parents[0] ? [0, 1, 2, 3].map(n => cand(p, `ops${n}`)) : [cand(p, null)]);
+    const io = makeIo({ candidates, capabilities: BOTH_AVAILABLE });
+    const r = await loadCrossSourceGovernanceInput("t-a", io);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.input.applicationCandidates).toHaveLength(204);
+    expect(new Set(r.input.applicationCandidates.map(c => c.directoryApplicationId)).size).toBe(201);
+    expect(io.calls.filter(n => n === "product_application_match_candidates")).toHaveLength(2);
+  });
+
+  // WHAT THE PARENT COUNT ACTUALLY BUYS, measured rather than asserted about data. A row-count termination cannot
+  // truncate this feed — the LEFT JOIN guarantees a row per parent, so `rows < limit` implies `parents < limit` — so
+  // the difference is round trips: three parents whose rows exceed the page limit are ONE complete page, and a
+  // row-counting walk would go back for a page that cannot exist. The distinction is only visible in the call count.
+  it("stops after one page when the parents fit, however many rows they expand to", async () => {
+    const candidates = [
+      ...Array.from({ length: 250 }, (_, i) => cand("d0000", `ops${i}`)),
+      cand("d0001", null), cand("d0002", "opsX"),
+    ];
+    const io = makeIo({ candidates, capabilities: BOTH_AVAILABLE });
+    const r = await loadCrossSourceGovernanceInput("t-a", io);
+    expect(r.ok).toBe(true);
+    expect(r.ok && r.input.applicationCandidates).toHaveLength(252);
+    expect(io.calls.filter(n => n === "product_application_match_candidates")).toHaveLength(1);
+  });
+
+  it.each([
+    ["parents out of order", [cand("d2", "ops1"), cand("d1", "ops2")]],
+    ["a group split by another parent", [cand("d1", "ops1"), cand("d2", "ops2"), cand("d1", "ops3")]],
+  ])("fails the load on %s rather than classifying from a malformed feed", async (_label, candidates) => {
+    const io = makeIo({ candidates, capabilities: BOTH_AVAILABLE });
+    const r = await loadCrossSourceGovernanceInput("t-a", io);
+    expect(r.ok).toBe(false);
+    expect(r.ok === false && r.error).toBe("pagination_contract_violated");
+  });
+
+  // The cursor's OWN parent coming back on the next page. Intra-page ordering cannot see it — that parent is the first
+  // row of its page — so it is caught against `after`, and it must be, because those rows are already in the result and
+  // a duplicated instance would read as a second candidate for an application that has one.
+  it("fails the load when a page re-serves the parent the cursor already consumed", async () => {
+    const parents = Array.from({ length: 201 }, (_, i) => `d${String(i).padStart(4, "0")}`);
+    const base = makeIo({ candidates: parents.map(p => cand(p, "ops1")), capabilities: BOTH_AVAILABLE });
+    const io: LoaderIo = {
+      ...base,
+      rpc: async (n, a) =>
+        n === "product_application_match_candidates" && a.p_after_directory_application_id !== null
+          // Off-by-one: `>=` instead of `>` on the cursor.
+          ? { data: [cand(a.p_after_directory_application_id as string, "ops1"), cand("d0999", "ops1")], error: null }
+          : base.rpc(n, a),
+    };
+    const r = await loadCrossSourceGovernanceInput("t-a", io);
+    expect(r.ok === false && r.error).toBe("pagination_contract_violated");
+  });
+
+  it("fails the load when a candidate row does not meet its contract", async () => {
+    const io = makeIo({
+      candidates: [{ directory_application_id: "d1", app_id: "ops1" }], capabilities: BOTH_AVAILABLE,
+    });
+    const r = await loadCrossSourceGovernanceInput("t-a", io);
+    expect(r.ok === false && r.error).toBe("pagination_contract_violated");
+  });
+});
+
 describe("read failure is not an empty result", () => {
   it.each([
     "product_app_accounts_for_governance", "product_list_directory_identities", "product_list_directory_applications",
     "product_person_account_links", "product_application_matches", "product_connector_capabilities",
-    "product_application_matcher_state",
+    "product_application_matcher_state", "product_application_match_candidates",
   ])("a failed %s fails the whole load rather than returning []", async name => {
     const io = makeIo({ capabilities: BOTH_AVAILABLE }, { fail: [name] });
     const r = await loadCrossSourceGovernanceInput("t-a", io);

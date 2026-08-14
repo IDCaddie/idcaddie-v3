@@ -15,6 +15,7 @@
 // output through `product_sync_governance_findings` (0083).
 
 import type { GovernanceSeverity, GovernanceConfidence } from "../governance-analytics/types";
+import type { CandidateRow as ApplicationCandidateRow } from "./application-matcher-plan";
 
 // Deliberately re-exported rather than redefined: severity and confidence mean exactly what they mean in Phase 14, and
 // two vocabularies for one concept is how a "medium" comes to mean two things.
@@ -87,6 +88,13 @@ export type ApplicationMatchRow = {
 };
 
 /**
+ * A row of 0090's candidate feed. IMPORTED rather than redefined, from the module that already owns the shape: two
+ * declarations of one feed row is how the matcher and the engine come to disagree about what a NULL `appId` means.
+ * Phase 18C's planner is not modified by this — only its type is reused.
+ */
+export type { CandidateRow as ApplicationCandidateRow } from "./application-matcher-plan";
+
+/**
  * `application_matcher_state` (0085) — whether the matching PROCESS ran, which is a different fact from what it found.
  *
  * Rule 5 gates on `status === "completed"` and on nothing else. In particular it does NOT gate on `lastCompletedAt`:
@@ -108,6 +116,15 @@ export type CrossSourceGraph = {
   readonly personAccountLinks: readonly PersonAccountLinkRow[];
   readonly directoryApplications: readonly DirectoryApplicationRow[];
   readonly applicationMatches: readonly ApplicationMatchRow[];
+  /**
+   * 0090's candidate feed, walked to EXHAUSTION by the loader. It carries no rule decision — it only says which
+   * directory applications have a settled canonical product, and which of those own an operational instance.
+   *
+   * An empty array must therefore only ever mean a successful empty read. The loader fails the whole evaluation when
+   * this read fails, because "we could not read the feed" and "nothing is resolved" would otherwise be the same `[]`,
+   * and the second one is a claim about the customer's estate.
+   */
+  readonly applicationCandidates: readonly ApplicationCandidateRow[];
   /** Execution evidence for the matcher. Counting `applicationMatches` can never substitute for this — see rule 5. */
   readonly matcherState: ApplicationMatcherState;
 };
@@ -122,6 +139,26 @@ export type CrossSourceRuleId =
 
 export type CrossSourceSubjectType = "app_account" | "person" | "directory_application";
 
+/**
+ * Phase 18D — WHY rule 5 is open, in the only three states the evidence can actually distinguish.
+ *
+ * This is a REMEDIATION fact, not a second rule and not a second finding. The rule's broad claim is unchanged: after a
+ * completed matcher run, no accepted operational application relationship exists for this current directory
+ * application. What differs is what a customer should do about it, and those actions are not interchangeable — telling
+ * someone to link an operational record when the software has not even been identified sends them to a screen with
+ * nothing to choose from.
+ *
+ * NOT part of the finding key (see `finding-id.ts`), so a subject moving between these states REFRESHES its finding
+ * rather than closing one and opening another. Its age, its `first_seen_at` and its reopen count all survive.
+ */
+export type UnmanagedApplicationReason =
+  /** In the census, absent from the candidate feed: no confirmed alias settles which canonical product this is. */
+  | "product_unresolved"
+  /** In the feed with a NULL `appId`: the product is recognised and owns no operational instance to link. */
+  | "operational_instance_absent"
+  /** In the feed with at least one instance: candidates exist and none has been accepted. */
+  | "operational_match_unaccepted";
+
 /** Exactly the payload `product_sync_governance_findings` (0083) consumes — no adapter layer between them. */
 export type CrossSourceFinding = {
   readonly finding_key: string;
@@ -133,7 +170,15 @@ export type CrossSourceFinding = {
   readonly title_key: string;
   readonly summary_key: string;
   readonly remediation_key: string | null;
-  readonly evidence: { readonly counts: Readonly<Record<string, number>>; readonly supportingIds?: readonly string[] };
+  readonly evidence: {
+    readonly counts: Readonly<Record<string, number>>;
+    readonly supportingIds?: readonly string[];
+    /**
+     * A bounded enum and nothing else. Never a name, an external id, an alias value, a provider payload, a product id
+     * or a contract detail — the subtype is a presentation fact, and evidence_json (0083) is persisted verbatim.
+     */
+    readonly reason?: UnmanagedApplicationReason;
+  };
   readonly source_providers: readonly string[];
   /** NON-EMPTY, always: 0083 refuses a sourceless finding because it could never be proven absent. */
   readonly evidence_connection_ids: readonly string[];
