@@ -12,6 +12,43 @@ from PRs verified via `git log` / `gh pr list`.
 > **as of each PR's date** and are historical — where an older entry says "RISK-007 remains OPEN" / "Phase C remains
 > BLOCKED", that was accurate at that entry's date; this banner is the current state.
 
+### feat(governance) — Phase 18C: the deterministic application matcher · 2026-08-14
+
+**No migration.** Everything it needs merged in 0085, 0088 and 0090; this is the orchestration those contracts were
+built for. `git diff origin/main..HEAD -- supabase/migrations` is empty.
+
+Two feeds, kept apart: the 0073 census (every eligible application) and the 0090 candidate feed (only those whose
+canonical product is settled by a confirmed alias). Absence from the feed is absence of EVIDENCE, not of the
+application — and the census is what validates the feed, so a candidate naming an application the census did not return
+fails the run rather than being proposed against or quietly dropped.
+
+Four states, and only two of them may write: unresolved → nothing; resolved-with-zero-instances → nothing;
+one candidate → `canonical_product` / **medium**; N candidates → `canonical_product` / **low** for every one, unranked.
+`high` is unreachable, because cardinality is a fact about the estate rather than about the evidence.
+
+Fail-closed and ordered: start → complete both reads → validate → all proposals → complete. Completion is LAST because
+`matcher_state = completed` is what licenses Rule 5; completing early leaves a window where the rule reads a completed
+run whose proposals do not exist. Every inconsistency fails the run — a candidate outside the census, one application
+resolving to two products, a NULL instance mixed with a concrete one, a duplicated row. Nothing picks first, dedupes
+silently or repairs malformed evidence.
+
+It proposes and never decides — asserted in the SOURCE, not sampled: the decide RPC does not appear, no provider name
+appears in executable text, and no `service_role` or scheduler is reachable. `already_accepted` / `already_rejected` on
+replay are successes, so a re-running matcher never resurrects a rejection nor duplicates an acceptance, and a candidate
+that vanishes from the estate keeps its proposal.
+
+Rule 5 runtime is UNCHANGED. Its inability to distinguish an unresolved product from a resolved-but-unlinked one is now
+pinned by a test rather than only described: same rule, same severity, same copy keys, different remediation. That test
+fails the moment the rule starts distinguishing them — which is exactly when the customer copy has to change.
+
+Proven against real Postgres as well as mocks (Phase 18A shipped a server action that read a deny-all table with
+seventeen green mocked tests): every RPC the matcher calls is exercised verbatim, including a cross-tenant identifier
+collision that makes the alias/product tenant predicates testable at all. 15 mutants, each RED for its intended reason
+and restored byte-exact — one of which (a swallowed census read failure) survived the first pass and exposed a test that
+was passing for the wrong reason.
+
+No matcher UI, no scheduler, no background principal, no provider code, no hosted apply, nothing deployed.
+
 ### feat(governance) — Phase 18C0: migration 0090, the candidate evidence contract · 2026-08-14
 
 **The contract 18C will need, and nothing that uses it.** Two additions, one migration, because shipping them apart

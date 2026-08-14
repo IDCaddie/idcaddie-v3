@@ -314,6 +314,29 @@ describe("rule 5 — application unmanaged by the IdP", () => {
     expect(evaluateCrossSourceGovernance(g).evaluatedRules).toContain("discovered_application_unmanaged_by_idp");
   });
 
+  // PHASE 18C DEBT, PINNED AS A FACT rather than only described in docs/79. After a completed matcher run these two
+  // applications are in genuinely different states — `app1`'s canonical product is UNRESOLVED (no confirmed alias), and
+  // `app2`'s product IS resolved but owns zero operational instances — yet Rule 5 sees one thing about each: no
+  // accepted match. That is truthful at the level the rule speaks ("no accepted operational relationship exists") and
+  // it is why the two findings are indistinguishable here.
+  //
+  // The REMEDIATION differs completely: one needs a canonical alias declared, the other needs an operational record.
+  // Whoever writes the customer copy must resolve that; this test fails the moment the rule starts distinguishing
+  // them, which is exactly when the copy has to change too.
+  it("cannot distinguish an unresolved product from a resolved one with zero instances — recorded debt", () => {
+    const g = graph({
+      capabilities: appCaps,
+      directoryApplications: [...apps, { id: "app2", connectionId: OKTA, provider: "okta", syncStatus: "current" }],
+      applicationMatches: [],
+      matcherState: COMPLETED,
+    });
+    const f = evaluateCrossSourceGovernance(g).findings;
+    expect(f.map(x => x.subject_id).sort()).toEqual(["app1", "app2"]);
+    // Same rule, same severity, same copy keys — nothing in the finding carries the distinction.
+    expect(new Set(f.map(x => x.remediation_key)).size).toBe(1);
+    expect(new Set(f.map(x => x.severity)).size).toBe(1);
+  });
+
   it("recognises a managed application once a completed run produced an accepted match", () => {
     const g = graph({
       capabilities: appCaps,

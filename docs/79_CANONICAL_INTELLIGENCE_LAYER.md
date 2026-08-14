@@ -349,6 +349,59 @@ page made entirely of them from stalling the walk.
 **Execution for 18C v1 is request-driven**: an authenticated owner/admin triggers it. Background/scheduled matching is a
 separate trust-boundary phase and no principal for it exists.
 
+### Phase 18C — how the deterministic matcher runs
+
+Two independently-read feeds, deliberately not collapsed:
+
+```
+census            product_list_directory_applications(p_include_stale = false)   every eligible application
+candidate feed    product_application_match_candidates(...)                      only those whose product is settled
+```
+
+**Absence from the candidate feed is not absence of the application** — it is absence of settled product evidence. A
+matcher driven by the feed alone would never learn an application exists and would report a clean run over an estate it
+never looked at. The census is also what validates the feed: a candidate naming an application the census did not return
+means the two feeds disagree, and the run fails rather than proposing against something it never examined.
+
+| state | evidence | proposals |
+|---|---|---|
+| **unresolved product** | in census, absent from feed | none |
+| **resolved, zero instances** | feed row with `app_id` NULL | none |
+| **one candidate** | one operational app | that one — `canonical_product` / **medium** |
+| **ambiguous** | N operational apps | **every** one — `canonical_product` / **low** |
+
+**Confidence is not cardinality.** One instance means the ambiguity is small, not that the evidence is stronger: the
+identifier proved the PRODUCT in both cases. Promoting a lone candidate to `high` would launder "the estate happens to
+have one row today" into "we know this is the right one", and a second instance appearing tomorrow would retroactively
+falsify a claim already recorded. `high` is never emitted.
+
+**The run is fail-closed, and the ordering is the point.** `start` → complete census → complete candidate feed →
+validate → **all** proposals → `complete`. Any failure after the start marks the run FAILED and returns. Completion is
+last because `application_matcher_state = completed` is what licenses Rule 5: completing first would leave a window in
+which the rule reads a completed run whose proposals do not exist yet. A read failure is never an empty read, and there
+is no partial completion.
+
+**The matcher proposes and never decides.** Not even the unambiguous one-candidate case — a match is a human judgement,
+and `product_decide_application_match` is absent from the source, asserted statically rather than sampled at runtime.
+`already_accepted` and `already_rejected` on replay are SUCCESSES: the candidate was legitimate and a person had already
+answered it. A rejected candidate is never re-opened, an accepted one never duplicated, and a candidate that disappears
+from the estate keeps its proposal — this phase has no authority to delete review history.
+
+**Completeness is relative to its own bounded reads, not to a database snapshot.** The two feeds are separate cursor
+walks in separate statements; an application created between them belongs to the next run. Stated rather than papered
+over, because claiming snapshot consistency we do not have would be the more dangerous kind of wrong.
+
+Request-driven, owner/admin, tenant from `accessGate()`. No scheduler, no background principal, no UI, no migration.
+
+### What Rule 5 still cannot say — and what must change with it
+
+After a completed run, an application whose product is UNRESOLVED and one whose product is resolved with ZERO
+operational instances are genuinely different states, and Rule 5 sees one thing about each: no accepted match. That is
+truthful at the level the rule speaks, and it is why both produce the same finding, severity and copy keys — pinned by a
+test, not only described here. The **remediation** differs completely: one needs a canonical alias declared, the other
+needs an operational record. Whoever writes that copy must resolve the distinction; the pinning test fails the moment
+the rule starts making it, which is exactly when the copy has to change too.
+
 ### What 18C still needs
 
 18B0's writer is **human-driven**: an operator creates the product, declares the alias, and the resolver links the app. Until a

@@ -113,7 +113,10 @@ begin
   exception when insufficient_privilege then msg := sqlerrm;
   end;
   assert msg like 'not authorized%', 'B1 refused by the role gate, got: ' || msg;
-  select count(*) into n from public.application_matcher_state;
+  -- Scoped to THIS tenant: the claim is that the refused start wrote nothing, not that the table is globally empty.
+  -- Other suites in the same run legitimately have matcher state of their own.
+  select count(*) into n from public.application_matcher_state
+   where tenant_id = 'a7000000-0000-4000-8000-00000000000a';
   assert n = 0, 'B1 a refused start wrote nothing, found ' || n;
 end $$;
 
