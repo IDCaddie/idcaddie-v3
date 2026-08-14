@@ -302,6 +302,53 @@ coherent rather than contradictory.
 - whoever writes that copy must say **instance/contract management, not product recognition**, or the finding will contradict this
   model.
 
+### The 18C candidate contract (migration 0090)
+
+**`canonical_product` — a sixth `method`, because none of the five was true.** The chain
+`external_id → confirmed provider_app_id alias → app_product → apps WHERE canonical_app_id = product` proves the
+**product**; the identifier never touches the `apps` row, so it does not prove the **instance** — and that stays true at
+N=1, where the candidate set is exhaustive by *cardinality*, not by evidence. `exact_external_id` would claim the
+identifier matched this instance. `vendor_catalog` was never defined by 0075, nothing writes it, and `vendors`
+(Atlassian) is a different noun from `app_products` (Jira), so it reads as an external catalogue — retrofitting it would
+hollow out the vocabulary. `suggested` is the weak-evidence bucket 0088 refuses to keep name-similarity out, and this
+derivation is deterministic. `manual` is an operator. So:
+
+> **`canonical_product`** — candidate derived deterministically from a confirmed canonical-product mapping and the
+> tenant's operational instances of that product; the evidence does not itself identify this instance as the correct one.
+
+**method is provenance; confidence is the weighing.** 0075: *"HOW the match was decided … the automated methods are
+recorded distinctly so a low-quality heuristic can be found and revisited later"* versus *"a match without one is an
+assertion nobody can weigh."* So method must NOT vary with cardinality and confidence MAY:
+
+| operational instances | proposal | method | confidence |
+|---|---|---|---|
+| **zero** | none | — | — |
+| **one** | one candidate | `canonical_product` | **medium** — exhaustive, but still inferential; the zero case proves a product may own no instance at all |
+| **many** | one per instance | `canonical_product` | **low** for every candidate — nothing distinguishes them |
+
+Never propagate alias/product confidence into instance confidence: a high-confidence *product* identification says
+nothing about which instance is right.
+
+**`product_application_match_candidates` — the bounded read.** `directory_applications` is deny-all and 0061 withholds
+`external_id`, so product code cannot perform `directory_application → alias` at all. The definer reads the identifier
+INTERNALLY, joins on it, and returns only `(directory_application_id, app_product_id, app_id)` — never the identifier,
+alias value, label, name or provider payload. Owner/admin, `authenticated` EXECUTE only; PUBLIC/anon/`connector_runner`
+revoked; no `service_role`, no table grant, no policy on `directory_applications`.
+
+Eligibility mirrors 0087: a `current` directory application with a non-blank identifier, on a connector that is neither
+superseded nor disconnected, carrying a **confirmed** `provider_app_id` alias. `pending`, `rejected`, `auto` and `name`
+never bridge.
+
+**Paging bounds PARENTS, never the exploded join.** One directory application expands into 0/1/N rows; a limit on the
+joined result would split a many-instance group across a page boundary, and a matcher seeing half a group would propose
+half an ambiguity and call the run complete. So a page of parents is selected first, ordered by immutable `id`, then
+every selected parent is expanded to its complete set. Row count is unbounded by design. The cursor is the last parent
+id, readable from the last row — and a zero-instance parent still emits its `app_id NULL` row, which is what stops a
+page made entirely of them from stalling the walk.
+
+**Execution for 18C v1 is request-driven**: an authenticated owner/admin triggers it. Background/scheduled matching is a
+separate trust-boundary phase and no principal for it exists.
+
 ### What 18C still needs
 
 18B0's writer is **human-driven**: an operator creates the product, declares the alias, and the resolver links the app. Until a
