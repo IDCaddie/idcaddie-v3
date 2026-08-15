@@ -31,9 +31,9 @@ completeness call, not an incident.
 
 ### GWS-R1 — Persist task/runtime DB gate mismatch
 
-`deploy/task-definition-google-workspace-persist.json:70-72` sets `RUNNER_DB_ENABLED=1`.
-**Nothing reads that name.** The runtime gate is `IDCADDIE_RUNNER_DB_ENABLED`
-(`src/runner-connection.ts:81`, read at `:174-176`).
+The **Google Workspace persist task definition** — `deploy/…-google-workspace-persist.json:70-72` —
+sets `RUNNER_DB_ENABLED=1`. **Nothing reads that name.** The runtime gate is
+`IDCADDIE_RUNNER_DB_ENABLED` (`src/runner-connection.ts:81`, read at `:174-176`).
 
 Three requirements are unmet, all of them satisfied by every Okta persist task definition:
 
@@ -84,13 +84,18 @@ is precisely where it would first appear.
 
 ### GWS-R3 — Manifest `rate_limit` declaration is not enforced proactively
 
-`src/connector-sync/manifests/google_workspace.v1.json:89-92` declares `{"rps": 5, "burst": 2}`.
-No code reads `rate_limit`, `rps`, or `burst`. There is no client-side throttle, pacing, token
-bucket, or concurrency cap anywhere on the Google path.
+`src/connector-sync/manifests/google_workspace.v1.json:89-92` declares
+`rate_limit: { rps: 5, burst: 2 }`, and the manifest schema **does read and validate** it
+(`manifest-schema.ts:212,258` — `rps` positive, `burst` a positive int, `.strict()`).
 
-Rate limiting is therefore **reactive only** — the connector backs off after Google has already
-refused (which it does well; see PASSED). The declared figure is documentation, not a control, and
-should not be relied on as one when sizing the exercise.
+What is missing is enforcement, not declaration: the **runtime does not consume that declaration**
+to enforce proactive throttling, pacing, or concurrency. There is no client-side throttle, token
+bucket, or concurrency cap anywhere on the Google path. Rate limiting is therefore **reactive**,
+through retry/backoff after Google has already refused a request, rather than proactively enforced
+from the manifest contract.
+
+The backoff itself is good (see PASSED). But the declared figure is a validated contract value that
+nothing acts on, so it must not be relied on as a control when sizing the exercise.
 
 ### GWS-R4 — Google Workspace findings evaluator has no production caller
 
@@ -109,12 +114,22 @@ demonstrate governance output.
 
 None of these can be satisfied by a repository change.
 
-### GWS-E1 — Google service-account key not provisioned in KMS
+### GWS-E1 — No Google service-account signing key is wired into the task definitions
+
+**The proven claim, and its limit.** No Google service-account signing key is wired into the current
+task definitions: all three retain placeholder KMS configuration
+(`REPLACE_WITH_KMS_KEY_ARN`, `REPLACE_WITH_SERVICE_ACCOUNT_KEY_ID`). As currently configured the live
+path therefore cannot obtain the required signing capability.
+
+Whether an unrelated or unreferenced key already exists elsewhere in AWS is **outside this
+repository review and remains unverified** — this lane has no hosted access and cannot observe AWS
+state. What is established here is the wiring, not the absence of a key in the account.
 
 `createHostedGoogleAssertionProvider` requires `GOOGLE_WORKSPACE_KMS_KEY_ID`,
 `GOOGLE_WORKSPACE_SA_KEY_ID`, and `GOOGLE_WORKSPACE_KMS_REGION`, with no default and no local-key
-fallback (`src/connector-sync/google-workspace-kms-adapter.ts:38-46,83-88`). With none present it
-fails closed at `missing_kms_key`. Also required: the task role granted `kms:Sign` on that key.
+fallback (`src/connector-sync/google-workspace-kms-adapter.ts:38-46,83-88`). With any of them absent
+it fails closed at `missing_kms_key`. Also required, and equally unverifiable from here: the task
+role granted `kms:Sign` on that key.
 
 ### GWS-E2 — Domain-wide delegation grant not configured/verified
 
