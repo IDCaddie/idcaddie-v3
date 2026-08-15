@@ -9,7 +9,7 @@
 // only when both hold, and the server actions re-check the flag themselves — this page is never trusted.
 
 import { readTenantMatcherState } from "@/lib/data/governance-ops";
-import { isGovernanceOpsEnabled, toMatcherStateView } from "./governance-ops-view";
+import { evaluationGate, isGovernanceOpsEnabled, toMatcherStateView } from "./governance-ops-view";
 import { RunEvaluationForm, RunMatcherForm } from "./run-panel";
 
 export const metadata = { title: "Internal governance ops · ID Caddie" };
@@ -36,6 +36,12 @@ export default async function GovernanceOpsPage() {
   }
 
   const read = await readTenantMatcherState();
+  // A read we could not complete blocks the evaluation button too. Rendering it enabled on an unknown state would
+  // invite the exact press the server action is going to refuse anyway.
+  const gate = read.ok ? evaluationGate(read.state) : null;
+  const blockedReason = gate === null
+    ? "Evaluation is unavailable while the matcher state cannot be read."
+    : gate.allowed ? null : gate.message;
 
   return (
     <main className="flex flex-1 flex-col gap-6 p-8">
@@ -80,7 +86,7 @@ export default async function GovernanceOpsPage() {
       </section>
 
       <RunMatcherForm />
-      <RunEvaluationForm />
+      <RunEvaluationForm blockedReason={blockedReason} />
 
       <footer className="text-sm text-zinc-500">
         Run outcomes above are shown to the operator who triggered them and are not persisted — see{" "}

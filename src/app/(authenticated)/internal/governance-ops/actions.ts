@@ -19,8 +19,10 @@
 import { revalidatePath } from "next/cache";
 import { runTenantApplicationMatcher } from "@/lib/data/application-matcher";
 import { evaluateTenantCrossSourceGovernance } from "@/lib/data/cross-source-governance-loader";
+import { readTenantMatcherState } from "@/lib/data/governance-ops";
 import {
-  OPS_PATH, failureReasonLabel, isGovernanceOpsEnabled, matcherCountRows, syncCountRows, withheldClosureNote,
+  CLOSURE_UNSAFE_WITHHELD_RULE, MID_RUN_STATE_CHANGE_NOTE, OPS_PATH, evaluationGate, failureReasonLabel,
+  isGovernanceOpsEnabled, matcherCountRows, syncCountRows, withheldClosureNote,
   type CountRow,
 } from "./governance-ops-view";
 
@@ -73,6 +75,20 @@ export async function runMatcherAction(_prev: OpsActionState): Promise<OpsAction
 export async function runEvaluationAction(_prev: OpsActionState): Promise<OpsActionState> {
   if (!isGovernanceOpsEnabled(process.env)) return DISABLED;
 
+  // ── THE PRECONDITION, ENFORCED HERE AND NOT IN THE UI ──────────────────────────────────────────────────────────────
+  // The page also hides the button, but that is a courtesy: a server action is an addressable POST endpoint, so a
+  // hostile or stale client can invoke this directly. This check is the authority, and it runs BEFORE the engine — and
+  // therefore before any finding-sync mutation — is reached at all.
+  //
+  // It reads the CURRENT persisted matcher state. `last_completed_at` is not consulted and cannot unlock anything: see
+  // `evaluationGate` for why syncing while rule 5 is withheld closes findings that are still true.
+  const state = await readTenantMatcherState();
+  if (!state.ok) {
+    return { ok: false, message: `Evaluation blocked. ${failureReasonLabel(state.error)}`, counts: [], notes: [] };
+  }
+  const gate = evaluationGate(state.state);
+  if (!gate.allowed) return { ok: false, message: gate.message, counts: [], notes: [] };
+
   const result = await evaluateTenantCrossSourceGovernance();
   revalidatePath(OPS_PATH);
 
@@ -87,6 +103,16 @@ export async function runEvaluationAction(_prev: OpsActionState): Promise<OpsAct
   // A withheld RULE is a different fact from a withheld CLOSURE and is reported separately: one rule did not run at
   // all, the other ran and declined to close. Collapsing them would let "rule 5 never fired" hide inside a closure count.
   for (const r of summary.withheldRules) notes.push(`Rule not evaluated — ${r.ruleId}: ${r.reason}`);
+
+  // ── RESIDUAL RACE, DETECTED RATHER THAN CLAIMED IMPOSSIBLE ─────────────────────────────────────────────────────────
+  // The precondition above and the engine's own matcher read are two separate statements. A concurrent matcher run
+  // started by another owner in between would flip the state, and the engine — not this guard — decides whether rule 5
+  // fires. This cannot be closed from here without changing the engine, so it is DETECTED: if a run we authorized comes
+  // back reporting rule 5 withheld, the state moved under us and findings may have been wrongly closed. Saying so
+  // loudly is the difference between a recoverable incident and a silent one.
+  if (summary.withheldRules.some(r => r.ruleId === CLOSURE_UNSAFE_WITHHELD_RULE)) {
+    notes.push(MID_RUN_STATE_CHANGE_NOTE);
+  }
 
   return {
     ok: true,

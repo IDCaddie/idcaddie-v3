@@ -268,6 +268,52 @@ as an empty estate · raw timestamp shown instead of a phrased age. Independent 
 SURVIVED**, each naming a real gap that is now closed: all rows dropped while reporting zero drops · the rendered list
 keyed on a mutable field · `status` deleted from `rowSchema`. Those three plus three review-fix mutants (remove one
 live rule's prose · restore the 100-row false-exact count · render all-unreadable as the clean empty state) are RED.
+### fix(governance) — Phase 18F-C blocker: the evaluation refuses to run unless the matcher is currently completed · 2026-08-15
+
+**Independent review found that the operator surface below could silently close true findings, and it was right.** Rule
+5's findings carry the application's connection as their evidence, and 0083 closes any open finding of this engine that
+is absent from a run's payload and whose evidence connections are all closure-eligible — a flat subset test that knows
+nothing about which rule produced a finding, or whether that rule ran at all. So with the matcher `running` or `failed`,
+rule 5 is withheld, its findings vanish from the payload, and the connector is still healthy and therefore still
+closure-eligible. 0083 reads "absent + covered" as "the condition ended" and closes a finding that is still true —
+counted in `closed`, never in `withheld_from_closure`, so nothing on screen said anything was lost. Since #431 merged,
+those findings are customer-visible at `/access/governance`, where the close reads as **resolved**.
+
+**The engine gap is pre-existing; the reachability was not.** Before this lane, `evaluateTenantCrossSourceGovernance`
+had no production caller, so the collision could not happen. The operator button is what made it reachable — and the
+first version of that button shipped copy asserting the opposite ("Findings raised by an earlier run stay open"),
+directly above the control that closed them. That string is gone.
+
+**The guard.** `runEvaluationAction` now reads the CURRENT persisted matcher state and refuses unless it is `completed`,
+returning a bounded `matcher_never_run` / `matcher_running` / `matcher_failed` — **before** the engine, and therefore
+before any finding-sync mutation, is entered at all. `evaluationGate` derives from `toMatcherStateView(...).headline`,
+which is a function of the current status alone, so a surviving `last_completed_at` cannot unlock it by construction
+rather than by a second rule that could drift. The page also disables the button, but that is a courtesy: a server
+action is an addressable POST, so the action is the authority and the tests invoke it directly to prove it.
+
+**Scope, stated rather than implied.** This does NOT repair 0083's closure model — that needs a migration carrying
+per-rule/per-capability closure scope, and every other caller of the engine is exactly as exposed as before. The guard
+refuses to *enter* the unsafe state from the one path this lane created. A static test pins that the surface never
+claims otherwise.
+
+**The residual race is detected, not denied.** The precondition and the engine's own matcher read are two statements; a
+concurrent matcher run between them flips the state, and the engine — not the guard — decides whether rule 5 fires. That
+cannot be closed from the operator surface, so a run that was authorized and comes back reporting rule 5 withheld now
+raises an `ANOMALY` note naming the possible wrong closures and the recovery. The regression test drives that race
+deterministically by flipping the matcher row between the two reads.
+
+**Regression + matrix.** `evaluation-gate.regression.test.ts` runs the REAL action, reader, loader and engine over a
+fake client whose sync implements 0083's closure predicate verbatim — and pins that emulation against 0091's own SQL, so
+the file cannot quietly prove a fiction. It demonstrates the unsafe close first (kept, as the documented engine gap),
+then C1–C11: refusal for never-run/running/failed with and without history, allowance on completed, a real closure still
+working, direct-invocation bypass, hostile `prevState`, and the mid-run anomaly. Eleven mutants RED, including
+gate-on-`lastCompletedAt`, allow-failed, allow-running, server-guard-removed, guard-after-evaluation, anomaly-removed,
+button-not-disabled, and the false copy and the false runbook claim being restored.
+
+**Runbook §1 rewritten**, plus the three claims review contradicted: the stuck-`running` reassurance, the dormancy
+generalisation (true for connector degradation, false for a failed matcher), and evaluation-alone being "valid". Staging
+acceptance gains two closure-safety steps.
+
 ### feat(governance) — Phase 18F-C: governance ops + observability, no migration · 2026-08-15
 
 **The engine had no production caller.** `runTenantApplicationMatcher` (Phase 18C) and

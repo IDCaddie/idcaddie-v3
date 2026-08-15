@@ -9,6 +9,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const runTenantApplicationMatcher = vi.fn();
 const evaluateTenantCrossSourceGovernance = vi.fn();
 const revalidatePath = vi.fn();
+const readTenantMatcherState = vi.fn();
+
+// The evaluation's precondition. Defaulted to `completed` so the tests below exercise the reporting they are about;
+// the precondition itself is proven in `evaluation-gate.regression.test.ts` against the real reader and real engine.
+const COMPLETED_STATE = {
+  ok: true as const,
+  state: { hasEverRun: true, status: "completed" as const, startedAt: "2026-08-15T09:00:00Z", lastCompletedAt: "2026-08-15T09:14:00Z" },
+};
 
 vi.mock("next/cache", () => ({ revalidatePath: (p: string) => revalidatePath(p) }));
 vi.mock("@/lib/data/application-matcher", () => ({
@@ -16,6 +24,9 @@ vi.mock("@/lib/data/application-matcher", () => ({
 }));
 vi.mock("@/lib/data/cross-source-governance-loader", () => ({
   evaluateTenantCrossSourceGovernance: () => evaluateTenantCrossSourceGovernance(),
+}));
+vi.mock("@/lib/data/governance-ops", () => ({
+  readTenantMatcherState: () => readTenantMatcherState(),
 }));
 
 const { runEvaluationAction, runMatcherAction } = await import("./actions");
@@ -37,6 +48,7 @@ const okSummary = {
 beforeEach(() => {
   vi.clearAllMocks();
   process.env[FLAG] = "1";
+  readTenantMatcherState.mockResolvedValue(COMPLETED_STATE);
 });
 afterEach(() => {
   delete process.env[FLAG];
@@ -61,6 +73,8 @@ describe("the flag is a refusal, not a display condition", () => {
     const state = await runEvaluationAction(null);
 
     expect(evaluateTenantCrossSourceGovernance).not.toHaveBeenCalled();
+    // The flag is checked BEFORE the precondition, so not even the matcher state is read.
+    expect(readTenantMatcherState).not.toHaveBeenCalled();
     expect(state?.ok).toBe(false);
   });
 });
@@ -153,12 +167,12 @@ describe("the evaluation trigger", () => {
       ok: true,
       summary: {
         ...okSummary, evaluatedRules: ["r1"],
-        withheldRules: [{ ruleId: "discovered_application_unmanaged_by_idp", reason: "the application matcher has never run" }],
+        withheldRules: [{ ruleId: "inactive_identity_with_active_saas_account", reason: "both sources must be complete" }],
       },
     });
     const state = await runEvaluationAction(null);
-    expect(state?.notes.join(" ")).toMatch(/discovered_application_unmanaged_by_idp/);
-    expect(state?.notes.join(" ")).toMatch(/never run/);
+    expect(state?.notes.join(" ")).toMatch(/inactive_identity_with_active_saas_account/);
+    expect(state?.notes.join(" ")).toMatch(/both sources must be complete/);
   });
 
   it("a load failure is reported, and nothing is presented as synced", async () => {

@@ -7,7 +7,7 @@
 import { describe, expect, it } from "vitest";
 import type { MatcherState } from "@/lib/data/governance-ops";
 import {
-  UNRECOGNISED_REASON, failureReasonLabel, isGovernanceOpsEnabled, matcherCountRows, syncCountRows,
+  UNRECOGNISED_REASON, evaluationGate, failureReasonLabel, isGovernanceOpsEnabled, matcherCountRows, syncCountRows,
   toMatcherStateView, withheldClosureNote,
 } from "./governance-ops-view";
 
@@ -177,5 +177,58 @@ describe("a withheld closure reads as correct behaviour, not as a failure", () =
     // The dangerous "fix" for a withheld closure is to relax the completeness test, which closes findings on evidence
     // that proved nothing. The copy must not suggest it.
     expect(withheldClosureNote(3)).not.toMatch(/force|override|ignore|disable|bypass/i);
+  });
+});
+
+// ── The evaluation precondition ──────────────────────────────────────────────────────────────────────────────────────
+describe("evaluationGate — only a CURRENTLY completed matcher unlocks the evaluation", () => {
+  it("completed → allowed", () => {
+    expect(evaluationGate(state()).allowed).toBe(true);
+  });
+
+  it.each([
+    ["never run", { hasEverRun: false, status: null, startedAt: null, lastCompletedAt: null }, "matcher_never_run"],
+    ["running, no history", { status: "running" as const, lastCompletedAt: null }, "matcher_running"],
+    ["running WITH history", { status: "running" as const }, "matcher_running"],
+    ["failed, no history", { status: "failed" as const, lastCompletedAt: null }, "matcher_failed"],
+    ["failed WITH history", { status: "failed" as const }, "matcher_failed"],
+  ])("%s → blocked with reason %s", (_label, over, reason) => {
+    const g = evaluationGate(state(over as Partial<MatcherState>));
+    expect(g.allowed).toBe(false);
+    expect(!g.allowed && g.reason).toBe(reason);
+    expect(!g.allowed && g.message.length).toBeGreaterThan(0);
+  });
+
+  it("a surviving last_completed_at NEVER unlocks it", () => {
+    // The exact mutant: gating on history rather than on the current status.
+    for (const status of ["running", "failed"] as const) {
+      const s = state({ status, lastCompletedAt: "2026-08-15T09:14:00Z" });
+      expect(s.lastCompletedAt).not.toBeNull();
+      expect(evaluationGate(s).allowed).toBe(false);
+    }
+  });
+
+  it("the blocked copy explains the closure hazard rather than just refusing", () => {
+    const g = evaluationGate(state({ status: "failed" }));
+    expect(!g.allowed && g.message).toMatch(/does NOT authorize/);
+    expect(!g.allowed && g.message).toMatch(/close findings that are still true/);
+    expect(!g.allowed && g.message).toMatch(/left untouched/);
+  });
+
+  it("the blocked copy does not claim the ENGINE is closure-safe", () => {
+    // The guard is a refusal to enter the unsafe state from this path — not a fix to 0083's closure model.
+    for (const status of ["running", "failed"] as const) {
+      const g = evaluationGate(state({ status }));
+      expect(!g.allowed && g.message).not.toMatch(/engine is safe|cannot close|never closes|closure-safe/i);
+    }
+  });
+});
+
+describe("the failed-state consequence no longer makes the false promise", () => {
+  it("does not claim earlier findings simply stay open", () => {
+    // The pre-fix copy said "Findings raised by an earlier run stay open and are not being refreshed" — false, because
+    // pressing Run evaluation would have closed them.
+    const v = toMatcherStateView(state({ status: "failed" }));
+    expect(v.consequence).not.toMatch(/stay open/);
   });
 });

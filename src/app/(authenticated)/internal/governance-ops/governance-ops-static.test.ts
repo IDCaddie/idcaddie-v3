@@ -152,3 +152,87 @@ describe("the surface shows engine operability, not finding content", () => {
     expect(nav).not.toMatch(/\/internal\//);
   });
 });
+
+describe("the evaluation precondition is enforced server-side, before the engine", () => {
+  it("the action reads the matcher state BEFORE it calls the evaluator", () => {
+    const src = codeKeepStrings(FILES.actions);
+    const read = src.indexOf("readTenantMatcherState(");
+    const gate = src.indexOf("evaluationGate(");
+    const evaluate = src.indexOf("evaluateTenantCrossSourceGovernance(");
+    expect(read).toBeGreaterThan(-1);
+    expect(gate).toBeGreaterThan(read);      // gate the state we just read …
+    expect(evaluate).toBeGreaterThan(gate);  // … and only then enter the engine
+  });
+
+  it("the refusal returns before the engine rather than discarding its result", () => {
+    // `return` on the blocked branch is the whole guard. Computing the evaluation and then throwing the result away
+    // would already have run the sync — and the sync is the mutation.
+    expect(codeKeepStrings(FILES.actions)).toMatch(/if \(!gate\.allowed\) return/);
+  });
+
+  it("the evaluation button is actually disabled when the server said blocked", () => {
+    // Defence in depth, and the only half a mutation of the JSX would touch: the server action refuses regardless, but
+    // an enabled button invites a press that is guaranteed to fail, and hides the reason behind an error instead of
+    // showing it up front.
+    const kept = codeKeepStrings(FILES.panel);
+    expect(kept).toMatch(/const blocked = blockedReason !== null/);
+    expect(kept).toMatch(/disabled=\{pending \|\| blocked\}/);
+  });
+
+  it("the client component holds no gate logic — it renders a reason the server decided", () => {
+    const kept = codeKeepStrings(FILES.panel);
+    expect(kept).not.toMatch(/evaluationGate|readTenantMatcherState|lastCompletedAt|"completed"/);
+    expect(kept).toMatch(/blockedReason/);
+  });
+
+  it("the false pre-fix promise cannot come back", () => {
+    // "Findings raised by an earlier run stay open and are not being refreshed" was untrue: pressing Run evaluation
+    // closed them. Nothing on this surface may claim it again.
+    for (const path of Object.values(FILES)) {
+      expect(codeKeepStrings(path)).not.toMatch(/stay open/);
+    }
+  });
+
+  it("the guard records that it does NOT fix the engine's closure model", () => {
+    // Read raw: this is a claim about the documentation a maintainer will read, and `codeKeepStrings` strips comments.
+    const raw = readFileSync(FILES.view, "utf8");
+    expect(raw).toMatch(/THIS GUARD DOES NOT FIX IT/);
+    expect(raw).toMatch(/needs a migration/);
+  });
+
+  it("no operator-facing copy promises engine-wide closure safety", () => {
+    for (const path of Object.values(FILES)) {
+      expect(codeKeepStrings(path)).not.toMatch(/closure-safe|never closes|cannot close a finding/i);
+    }
+  });
+});
+
+describe("the runbook cannot re-assert the claims the guard disproved", () => {
+  const RUNBOOK = "docs/runbooks/GOVERNANCE_OPS_RUNBOOK.md";
+  const text = () => readFileSync(RUNBOOK, "utf8");
+
+  it("never says evaluation-alone is valid", () => {
+    // The pre-fix text said "Running the evaluation alone is valid — it simply reports rule 5 as withheld". It is not
+    // valid: with a prior rule 5 finding open, that run closes it.
+    expect(text()).not.toMatch(/evaluation alone is valid|Running the evaluation alone is valid/i);
+  });
+
+  it("never claims a withheld rule leaves findings merely absent", () => {
+    expect(text()).not.toMatch(/findings are not wrong, they are absent/i);
+  });
+
+  it("states the precondition and the reason for it", () => {
+    // Markdown wraps and emphasises, so compare against a whitespace- and bold-normalised copy rather than the raw
+    // file — otherwise a reflow would break a test that is about meaning.
+    const flat = text().replace(/\*\*/g, "").replace(/\s+/g, " ");
+    expect(flat).toMatch(/refuses to run unless the matcher/i);
+    expect(flat).toMatch(/closes a finding that is still true/i);
+    expect(flat).toMatch(/history does not authorize a run/i);
+  });
+
+  it("does not claim the engine's closure model is fixed", () => {
+    const t = text();
+    expect(t).toMatch(/does \*\*not\*\* repair 0083/i);
+    expect(t).not.toMatch(/the engine is now closure-safe/i);
+  });
+});

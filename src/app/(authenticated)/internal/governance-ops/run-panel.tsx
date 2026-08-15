@@ -53,8 +53,14 @@ export function RunMatcherForm() {
   );
 }
 
-export function RunEvaluationForm() {
+/**
+ * `blockedReason` is presentation only. The server action re-derives the same precondition from the persisted state and
+ * refuses on its own authority — hiding a button stops an accident, not an attacker, and this component is the half a
+ * hostile client simply would not run.
+ */
+export function RunEvaluationForm({ blockedReason }: { blockedReason: string | null }) {
   const [state, action, pending] = useActionState(runEvaluationAction, null);
+  const blocked = blockedReason !== null;
   return (
     <form action={action} className="space-y-3 rounded border border-zinc-200 p-4 dark:border-zinc-800">
       <h2 className="text-sm font-medium">Run the cross-source governance evaluation</h2>
@@ -62,7 +68,12 @@ export function RunEvaluationForm() {
         Loads the canonical evidence, evaluates the rules, and reconciles findings through migration 0083 — opening,
         refreshing, reopening and closing them. A finding is closed only where the run could prove the condition ended.
       </p>
-      <button type="submit" disabled={pending}
+      <p className="text-sm text-zinc-600 dark:text-zinc-400">
+        Requires the application matcher to be <strong>currently</strong> completed. Evaluating while it is not would
+        drop rule 5 from the payload, and migration 0083 would close unmanaged-application findings that are still true.
+      </p>
+      {blocked ? <p role="status" className="text-sm text-amber-700 dark:text-amber-500">{blockedReason}</p> : null}
+      <button type="submit" disabled={pending || blocked}
         className="rounded bg-violet-600 px-3 py-2 text-sm font-medium text-white hover:bg-violet-700 disabled:opacity-50">
         {pending ? "Evaluating…" : "Run evaluation"}
       </button>

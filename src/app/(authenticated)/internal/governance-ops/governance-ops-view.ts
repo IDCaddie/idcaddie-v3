@@ -80,8 +80,73 @@ const CONSEQUENCE: Record<MatcherHeadline, string> = {
   completed:
     "Rule 5 is licensed: an application with no accepted match may now be reported as unmanaged.",
   failed:
-    "Rule 5 is withheld: the most recent run did not complete, so absence of a match proves nothing. Findings raised by an earlier run stay open and are not being refreshed.",
+    "Rule 5 is withheld: the most recent run did not complete, so absence of a match proves nothing.",
 };
+
+// ── The evaluation precondition ──────────────────────────────────────────────────────────────────────────────────────
+//
+// ══ WHY A WITHHELD RULE IS NOT A SAFE STATE TO SYNC IN ═══════════════════════════════════════════════════════════════
+// Rule 5's findings carry the application's connection as their evidence, and 0083 closes any open finding of this
+// engine that is ABSENT from a run's payload and whose evidence connections are all closure-eligible. That test is
+// flat: it knows nothing about which rule produced the finding, or whether that rule ran at all.
+//
+// So when the matcher is not `completed`, rule 5 is withheld, its findings go missing from the payload — and the
+// connector is still perfectly healthy, so its connection is still closure-eligible. 0083 reads "absent + covered" as
+// "the condition ended" and CLOSES a finding that is still true. It lands in `closed`, not in `withheld_from_closure`,
+// so nothing on screen would say anything was lost.
+//
+// The engine's own closure model is what makes that possible, and fixing it needs a migration (0083 would have to
+// carry per-capability, per-rule closure scope). THIS GUARD DOES NOT FIX IT. It refuses to *enter* the unsafe state
+// from the one path that can now reach it — the operator button this lane added. Any other caller of the engine is
+// exactly as exposed as it was before.
+export type EvaluationBlockReason = "matcher_never_run" | "matcher_running" | "matcher_failed";
+
+export type EvaluationGate =
+  | { readonly allowed: true }
+  | { readonly allowed: false; readonly reason: EvaluationBlockReason; readonly message: string };
+
+const BLOCKED_BY: Record<Exclude<MatcherHeadline, "completed">, { reason: EvaluationBlockReason; message: string }> = {
+  never_run: {
+    reason: "matcher_never_run",
+    message:
+      "Evaluation blocked: the application matcher has never run. Run the matcher first. Nothing was evaluated and no finding was changed.",
+  },
+  running: {
+    reason: "matcher_running",
+    message:
+      "Evaluation blocked: an application matcher run is still in flight. Wait for it to complete, then evaluate. Nothing was evaluated and no finding was changed.",
+  },
+  failed: {
+    reason: "matcher_failed",
+    message:
+      "Evaluation blocked: the most recent application matcher run FAILED. A previous run may have completed successfully — that history does NOT authorize an evaluation, because rule 5 reads the current status. Re-run the matcher successfully first. Existing findings are deliberately left untouched: evaluating now would drop rule 5 from the payload and 0083 would close findings that are still true.",
+  },
+};
+
+/**
+ * May the operator run the evaluation right now?
+ *
+ * Derived from `toMatcherStateView(...).headline`, which is a function of the CURRENT status alone — so a surviving
+ * `last_completed_at` can never unlock this, by construction rather than by a second rule that could drift from the
+ * first.
+ */
+export function evaluationGate(state: MatcherState): EvaluationGate {
+  const { headline } = toMatcherStateView(state);
+  if (headline === "completed") return { allowed: true };
+  return { allowed: false, ...BLOCKED_BY[headline] };
+}
+
+/**
+ * The rule whose withholding is unsafe to sync in. If a run we ALLOWED still reports this rule as withheld, the matcher
+ * state changed after the precondition was checked and before the engine read it — see `runEvaluationAction`.
+ */
+export const CLOSURE_UNSAFE_WITHHELD_RULE = "discovered_application_unmanaged_by_idp";
+
+export const MID_RUN_STATE_CHANGE_NOTE =
+  "ANOMALY — the matcher state changed during this evaluation: the run was authorized while the matcher was `completed`, " +
+  "but the engine then read a different status and withheld rule 5. Unmanaged-application findings may have been closed " +
+  "by this run even though they are still true. Re-run the matcher to a successful completion, evaluate again to reopen " +
+  "anything that was wrongly closed, and check whether another operator was running the matcher at the same time.";
 
 export function toMatcherStateView(state: MatcherState): MatcherStateView {
   // `hasEverRun` and a null status are the same fact from 0085's LEFT JOIN; either one alone means no row exists.
