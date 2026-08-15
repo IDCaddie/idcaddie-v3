@@ -12,6 +12,62 @@ from PRs verified via `git log` / `gh pr list`.
 > **as of each PR's date** and are historical — where an older entry says "RISK-007 remains OPEN" / "Phase C remains
 > BLOCKED", that was accurate at that entry's date; this banner is the current state.
 
+### feat(governance) — Phase 18F-B: the human review surface for application-match proposals · 2026-08-15
+
+The propose/decide boundary (**0088**), the candidate contract (**0090**) and the bounded read (**0085**) were all in
+place and staging-proven. The decision they exist for had **no way to be made**. This adds the surface and nothing
+else: **no migration** (`git diff origin/main -- supabase/migrations` is empty), no matcher change, no propose path,
+no scheduler, no provider code. The matcher, the governance loader/presenter and the whole `/access` tree are
+byte-identical to main.
+
+**`/directory/applications/review`**, reached from the directory applications list — the same shape
+`/connectors/review` has. **No nav entry and no `IMPLEMENTED_ROUTES` change**, deliberately: `nav-items.test.ts` pins
+the Directory section to exactly three labels, and Lane A (#431) owns `nav-items.ts`. This lane keeps clear of the nav
+and `/access` runtime entirely — but the directory-applications **footnote** is now a coordinated shared surface with
+Lane A, which merged first. This branch was rebased onto it and the footnote resolved to carry BOTH: Lane A's wording
+that linking is decided by cross-system governance rather than by presence in the list, and this lane's sentence
+carrying the only entry link to the review queue. Lane A's three footnote assertions are satisfied verbatim, not
+weakened. `KNOWN_ROUTES.applicationMatchReview` deliberately stays `null` here: Lane A's guard requires the route to
+be in `IMPLEMENTED_ROUTES` in the same commit that flips it, so that activation is a separate integration change
+after this lands.
+
+**THE QUESTION ON THE SCREEN, and the only one:** *"is this application from your identity provider the same thing as
+this operational record?"* Product recognition is upstream and already settled by a confirmed alias; the open question
+is the **instance**. Everything the layout does serves not answering it for the customer:
+
+- **nothing ranks.** The 0085 read returns no `confidence`, so there is nothing to rank by — and there must not be
+  (docs/79: *"neither confidence, arrival order nor arithmetic may pick one"*). Candidates are ordered
+  alphabetically on their own label, an order that asserts nothing, and one function renders every row, so there is
+  no branch in which a sibling looks different. `MatchCandidateView` carries no field a ranking could live in.
+- **"Not this record"** is the reject control, and the copy states outright that it never means *not this software*
+  and leaves every other record for that product an open question.
+- an accepted candidate **leaves its siblings as proposals**, exactly as the boundary does. Nothing is swept.
+- settled decisions render as settled, with no controls and **no way to re-open or re-run anything**.
+
+**Editors and viewers are refused BEFORE any read**, and that distinction is load-bearing: the 0085 read returns
+**zero rows** to them rather than an error, so a surface that rendered what came back would say "nothing to review" —
+a false statement about a queue they may not see. The gate is what keeps the empty state honest.
+
+**Two records of one product are told apart** by the instance discriminator (domain → workspace address → the
+provider's instance id). When the tenant's own records do not distinguish themselves, that is **reported** with a
+short reference rather than hidden: two identical rows with Accept buttons is how somebody accepts the wrong one.
+
+**The candidate walk terminates on DISTINCT PARENTS, not row count.** 0090 bounds its page at 200 parent applications
+and then expands each to its complete instance set, so row count says nothing about whether the feed is exhausted — a
+row-count walk stops early on a many-instance estate and loops on another. Two tests are the difference: a page of 600
+rows holding 2 parents must stop; a page of exactly 200 parents must continue.
+
+**A surviving mutant found a real gap.** A loader that decided a lone candidate while merely rendering the page passed
+an earlier version of this suite: the assertion was on the returned status, and the view model had already been
+assembled before the write. The B14 assertions are now on the **calls**, for every cardinality. Mutants: rank first
+candidate (ordering + identical-markup) RED · auto-accept at assembly RED · auto-accept in the loader RED · sweep
+product siblings on rejection RED · product-wide reject copy RED · direct table update RED · widen the gate to editors
+RED (against the **real** gate, so the denials are not proven by a stub) · classify `already_rejected` as a failure
+RED, in both layers · collapse many candidates into one RED · echo a raw database message RED · echo an unrecognised
+status verbatim RED.
+
+**Verified:** 3233 unit tests (122 new across four files), tsc 0, lint 0 errors, build compiled, migration safety,
+auth safety, import boundary, token scan, callback bundle, docs, `diff --check`. No hosted apply, nothing deployed.
 ### feat(governance) — Phase 18F Lane A: the first customer surface for cross-source findings · 2026-08-15
 
 **`product_governance_findings` (0083) gets its first consumer.** Everything Phase 16–18E proved on hosted staging was

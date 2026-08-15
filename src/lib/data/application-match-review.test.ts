@@ -437,14 +437,27 @@ describe("deciding one candidate", () => {
 
 // ══ B14 / M2 — nothing decides on the customer's behalf ═════════════════════════════════════════════════════════════════════
 describe("B14 — loading the queue decides nothing", () => {
-  it("never calls the decision command, and never proposes", async () => {
-    const sb = happyPath();
-    createClient.mockResolvedValue(sb.client);
-    await loadApplicationMatchReview();
-    const names = sb.rpcCalls.map((c) => c.name);
-    expect(names).not.toContain("product_decide_application_match");
-    expect(names).not.toContain("product_propose_application_match");
-  });
+  // Every cardinality, because a lone candidate is the one an "obviously it must be this" shortcut would take. A mutant that
+  // decided it while merely loading the page survived a version of this suite that only checked the RETURNED status: the write
+  // had already happened, and the view model was assembled before it. So the assertion is on the CALLS, for every shape.
+  const SHAPES = {
+    "one candidate": { matches: [MATCH_ROWS[0]], candidates: [CANDIDATE_ROWS[0]], apps: [APP_ROWS[0]] },
+    "two candidates": {},
+    "one already accepted": { matches: [{ ...MATCH_ROWS[0], status: "accepted" }] },
+  };
+
+  for (const [shape, over] of Object.entries(SHAPES)) {
+    it(`never calls the decision command, and never proposes — ${shape}`, async () => {
+      const sb = happyPath(over);
+      createClient.mockResolvedValue(sb.client);
+      await loadApplicationMatchReview();
+      const names = sb.rpcCalls.map((c) => c.name);
+      expect(names).not.toContain("product_decide_application_match");
+      expect(names).not.toContain("product_propose_application_match");
+      // the read path calls reads only
+      expect(names.every((n) => n.startsWith("product_application_match") || n === "product_list_directory_applications")).toBe(true);
+    });
+  }
 
   it("a lone candidate is still proposed after a load — cardinality is not consent", async () => {
     const sb = happyPath({ matches: [MATCH_ROWS[0]], candidates: [CANDIDATE_ROWS[0]], apps: [APP_ROWS[0]] });
@@ -453,6 +466,7 @@ describe("B14 — loading the queue decides nothing", () => {
     if (!r.ok) throw new Error("expected a loaded queue");
     expect(r.data.groups[0].candidates[0].status).toBe("proposed");
     expect(r.data.groups[0].openCount).toBe(1);
+    expect(sb.rpcCalls.map((c) => c.name)).not.toContain("product_decide_application_match");
   });
 
   it("never starts, completes or fails a matcher run — execution state and human decisions are separate facts", async () => {
