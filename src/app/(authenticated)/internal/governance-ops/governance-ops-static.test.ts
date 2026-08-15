@@ -94,12 +94,15 @@ describe("nothing on this surface runs unattended", () => {
   });
 });
 
-describe("no service-role path", () => {
-  it.each(Object.entries(FILES))("%s never reaches for an admin client or a service key", (_name, path) => {
+describe("no privileged-client path", () => {
+  // The privileged-role literal is NOT asserted here. `scripts/check-auth-safety.sh` already greps the whole of `src/`
+  // for it on every PR, with no allowlist — so writing it down would duplicate an existing gate AND trip it, which is
+  // how this test first failed CI. What follows is only what that scanner does not cover.
+  it.each(Object.entries(FILES))("%s never reaches for an admin client factory", (_name, path) => {
     const kept = codeKeepStrings(path);
-    expect(kept).not.toMatch(/service_role/);
-    expect(kept).not.toMatch(/SERVICE_ROLE/);
-    expect(kept).not.toMatch(/createAdminClient|serviceClient|createServiceClient/);
+    expect(kept).not.toMatch(/createAdminClient|serviceClient|createServiceClient|createSupabaseAdmin/);
+    // The one client factory this path is allowed to use is the cookie-bound, user-scoped server client.
+    expect(kept).not.toMatch(/@supabase\/supabase-js/);
   });
 
   it("the reader takes its tenant from the gate, never from a caller argument", () => {
