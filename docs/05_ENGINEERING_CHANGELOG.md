@@ -12,6 +12,51 @@ from PRs verified via `git log` / `gh pr list`.
 > **as of each PR's date** and are historical — where an older entry says "RISK-007 remains OPEN" / "Phase C remains
 > BLOCKED", that was accurate at that entry's date; this banner is the current state.
 
+### feat(governance) — Phase 18F-E: unmanaged-application findings reach the match-review queue · 2026-08-15
+
+The smallest PR in Phase 18F, and the one the previous three were shaped around. #431 shipped the findings surface with
+its match-review action resolving to `null`; #433 shipped the queue. This connects them, and does nothing else.
+
+**Four changes, and they had to be one commit.** Lane A's guards make any subset red, deliberately:
+`KNOWN_ROUTES.applicationMatchReview` `null` → `"/directory/applications/review"` · the route added to
+`IMPLEMENTED_ROUTES` (a test asserts every non-null emittable href is implemented) · Lane A's
+*"Lane B has not shipped; this must stay null"* assertion **turned into** the positive contract rather than deleted ·
+and the CTA render contract.
+
+**PARAMETERLESS, and that is a disclosure decision rather than a convenience.** `actionFor` receives only
+(rule_id, subject_type, reason) and the reader's `rowSchema` omits `subject_id` — so there is no id in scope to build a
+deep link from, and adding one would mean widening the reader's disclosure surface, not just its href. The queue already
+groups by directory application and sorts open questions first, so a reviewer arriving from a finding lands on the work.
+Tests refuse a query string, a fragment and any uuid in a rendered href.
+
+**The CTA may not promise a winner.** Lane B has no ranking, and rejected candidates coexist with open ones, so the label
+is "Review available matches" and both layers refuse *recommended*, *best match*, *proposed match*, *exactly one*,
+*correct* and *suggested*.
+
+**The end-to-end contract is proven in two files because it cannot be proven in one.** The reader carries a server-only
+sentinel that throws when `window` exists, as does `access-rpc-types` beneath it, so the jsdom page test cannot import
+the real `toView` — an attempt to do so failed loudly, which is the boundary working. The mapping is asserted in node
+(row → exactly that label and href) and the render in jsdom (that action → a real keyboard-reachable anchor), and the two
+halves are joined by a source assertion that the page renders `f.action.href` and contains **no** route literal of its
+own. Without that join the render half would pass against a hardcoded string.
+
+**One copy correction that is not cosmetic.** The no-action branch said *"A dedicated review screen is not available
+yet"* — written for the match-review case while that queue was unbuilt. It is now false for the only findings that still
+reach that branch (unknown rules and subjects), so it is broad: *"There is no dedicated screen for this finding."*
+Naming match review there would have been a lie in the other direction.
+
+**The other two Rule 5 subtypes are unchanged.** `product_unresolved` and `operational_instance_absent` still route to
+the application list; a test renders all three together and asserts exactly one review link and two list links, so
+activating one subtype cannot redirect its siblings.
+
+Mutants, all RED: constant back to `null` · route removed from the registry · typo'd route · page hardcoding the href
+while the mapping is null · page hardcoding the href while the mapping is intact · `product_unresolved` pointed at the
+queue · `operational_instance_absent` pointed at the queue · the stale "not available yet" copy restored ·
+`?application=` appended · `#fragment` appended · a "recommended match" label.
+
+**No migration, no RLS, no RPC, no grant, no `service_role`, no scheduler, no provider code, no mutation of any kind.**
+This PR adds navigation. Migration head remains 0091. Nothing hosted was touched.
+
 ### fix(governance) — Phase 18F-B review fixes: a NUL byte blinded two safety gates · 2026-08-15
 
 Two blockers from the independent exact-head review of #433. Both behaviour-preserving; the feature did not move

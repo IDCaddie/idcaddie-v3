@@ -128,26 +128,25 @@ export function firstSeenLabel(firstSeenAt: string | null, now: Date): string | 
 /**
  * Where a finding sends the customer.
  *
- * ROUTES ARE VALIDATED AGAINST WHAT THIS BUILD ACTUALLY HAS. Lane B owns the match-review surface; until it exists,
- * the unaccepted-match action resolves to null and the UI renders a non-broken disabled affordance rather than a link
- * to a 404. `KNOWN_ROUTES` is the single place that decides, so a route appearing later is a one-line change here.
+ * ROUTES ARE VALIDATED AGAINST WHAT THIS BUILD ACTUALLY HAS. `KNOWN_ROUTES` is the single place that decides, and the
+ * route guard in this module's test refuses any non-null value that is not in `IMPLEMENTED_ROUTES` — so a href here can
+ * never outrun the routes the app actually serves.
  */
 export const KNOWN_ROUTES = {
   directoryApplications: "/directory/applications",
   saasAccounts: "/saas/accounts",
   people: "/directory/people",
   /**
-   * Lane B's contract. STAYS `null` while #433 is unmerged — this file must never depend on code that is not on main.
+   * ACTIVATED in Phase 18F-E, now that #433 put the match-review queue on main. It was deliberately `null` until then:
+   * this module must never name a route the build does not serve, and a disabled affordance beats a link to a 404.
    *
-   * The intended destination is `/directory/applications/review` (the `/connectors/review` precedent: an interactive
-   * review queue as a child of the read-only list it acts on). Two constraints bind whoever flips this, and both are
-   * already enforced by tests rather than by this comment:
-   *   · it must be PARAMETERLESS — `actionFor` receives only (rule_id, subject_type, reason) and `rowSchema`
-   *     deliberately strips `subject_id`, so there is no id here to build a deep link from;
-   *   · the path must be added to `IMPLEMENTED_ROUTES`, or the route guard in this module's test goes red.
-   * Recording the name is not the same as depending on it: until #433 is on main this is null and the UI says so.
+   * It is PARAMETERLESS, and that is a contract rather than a convenience. `actionFor` receives only
+   * (rule_id, subject_type, reason) and `rowSchema` deliberately omits `subject_id`, so there is no id here to build a
+   * deep link from — adding one would mean widening this module's disclosure surface, not just its href. The queue
+   * groups by directory application and sorts open questions first, so a reviewer arriving from a finding lands on a
+   * page that already shows the work; a per-application link would buy little and cost a disclosure.
    */
-  applicationMatchReview: null as string | null,
+  applicationMatchReview: "/directory/applications/review" as string | null,
 } as const;
 
 export function actionFor(row: Pick<Row, "rule_id" | "subject_type">, reason: string | null): CrossSourceFindingView["action"] {

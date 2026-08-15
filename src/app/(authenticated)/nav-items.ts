@@ -32,7 +32,11 @@ export function visibleNavSections(sections: NavSection[], demoMode: boolean): N
 
 // The real, implemented authenticated routes that may be linked. Keep in sync with the route tree;
 // the test asserts every linked NavItem.href is one of these (so an unbuilt area can never be linked).
-export const IMPLEMENTED_ROUTES = ["/", "/apps", "/contracts", "/people", "/reports", "/audit", "/admin", "/files", "/dashboards", "/connectors", "/needs-attention", "/catalog", "/access", "/access/findings", "/access/governance", "/connectors/manage", "/directory/people", "/directory/groups", "/directory/applications", "/saas/accounts", "/saas/groups"] as const;
+//
+// `/directory/applications/review` is listed but deliberately NOT a nav item: it is an interactive review queue reached
+// from the list it acts on and from a governance finding, the same shape `/connectors/review` has. Being here is what
+// lets a finding's action link to it — `cross-source-findings-reader` refuses any href this registry does not contain.
+export const IMPLEMENTED_ROUTES = ["/", "/apps", "/contracts", "/people", "/reports", "/audit", "/admin", "/files", "/dashboards", "/connectors", "/needs-attention", "/catalog", "/access", "/access/findings", "/access/governance", "/connectors/manage", "/directory/people", "/directory/groups", "/directory/applications", "/directory/applications/review", "/saas/accounts", "/saas/groups"] as const;
 
 export const NAV_SECTIONS: NavSection[] = [
   {

@@ -12,6 +12,15 @@ vi.mock("next/link", () => ({
     <a href={typeof href === "string" ? href : "#"} {...rest}>{children}</a>
   ),
 }));
+// The whole reader is faked, and it MUST be: `cross-source-findings-reader` carries a server-only sentinel that throws
+// the moment `window` exists, as does `access-rpc-types` beneath it. So this file cannot import the real `toView` to
+// drive the page from a persisted row — that boundary is deliberate and defeating it would be the wrong trade.
+//
+// The end-to-end contract is therefore proven across two files, each in the environment it belongs to:
+//   · cross-source-findings-reader.test.ts (node) — the MAPPING: a row whose reason is `operational_match_unaccepted`
+//     produces exactly { label: "Review available matches", href: "/directory/applications/review" };
+//   · this file (jsdom) — the RENDER: given that action, the page emits a real, keyboard-reachable anchor at that href.
+// The join is pinned by a source assertion in the node test: this page renders `f.action.href`, never a literal.
 vi.mock("@/lib/data/cross-source-findings-reader", () => ({ loadCrossSourceFindings: vi.fn() }));
 
 import Page from "./page";
@@ -191,12 +200,16 @@ describe("A6/A7/A8 — the three remediations, and the Lane B boundary", () => {
     }
   });
 
-  // A4 of the brief: a missing Lane B route must not become a broken link.
+  // A4 of the brief: a finding with no route must not become a broken link. The copy is BROAD since Phase 18F-E — the
+  // match-review case now has a real destination, so this branch is reached only by rules or subjects this build has no
+  // specific screen for, and naming match review here would be false.
   it("A8 a finding with no available action renders an honest note, NOT a link", async () => {
     ok([finding({ title: "Application match needs review", action: null })]);
     render(await Page());
     expect(screen.queryByRole("link", { name: /Review available matches/ })).toBeNull();
-    expect(screen.getByText(/A dedicated review screen is not available yet/)).toBeTruthy();
+    expect(screen.getByText(/There is no dedicated screen for this finding/)).toBeTruthy();
+    // and it must no longer claim the review screen is missing, because it is not
+    expect(screen.queryByText(/not available yet/i)).toBeNull();
   });
 
   it("every rendered action points somewhere, and no link href is empty or '#'", async () => {
@@ -296,5 +309,66 @@ describe("A8/A14/A15 — accessibility and layout contract", () => {
     ok([finding()]);
     const { container } = render(await Page());
     expect(container.querySelectorAll("[title]")).toHaveLength(0);
+  });
+});
+
+// ── Phase 18F-E — the governance → match-review CTA, rendered ───────────────────────────────────────────────────────
+//
+// This half asserts the RENDER contract: given the action the reader now produces for `operational_match_unaccepted`,
+// the page emits a real anchor at the review queue. The action objects below are the reader's exact output, pinned
+// literal-for-literal by `cross-source-findings-reader.test.ts` in node, where the real mapping can be loaded.
+const REVIEW_ACTION = { label: "Review available matches", href: "/directory/applications/review" };
+const APPLICATION_ACTION = { label: "View application", href: "/directory/applications" };
+
+describe("Phase 18F-E — unmanaged-application findings reach the match-review queue", () => {
+  it("the review action renders a REAL, keyboard-reachable link to the queue", async () => {
+    ok([finding({ title: "Application match needs review", action: REVIEW_ACTION })]);
+    const { container } = render(await Page());
+    const link = screen.getByRole("link", { name: "Review available matches" });
+    expect(link.tagName).toBe("A");
+    expect(link.getAttribute("href")).toBe("/directory/applications/review");
+    expect(container.querySelector('a[href="/directory/applications/review"]')).toBeTruthy();
+    expect(screen.queryByText(/no dedicated screen for this finding/i)).toBeNull();
+    expect(screen.queryByText(/not available yet/i)).toBeNull();
+  });
+
+  it("the rendered CTA never implies a winner among candidates", async () => {
+    ok([finding({ title: "Application match needs review", action: REVIEW_ACTION })]);
+    const { container } = render(await Page());
+    const t = (container.textContent ?? "").toLowerCase();
+    for (const banned of ["recommended match", "recommended", "best match", "proposed match", "exactly one",
+                          "correct candidate", "correct match", "most likely", "suggested match", "confidence score"]) {
+      expect(t, `the CTA must not promise "${banned}"`).not.toContain(banned);
+    }
+  });
+
+  it("the other unmanaged-application findings still point at the application list, not the queue", async () => {
+    ok([
+      finding({ id: "aaaaaaaa-1111-4111-8111-111111111111", title: "Application needs identification", action: APPLICATION_ACTION }),
+      finding({ id: "bbbbbbbb-2222-4222-8222-222222222222", title: "Application is not linked to an operational record", action: APPLICATION_ACTION }),
+      finding({ id: "cccccccc-3333-4333-8333-333333333333", title: "Application match needs review", action: REVIEW_ACTION }),
+    ]);
+    const { container } = render(await Page());
+    expect(container.querySelectorAll('a[href="/directory/applications/review"]')).toHaveLength(1);
+    expect(container.querySelectorAll('a[href="/directory/applications"]')).toHaveLength(2);
+  });
+
+  it("the rendered href is parameterless — no id, tenant or query string reaches the customer", async () => {
+    ok([finding({ action: REVIEW_ACTION, evidenceRows: [] })]);
+    const { container } = render(await Page());
+    const href = container.querySelector('a[href^="/directory/applications/review"]')?.getAttribute("href") ?? "";
+    expect(href).toBe("/directory/applications/review");
+    expect(href).not.toMatch(/[?#=]/);
+    for (const a of container.querySelectorAll("a")) {
+      expect(a.getAttribute("href") ?? "").not.toMatch(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
+    }
+  });
+
+  it("the page stays navigation only — no form, button or input anywhere", async () => {
+    ok([finding({ action: REVIEW_ACTION }), finding({ id: "d-2", action: APPLICATION_ACTION })]);
+    const { container } = render(await Page());
+    expect(container.querySelectorAll("form")).toHaveLength(0);
+    expect(container.querySelectorAll("button")).toHaveLength(0);
+    expect(container.querySelectorAll("input")).toHaveLength(0);
   });
 });

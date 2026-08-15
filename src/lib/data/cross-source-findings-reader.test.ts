@@ -4,6 +4,8 @@
 // internal enum, a raw key, a raw id, or an empty card standing in for a dropped row.
 
 import { describe, expect, it, vi, beforeEach } from "vitest";
+import fs from "node:fs";
+import path from "node:path";
 
 const gate = vi.hoisted(() => ({ value: { ok: true, tenantId: "t-a" } as { ok: boolean; tenantId?: string } }));
 vi.mock("./access-repository", () => ({ accessGate: async () => gate.value }));
@@ -319,10 +321,59 @@ describe("A4/A13 — actions and identifiers", () => {
   });
 
   // A4 of the brief: never hard-code a route this build does not have.
-  it("the unaccepted-match action is null until Lane B ships its route", () => {
-    expect(KNOWN_ROUTES.applicationMatchReview, "Lane B has not shipped; this must stay null").toBeNull();
-    expect(actionFor({ rule_id: "discovered_application_unmanaged_by_idp", subject_type: "directory_application" },
-      "operational_match_unaccepted")).toBeNull();
+  //
+  // This assertion used to read "must stay null" — correct while #433 was unmerged, and stale by design the moment the
+  // queue landed on main. Phase 18F-E turns it into the positive contract rather than deleting it, because the property
+  // worth holding was never "null": it is that this href and the route registry agree.
+  it("the unaccepted-match action links to the match-review queue that is now on main", () => {
+    expect(KNOWN_ROUTES.applicationMatchReview).toBe("/directory/applications/review");
+    const a = actionFor({ rule_id: "discovered_application_unmanaged_by_idp", subject_type: "directory_application" },
+      "operational_match_unaccepted");
+    expect(a).not.toBeNull();
+    expect(a?.href).toBe("/directory/applications/review");
+    // The label weighs nothing. Lane B has no ranking and rejected candidates coexist with open ones, so the CTA may
+    // not promise a winner, a count, or a correct answer — it may only offer the review.
+    expect(a?.label).toBe("Review available matches");
+    for (const forbidden of [/recommended/i, /best match/i, /proposed match/i, /exactly one/i, /correct/i, /suggested/i]) {
+      expect(a?.label ?? "", `the CTA label must not imply a winner (${forbidden})`).not.toMatch(forbidden);
+    }
+  });
+
+  // PARAMETERLESS IS THE CONTRACT, not a detail. `actionFor` is handed only (rule_id, subject_type, reason) and
+  // `rowSchema` omits `subject_id`, so a deep link is not merely absent — there is no id in scope to build one from.
+  it("the match-review href carries no query string, fragment or path parameter", () => {
+    const href = KNOWN_ROUTES.applicationMatchReview ?? "";
+    expect(href).toBe("/directory/applications/review");
+    expect(href).not.toMatch(/[?#=]/);
+    // Asserted through the public surface: the view a real row produces carries the href and no subject id.
+    const view = toView(row({ evidence_json: { reason: "operational_match_unaccepted" } }) as never, NOW);
+    expect(view.action?.href).toBe("/directory/applications/review");
+    expect(JSON.stringify(view)).not.toMatch(/subject_id/);
+  });
+
+  // The invariant the registry exists for, asserted in the direction that bites: a non-null href MUST be implemented.
+  it("a non-null KNOWN_ROUTE implies the app implements it", async () => {
+    const { IMPLEMENTED_ROUTES } = await import("@/app/(authenticated)/nav-items");
+    const href = KNOWN_ROUTES.applicationMatchReview;
+    expect(href).not.toBeNull();
+    expect(IMPLEMENTED_ROUTES as readonly string[],
+      `${href} is emitted by KNOWN_ROUTES but is not in IMPLEMENTED_ROUTES`).toContain(href!);
+  });
+
+  // THE JOIN between this file and the render test. The governance page cannot import this module in jsdom — both carry
+  // a server-only sentinel — so its render test necessarily asserts against the action object rather than the real
+  // mapping. That is only sound while the page renders the href it was HANDED. A literal in the page would satisfy the
+  // render test and quietly ignore this module; that is what this refuses.
+  it("the governance page renders the mapped href, never a route literal of its own", () => {
+    const page = fs.readFileSync(
+      path.join(process.cwd(), "src/app/(authenticated)/access/governance/page.tsx"), "utf8");
+    expect(page, "the page must render the action's own href").toContain("href={f.action.href}");
+    expect(page, "the page must render the action's own label").toContain("{f.action.label}");
+    const code = page.replace(/\/\/.*$/gm, "").replace(/\/\*[\s\S]*?\*\//g, "");
+    for (const known of Object.values(KNOWN_ROUTES)) {
+      if (known === null) continue;
+      expect(code, `${known} must come from KNOWN_ROUTES, not a literal in the page`).not.toContain(`"${known}"`);
+    }
   });
 
   it.each([
