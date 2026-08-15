@@ -585,3 +585,14 @@ to include `'editor'` left that entire suite green while a tenant editor could e
 estate. **CR1** therefore runs *after* the gate restore, against real `tenant_memberships` rows: owner and admin walk
 the estate, editor and viewer read zero, and another tenant's owner reads zero. Placement is load-bearing — moved above
 the restore it proves nothing. The mutation now fails with `CR1 ROLE LEAK: a tenant EDITOR walked 9 accounts`.
+
+## zz_governance_finding_sync_safeupdate_test.sql (0091)
+
+Runs under `scripts/test-safeupdate.sh` (Supabase's Postgres image, `safeupdate` preloaded) as well as the stock
+harness. Proves the 0091 one-token correction leaves the 0083 lifecycle exact: **L10** an empty payload is accepted
+(the hosted failure was structural, not data-shaped); **L1** a finding opens; **L2/L3** the same subject refreshes as
+its reason and copy keys change; **L4** row id and `first_seen_at` are stable; **L5** `reopen_count` is unchanged by a
+refresh; **L6** a complete-proof run closes an unreported finding; **L7** a proof-less run withholds closure instead;
+**L8** reappearance reopens, increments `reopen_count` once, and still keeps `first_seen_at`; **L9** cross-tenant
+isolation, including that tenant B cannot name tenant A's connection. It also pins the reason the clear exists at all:
+two calls in ONE transaction must reconcile against their own payloads.

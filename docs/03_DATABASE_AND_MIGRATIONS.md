@@ -664,3 +664,38 @@ four load-bearing properties were confirmed by mutation: removing the closure ga
 dropping the engine filter from the close predicate fails **G8** (`closed NOTHING belonging to the other engine`); and
 weakening `gf_identity_key` breaks the sync outright (`no unique or exclusion constraint matching the ON CONFLICT
 specification`) — finding identity is structurally load-bearing, not merely asserted. NOT applied to hosted Supabase.**
+
+### 0091 — hosted safe-update compatibility for the governance finding sync
+
+**The defect a schema-identical replica could not find.** `product_sync_governance_findings` (0083) cleared its
+`on commit drop` reporting table with `delete from reported_findings;`. Managed Supabase preloads the `safeupdate`
+extension, which rejects any UPDATE or DELETE whose parse tree carries no WHERE clause, so on hosted staging **every
+call failed** — including one with an empty payload — with `SQLSTATE 21000 · DELETE requires a WHERE clause`.
+`governance_findings` could not be written at all, which blocked the entire Rule 5 persistence path.
+
+Stock Postgres does not load `safeupdate`. That is why 43/43 real-DB suites, the full RLS suite, CI, and a replica
+loaded from staging's own post-0090 schema dump all passed while the hosted call could never have worked. **The defect
+was found by hosted runtime acceptance (Phase 18E2), not by any local gate.**
+
+**The correction is one token:** `delete from reported_findings where true;`. The statement stays a DELETE, so row
+counts, triggers, MVCC and rollback behaviour are unchanged. `where true` is the predicate `safeupdate` accepts —
+verified against Supabase's own Postgres image rather than assumed, because a plausible alternative reading was that
+the planner folds the constant away and the guard still fires. It does not.
+
+0083 is **not** edited; rewriting a merged migration would give two databases two different histories. 0091 redefines
+the function so staging, production and every future environment receive the identical reviewed artifact.
+
+**Two guards, installed together:**
+- `src/lib/data/governance-finding-sync-equivalence.test.ts` proves 0091's function body differs from 0083's by
+  exactly one line, re-asserts every lifecycle property on 0091's own text, and fails any migration that introduces a
+  WHERE-less DELETE/UPDATE. 0083 is the single allowlisted exception, permitted **only while 0091 demonstrably
+  supersedes it** — delete 0091 and the guard fails.
+- `scripts/test-safeupdate.sh` runs the chain and the persistence suites against `supabase/postgres` with `safeupdate`
+  preloaded. It self-checks that the guard is live before reporting anything, and it is non-vacuous: remove 0091 and
+  it reproduces the exact hosted error.
+
+**Scope of the safeupdate harness.** It runs the governance-persistence suites, not the whole suite, for two reasons
+that are about the tests rather than the product: several suites assert denial by issuing a WHERE-less statement and
+expecting RLS to refuse it (the statement is now rejected earlier, with a different error), and several replace
+`has_tenant_role` for the rest of the session, so an arbitrary subset is order-coupled. `scripts/test-rls.sh` remains
+the canonical full suite.
