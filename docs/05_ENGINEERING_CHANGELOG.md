@@ -268,6 +268,62 @@ as an empty estate · raw timestamp shown instead of a phrased age. Independent 
 SURVIVED**, each naming a real gap that is now closed: all rows dropped while reporting zero drops · the rendered list
 keyed on a mutable field · `status` deleted from `rowSchema`. Those three plus three review-fix mutants (remove one
 live rule's prose · restore the 100-row false-exact count · render all-unreadable as the clean empty state) are RED.
+### feat(governance) — Phase 18F-C: governance ops + observability, no migration · 2026-08-15
+
+**The engine had no production caller.** `runTenantApplicationMatcher` (Phase 18C) and
+`evaluateTenantCrossSourceGovernance` (Phase 17) were reachable only from their own test suites — `grep` over `src/` and
+`scripts/` returns their definitions and nothing else. The engine was not merely unobservable; **no human could run it
+at all**. This lane is the operability fix rather than a dashboard.
+
+**`/internal/governance-ops`** — internal, absent from `nav-items.ts`, env-flag gated
+(`ID_CADDIE_INTERNAL_GOVERNANCE_OPS_ENABLED`, fail-closed, re-checked inside both server actions rather than trusted
+from the page), owner/admin via the existing `accessGate()`, writing as the operator under RLS. It follows the
+`internal/slack-sync` pattern with one deliberate difference: that trigger is restricted to local development because it
+forwards a provider token from a dev-only source, and this one forwards nothing — it calls two RPCs already granted to
+`authenticated` that re-verify owner/admin in the database. The page adds a button, not an authority, so staging can
+enable it and be accepted against it.
+
+**No migration, and the reasoning is the deliverable.** Twelve operator questions were checked against persisted state.
+Five are already answered by `application_matcher_state` (0085): never-run (`has_ever_run` is a value, not an empty
+result), running, completed, failed, and last successful completion. The other seven — the bounded failure reason and
+every count, including `withheld_from_closure` — are **transient by construction**, returned to the caller and gone with
+the request. That is sufficient **because there is no scheduler**: every run is attended by the person who pressed the
+button. It stops being sufficient the moment one is not, which is why the ceiling and its upgrade path are written down
+rather than discovered later.
+
+**The mutant this surface exists to prevent.** `last_completed_at` deliberately survives a later failure (0085 clears it
+on neither `fail` nor `start`), while rule 5 is gated on the **current** status being `completed` — `evaluate.ts` is
+explicit that this is stricter than `lastCompletedAt is not null` for exactly this reason. A surface leading with the
+timestamp would show "completed 09:14" to an operator whose matcher failed at 11:02, with rule 5 silently no longer
+firing. The headline is therefore always the current status, a surviving completion renders only as an explicitly
+historical note, and licensing is derived from the status alone. Mutating `rule5Licensed` to read the timestamp fails
+two tests; dropping the historical note fails two more.
+
+**Bounded reasons are an allowlist, not an echo.** Every reason both entrypoints return is a fixed literal today, so a
+raw fallback would leak nothing — the allowlist is what keeps that true. A widened union that carried a predicate, an id
+or a token renders as `UNRECOGNISED_REASON` instead, and the failure is still reported. A read failure is likewise never
+rendered as never-run: 0085 returns zero rows for an unauthorized caller and for a tenant that does not exist, so "no
+row" is a fact about our access, never about the estate.
+
+**Two silences kept apart.** A withheld CLOSURE (the run could not prove the condition ended) is reported as correct
+behaviour with the remedy — sync those connectors, re-run — and never with language suggesting the completeness test be
+widened, which is how a finding gets closed on evidence that proved nothing. A withheld RULE (it never ran) is reported
+separately with its own reason, so "rule 5 never fired" cannot hide inside a closure count of zero.
+
+**Tests: 83, and nine mutants killed** — timestamp-as-status, historical-note dropped, raw-reason echo, failure reported
+as success, flag check removed, automatic retry loop, zero-rows-as-never-run, withheld-closure suppressed, and
+decisions-as-errors. Static guards over the surface's source pin no timer/cron/scheduler registration, no route handler
+under the directory, no `service_role` path, no form-supplied tenant, no finding content, and no nav link.
+
+**Runbook: [`runbooks/GOVERNANCE_OPS_RUNBOOK.md`](./runbooks/GOVERNANCE_OPS_RUNBOOK.md).** It states that no scheduler
+exists; that re-running is safe from any state because `start` upserts unconditionally, so a stuck `running` (a died
+request, or a `fail` that itself failed) is not a deadlock and needs no repair; that re-running cannot reset a human
+decision because the matcher only proposes and `already_accepted`/`already_rejected` are successes; that a hosted
+`query_failed` on the evaluation should be checked against 0091 before anything else; that provider dormancy surfaces as
+withheld counts rather than a fabricated clean run; and the four things Phase 18G would need before any scheduler — a
+run record with a bounded reason (following `manual_sync_runs` 0037, whose `source` CHECK would have to be widened), a
+concurrency lock (`application_matcher_state` deliberately has none), a machine principal (none exists — every RPC gates
+on `auth.uid()`), and persisted sync summaries.
 
 ### fix(governance) — Phase 18E4: migration 0091, hosted safe-update compatibility · 2026-08-15
 
