@@ -412,6 +412,27 @@ function matcherWithheldReason(m: CrossSourceGraph["matcherState"]): string {
  *
  * The precise long-term fix is per-capability closure scope in 0083's contract, which needs a migration; this is the
  * correct behaviour available without one, and it errs toward withholding rather than closing.
+ *
+ * ══ THE SAME DEFECT ALONG THE MATCHER AXIS ═══════════════════════════════════════════════════════════════════════════
+ * Capability degradation is not the only way a rule can go quiet while its connection stays "healthy". Rule 5 is also
+ * gated on the matcher's CURRENT status, and a matcher failure does not touch any capability — so a withheld rule 5
+ * used to leave its directory-application connection fully closure-eligible. 0083 then saw the finding absent from the
+ * payload, saw its evidence covered, and closed a condition that was still true. It landed in `closed` rather than
+ * `withheld_from_closure`, so the estate appeared to improve because proof was missing.
+ *
+ * A caller-side precondition cannot fix this. The caller's matcher read and this evaluation's are separate statements,
+ * and a concurrent matcher run between them flips the state after the caller has decided. The decision has to be made
+ * where the withholding decision itself is made — from THIS graph — which is why it lives here.
+ *
+ * WHY `hasEverRun` IS PART OF THE CONDITION. `application_matcher_state` gains its row on the first `start` and keeps
+ * it, so `hasEverRun: false` proves rule 5 has never fired and therefore that no rule 5 finding can exist to protect.
+ * Withdrawing the licence there would buy nothing and would permanently hold open every OTHER rule's findings on a
+ * directory connection, for any tenant that simply never runs the matcher. The withdrawal is therefore scoped to the
+ * transient states — `running` and `failed` — where a finding really can be waiting.
+ *
+ * The cost is a DELAY, and it is deliberate: a connector serving both `identity` and `directory_applications` loses
+ * closure for both while the matcher is unwell, because the subset test cannot separate them. The next completed-matcher
+ * run restores it. False closure is unacceptable; delayed closure is not.
  */
 function closureEligibleConnections(graph: CrossSourceGraph, ctx: Ctx): string[] {
   const degraded = new Set(
@@ -420,8 +441,14 @@ function closureEligibleConnections(graph: CrossSourceGraph, ctx: Ctx): string[]
         && c.state !== "available")
       .map(c => c.connectionId),
   );
+  // Read from the SAME graph that gates rule 5 below, so the licence and the withholding cannot disagree.
+  const m = graph.matcherState;
+  const matcherCannotReprove = m.hasEverRun && m.status !== "completed";
+
   return sorted(
-    [...ctx.identityComplete, ...ctx.accountsComplete, ...ctx.appsComplete].filter(id => !degraded.has(id)),
+    [...ctx.identityComplete, ...ctx.accountsComplete, ...ctx.appsComplete]
+      .filter(id => !degraded.has(id))
+      .filter(id => !(matcherCannotReprove && ctx.appsComplete.has(id))),
   );
 }
 
