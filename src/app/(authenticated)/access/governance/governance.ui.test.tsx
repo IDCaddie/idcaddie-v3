@@ -31,8 +31,10 @@ const finding = (o: Record<string, unknown> = {}) => ({
   action: { label: "View application", href: "/directory/applications" },
   ...o,
 });
-const ok = (findings: unknown[], unreadable = 0) =>
-  asMock(loadCrossSourceFindings).mockResolvedValue({ ok: true, data: { findings, total: findings.length, unreadable } });
+const ok = (findings: unknown[], unreadable = 0, truncated = false) =>
+  asMock(loadCrossSourceFindings).mockResolvedValue({
+    ok: true, data: { findings, shown: findings.length, unreadable, truncated },
+  });
 
 describe("A2/A3/A4/A5 — states", () => {
   it("A4 renders a finding with its title, summary, guidance, evidence and action", async () => {
@@ -81,6 +83,97 @@ describe("A2/A3/A4/A5 — states", () => {
     expect(screen.getByText(/The list below is incomplete/)).toBeTruthy();
     // ...and the one readable finding is still shown rather than the whole page failing.
     expect(screen.getAllByRole("listitem")).toHaveLength(1);
+  });
+
+  // THE INVARIANT THIS PAGE EXISTS TO HOLD, and the exact case the original suite never asked for. Every row failed
+  // its contract: nothing is readable, and the estate is NOT clean — we simply could not read it. Reporting that as
+  // "no open findings" is the one output this page must never produce.
+  it("EVERY row unreadable is a failure state, NOT the clean empty state", async () => {
+    ok([], 5);
+    render(await Page());
+    expect(screen.getByRole("alert").textContent).toMatch(/could not be displayed/);
+    expect(screen.getByRole("alert").textContent).toMatch(/5 findings could not be read/);
+    expect(screen.queryByText("No open findings"), "a broken data contract is not a clean estate").toBeNull();
+    expect(screen.queryByText(/Nothing is currently flagged/)).toBeNull();
+    expect(screen.queryByRole("listitem")).toBeNull();
+  });
+
+  it("a single unreadable row with nothing readable is still a failure state", async () => {
+    ok([], 1);
+    render(await Page());
+    expect(screen.getByRole("alert").textContent).toMatch(/1 finding could not be read/);
+    expect(screen.queryByText("No open findings")).toBeNull();
+  });
+});
+
+// ══ THE HEADLINE COUNT ════════════════════════════════════════════════════════════════════════════════════════════
+// The reader is bounded and runs no count query, so the page may state an exact number ONLY when it holds the whole
+// set. Above the cap it says so instead of naming a total nobody measured.
+describe("bounded count copy", () => {
+  const many = (n: number) => Array.from({ length: n }, (_, i) => finding({ id: `id-${i}` }));
+
+  it("1 finding reads in the singular", async () => {
+    ok(many(1));
+    render(await Page());
+    expect(screen.getByText("1 open finding.")).toBeTruthy();
+  });
+
+  it.each([2, 99, 100])("%i findings is stated exactly", async n => {
+    ok(many(n));
+    render(await Page());
+    expect(screen.getByText(`${n} open findings.`)).toBeTruthy();
+  });
+
+  it("a truncated page says so and NEVER states the cap as the total", async () => {
+    ok(many(100), 0, true);
+    const { container } = render(await Page());
+    expect(screen.getByText("Showing the 100 most severe of more than 100 open findings.")).toBeTruthy();
+    expect(screen.queryByText("100 open findings."), "the cap is not the estate").toBeNull();
+    expect(container.textContent).not.toMatch(/(^|[^n ])100 open findings\./);
+    expect(screen.getAllByRole("listitem")).toHaveLength(100);
+  });
+});
+
+// ══ RENDER IDENTITY ═══════════════════════════════════════════════════════════════════════════════════════════════
+// The reader's identity property was pinned; the RENDER key was not. These two tests fail for different mutations —
+// the first when the key becomes copy (title/reason/remediation), the second when it becomes the array index — and
+// together they are what makes "the same problem does not appear to vanish and come back" true on screen.
+describe("A11 the rendered list is keyed on persisted finding identity", () => {
+  const ID = "11111111-1111-4111-8111-111111111111";
+
+  it("keeps the SAME row element when one finding changes remediation subtype", async () => {
+    ok([finding({ id: ID, title: "Application needs identification" })]);
+    const { container, rerender } = render(await Page());
+    const before = container.querySelector("li");
+    expect(before?.textContent).toContain("Application needs identification");
+
+    // 0083 refreshes ONE row in place as the subtype moves; only the reviewed copy changes.
+    ok([finding({ id: ID, title: "Application match needs review" })]);
+    rerender(await Page());
+    const after = container.querySelector("li");
+
+    expect(after?.textContent).toContain("Application match needs review");
+    expect(screen.getAllByRole("listitem"), "one finding, not two").toHaveLength(1);
+    expect(after, "keying on copy would unmount this row and mount a different one").toBe(before);
+  });
+
+  it("carries the row element with the finding when severity ordering moves it", async () => {
+    const A = "aaaaaaaa-1111-4111-8111-111111111111";
+    const B = "bbbbbbbb-2222-4222-8222-222222222222";
+    const nodeFor = (c: HTMLElement, t: string) =>
+      [...c.querySelectorAll("li")].find(li => li.textContent?.includes(t));
+
+    ok([finding({ id: A, title: "Alpha finding" }), finding({ id: B, title: "Beta finding" })]);
+    const { container, rerender } = render(await Page());
+    const betaBefore = nodeFor(container, "Beta finding");
+    expect(betaBefore).toBeTruthy();
+
+    // A re-evaluation can change severity and reorder the list. The row must travel with its finding.
+    ok([finding({ id: B, title: "Beta finding" }), finding({ id: A, title: "Alpha finding" })]);
+    rerender(await Page());
+
+    expect(nodeFor(container, "Beta finding"), "keying on the array index rewrites rows in place instead of moving them")
+      .toBe(betaBefore);
   });
 });
 
@@ -147,6 +240,26 @@ describe("A8/A14/A15 — accessibility and layout contract", () => {
     render(await Page());
     // The word is present in the accessible text, so a screen reader and a colour-blind user both get the signal.
     expect(screen.getByText("High")).toBeTruthy();
+  });
+
+  // Three bare adjectives in a row read aloud as "High Application account Ongoing", which names no dimension. The
+  // prefixes are sr-only, so the visual pill layout is unchanged.
+  it("A15 each badge names the DIMENSION it describes, for a screen reader", async () => {
+    ok([finding({ severityLabel: "High", severityTone: "danger", subjectKind: "Person", lifecycleLabel: "Returned" })]);
+    const { container } = render(await Page());
+    const badgeLabels = [...container.querySelectorAll("span.sr-only")].map(s => s.textContent?.trim());
+    for (const dimension of ["Severity:", "Subject:", "Lifecycle:"]) {
+      expect(badgeLabels, `no programmatic label for ${dimension}`).toContain(dimension);
+    }
+  });
+
+  // Muted text must define a dark value; `text-zinc-500` alone falls below AA on the dark page background.
+  it("A14 every muted text class pairs a dark-mode value", async () => {
+    ok([finding({ action: null })]);
+    const { container } = render(await Page());
+    for (const el of container.querySelectorAll("[class*='text-zinc-500']")) {
+      expect(el.className, `un-paired muted text: ${el.className}`).toMatch(/dark:text-zinc-/);
+    }
   });
 
   it("headings nest correctly: one h1, an h2 per finding", async () => {

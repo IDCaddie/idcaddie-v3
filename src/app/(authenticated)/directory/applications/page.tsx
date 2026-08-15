@@ -75,8 +75,8 @@ export default async function DirectoryApplicationsPage({ searchParams }: { sear
         <>
           Directory applications are what your identity provider exposes.{" "}
           <Link href="/apps" className="underline">SaaS inventory</Link> is a separate surface holding normalized software records used for
-          contracts, spend and utilization. An application listed here does not need a matching SaaS record, and the absence of one is not a
-          problem to fix — the two surfaces are not linked yet.
+          contracts, spend and utilization. An application listed here is not automatically linked to a SaaS record. Whether a particular
+          application still needs review or linking is decided by cross-system governance, not by its presence in this list.
         </>
       }
     />

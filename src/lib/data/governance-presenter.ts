@@ -108,7 +108,11 @@ export const RULE_PROSE: Record<GovernanceRuleId, RuleProse> = {
 // ══ CROSS-SOURCE COPY (Phase 18D) ══════════════════════════════════════════════════════════════════════════════════════
 // The sibling engine (`src/lib/server/cross-source-governance/`) stamps `crossSource.{ruleId}[.{reason}].title|.summary|
 // .remediation` and persists them through 0083. Those keys resolved to NO COPY ANYWHERE until now — docs/79 recorded it
-// as debt — so this table exists to close it for rule 5, whose remediation genuinely differs by state.
+// as debt — so this table exists to close it. Phase 18D closed rule 5, whose remediation genuinely differs by state;
+// the 18F-A review fix closed the remaining four, because `/access/governance` reads the ENGINE and not one rule, so a
+// rule without copy is a customer looking at a severity badge attached to no sentence. `crossSourceProse` is now
+// EXHAUSTIVE over the shipped `CrossSourceRuleId` union, and `governance-presenter.test.ts` fails if a new rule ships
+// without copy. The broad fallback below stays for rows persisted by a FUTURE build, not for anything shipping today.
 //
 // KEYED BY THE PERSISTED STEM, not by a rule enum, because a consumer reads `title_key` back out of
 // `product_governance_findings` as a plain string and has no typed subtype to switch on.
@@ -141,6 +145,53 @@ export const CROSS_SOURCE_PROSE: Record<string, RuleProse> = {
     title: "Application match needs review",
     summary: "The software product is recognized and operational application candidates are available, but none has been accepted.",
     guidance: "Review the available operational application candidates and accept the correct record.",
+  },
+
+  // ── The four ACCOUNT and PERSON rules ──────────────────────────────────────────────────────────────────────────────
+  // Added by Phase 18F-A review fix. `/access/governance` reads the whole `cross_source` engine, not one rule, so
+  // until these existed four of the five shipped rules — including both HIGH-severity ones — reached a customer as the
+  // broad fallback card. Every sentence below is bounded by what its rule in `cross-source-governance/evaluate.ts`
+  // actually proves; none claims usage, licence, spend, cost, savings, inactivity of an ACCOUNT, or safe removal, and
+  // none says "remove" or "delete".
+
+  // Rule 1. Fires on a `human`/`active`/currently-confirmed account, NOT flagged admin, in a connection whose account
+  // list is proven complete, with NO person link in either the accepted or the pending state. So "not linked" is the
+  // whole claim — it does NOT say the person is absent from the directory, and it says nothing about what the account
+  // can do or whether anyone uses it.
+  "crossSource.active_saas_account_without_accepted_identity": {
+    title: "Account is not linked to a person",
+    summary: "This account is recorded as a person's account and is active in a connected application, but no person in your directory is linked to it.",
+    guidance: "Review this account and link it to the person who uses it, or record that it does not belong to an individual.",
+  },
+
+  // Rule 3. The same shape as rule 1, but the provider reported the account as administrative AND a pending match does
+  // not satisfy it — only a confirmed owner does. That difference is the one thing this copy must convey, because it
+  // is why the finding stays open while a match is sitting unreviewed. It does NOT describe what the account can
+  // administer: the evidence is the provider's own admin flag and nothing more.
+  "crossSource.privileged_saas_account_without_accepted_identity": {
+    title: "Administrative account has no confirmed owner",
+    summary: "The provider reports this active account as administrative, and no person in your directory has been confirmed as its owner.",
+    guidance: "Confirm who owns this administrative account. For administrative accounts a suggested match is not treated as ownership until someone accepts it.",
+  },
+
+  // Rule 2. Both halves are provider-stated and currently confirmed: an identity the provider explicitly reports as
+  // deactivated (`is_active = false` — never the unknown null), and an account the provider reports as active, both
+  // linked to the same person. It must NOT call the person a leaver, claim the access was used, or advise removal —
+  // the rule looked at neither employment nor usage.
+  "crossSource.inactive_identity_with_active_saas_account": {
+    title: "Deactivated identity still has an active account",
+    summary: "This person has a directory identity the provider reports as deactivated, and at least one account that is still active in a connected application.",
+    guidance: "Review whether this person's remaining application access is still intended.",
+  },
+
+  // Rule 4. Deliberately narrow: two or more active human accounts for one person WITHIN A SINGLE connected system.
+  // Across systems it is not a finding at all — one person legitimately holds Okta, Slack and Google — so the copy has
+  // to carry the "same system" qualifier or it accuses normal estates. No licence or spend claim: the rule counts
+  // accounts, and an account is not a paid seat.
+  "crossSource.duplicate_active_accounts_for_one_person": {
+    title: "One person has more than one active account in the same system",
+    summary: "Within a single connected system, more than one active account is linked to this person.",
+    guidance: "Review whether each of these accounts is still needed, or whether the same person has been recorded twice.",
   },
 };
 

@@ -26,7 +26,7 @@ export default async function CrossSystemGovernancePage() {
     <main className="flex flex-1 flex-col gap-6 p-8">
       <header className="space-y-1">
         <div className="text-sm">
-          <Link href="/access" className="text-zinc-500 hover:underline">← Back to Access</Link>
+          <Link href="/access" className="text-zinc-500 hover:underline dark:text-zinc-400">← Back to Access</Link>
         </div>
         <h1 className="text-xl font-semibold">Cross-system governance</h1>
         <p className="max-w-3xl text-sm text-zinc-600 dark:text-zinc-400">
@@ -46,7 +46,16 @@ export default async function CrossSystemGovernancePage() {
         <p className="text-sm text-red-600" role="alert">
           Governance findings could not be loaded. Please try again later.
         </p>
-      ) : result.data.total === 0 ? (
+      ) : result.data.shown === 0 && result.data.unreadable > 0 ? (
+        // EVERY row failed its contract. This is the one state that must never borrow the clean-estate wording: we
+        // did read the estate, and we could not understand any of what came back. Saying "no open findings" here
+        // would report a broken data contract as a healthy tenant.
+        <p className="rounded border border-red-400 bg-red-50 p-4 text-sm text-red-700 dark:border-red-700 dark:bg-red-950/30 dark:text-red-300" role="alert">
+          Governance findings could not be displayed. {result.data.unreadable} finding
+          {result.data.unreadable === 1 ? "" : "s"} could not be read, so this page cannot show the current state of
+          your connected systems. Please try again later.
+        </p>
+      ) : result.data.shown === 0 ? (
         <div className="rounded border border-zinc-300 p-4 text-sm dark:border-zinc-700">
           <div className="font-medium">No open findings</div>
           <p className="mt-1 text-zinc-600 dark:text-zinc-400">
@@ -64,8 +73,12 @@ export default async function CrossSystemGovernancePage() {
             </p>
           ) : null}
 
-          <p className="text-sm text-zinc-500" role="status">
-            {result.data.total} open finding{result.data.total === 1 ? "" : "s"}.
+          {/* The read is bounded and there is no count query, so a truncated page says so instead of naming a total
+              it never measured. `shown` is the page; `truncated` is the only thing known beyond it. */}
+          <p className="text-sm text-zinc-500 dark:text-zinc-400" role="status">
+            {result.data.truncated
+              ? `Showing the ${result.data.shown} most severe of more than ${result.data.shown} open findings.`
+              : `${result.data.shown} open finding${result.data.shown === 1 ? "" : "s"}.`}
           </p>
 
           <ul className="flex flex-col gap-3" aria-label="Cross-system governance findings">
@@ -77,11 +90,16 @@ export default async function CrossSystemGovernancePage() {
                     <h2 className="font-medium">{f.title}</h2>
                     <p className="mt-1 max-w-3xl text-sm text-zinc-600 dark:text-zinc-400">{f.summary}</p>
                   </div>
-                  {/* Severity carries a WORD, not just a colour — the badge tone is reinforcement, never the signal. */}
+                  {/* Severity carries a WORD, not just a colour — the badge tone is reinforcement, never the signal.
+                      Each badge also names its DIMENSION for a screen reader: three bare adjectives read aloud as
+                      "High Application account Ongoing", which says nothing about which is severity and which is not.
+                      The prefix is sr-only, so sighted layout is unchanged. */}
                   <div className="flex shrink-0 flex-wrap items-center gap-2">
-                    <Badge tone={f.severityTone}>{f.severityLabel}</Badge>
-                    <Badge tone="neutral">{f.subjectKind}</Badge>
-                    <Badge tone={f.lifecycleLabel === "Returned" ? "attention" : "neutral"}>{f.lifecycleLabel}</Badge>
+                    <Badge tone={f.severityTone}><span className="sr-only">Severity: </span>{f.severityLabel}</Badge>
+                    <Badge tone="neutral"><span className="sr-only">Subject: </span>{f.subjectKind}</Badge>
+                    <Badge tone={f.lifecycleLabel === "Returned" ? "attention" : "neutral"}>
+                      <span className="sr-only">Lifecycle: </span>{f.lifecycleLabel}
+                    </Badge>
                   </div>
                 </div>
 
@@ -112,7 +130,7 @@ export default async function CrossSystemGovernancePage() {
                   ) : (
                     // Lane B owns the match-review surface. Until it exists we say so plainly rather than linking to a
                     // route that would 404 — an honest disabled affordance beats a broken promise.
-                    <p className="text-sm text-zinc-500">
+                    <p className="text-sm text-zinc-500 dark:text-zinc-400">
                       Review this application’s matches in your application records. A dedicated review screen is not
                       available yet.
                     </p>

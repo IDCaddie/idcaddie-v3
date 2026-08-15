@@ -10,7 +10,8 @@ vi.mock("./access-repository", () => ({ accessGate: async () => gate.value }));
 vi.mock("@/lib/supabase/server", () => ({ createClient: async () => { throw new Error("must not build a real client"); } }));
 
 import {
-  loadCrossSourceFindings, toView, firstSeenLabel, lifecycleLabel, actionFor, KNOWN_ROUTES, type FindingsIo,
+  loadCrossSourceFindings, toView, firstSeenLabel, lifecycleLabel, actionFor, KNOWN_ROUTES, DISPLAY_CAP,
+  type FindingsIo,
 } from "./cross-source-findings-reader";
 
 const NOW = new Date("2026-08-15T12:00:00Z");
@@ -47,14 +48,15 @@ describe("A2/A3/A4/A5 — result states", () => {
 
   it("A5 multiple findings all render", async () => {
     const r = await loadCrossSourceFindings(io([row(), row({ id: "22222222-2222-4222-8222-222222222222" })]), NOW);
-    expect(r.ok && r.data.total).toBe(2);
+    expect(r.ok && r.data.shown).toBe(2);
   });
 
   it("A2 an empty estate is an empty list, not an error", async () => {
     const r = await loadCrossSourceFindings(io([]), NOW);
     expect(r.ok).toBe(true);
-    expect(r.ok && r.data.total).toBe(0);
+    expect(r.ok && r.data.shown).toBe(0);
     expect(r.ok && r.data.unreadable).toBe(0);
+    expect(r.ok && r.data.truncated).toBe(false);
   });
 
   it("A3 a backend error is query_failed, never an empty list", async () => {
@@ -78,8 +80,19 @@ describe("A2/A3/A4/A5 — result states", () => {
   it("a row that fails its contract is COUNTED, not silently dropped", async () => {
     const r = await loadCrossSourceFindings(io([row(), { id: "x" }]), NOW);
     expect(r.ok).toBe(true);
-    expect(r.ok && r.data.total).toBe(1);
+    expect(r.ok && r.data.shown).toBe(1);
     expect(r.ok && r.data.unreadable).toBe(1);
+  });
+
+  // The half the original suite missed: when EVERY row is dropped the result still carries the drop count, so the
+  // page has something to distinguish "we read nothing" from "there is nothing". Pinned here AND at the render layer.
+  it("ALL rows unreadable still reports the drops — never a silent empty estate", async () => {
+    const r = await loadCrossSourceFindings(io([{ id: "x" }, { id: "y" }, { bad: true }]), NOW);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.data.shown).toBe(0);
+    expect(r.data.unreadable, "an empty list with dropped rows must not claim zero drops").toBe(3);
+    expect(r.data.truncated).toBe(false);
   });
 
   it("A12 a non-owner/admin is refused before any read", async () => {
@@ -91,11 +104,78 @@ describe("A2/A3/A4/A5 — result states", () => {
     expect(called, "must not query on behalf of an unauthorized caller").toBe(false);
   });
 
-  it("asks only for OPEN cross_source findings, scoped to the gated tenant", async () => {
+  it("asks only for OPEN cross_source findings, scoped to the gated tenant, with the +1 sentinel", async () => {
     let args: Record<string, unknown> | null = null;
     const spy: FindingsIo = { rpc: async (_n, a) => { args = a; return { data: [], error: null }; } };
     await loadCrossSourceFindings(spy, NOW);
-    expect(args).toEqual({ p_tenant_id: "t-a", p_engine: "cross_source", p_status: "open", p_limit: 100 });
+    expect(args).toEqual({ p_tenant_id: "t-a", p_engine: "cross_source", p_status: "open", p_limit: DISPLAY_CAP + 1 });
+  });
+});
+
+// ══ THE BOUNDED COUNT ═════════════════════════════════════════════════════════════════════════════════════════════
+// The read has no count query, so the only honest claims are "exactly N" (fewer rows came back than we asked for) and
+// "more than the cap" (the sentinel row came back). Asking for the cap and reporting the row count — the original
+// shape — makes the two indistinguishable and states a page size as the tenant's total.
+describe("bounded result count — exact below the cap, explicitly truncated above it", () => {
+  const rows = (n: number) =>
+    Array.from({ length: n }, (_, i) => row({ id: `${String(i).padStart(8, "0")}-1111-4111-8111-111111111111` }));
+
+  it.each([0, 1, 99, DISPLAY_CAP])("%i rows is an EXACT count, never truncated", async n => {
+    const r = await loadCrossSourceFindings(io(rows(n)), NOW);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.data.shown).toBe(n);
+    expect(r.data.truncated, `${n} rows is the whole estate`).toBe(false);
+  });
+
+  it("the sentinel row marks the page truncated and is NOT rendered", async () => {
+    const r = await loadCrossSourceFindings(io(rows(DISPLAY_CAP + 1)), NOW);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.data.shown, "the sentinel is never shown to a customer").toBe(DISPLAY_CAP);
+    expect(r.data.findings).toHaveLength(DISPLAY_CAP);
+    expect(r.data.truncated).toBe(true);
+  });
+
+  // The sentinel answers "is there more", nothing else. A malformed sentinel must not be counted as a dropped row on
+  // the page the customer is actually looking at.
+  it("a malformed SENTINEL row does not pollute the visible page's drop count", async () => {
+    const r = await loadCrossSourceFindings(io([...rows(DISPLAY_CAP), { garbage: true }]), NOW);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.data.shown).toBe(DISPLAY_CAP);
+    expect(r.data.unreadable).toBe(0);
+    expect(r.data.truncated).toBe(true);
+  });
+});
+
+// ══ THE STATUS CONTRACT ═══════════════════════════════════════════════════════════════════════════════════════════
+// `status` is requested as 'open' and never rendered, so it is easy to read the field in `rowSchema` as dead weight
+// and delete it. It is the defence that survives the RPC's filter changing: a row whose status this build does not
+// recognise is UNREADABLE, not silently rendered as an open, actionable finding. The accepted set stays exactly
+// 0083's CHECK (`open` | `closed`) — narrowing it to 'open' alone would turn every closed row into a false "could not
+// be displayed" alarm, which is a worse failure than the one it guards.
+describe("rowSchema pins the persisted status contract", () => {
+  it.each([
+    ["a status this build does not know", { status: "archived" }],
+    ["a missing status", { status: undefined }],
+    ["a null status", { status: null }],
+    ["a non-string status", { status: 1 }],
+  ])("%s makes the row UNREADABLE rather than an actionable open finding", async (_label, patch) => {
+    const bad = row(patch);
+    if (patch.status === undefined) delete (bad as Record<string, unknown>).status;
+    const r = await loadCrossSourceFindings(io([bad]), NOW);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.data.shown, "an unrecognised status must not reach the list").toBe(0);
+    expect(r.data.unreadable).toBe(1);
+  });
+
+  it("accepts exactly the two statuses 0083's CHECK permits, and no more", async () => {
+    for (const status of ["open", "closed"]) {
+      const r = await loadCrossSourceFindings(io([row({ status })]), NOW);
+      expect(r.ok && r.data.shown, `${status} must parse`).toBe(1);
+    }
   });
 });
 

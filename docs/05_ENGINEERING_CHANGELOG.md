@@ -24,26 +24,57 @@ connected systems, are persisted, and carry an age, a status and a reopen count 
 have meant widening that page's view models, filters and CSV allowlist, and would have blurred "your access topology"
 with "what is unowned across your estate". They sit in the same nav section and link to each other instead.
 
-**Copy comes from one authority.** `crossSourceProse` resolves every sentence; the page interpolates no governance
-prose and renders no internal enum. `product_unresolved` / `operational_instance_absent` /
-`operational_match_unaccepted` never reach a customer — they select reviewed copy and are asserted absent from the
-rendered DOM. Unknown rules and prototype-shaped keys fall back to a truthful non-empty card.
+**Copy comes from one authority, and now covers every shipped rule.** `crossSourceProse` resolves every sentence; the
+page interpolates no governance prose and renders no internal enum. `product_unresolved` /
+`operational_instance_absent` / `operational_match_unaccepted` never reach a customer — they select reviewed copy and
+are asserted absent from the rendered DOM.
 
-**Identity is the persisted row id.** A subject moving between remediation subtypes is one finding being refreshed, so
-keying the list on the subtype would make the same problem appear to vanish and return. Pinned by a test.
+**The first version of this shipped that claim while it was true of ONE rule out of five.** `/access/governance` reads
+the whole `cross_source` engine, not one rule, and `CROSS_SOURCE_PROSE` held copy only for
+`discovered_application_unmanaged_by_idp`. The other four — including BOTH high-severity ones, the unowned
+administrative account and the deactivated identity that still holds an active account — resolved to null and rendered
+as "Governance finding / This finding needs review.", sorted above the one rule that had a sentence. The suite hid it:
+the fallback case was named "an unknown RULE" and fed a fabricated id, so the path four shipped rules actually take
+was never exercised. Independent review caught it. Reviewed copy now exists for all five, bounded by what each rule in
+`cross-source-governance/evaluate.ts` proves — no employment claim on the deactivated-identity rule, no seat or
+licence claim on the duplicate-account rule, and the "same connected system" qualifier that keeps rule 4 from
+accusing a normal estate. `Record<CrossSourceRuleId, true>` makes a sixth rule without copy a compile error.
+
+**The count is bounded, and says so.** The read has no `count(*)` and never will for a headline, so the page asks for
+`DISPLAY_CAP + 1` and treats the extra row as a SENTINEL: at or below the cap it states an exact number, above it it
+says "Showing the 100 most severe of more than 100 open findings." The first version asked for 100 and rendered the
+row count as the total, so a tenant with several hundred unmatched applications — the steady state while the matcher
+is unbuilt — was told it had exactly 100. The field is now `shown`, not `total`; the name is what stops it recurring.
+
+**A broken data contract is never a clean estate.** The dropped-row banner used to live inside the "we have findings"
+branch, so a response in which EVERY row failed its contract fell through to "No open findings — nothing is currently
+flagged". The clean empty state now requires `shown === 0 && unreadable === 0`; all-unreadable is its own alert.
+
+**Identity is the persisted row id — at both layers.** A subject moving between remediation subtypes is one finding
+being refreshed, so keying on the subtype would make the same problem appear to vanish and return. That was pinned in
+the reader and NOT at the render layer; two tests now pin the rendered key as well — one that fails when the key
+becomes copy, one that fails when it becomes the array index.
 
 **Actions only point at routes that exist.** `KNOWN_ROUTES` is the single decision point, and
-`applicationMatchReview` is deliberately `null` until Lane B ships — that finding renders an honest note rather than a
-link to a 404. A test asserts every emittable href is in `IMPLEMENTED_ROUTES`.
+`applicationMatchReview` stays `null` while #433 is unmerged — that finding renders an honest note rather than a link
+to a 404. A test asserts every emittable href is in `IMPLEMENTED_ROUTES`. The intended destination is recorded as
+`/directory/applications/review` (the `/connectors/review` precedent) with its two binding constraints — parameterless,
+and present in `IMPLEMENTED_ROUTES` — but recording a name is not depending on it.
+
+`/directory/applications` told customers that an application without a SaaS record "is not a problem to fix". Rule 5
+sends them to that page to fix exactly that, so the footnote now says linkage is decided by cross-system governance
+rather than by presence in the list. No behaviour change on that page.
 
 Read-only, owner/admin, server-rendered. `accessGate()` establishes the tenant and the RPC re-checks it; a denied
 caller is refused before any query runs. No service_role, no browser-side tenant id, no mutation, no export, no
 migration, no scheduler, no provider code.
 
-10 mutants RED: subtype in UI identity · raw reason rendered · undefined prose · CTA to a nonexistent route · access
-gate removed · severity by colour only · closed findings shown as open · dropped row swallowed · non-array read as an
-empty estate · raw timestamp shown instead of a phrased age. The last one initially SURVIVED — the UUID-shaped
-assertion did not cover timestamps — and the gap was closed before this shipped.
+10 original mutants RED: subtype in UI identity · raw reason rendered · undefined prose · CTA to a nonexistent route ·
+access gate removed · severity by colour only · closed findings shown as open · dropped row swallowed · non-array read
+as an empty estate · raw timestamp shown instead of a phrased age. Independent review then ran 11 more and **three
+SURVIVED**, each naming a real gap that is now closed: all rows dropped while reporting zero drops · the rendered list
+keyed on a mutable field · `status` deleted from `rowSchema`. Those three plus three review-fix mutants (remove one
+live rule's prose · restore the 100-row false-exact count · render all-unreadable as the clean empty state) are RED.
 
 ### fix(governance) — Phase 18E4: migration 0091, hosted safe-update compatibility · 2026-08-15
 

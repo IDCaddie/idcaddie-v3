@@ -55,9 +55,22 @@ export type CrossSourceFindingView = {
 
 export type CrossSourceFindingsData = {
   readonly findings: readonly CrossSourceFindingView[];
-  readonly total: number;
+  /**
+   * How many findings are RENDERED — deliberately NOT called `total`.
+   *
+   * The read is bounded and there is no count query, so this number is the page, not the estate. Calling it `total`
+   * is what let the page state a page size as the tenant's total; the name is now the thing that stops it recurring.
+   */
+  readonly shown: number;
   /** Rows the RPC returned that failed their contract. Surfaced so a silent drop can never read as "all clear". */
   readonly unreadable: number;
+  /**
+   * True when the estate holds MORE open findings than this page shows.
+   *
+   * A BOOLEAN, not a number: the +1 sentinel proves "there is at least one more", and that is the whole of what a
+   * bounded read knows. Turning it into a count would need an unbounded `count(*)` this surface has no reason to run.
+   */
+  readonly truncated: boolean;
 };
 
 // Strict-by-default: zod strips unknown keys, so a column a future RPC change adds cannot reach the browser.
@@ -123,7 +136,17 @@ export const KNOWN_ROUTES = {
   directoryApplications: "/directory/applications",
   saasAccounts: "/saas/accounts",
   people: "/directory/people",
-  /** Lane B's contract. `null` until that lane ships — deliberately not a guessed path. */
+  /**
+   * Lane B's contract. STAYS `null` while #433 is unmerged — this file must never depend on code that is not on main.
+   *
+   * The intended destination is `/directory/applications/review` (the `/connectors/review` precedent: an interactive
+   * review queue as a child of the read-only list it acts on). Two constraints bind whoever flips this, and both are
+   * already enforced by tests rather than by this comment:
+   *   · it must be PARAMETERLESS — `actionFor` receives only (rule_id, subject_type, reason) and `rowSchema`
+   *     deliberately strips `subject_id`, so there is no id here to build a deep link from;
+   *   · the path must be added to `IMPLEMENTED_ROUTES`, or the route guard in this module's test goes red.
+   * Recording the name is not the same as depending on it: until #433 is on main this is null and the UI says so.
+   */
   applicationMatchReview: null as string | null,
 } as const;
 
@@ -187,6 +210,16 @@ export async function createFindingsIo(): Promise<FindingsIo> {
 }
 
 /**
+ * How many findings a customer sees at once, and the ONLY number this module treats as a page size.
+ *
+ * The RPC is asked for `DISPLAY_CAP + 1`. That extra row is a SENTINEL and is never rendered: if it comes back, more
+ * open findings exist than fit, which is exactly the fact the page needs and the most a bounded read can honestly
+ * know. The alternative — asking for the cap and reporting the row count as the total — is what made the page claim
+ * "100 open findings" for a tenant with several hundred. 0083 clamps at 500, so 101 is well inside its contract.
+ */
+export const DISPLAY_CAP = 100;
+
+/**
  * Load this tenant's OPEN cross-source findings.
  *
  * `p_status: 'open'` is the product decision: a closed finding is a resolved one, and listing it beside live work
@@ -201,7 +234,7 @@ export async function loadCrossSourceFindings(io?: FindingsIo, now: Date = new D
   let data: unknown;
   try {
     const r = await resolved.rpc("product_governance_findings", {
-      p_tenant_id: gate.tenantId, p_engine: "cross_source", p_status: "open", p_limit: 100,
+      p_tenant_id: gate.tenantId, p_engine: "cross_source", p_status: "open", p_limit: DISPLAY_CAP + 1,
     });
     if (r.error) { console.error("[data/cross-source-findings] rpc query_failed"); return { ok: false, error: "query_failed" }; }
     data = r.data;
@@ -216,14 +249,19 @@ export async function loadCrossSourceFindings(io?: FindingsIo, now: Date = new D
     return { ok: false, error: "query_failed" };
   }
 
+  // The sentinel is measured on the RAW response and then dropped: it exists to answer "is there more?", and parsing
+  // or counting it would let a row nobody will see change what the page says about the rows they do.
+  const truncated = data.length > DISPLAY_CAP;
+  const page = truncated ? data.slice(0, DISPLAY_CAP) : data;
+
   const findings: CrossSourceFindingView[] = [];
   let unreadable = 0;
-  for (const raw of data) {
+  for (const raw of page) {
     const parsed = rowSchema.safeParse(raw);
     if (!parsed.success) { unreadable++; continue; }
     findings.push(toView(parsed.data, now));
   }
   if (unreadable > 0) console.error(`[data/cross-source-findings] ${unreadable} row(s) failed their contract`);
 
-  return { ok: true, data: { findings, total: findings.length, unreadable } };
+  return { ok: true, data: { findings, shown: findings.length, unreadable, truncated } };
 }

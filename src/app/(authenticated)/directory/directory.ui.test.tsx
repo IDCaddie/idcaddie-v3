@@ -148,10 +148,16 @@ describe("/directory/applications", () => {
     expect([...container.querySelectorAll("a")].some((a) => a.getAttribute("href") === "/apps")).toBe(true);
   });
 
-  it("does not imply an unmatched application is broken", async () => {
+  // The footnote must not call an unmatched application broken — and, since 18F-A, must not promise the opposite
+  // either. Cross-system governance CAN flag one of these applications for review and sends the customer to this very
+  // page to act on it, so "the absence of one is not a problem to fix" was telling them the opposite of the finding
+  // that brought them here.
+  it("does not imply an unmatched application is broken, and does not deny that one may need review", async () => {
     const { container } = render(await ApplicationsPage({ searchParams: sp() }));
     expect(screen.queryByText(/catalog match/i), "no chip on an unmatched row").toBeNull();
-    expect(container.textContent).toMatch(/absence of one is not a problem to fix/i);
+    expect(container.textContent).toMatch(/not automatically linked to a SaaS record/i);
+    expect(container.textContent).toMatch(/decided by cross-system governance/i);
+    expect(container.textContent, "must not contradict a rule-5 finding").not.toMatch(/not a problem to fix/i);
   });
 
   it("shows a catalog match when one really exists", async () => {
