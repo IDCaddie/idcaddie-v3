@@ -436,4 +436,20 @@ describe("the page itself queries nothing and mutates nothing", () => {
     expect(read("actions.ts")).toContain('"use server"');
     expect(read("page.tsx")).not.toContain('"use server"');
   });
+
+  // ── the one way in ──────────────────────────────────────────────────────────────────────────────────────────────────
+  // This surface has NO nav entry (nav-items.test.ts pins the Directory section to three labels), so the parent list
+  // page's footnote link is the only path to it in the whole product. That footnote is now a SHARED surface: Lane A
+  // (#431) merged first and rewrote the same sentences to say linking is decided by cross-system governance, and this
+  // branch was rebased onto that, resolving both intents into one paragraph.
+  //
+  // Lane A's own test pins ITS half — reintroducing "not a problem to fix", or dropping the governance sentence, turns
+  // `directory.ui.test.tsx` red. Nothing pinned THIS half: deleting the link left every suite in the repository green
+  // while orphaning the route, which mutation testing of the resolution is how we found out. Asserted here, in this
+  // lane's own file, rather than by editing the shared directory test.
+  it("the parent applications page still links here — this is the only entry point that exists", () => {
+    const parent = read("../page.tsx");
+    expect(parent, "the review queue would be unreachable").toContain('href="/directory/applications/review"');
+    expect(parent).toContain("application match review");
+  });
 });
