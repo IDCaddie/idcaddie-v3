@@ -128,11 +128,13 @@ export default async function CrossSystemGovernancePage() {
                       {f.action.label}
                     </Link>
                   ) : (
-                    // Lane B owns the match-review surface. Until it exists we say so plainly rather than linking to a
-                    // route that would 404 — an honest disabled affordance beats a broken promise.
+                    // No route for this finding. This branch was written for the match-review case while that queue was
+                    // unbuilt; Phase 18F-E gave that case a real link, so the only findings that reach here now are ones
+                    // whose rule or subject this build has no specific screen for. The copy is therefore BROAD — naming
+                    // match review here would be false, since that screen exists — and it still promises nothing.
                     <p className="text-sm text-zinc-500 dark:text-zinc-400">
-                      Review this application’s matches in your application records. A dedicated review screen is not
-                      available yet.
+                      There is no dedicated screen for this finding. Review the records it names in the area of the
+                      product that owns them.
                     </p>
                   )}
                 </div>
