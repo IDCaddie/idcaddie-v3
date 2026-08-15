@@ -253,11 +253,33 @@ describe("the runbook cannot re-assert the claims the guard disproved", () => {
 
 
 describe("operator copy is reconciled with #436", () => {
+  // ── The forbidden set, applied to EVERY file that can put words in front of an operator ──────────────────────────
+  // Independent review found the earlier guard scanned only the view module, so a mutant that injected
+  // "may have wrongly closed findings" into the run-panel JSX survived the entire suite — and the real panel was
+  // still carrying the pre-#436 sentence. Patterns are deliberately short so a reflow or reword cannot slip past;
+  // they describe the CLAIM, not a sentence.
+  const OPERATOR_COPY_FILES = [FILES.view, FILES.panel, FILES.page, FILES.actions] as const;
+  const FORBIDDEN: readonly [RegExp, string][] = [
+    [/wrongly closed/i, "claims findings were/could be wrongly closed"],
+    [/reopen anything/i, "tells the operator to reopen wrongly-closed findings"],
+    [/0083 would close/i, "attributes a false closure to 0083 as a current property"],
+    [/close .{0,40}findings that are still true/i, "claims still-true findings would be closed"],
+    [/corruption/i, "raises data corruption"],
+  ];
+
+  it.each(OPERATOR_COPY_FILES)("%s carries no pre-#436 false-closure claim", (path) => {
+    // RAW text: this covers rendered JSX, string literals AND comments, because all three mislead a reader and the
+    // panel's stale sentence lived in JSX that literal-stripping would have hidden.
+    const raw = readFileSync(path, "utf8");
+    for (const [pattern, why] of FORBIDDEN) {
+      expect(raw, `${path} — ${why}`).not.toMatch(pattern);
+    }
+  });
+
   it("the mid-run note reports INCOMPLETENESS, never corruption", () => {
     const kept = codeKeepStrings(FILES.view);
     expect(kept).toMatch(/INCOMPLETE —/);
-    expect(kept).not.toMatch(/may have been closed by this run/i);
-    expect(kept).not.toMatch(/reopen\s+anything that was wrongly closed/i);
+    expect(kept).toMatch(/Closure stayed protected/);
   });
 
   it("no blocked-state copy asserts that 0083 would close still-true findings", () => {

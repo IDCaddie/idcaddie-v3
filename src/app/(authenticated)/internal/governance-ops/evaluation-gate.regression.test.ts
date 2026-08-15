@@ -220,9 +220,9 @@ describe("C11 · a mid-run matcher state change reports an INCOMPLETE run, not c
     expect(state?.ok).toBe(true);                      // the sync did happen …
     expect(world.stored[0].status).toBe("open");       // … and #436 kept the still-true finding open
     expect(state?.notes.join(" ")).toMatch(/INCOMPLETE/);
-    expect(state?.notes.join(" ")).toMatch(/Nothing was wrongly closed/);
+    expect(state?.notes.join(" ")).toMatch(/Closure stayed protected/);
     // The old corruption language must never come back: it would send an operator chasing damage that cannot occur.
-    expect(state?.notes.join(" ")).not.toMatch(/wrongly closed findings|reopen anything|corruption/i);
+    expect(state?.notes.join(" ")).not.toMatch(/wrongly closed|reopen anything|corruption/i);
   });
 
   it("the note is only raised when rule 5 was actually withheld", async () => {

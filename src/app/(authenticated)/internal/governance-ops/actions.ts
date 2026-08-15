@@ -104,12 +104,13 @@ export async function runEvaluationAction(_prev: OpsActionState): Promise<OpsAct
   // all, the other ran and declined to close. Collapsing them would let "rule 5 never fired" hide inside a closure count.
   for (const r of summary.withheldRules) notes.push(`Rule not evaluated — ${r.ruleId}: ${r.reason}`);
 
-  // ── RESIDUAL RACE, DETECTED RATHER THAN CLAIMED IMPOSSIBLE ─────────────────────────────────────────────────────────
-  // The precondition above and the engine's own matcher read are two separate statements. A concurrent matcher run
-  // started by another owner in between would flip the state, and the engine — not this guard — decides whether rule 5
-  // fires. This cannot be closed from here without changing the engine, so it is DETECTED: if a run we authorized comes
-  // back reporting rule 5 withheld, the state moved under us and findings may have been wrongly closed. Saying so
-  // loudly is the difference between a recoverable incident and a silent one.
+  // ── MID-RUN STATE CHANGE — AN INCOMPLETENESS SIGNAL, NOT AN INCIDENT ───────────────────────────────────────────────
+  // The precondition above and the engine's own matcher read are two separate statements, so a concurrent matcher run
+  // between them flips the state after this action has already decided. #436 handles the SAFETY of that from inside the
+  // engine — the closure licence is withdrawn from the same graph the withholding decision is made on — so nothing is
+  // at risk here. What is affected is COMPLETENESS: the run says nothing about unmanaged applications and may have
+  // withheld closures it would otherwise have made. The note exists so the operator knows to run the matcher to
+  // completion and evaluate again, rather than reading this run as a full picture.
   if (summary.withheldRules.some(r => r.ruleId === CLOSURE_UNSAFE_WITHHELD_RULE)) {
     notes.push(MID_RUN_STATE_CHANGE_NOTE);
   }

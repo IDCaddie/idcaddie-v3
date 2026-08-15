@@ -145,7 +145,7 @@ export const CLOSURE_UNSAFE_WITHHELD_RULE = "discovered_application_unmanaged_by
 
 export const MID_RUN_STATE_CHANGE_NOTE =
   "INCOMPLETE — the matcher state changed while this evaluation was running: it was authorized with the matcher " +
-  "`completed`, but the engine then read a different status and withheld rule 5. Nothing was wrongly closed — the engine " +
+  "`completed`, but the engine then read a different status and withheld rule 5. Closure stayed protected — the engine " +
   "withdraws the closure licence in exactly this state — but this run does not describe unmanaged applications, and it " +
   "may have withheld closures it would otherwise have made. Run the matcher to completion and evaluate again for a " +
   "complete result; if this recurs, check whether another operator is running the matcher at the same time.";

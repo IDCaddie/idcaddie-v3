@@ -69,8 +69,10 @@ export function RunEvaluationForm({ blockedReason }: { blockedReason: string | n
         refreshing, reopening and closing them. A finding is closed only where the run could prove the condition ended.
       </p>
       <p className="text-sm text-zinc-600 dark:text-zinc-400">
-        Requires the application matcher to be <strong>currently</strong> completed. Evaluating while it is not would
-        drop rule 5 from the payload, and migration 0083 would close unmanaged-application findings that are still true.
+        Requires the application matcher to be <strong>currently</strong> completed. The engine preserves closure safety
+        when matcher evidence cannot be re-proven, but an evaluation in that state is incomplete — it says nothing about
+        unmanaged applications and may withhold finding closures. Run the matcher to completion first for a complete
+        governance result.
       </p>
       {blocked ? <p role="status" className="text-sm text-amber-700 dark:text-amber-500">{blockedReason}</p> : null}
       <button type="submit" disabled={pending || blocked}
