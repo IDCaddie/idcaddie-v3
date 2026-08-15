@@ -180,8 +180,14 @@ export function buildReviewGroups(rows: readonly MatchRow[], labels: ReviewLabel
 
     // How many candidates in this group share each (label, instance) pair. Anything above one is indistinguishable to a
     // reader, whatever the ids say.
+    //
+    // The separator is U+0000, written as an escape and never as the raw byte. U+0000 because it is the one character a
+    // label cannot contain (Postgres refuses a NUL inside `text`), so joining on it cannot make two distinguishable
+    // records collide the way a space, colon or pipe would. Written as an escape because a raw NUL makes grep classify
+    // this whole file as binary, and the credential and import-boundary gates both scan with `grep -I` — one byte would
+    // silently exempt this file from both. Both halves are pinned by tests; do not "tidy" either one.
     const seen = new Map<string, number>();
-    const key = (c: { recordLabel: string | null; instanceLabel: string | null }) => `${c.recordLabel ?? ""} ${c.instanceLabel ?? ""}`;
+    const key = (c: { recordLabel: string | null; instanceLabel: string | null }) => `${c.recordLabel ?? ""}\u0000${c.instanceLabel ?? ""}`;
     for (const c of withLabels) seen.set(key(c), (seen.get(key(c)) ?? 0) + 1);
 
     const candidates: MatchCandidateView[] = withLabels

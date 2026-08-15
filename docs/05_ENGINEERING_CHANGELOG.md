@@ -12,6 +12,58 @@ from PRs verified via `git log` / `gh pr list`.
 > **as of each PR's date** and are historical — where an older entry says "RISK-007 remains OPEN" / "Phase C remains
 > BLOCKED", that was accurate at that entry's date; this banner is the current state.
 
+### fix(governance) — Phase 18F-B review fixes: a NUL byte blinded two safety gates · 2026-08-15
+
+Two blockers from the independent exact-head review of #433. Both behaviour-preserving; the feature did not move
+(128 focused tests green before and after, and a runtime-equivalence proof for the first).
+
+**A raw NUL byte in `src/lib/canonical/application-match-review.ts` silently exempted the file from two safety gates.**
+The composite ambiguity key joins two free-text labels on U+0000 — the right separator, because U+0000 is the one
+character a label cannot contain (Postgres refuses a NUL inside `text`), so it cannot make two distinguishable records
+collide the way a space, colon or pipe would. That part stands. What was wrong is that the separator was written as the
+**raw byte**, and one raw NUL makes `grep` classify the whole file as binary. `check-auth-safety.sh` and
+`check-app-runtime-imports.sh` both scan with `grep -I`, which skips binary files — so the file was invisible to the
+credential scan and to the app↔runner import boundary, and passed both regardless of content. Proven by planting
+`SUPABASE_SERVICE_ROLE_KEY` in it: the gate said `auth safety checks passed`. The same credential in the NUL-free
+sibling module was caught immediately.
+
+`git diff` will not warn you: git samples only the first 8000 bytes for its own binary heuristic, and this NUL sat at
+offset 11490, so the file diffed as ordinary text — the raw byte even *renders as a space* in a diff, which is how it
+survived authoring and first review. The fix is the six-character escape instead of the byte; the runtime string is
+identical (proven over a 13-pair corpus including labels containing spaces, colons, pipes, commas and newlines).
+
+Two tests now hold both halves. A **separator-property** test in the pure suite feeds it the exact label pairs that
+would collide under a space, a colon, a pipe, a comma, a newline or no separator at all, so swapping U+0000 for any of
+them turns it red. A **grep-visibility tripwire** asserts no file in the lane — tests included, since the gates scan all
+of `src/` — contains a raw NUL. Restoring the byte turns the tripwire red *and* makes the credential gate go blind
+again, which is the non-vacuity control.
+
+**A scope test claimed ownership of the repository's future migration numbering.** It asserted *"no migration numbered
+above 0091 exists anywhere"* — a claim about every other lane's work, not about this one. The next unrelated migration
+from any of the concurrent branches would have turned it red on `main` and named this file for a change it has nothing
+to do with; verified by dropping in a dummy `0092`. Changed-file scope is already covered twice by machinery authorized
+to judge it (`check-migration-safety.sh`, and `git diff origin/main..HEAD -- supabase/migrations` in the gates), so the
+test now asserts only the complementary half those cannot see: that no file in this lane carries schema behaviour of its
+own — no DDL, no `security definer`, no reach into the migration directory. With a dummy `0092` present the lane's
+focused tests stay green.
+
+**Also pinned, from the review's non-blocking list:** `MATCH_PAGE`, `CANDIDATE_PARENT_PAGE` and `DIRECTORY_PAGE` are now
+tied to the ceilings the reads actually enforce, read off 0085/0090 and off the access repository's `MAX_PAGE`. Each
+walker decides "was that the last page?" by comparing what returned against what it asked for, and every one of these
+reads silently clamps its own limit — so a constant raised above its ceiling would trim the request, make the
+comparison unsatisfiable, and stop the walk after one page while believing it had finished. Nothing else tied the two
+numbers together. Raising any of the three now fails.
+
+Still open, recorded not fixed: the application-label walk has no size pre-gate (cost scales with tenant directory size,
+not match count); the only entry link sits in the parent list page's footnote, which that page skips in its
+`!ok`/`too_large` early returns; `DECIDE_STATUSES` carries three statuses 0088 cannot return (safe, documented);
+`parseRows` drops invalid rows before the page-length termination check (unreachable — all four columns are NOT NULL —
+and identical to the merged `directory-loaders.ts` walker).
+
+**Verified:** 3236 unit tests, tsc 0, runner typecheck 0, lint 0 errors, build compiled, migration safety, auth safety,
+import boundary, token scan, callback bundle, docs, `diff --check`. Author mutants and the reviewer's twelve all still
+RED. `git diff origin/main -- supabase/migrations` is empty. No hosted apply, nothing deployed.
+
 ### feat(governance) — Phase 18F-B: the human review surface for application-match proposals · 2026-08-15
 
 The propose/decide boundary (**0088**), the candidate contract (**0090**) and the bounded read (**0085**) were all in

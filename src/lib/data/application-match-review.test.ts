@@ -485,6 +485,17 @@ const LANE_SOURCES = [
   "src/app/(authenticated)/directory/applications/review/page.tsx",
   "src/app/(authenticated)/directory/applications/review/actions.ts",
 ];
+// Every file this lane adds or edits, tests included. The behavioural tripwires above only care about runtime source,
+// but the grep-visibility one below applies to all of them: the safety gates scan the whole of src/, so a test file can
+// blind them just as effectively as a runtime file can.
+const LANE_FILES = [
+  ...LANE_SOURCES,
+  "src/lib/canonical/application-match-review.test.ts",
+  "src/lib/data/application-match-review.test.ts",
+  "src/app/(authenticated)/directory/applications/review/actions.test.ts",
+  "src/app/(authenticated)/directory/applications/review/review.ui.test.tsx",
+  "src/app/(authenticated)/directory/applications/page.tsx",
+];
 const stripComments = (s: string) => s.replace(/\/\/.*$/gm, "").replace(/\/\*[\s\S]*?\*\//g, "");
 
 describe("B13 / M4 — no file in this lane can write a table", () => {
@@ -518,6 +529,25 @@ describe("B13 / M4 — no file in this lane can write a table", () => {
       expect(stripComments(read(p))).not.toMatch(/["'](okta|slack|google|entra|microsoft|github)["']/i);
     }
   });
+
+  // ── the file must stay TEXT, or the safety gates stop seeing it ─────────────────────────────────────────────────────
+  // This is not style. `scripts/check-auth-safety.sh` and `scripts/check-app-runtime-imports.sh` both scan with
+  // `grep -I`, which SKIPS any file grep classifies as binary — and one raw NUL byte anywhere is enough to earn that
+  // classification. A source file containing one is therefore silently exempt from the credential scan and the
+  // app-to-runner import boundary, and it passes both gates no matter what it contains. That is how this lane shipped a
+  // review-blocking hole: the composite key in the pure module used a NUL separator written as the raw byte.
+  //
+  // The separator is still U+0000 at runtime, and must stay so (a separator that can occur inside a label makes
+  // distinguishable records collide — proven in canonical/application-match-review.test.ts). Only the SPELLING changed:
+  // the escape sequence, never the byte. `git diff` will not catch this for you — git only samples the first 8000 bytes
+  // for its own binary heuristic, so a NUL past that point diffs as ordinary text while grep still refuses the file.
+  it("no file in this lane contains a raw NUL byte, so the grep-based safety gates can still read it", () => {
+    const NUL = String.fromCharCode(0);
+    for (const p of LANE_FILES) {
+      const raw = fs.readFileSync(path.join(process.cwd(), p), "utf8");
+      expect(raw.includes(NUL), `${p} contains a raw NUL byte and would be skipped by grep -I`).toBe(false);
+    }
+  });
 });
 
 describe("scope — the matcher and the migrations are untouched by this lane", () => {
@@ -544,10 +574,77 @@ describe("scope — the matcher and the migrations are untouched by this lane", 
     ]);
   });
 
-  it("no migration is added or edited by this lane", () => {
-    const migrations = fs.readdirSync(path.join(process.cwd(), "supabase/migrations")).filter((f) => f.endsWith(".sql"));
-    // 0091 is the latest on main; this lane needs no schema change, so nothing beyond it may appear.
-    expect(migrations.filter((f) => Number.parseInt(f.slice(0, 4), 10) > 91)).toEqual([]);
+  // THIS LANE OWNS NO MIGRATION — and that is a property of ITS OWN FILES, never of the repository's migration numbering.
+  //
+  // An earlier version of this test asserted "no migration numbered above 0091 exists anywhere in the repository". That is
+  // a claim about every OTHER lane's future work: the next unrelated migration, from any concurrent branch, would have
+  // turned this test red on `main` and named this file as the failure — for a change it has nothing to do with. A lane may
+  // only assert what it owns.
+  //
+  // Changed-file scope is already covered, twice, by machinery that is actually authorized to judge it:
+  // `scripts/check-migration-safety.sh` and `git diff origin/main..HEAD -- supabase/migrations` in the PR gates. What
+  // belongs HERE is the complementary half those cannot see: that nothing in this lane's own source carries schema
+  // behaviour, so it could not need a migration in the first place.
+  it("no file in this lane carries schema or migration behaviour", () => {
+    for (const p of LANE_SOURCES) {
+      const code = stripComments(read(p));
+      for (const ddl of [
+        /create\s+(or\s+replace\s+)?function/i,
+        /create\s+table/i,
+        /alter\s+table/i,
+        /create\s+policy/i,
+        /create\s+(unique\s+)?index/i,
+        /\bgrant\s+execute/i,
+        /\brevoke\s+/i,
+        /drop\s+(table|function|constraint|policy)/i,
+        /security\s+definer/i,
+      ]) {
+        expect(code, `${p} must carry no schema statement (${ddl})`).not.toMatch(ddl);
+      }
+      expect(code, `${p} must not reach into the migration directory`).not.toContain("supabase/migrations");
+    }
+  });
+
+  // ── the page size this loader ASKS for must equal the cap the function ENFORCES ──────────────────────────────────────
+  // Both walkers decide "was that the last page?" by comparing what came back against the size they requested. Each
+  // function silently clamps its own limit — `least(coalesce(p_limit, N), N)` — so if a constant here ever exceeds N, the
+  // request is trimmed, the comparison can never be satisfied, and the walk stops after ONE page while believing it
+  // finished. That is silent truncation of a governance feed: matches simply missing from the queue, with nothing to
+  // show anything went wrong. Nothing else in the repository ties these two numbers together, so this is the only place
+  // raising one without the other fails.
+  const capOf = (sql: string, fn: string): number => {
+    const start = sql.indexOf(`create or replace function public.${fn}(`);
+    expect(start, `${fn} must exist in the migration`).toBeGreaterThanOrEqual(0);
+    const body = sql.slice(start, sql.indexOf("$$;", start));
+    const m = body.match(/least\(coalesce\(p_limit,\s*(\d+)\),\s*(\d+)\)/);
+    expect(m, `${fn} must clamp its own limit`).not.toBeNull();
+    // the default and the ceiling are the same number in every one of these reads; if they ever diverge, the ceiling wins
+    return Number.parseInt(m![2], 10);
+  };
+  const constOf = (name: string): number => {
+    const m = read("src/lib/data/application-match-review.ts").match(new RegExp(`const ${name} = (\\d+);`));
+    expect(m, `${name} must be declared`).not.toBeNull();
+    return Number.parseInt(m![1], 10);
+  };
+
+  it("MATCH_PAGE equals the ceiling product_application_matches enforces", () => {
+    const cap = capOf(read("supabase/migrations/0085_governance_canonical_read_boundary.sql"), "product_application_matches");
+    expect(cap).toBe(500);
+    expect(constOf("MATCH_PAGE")).toBe(cap);
+  });
+
+  it("CANDIDATE_PARENT_PAGE equals the PARENT ceiling product_application_match_candidates enforces", () => {
+    const cap = capOf(read("supabase/migrations/0090_application_match_candidate_contract.sql"), "product_application_match_candidates");
+    expect(cap).toBe(200);
+    expect(constOf("CANDIDATE_PARENT_PAGE")).toBe(cap);
+  });
+
+  it("DIRECTORY_PAGE is within the ceiling the access repository clamps every list read to", () => {
+    // That read goes through `listDirectoryApplications`, whose `clampLimit` trims to MAX_PAGE before the call, so the
+    // effective bound is the repository's, not a migration's.
+    const m = read("src/lib/data/access-repository.ts").match(/export const MAX_PAGE = (\d+);/);
+    expect(m).not.toBeNull();
+    expect(constOf("DIRECTORY_PAGE")).toBe(Number.parseInt(m![1], 10));
   });
 });
 

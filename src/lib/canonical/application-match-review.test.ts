@@ -178,6 +178,48 @@ describe("indistinguishable records are reported, not hidden", () => {
     const groups = buildReviewGroups([row("m1", APP_A, "proposed"), row("m2", APP_B, "proposed")], labels());
     expect(groups[0].candidates.every((c) => c.ambiguous === false)).toBe(true);
   });
+
+  // THE SEPARATOR IS PART OF THE PROPERTY, not an implementation detail. The flag compares a COMPOSITE of two free-text
+  // labels, so any separator that can itself occur inside a label makes distinguishable rows collide and marks them
+  // "cannot be told apart" when they plainly can. Each pair below is the exact collision a common separator choice
+  // produces, so swapping the separator for a space, a colon, a pipe, a comma or nothing at all turns one of them RED.
+  //
+  // U+0000 is the one separator that CANNOT occur in a label: Postgres refuses a NUL byte inside a `text` value, so no
+  // name, domain, workspace address or instance id reaching this function can contain one. That is why the composite is
+  // NUL-joined — and why the source must spell it as the six-character escape backslash-u-0000 rather than
+  // embed the raw byte. A raw NUL makes grep classify the whole file as binary, and both check-auth-safety.sh and
+  // check-app-runtime-imports.sh scan with `grep -I`, so the file would be silently skipped by both. The tripwire
+  // that keeps every file in this lane spelled out lives in data/application-match-review.test.ts.
+  it("distinguishable records never collide, whatever punctuation their labels contain", () => {
+    const COLLIDES_UNDER: ReadonlyArray<readonly [string, readonly [string, string | null], readonly [string, string | null]]> = [
+      ["a space", ["A B", "C"], ["A", "B C"]],
+      ["a colon", ["A:B", "C"], ["A", "B:C"]],
+      ["a pipe", ["A|B", "C"], ["A", "B|C"]],
+      ["a comma", ["A,B", "C"], ["A", "B,C"]],
+      ["no separator at all", ["AB", "C"], ["A", "BC"]],
+      ["a newline", ["A\nB", "C"], ["A", "B\nC"]],
+    ];
+    for (const [what, first, second] of COLLIDES_UNDER) {
+      const groups = buildReviewGroups(
+        [row("m1", APP_A, "proposed"), row("m2", APP_B, "proposed")],
+        labels({
+          app: new Map([
+            [APP_A, { recordLabel: first[0], instanceLabel: first[1] }],
+            [APP_B, { recordLabel: second[0], instanceLabel: second[1] }],
+          ]),
+        }),
+      );
+      expect(
+        groups[0].candidates.map((c) => c.ambiguous),
+        `these two records are distinguishable; they would collide under ${what}`,
+      ).toEqual([false, false]);
+    }
+  });
+
+  it("still flags a genuinely identical pair — the guard above did not disable detection", () => {
+    const groups = buildReviewGroups([row("m1", APP_A, "proposed"), row("m2", APP_B, "proposed")], indistinguishable);
+    expect(groups[0].candidates.map((c) => c.ambiguous)).toEqual([true, true]);
+  });
 });
 
 describe("B7 / B8 / M14 — settled decisions survive assembly untouched", () => {
