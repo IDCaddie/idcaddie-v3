@@ -12,6 +12,43 @@ from PRs verified via `git log` / `gh pr list`.
 > **as of each PR's date** and are historical — where an older entry says "RISK-007 remains OPEN" / "Phase C remains
 > BLOCKED", that was accurate at that entry's date; this banner is the current state.
 
+### fix(governance) — Phase 18E4: migration 0091, hosted safe-update compatibility · 2026-08-15
+
+**Found on hosted staging, not by any local gate.** `product_sync_governance_findings` (0083) cleared its
+`on commit drop` reporting table with `delete from reported_findings;`. Managed Supabase preloads `safeupdate`, which
+rejects an UPDATE/DELETE whose parse tree has no WHERE clause, so **every hosted call failed** — including one with an
+empty payload — with `SQLSTATE 21000 · DELETE requires a WHERE clause`. `governance_findings` could not be written at
+all. Stock Postgres does not load the extension, which is why 43/43 real-DB suites, the full RLS suite, CI, and a
+replica built from staging's own post-0090 schema dump all passed against a function that could never have worked
+hosted. Phase 18E2's runtime acceptance is what caught it.
+
+**One token: `delete from reported_findings where true;`.** Same statement class, same row counts, triggers, MVCC and
+rollback. `where true` was verified against Supabase's own Postgres image rather than assumed — the competing reading,
+that the planner folds the constant away and the guard still fires, is wrong. The utility-statement alternative also
+passes but changes the statement class for no benefit; a redesign would change finding semantics.
+
+**0083 is not edited** — rewriting a merged migration would give two databases two different histories. 0091 redefines
+the function, so every environment receives the identical reviewed artifact. Nothing else changes: same signature,
+return type, volatility, SECURITY DEFINER posture, pinned `search_path`, role gate, finding identity, `first_seen_at`,
+`reopen_count`, refresh, closure and `withheld_from_closure` accounting.
+
+**Equivalence is asserted mechanically, not by reading.** `governance-finding-sync-equivalence.test.ts` proves the two
+function bodies differ by exactly one line, re-asserts fourteen lifecycle properties on 0091's own text, and fails any
+migration that introduces a WHERE-less statement — with 0083 allowlisted **only while 0091 supersedes it**. The
+statement-aware scan confirms 0083:168 was the only such statement in all 90 runtime migrations; the fourteen hits in
+`supabase/tests/` are deliberate denial probes that never run hosted.
+
+**`scripts/test-safeupdate.sh`** closes the environment gap: the chain plus the persistence suites against
+`supabase/postgres` with `safeupdate` preloaded. It self-checks the guard is live before reporting, and is
+non-vacuous — remove 0091 and it reproduces the exact hosted error at
+`product_sync_governance_findings(...) line 24`. Scoped to the governance-persistence suites because other suites
+assert denial via WHERE-less statements or are order-coupled through `has_tenant_role`; `test-rls.sh` stays canonical.
+
+9 mutants RED: bare DELETE restored · clear removed · wrong table · `where false` · changed finding identity · reset
+`first_seen_at` · `reopen_count` incremented on refresh · closure without proof · widened role authority.
+
+Not applied hosted in this PR. No table, column, index, constraint, policy or RLS change; no data write; no scheduler.
+
 ### feat(governance) — Phase 18D: Rule 5's remediation split · 2026-08-14
 
 **No migration, and no matcher change.** `git diff origin/main..HEAD -- supabase/migrations` is empty;
