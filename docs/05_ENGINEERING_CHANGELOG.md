@@ -56,6 +56,46 @@ queue · `operational_instance_absent` pointed at the queue · the stale "not av
 
 **No migration, no RLS, no RPC, no grant, no `service_role`, no scheduler, no provider code, no mutation of any kind.**
 This PR adds navigation. Migration head remains 0091. Nothing hosted was touched.
+### fix(governance) — Phase 18F-C2: rule 5 withdraws its own closure licence · 2026-08-15
+
+**A withheld rule could license the closure of the finding it was withheld from re-proving.** Rule 5 fires only while
+the matcher's CURRENT status is `completed`, and its findings carry the directory application's connection as their
+evidence. 0083 closes any open finding of this engine that is ABSENT from a run's payload and whose evidence
+connections are all in `p_complete_connection_ids` — a flat subset test that knows nothing about which rule produced a
+finding, or whether that rule ran. So a run with the matcher `running`/`failed` handed 0083 both halves of a false
+closure at once: the finding went missing from the payload, and its connection stayed eligible because the CONNECTOR
+was perfectly healthy — only the matcher was unwell. The close landed in `closed`, never in `withheld_from_closure`, so
+the estate appeared to improve because proof was missing. Since #431 those findings are customer-visible, where the
+close reads as **resolved**.
+
+**A caller-side precondition cannot fix this, and #432's does not.** The caller's matcher read and the engine's own are
+two separate statements; a concurrent matcher run between them flips the state after the caller has already decided,
+and #432's anomaly note is computed after the sync has committed. The decision has to be made where both facts come
+from one graph — `closureEligibleConnections`, which already existed to solve the identical problem along the
+capability axis.
+
+**The fix is one condition.** When `matcherState.hasEverRun && status !== "completed"`, the directory-application
+connections are removed from the closure licence for that evaluation. Nothing about OPENING changes; rule 5 is still
+withheld with the same reason; matcher state, decisions and tenant authority are untouched. **No migration** — only the
+value of `p_complete_connection_ids` changes, not 0083's contract.
+
+**`hasEverRun` is load-bearing, not defensive.** `application_matcher_state` gains its row on the first `start` and
+keeps it, so `hasEverRun: false` proves rule 5 has never opened a finding — nothing to protect. Withdrawing the licence
+there would permanently hold open every OTHER rule's findings on a directory connection for any tenant that simply
+never runs the matcher. The withdrawal is scoped to the transient `running`/`failed` states.
+
+**The tradeoff is a delay, and it is tested rather than asserted.** A connector serving both `identity` and
+`directory_applications` loses closure for both while the matcher is unwell, because the subset test cannot separate
+them. `rule5-closure-race.test.ts` drives a real orphan finding on that shared connection through open → genuinely
+resolved while the matcher is failed (held open, and counted in `withheld_from_closure`) → matcher completes → closed.
+False closure is unacceptable; delayed closure is not.
+
+**Regressions kept permanently.** The engine test pins the invariant across all six matcher states — rule 5 licensed
+⇔ its connections are closure-eligible — plus determinism and never-run scoping. The loader test drives the TOCTOU
+interleaving by flipping the matcher row between reads, through the REAL loader and engine, over a sync emulated from
+0091's own text and asserted against it. Seven mutants RED: licence left eligible, keyed on `lastCompletedAt`, protect
+permanently, protect globally, rule 5 dropped from `withheldRules`, foreign connection leaked into scope, and the
+over-broad never-run variant.
 
 ### fix(governance) — Phase 18F-B review fixes: a NUL byte blinded two safety gates · 2026-08-15
 
