@@ -5,7 +5,7 @@ import {
 } from "./governance-presenter";
 import { evaluateCrossSourceGovernance } from "@/lib/server/cross-source-governance/evaluate";
 import type { GovernanceRuleId } from "@/lib/server/governance-analytics/types";
-import type { CrossSourceGraph } from "@/lib/server/cross-source-governance/types";
+import type { CrossSourceGraph, CrossSourceRuleId } from "@/lib/server/cross-source-governance/types";
 
 // The full rule catalog (must match GovernanceRuleId exactly — RULE_PROSE is a Record<GovernanceRuleId,…> so any missing rule is a compile
 // error; this list is the runtime backstop that the count/coverage never silently drifts).
@@ -75,6 +75,60 @@ describe("cross-source presenter — resolvable + truthful", () => {
     const p = crossSourceProse(`${stem}.title`)!;
     return `${p.title} ${p.summary} ${p.guidance ?? ""}`.toLowerCase();
   };
+
+  // ── COPY COVERAGE (18F-A review fix) ───────────────────────────────────────────────────────────────────────────────
+  // The gap this closes: `/access/governance` reads the whole `cross_source` engine, but only rule 5 had prose, so four
+  // of the five shipped rules — INCLUDING both high-severity ones — reached a customer as "Governance finding / This
+  // finding needs review." The broad fallback is for a row a FUTURE build persisted; a rule shipping today may not use it.
+  //
+  // `Record<CrossSourceRuleId, true>` is the compile-time half: a sixth rule added to the engine is a tsc error here,
+  // before it is a blank card in front of a customer. The runtime half below is the one that matters, because a rule can
+  // be listed here and still resolve to nothing.
+  const SHIPPED_RULES: Record<CrossSourceRuleId, true> = {
+    active_saas_account_without_accepted_identity: true,
+    privileged_saas_account_without_accepted_identity: true,
+    inactive_identity_with_active_saas_account: true,
+    duplicate_active_accounts_for_one_person: true,
+    discovered_application_unmanaged_by_idp: true,
+  };
+
+  it("every SHIPPED rule resolves to its OWN reviewed copy, never the broad fallback", () => {
+    const ids = Object.keys(SHIPPED_RULES) as CrossSourceRuleId[];
+    expect(ids, "the engine ships five cross-source rules").toHaveLength(5);
+    for (const ruleId of ids) {
+      const stem = `crossSource.${ruleId}`;
+      // Own entry, not a fallback: `crossSourceProse` degrades an unknown SUBTYPE to the rule's broad copy, but a rule
+      // with no entry of its own resolves to null and the reader substitutes a card that says nothing.
+      expect(Object.hasOwn(CROSS_SOURCE_PROSE, stem), `${ruleId} has no reviewed copy of its own`).toBe(true);
+      const p = crossSourceProse(`${stem}.title`);
+      expect(p, `${ruleId} resolves to no copy`).not.toBeNull();
+      expect(p!.title.trim().length, `${ruleId} title`).toBeGreaterThan(0);
+      expect(p!.summary.trim().length, `${ruleId} summary`).toBeGreaterThan(0);
+      expect(p!.guidance?.trim().length ?? 0, `${ruleId} guidance`).toBeGreaterThan(0);
+    }
+  });
+
+  // Each rule must say its OWN thing. Five rules sharing one sentence would satisfy the coverage test above while
+  // telling a customer nothing, which is the failure that test exists to prevent.
+  it("the five rules produce five DISTINCT titles and summaries", () => {
+    const ids = Object.keys(SHIPPED_RULES) as CrossSourceRuleId[];
+    const resolved = ids.map(id => crossSourceProse(`crossSource.${id}.title`)!);
+    expect(new Set(resolved.map(p => p.title)).size).toBe(5);
+    expect(new Set(resolved.map(p => p.summary)).size).toBe(5);
+  });
+
+  // The account/person rules read provider-stated account and identity state. They never looked at employment, a
+  // contract or a seat, so they may not imply any of it — beyond the shared FORBIDDEN sweep below.
+  it("the account and person rules claim no employment, seat or entitlement fact", () => {
+    for (const ruleId of ["active_saas_account_without_accepted_identity", "privileged_saas_account_without_accepted_identity",
+                          "inactive_identity_with_active_saas_account", "duplicate_active_accounts_for_one_person"] as const) {
+      const blob = blobOf(`crossSource.${ruleId}`);
+      for (const term of ["leaver", "left the company", "terminated", "former employee", "offboard",
+                          "seat", "licence", "license", "subscription", "contract", "spend", "cost", "duplicate charge"]) {
+        expect(blob.includes(term), `${ruleId} must not claim "${term}": ${blob}`).toBe(false);
+      }
+    }
+  });
 
   // R15 — the keys the ENGINE actually emits, not a hand-copied list. A rename in evaluate.ts that forgot the presenter
   // fails here rather than shipping a raw key to a customer.
