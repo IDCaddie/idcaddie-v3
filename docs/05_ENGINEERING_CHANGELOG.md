@@ -291,16 +291,24 @@ which is a function of the current status alone, so a surviving `last_completed_
 rather than by a second rule that could drift. The page also disables the button, but that is a courtesy: a server
 action is an addressable POST, so the action is the authority and the tests invoke it directly to prove it.
 
-**Scope, stated rather than implied.** This does NOT repair 0083's closure model — that needs a migration carrying
-per-rule/per-capability closure scope, and every other caller of the engine is exactly as exposed as before. The guard
-refuses to *enter* the unsafe state from the one path this lane created. A static test pins that the surface never
-claims otherwise.
+**Scope, stated rather than implied.** Per-rule/per-capability closure licensing still does not exist in 0083's
+contract, so #436's protection is coarse: a connector serving both `identity` and `directory_applications` can have
+another rule's genuinely-resolved finding held open for one evaluation. Delay bounded by the next completed-matcher run,
+counted in `withheld_from_closure`, and documented in the runbook. A static test pins that this surface never describes
+itself as the thing that makes closure safe.
 
-**The residual race is detected, not denied.** The precondition and the engine's own matcher read are two statements; a
-concurrent matcher run between them flips the state, and the engine — not the guard — decides whether rule 5 fires. That
-cannot be closed from the operator surface, so a run that was authorized and comes back reporting rule 5 withheld now
-raises an `ANOMALY` note naming the possible wrong closures and the recovery. The regression test drives that race
-deterministically by flipping the matcher row between the two reads.
+**Reconciled with #436, which is now the correctness boundary.** Phase 18F-C2 moved the protection into
+`closureEligibleConnections`: while the matcher has run before and its current status is not `completed`, the
+directory-application connections lose their closure licence, so no caller and no interleaving can close a rule 5
+finding that could not be re-proven. **This guard therefore no longer prevents data loss, and no longer claims to.**
+What it prevents is an INCOMPLETE run being read as a clean estate, which is why it survives as a completeness
+precondition rather than a safety one.
+
+The residual matcher-vs-evaluation race is still *reported* — a run authorized as `completed` that returns with rule 5
+withheld raises a bounded `INCOMPLETE` note saying the run does not describe unmanaged applications and may have
+withheld closures, with the remedy. It no longer claims findings may have been wrongly closed, because #436 makes that
+impossible; a test pins that the old corruption language cannot return. The regression drives the race deterministically
+by flipping the matcher row between the two reads and asserts the finding stays **open**.
 
 **Regression + matrix.** `evaluation-gate.regression.test.ts` runs the REAL action, reader, loader and engine over a
 fake client whose sync implements 0083's closure predicate verbatim — and pins that emulation against 0091's own SQL, so

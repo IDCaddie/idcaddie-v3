@@ -10,8 +10,13 @@
 // the payload, while the connector stays healthy and therefore closure-eligible. 0083 reads "absent + covered" as "the
 // condition ended" and CLOSES a finding that is still true — counted in `closed`, never in `withheld_from_closure`.
 //
-// Before this lane nothing could run the evaluation, so the collision was unreachable. The operator button made it
-// reachable, so the refusal belongs here.
+// Phase 18F-C2 (#436) fixed that collision IN THE ENGINE: `closureEligibleConnections` now withdraws the
+// directory-application connections from the closure licence whenever the matcher has run before and its current
+// status is not `completed`. Correctness therefore no longer depends on this lane's guard, and these tests assert the
+// merged behaviour rather than emulating the old bug.
+//
+// What the guard still buys is COMPLETENESS: an evaluation run while rule 5 is withheld says nothing about unmanaged
+// applications and conservatively withholds closures, so the operator is asked to run the matcher first.
 //
 // ══ WHAT THIS TEST IS ════════════════════════════════════════════════════════════════════════════════════════════════
 // The REAL action, the REAL reader, the REAL loader and the REAL engine, over a fake Supabase client whose
@@ -133,33 +138,35 @@ describe("baseline — a completed matcher opens the rule 5 finding", () => {
   });
 });
 
-// ── STEP 2 · the pre-existing ENGINE gap, demonstrated. NOT fixed by this lane. ─────────────────────────────────────
-describe("the engine gap this lane must not expose (documented, not fixed here)", () => {
+// ── STEP 2 · the ENGINE now protects the finding, with or without this lane's guard (#436) ─────────────────────────
+describe("the engine is the correctness boundary", () => {
   it.each([
     ["failed with a surviving last_completed_at", FAILED_WITH_HISTORY],
     ["running with a surviving last_completed_at", RUNNING_WITH_HISTORY],
-  ])("matcher %s: an UNGUARDED evaluation closes the still-true finding", async (_label, matcher) => {
+  ])("matcher %s: an UNGUARDED evaluation leaves the still-true finding OPEN", async (_label, matcher) => {
     await seedOpenFinding(matcher);
 
-    // Calling the engine directly — i.e. bypassing this lane's guard, as any other caller would.
+    // Calling the engine directly — bypassing this lane's guard entirely, as any other caller would.
     const r = await evaluateTenantCrossSourceGovernance();
 
     expect(r.ok).toBe(true);
     expect(r.ok && r.summary.withheldRules.map(x => x.ruleId)).toContain(RULE5);
-    expect(r.ok && r.summary.closed).toBe(1);
-    expect(r.ok && r.summary.withheldFromClosure).toBe(0); // not even counted as withheld
-    expect(world.stored[0].status).toBe("closed");          // still true in the estate, recorded as resolved
+    // #436: the directory-application connection is no longer closure-eligible while the matcher cannot re-prove it,
+    // so the finding is WITHHELD from closure rather than closed.
+    expect(r.ok && r.summary.closed).toBe(0);
+    expect(r.ok && r.summary.withheldFromClosure).toBeGreaterThan(0);
+    expect(world.stored[0].status).toBe("open");
   });
 });
 
 // ── STEP 3 · the guard. This is what the lane owns. ─────────────────────────────────────────────────────────────────
 describe("C1–C5 · the action refuses unless the matcher is CURRENTLY completed", () => {
   it.each([
-    ["C1 never run", { has_ever_run: false, status: null, last_completed_at: null }, /never run/i],
+    ["C1 never run", { has_ever_run: false, status: null, last_completed_at: null }, /before evaluating governance/i],
     ["C2 running, no history", { has_ever_run: true, status: "running", last_completed_at: null }, /in flight/i],
     ["C2 running WITH history", RUNNING_WITH_HISTORY, /in flight/i],
-    ["C3 failed, no history", { has_ever_run: true, status: "failed", last_completed_at: null }, /FAILED/],
-    ["C4 failed WITH history", FAILED_WITH_HISTORY, /FAILED/],
+    ["C3 failed, no history", { has_ever_run: true, status: "failed", last_completed_at: null }, /currently failed/i],
+    ["C4 failed WITH history", FAILED_WITH_HISTORY, /currently failed/i],
   ])("%s → refused before the sync, finding untouched", async (_label, matcher, copy) => {
     await seedOpenFinding(matcher);
 
@@ -201,18 +208,27 @@ describe("C1–C5 · the action refuses unless the matcher is CURRENTLY complete
 });
 
 // ── STEP 4 · the residual race is DETECTED, not claimed impossible ──────────────────────────────────────────────────
-describe("C11 · a mid-run matcher state change is surfaced as an anomaly", () => {
-  it("authorized while completed, engine then reads failed → loud anomaly note", async () => {
+describe("C11 · a mid-run matcher state change reports an INCOMPLETE run, not corruption", () => {
+  it("authorized while completed, engine then reads failed → finding still open, bounded incompleteness note", async () => {
     await seedOpenFinding(COMPLETED);
     // Precondition read sees `completed`; the engine's own read (the second) sees `failed` — a concurrent matcher run.
+    // This is the race the operator guard structurally cannot prevent, which is why #436 handles it in the engine.
     world.flipOnEngineRead = FAILED_WITH_HISTORY;
 
     const state = await runEvaluationAction(null);
 
-    expect(state?.ok).toBe(true); // the sync did happen — this guard cannot prevent it from here
-    expect(state?.notes.join(" ")).toMatch(/ANOMALY/);
-    expect(state?.notes.join(" ")).toMatch(/may have been closed/);
-    expect(world.stored[0].status).toBe("closed"); // the damage is real, and now it is VISIBLE rather than silent
+    expect(state?.ok).toBe(true);                      // the sync did happen …
+    expect(world.stored[0].status).toBe("open");       // … and #436 kept the still-true finding open
+    expect(state?.notes.join(" ")).toMatch(/INCOMPLETE/);
+    expect(state?.notes.join(" ")).toMatch(/Nothing was wrongly closed/);
+    // The old corruption language must never come back: it would send an operator chasing damage that cannot occur.
+    expect(state?.notes.join(" ")).not.toMatch(/wrongly closed findings|reopen anything|corruption/i);
+  });
+
+  it("the note is only raised when rule 5 was actually withheld", async () => {
+    await seedOpenFinding(COMPLETED);
+    const state = await runEvaluationAction(null);     // no flip — a clean, complete run
+    expect(state?.notes.join(" ")).not.toMatch(/INCOMPLETE/);
   });
 });
 

@@ -193,11 +193,13 @@ describe("the evaluation precondition is enforced server-side, before the engine
     }
   });
 
-  it("the guard records that it does NOT fix the engine's closure model", () => {
+  it("the guard records that CORRECTNESS lives in the engine, not here", () => {
     // Read raw: this is a claim about the documentation a maintainer will read, and `codeKeepStrings` strips comments.
     const raw = readFileSync(FILES.view, "utf8");
-    expect(raw).toMatch(/THIS GUARD DOES NOT FIX IT/);
-    expect(raw).toMatch(/needs a migration/);
+    expect(raw).toMatch(/CORRECTNESS LIVES IN THE ENGINE, NOT HERE/);
+    expect(raw).toMatch(/This guard is NOT what stops/);
+    // …and it must not re-acquire the pre-#436 framing.
+    expect(raw).not.toMatch(/THIS GUARD DOES NOT FIX IT/);
   });
 
   it("no operator-facing copy promises engine-wide closure safety", () => {
@@ -210,6 +212,15 @@ describe("the evaluation precondition is enforced server-side, before the engine
 describe("the runbook cannot re-assert the claims the guard disproved", () => {
   const RUNBOOK = "docs/runbooks/GOVERNANCE_OPS_RUNBOOK.md";
   const text = () => readFileSync(RUNBOOK, "utf8");
+
+  it("never re-asserts the false-closure hazard that #436 removed", () => {
+    // Post-#436 the engine withdraws the closure licence itself, so any runbook sentence claiming this path can close
+    // still-true findings — or telling an operator to reopen wrongly-closed ones — is false and must not come back.
+    const t = text();
+    expect(t).not.toMatch(/0083 would close still-true|would close still-true unmanaged/i);
+    expect(t).not.toMatch(/reopen anything wrongly closed|reopens anything wrongly/i);
+    expect(t).toMatch(/Correctness is handled in the engine/i);
+  });
 
   it("never says evaluation-alone is valid", () => {
     // The pre-fix text said "Running the evaluation alone is valid — it simply reports rule 5 as withheld". It is not
@@ -226,13 +237,37 @@ describe("the runbook cannot re-assert the claims the guard disproved", () => {
     // file — otherwise a reflow would break a test that is about meaning.
     const flat = text().replace(/\*\*/g, "").replace(/\s+/g, " ");
     expect(flat).toMatch(/refuses to run unless the matcher/i);
-    expect(flat).toMatch(/closes a finding that is still true/i);
+    // Post-#436 the reason is completeness, and the safety statement belongs to the engine.
+    expect(flat).toMatch(/cannot be closed by a run that could not re-prove it/i);
     expect(flat).toMatch(/history does not authorize a run/i);
   });
 
-  it("does not claim the engine's closure model is fixed", () => {
+  it("does not overclaim the engine's closure model", () => {
+    // #436 fixed the matcher axis; per-rule licensing still does not exist, and the runbook must keep saying so.
     const t = text();
-    expect(t).toMatch(/does \*\*not\*\* repair 0083/i);
-    expect(t).not.toMatch(/the engine is now closure-safe/i);
+    expect(t).toMatch(/Per-rule closure licensing does not exist in 0083/i);
+    expect(t).toMatch(/delay bounded by the next completed-matcher run/i);
+    expect(t).not.toMatch(/the engine is now fully closure-safe/i);
+  });
+});
+
+
+describe("operator copy is reconciled with #436", () => {
+  it("the mid-run note reports INCOMPLETENESS, never corruption", () => {
+    const kept = codeKeepStrings(FILES.view);
+    expect(kept).toMatch(/INCOMPLETE —/);
+    expect(kept).not.toMatch(/may have been closed by this run/i);
+    expect(kept).not.toMatch(/reopen\s+anything that was wrongly closed/i);
+  });
+
+  it("no blocked-state copy asserts that 0083 would close still-true findings", () => {
+    const kept = codeKeepStrings(FILES.view);
+    expect(kept).not.toMatch(/0083 would close findings that are still true/i);
+  });
+
+  it("the withheld-closure note names both evidence sources without inventing a breakdown", () => {
+    const kept = codeKeepStrings(FILES.view);
+    expect(kept).toMatch(/sync the connectors/);
+    expect(kept).toMatch(/run the matcher to completion/);
   });
 });

@@ -141,6 +141,22 @@ describe("the matcher trigger", () => {
 });
 
 describe("the evaluation trigger", () => {
+  it.each([
+    ["query_failed", "query_failed"],
+    ["not_authorized", "not_authorized"],
+  ])("an unreadable matcher state (%s) refuses BEFORE the engine", async (_l, error) => {
+    // Fail-closed on an unknown state. Without this the surface would enter an evaluation it cannot characterise —
+    // and a transient read failure would become an evaluation nobody asked for. (Independent review found this branch
+    // had no test; a mutant that treated an unreadable state as allowed survived the whole suite.)
+    readTenantMatcherState.mockResolvedValue({ ok: false, error });
+    const state = await runEvaluationAction(null);
+    expect(evaluateTenantCrossSourceGovernance).not.toHaveBeenCalled();
+    expect(state?.ok).toBe(false);
+    expect(state?.message).toMatch(/blocked/i);
+    expect(state?.counts).toEqual([]);
+  });
+
+
   it("reports the sync summary", async () => {
     evaluateTenantCrossSourceGovernance.mockResolvedValue({ ok: true, summary: okSummary });
     const state = await runEvaluationAction(null);

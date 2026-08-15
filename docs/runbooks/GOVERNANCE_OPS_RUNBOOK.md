@@ -36,24 +36,26 @@ POST cannot get past it.
 | matcher never run → evaluation | **refused** — run the matcher first |
 | `last_completed_at` set but current status is `failed`/`running` | **refused** — history does not authorize a run |
 
-### Why evaluation-alone is NOT safe when the matcher is not completed
+### Why evaluation-alone is not USEFUL when the matcher is not completed
 
-Rule 5's findings carry the application's connection as their evidence. Migration 0083 closes any open finding of this
-engine that is **absent from a run's payload** and whose evidence connections are all closure-eligible — a flat subset
-test that knows nothing about which rule produced a finding, or whether that rule ran.
+**Correctness is handled in the engine, not by this precondition.** Phase 18F-C2 (#436) made
+`closureEligibleConnections` withdraw the directory-application connections from the closure licence whenever the
+matcher has run before and its current status is not `completed`. A rule 5 finding therefore **cannot be closed by a
+run that could not re-prove it** — from any caller, and regardless of when the matcher state changed. Do not read the
+precondition below as the thing standing between you and data loss; it is not.
 
-So when the matcher is not `completed`, rule 5 is withheld, its findings vanish from the payload, and the connector is
-still healthy — therefore still closure-eligible. 0083 reads "absent + covered" as "the condition ended" and **closes a
-finding that is still true**. It is counted in `closed`, never in `withheld_from_closure`, so nothing on screen would
-tell you anything was lost. Since #431, those findings are customer-visible at `/access/governance`, where the close
-reads as *resolved*.
+What the precondition buys is a **complete** result. Evaluating while rule 5 is withheld produces a run that says
+nothing about unmanaged applications and that conservatively withholds closures on the affected connections. Reading
+that as "the estate is clean" is the mistake worth preventing, so the surface asks for a successful matcher run first.
 
-**A withheld rule is therefore not, by itself, a licence to close anything** — but 0083 cannot tell the difference. This
-runbook's precondition is what keeps the operator out of that state.
+**A withheld rule is not, by itself, a licence to close anything** — 0083's flat subset test cannot tell the
+difference, which is exactly why the engine now withdraws the licence rather than relying on any caller to behave.
 
-> **Scope of the fix.** The guard lives in this operator surface only. It does **not** repair 0083's closure model —
-> that needs a migration carrying per-rule/per-capability closure scope. Any other caller of the engine is exactly as
-> exposed as it was before. Do not read this section as "the engine is closure-safe".
+> **What is still NOT fixed.** Per-rule closure licensing does not exist in 0083's contract. The engine's protection is
+> deliberately coarse: while the matcher is unwell, a connector that serves both `identity` and `directory_applications`
+> loses closure eligibility for **both**, so another rule's genuinely-resolved finding on that shared connection can be
+> held open for one evaluation. That is a delay bounded by the next completed-matcher run, it is counted in
+> `withheld_from_closure`, and it is the accepted trade: false closure is unacceptable, delayed closure is not.
 
 ## 2. Reading the matcher state
 
@@ -114,9 +116,9 @@ unconditionally, so a new run simply takes over.
 
 In both cases the remedy is the same: **press Run matcher again.** There is no lock to clear and no row to repair.
 
-While the matcher is stuck at `running`, rule 5 is withheld **and the evaluation is refused** (§1). Do not try to
-"work around" the refusal by evaluating anyway from another path — that is precisely the state in which 0083 would
-close still-true unmanaged-application findings.
+While the matcher is stuck at `running`, rule 5 is withheld **and the evaluation is refused** (§1). Evaluating from
+another path is not dangerous — the engine withdraws the closure licence in exactly this state — but it is pointless:
+the result cannot speak about unmanaged applications and will withhold closures you would rather it made.
 
 Do **not** retry in a loop. The surface runs the engine exactly once per press, on purpose; an automatic retry would
 hide an intermittent failure behind an eventual success and would be the first step toward unattended execution.
@@ -133,15 +135,14 @@ makes the retry above safe. Concurrent *matcher* runs are bounded and non-destru
   state can therefore read `completed` while an operator is looking at a "failed" message.** The persisted state is the
   truth; re-read it before acting.
 
-**The one race that matters** is matcher-vs-evaluation. The evaluation's precondition and the engine's own matcher read
-are two separate statements, so another operator starting a matcher run in between can flip the state after the
-evaluation was authorized. This cannot be closed from the operator surface — the engine, not the guard, decides whether
-rule 5 fires — so it is **detected instead**: a run that was authorized but comes back reporting rule 5 as withheld
-raises an `ANOMALY` note telling you findings may have been wrongly closed, and what to do about it.
+**Matcher-vs-evaluation.** The precondition and the engine's own matcher read are two separate statements, so another
+operator starting a matcher run in between can flip the state after the evaluation was authorized. The operator surface
+cannot prevent that — which is why #436 handles it in the engine, where the withholding decision and the closure licence
+come from one graph. **No finding is wrongly closed by this race.**
 
-**If you see that note:** re-run the matcher to a successful completion, evaluate again (which reopens anything wrongly
-closed, incrementing `reopen_count`), and confirm with the other operator. Avoid it by not running the matcher and the
-evaluation from two sessions at the same time — attended operation is the only sequencing this phase has.
+It is still reported, because the run is INCOMPLETE: a run authorized as `completed` that comes back with rule 5
+withheld raises a bounded `INCOMPLETE` note. **If you see it:** run the matcher to completion and evaluate again for a
+complete result, and check whether another operator is running the matcher at the same time. Nothing needs repairing.
 
 ## 6. Decision preservation
 
@@ -172,8 +173,8 @@ that closes findings on evidence that proved nothing.
 *"the application matcher has never run"*). Zero closures does not tell you a rule ran; the withheld-rule list does.
 
 A load failure aborts before any sync. Nothing is written and nothing closes — a read we could not complete must never
-become a closure. The matcher-state precondition in §1 is the same principle applied one level earlier: a rule we could
-not evaluate must never become a closure either.
+become a closure. The engine applies the same principle to rule gating: a rule it could not evaluate withdraws its own
+closure licence, so a rule we could not evaluate never becomes a closure either (#436).
 
 ## 8. safeupdate compatibility (migration 0091)
 
@@ -228,9 +229,9 @@ must exist first:
    is no identity an unattended runner could present today, and creating one is a trust-boundary change.
 4. **Persisted sync summaries**, so "did anything close last night, and what was withheld" is answerable without a human
    having been present.
-5. **A closure model that respects rule gating** — 0083 currently closes on "absent from payload + evidence covered",
-   which cannot distinguish "the condition ended" from "the rule did not run" (§1). Attended operation is guarded by the
-   precondition; an unattended runner would need the migration.
+5. **Per-rule closure licensing.** #436 made the engine withdraw the whole directory-application connection when rule 5
+   cannot re-prove, which is correct but coarse — it can delay another rule's closure on a shared connection. 0083 would
+   need per-rule/per-capability closure scope to remove that collateral. Not required for safety, attended or not.
 
 Until all four exist, the honest statement is the one at the top of this document: there is no scheduler, and the
 backend is operationally supportable without one.
@@ -252,7 +253,8 @@ capability is `available`, and migrations through 0091.
 6. Run the evaluation again. Expected: rule 5 now evaluated rather than withheld; record opened/refreshed/closed and
    `withheld from closure`.
 7. **Closure-safety evidence.** With at least one rule 5 finding open, force a matcher failure (or catch one), then
-   attempt the evaluation. Expected: **refused**, and the finding is still `open` at `/access/governance`. Record both.
+   attempt the evaluation. Expected: **refused** by the surface, and the finding still `open` at `/access/governance`.
+   Record both. (The refusal is a completeness precondition; #436 is what guarantees the finding survives.)
 8. Re-run the matcher to a successful completion and evaluate again. Expected: allowed; the finding is refreshed, not
    reopened (its `first_seen_at` and `reopen_count` are unchanged) — proving nothing was closed behind your back.
 9. Capture screenshots of steps 2, 3, 5, 6 and 7 into `docs/evidence/`.

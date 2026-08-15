@@ -170,7 +170,10 @@ describe("a withheld closure reads as correct behaviour, not as a failure", () =
     const note = withheldClosureNote(3);
     expect(note).toContain("3");
     expect(note).toMatch(/correct behaviour, not a failure/);
-    expect(note).toMatch(/re-run once those connectors have synced/);
+    // Post-#436 a withheld closure can come from connector evidence OR from a matcher that could not re-prove, and
+    // 0083 reports only a count — so the remedy names both without inventing a breakdown.
+    expect(note).toMatch(/sync the connectors/);
+    expect(note).toMatch(/run the matcher to completion/);
   });
 
   it("never tells an operator to widen what counts as complete", () => {
@@ -208,18 +211,20 @@ describe("evaluationGate — only a CURRENTLY completed matcher unlocks the eval
     }
   });
 
-  it("the blocked copy explains the closure hazard rather than just refusing", () => {
+  it("the blocked copy explains WHY, and is truthful after #436", () => {
     const g = evaluationGate(state({ status: "failed" }));
-    expect(!g.allowed && g.message).toMatch(/does NOT authorize/);
-    expect(!g.allowed && g.message).toMatch(/close findings that are still true/);
-    expect(!g.allowed && g.message).toMatch(/left untouched/);
+    // The reason is completeness, not corruption: #436 makes false closure impossible from any caller.
+    expect(!g.allowed && g.message).toMatch(/does not make the current state healthy/);
+    expect(!g.allowed && g.message).toMatch(/COMPLETE governance result/);
+    expect(!g.allowed && g.message).toMatch(/no finding was changed/);
   });
 
-  it("the blocked copy does not claim the ENGINE is closure-safe", () => {
-    // The guard is a refusal to enter the unsafe state from this path — not a fix to 0083's closure model.
+  it("no blocked copy claims a false-closure hazard that #436 removed", () => {
     for (const status of ["running", "failed"] as const) {
       const g = evaluationGate(state({ status }));
-      expect(!g.allowed && g.message).not.toMatch(/engine is safe|cannot close|never closes|closure-safe/i);
+      const msg = !g.allowed ? g.message : "";
+      expect(msg).not.toMatch(/would close findings that are still true/i);
+      expect(msg).not.toMatch(/wrongly closed|corruption/i);
     }
   });
 });

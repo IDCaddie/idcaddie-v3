@@ -85,20 +85,21 @@ const CONSEQUENCE: Record<MatcherHeadline, string> = {
 
 // ── The evaluation precondition ──────────────────────────────────────────────────────────────────────────────────────
 //
-// ══ WHY A WITHHELD RULE IS NOT A SAFE STATE TO SYNC IN ═══════════════════════════════════════════════════════════════
-// Rule 5's findings carry the application's connection as their evidence, and 0083 closes any open finding of this
-// engine that is ABSENT from a run's payload and whose evidence connections are all closure-eligible. That test is
-// flat: it knows nothing about which rule produced the finding, or whether that rule ran at all.
+// ══ WHY A WITHHELD RULE IS STILL NOT A USEFUL STATE TO SYNC IN ═══════════════════════════════════════════════════════
+// CORRECTNESS LIVES IN THE ENGINE, NOT HERE. Phase 18F-C2 (#436) made `closureEligibleConnections` withdraw the
+// directory-application connections from the closure licence whenever the matcher has run before and its current
+// status is not `completed` — so a rule 5 finding can no longer be closed by a run that could not re-prove it, no
+// matter which caller triggered the evaluation and no matter when the state changed. This guard is NOT what stops
+// false closure, and must not be described as if it were.
 //
-// So when the matcher is not `completed`, rule 5 is withheld, its findings go missing from the payload — and the
-// connector is still perfectly healthy, so its connection is still closure-eligible. 0083 reads "absent + covered" as
-// "the condition ended" and CLOSES a finding that is still true. It lands in `closed`, not in `withheld_from_closure`,
-// so nothing on screen would say anything was lost.
+// What it stops is a WASTED AND MISLEADING RUN. Evaluating while rule 5 is withheld produces a result that says
+// nothing about unmanaged applications and that conservatively withholds closures on the affected connections — an
+// operator reading it as "the estate is fine" would be reading an incomplete evaluation as a complete one. So the
+// surface asks for a successful matcher run first, which is a completeness precondition rather than a safety one.
 //
-// The engine's own closure model is what makes that possible, and fixing it needs a migration (0083 would have to
-// carry per-capability, per-rule closure scope). THIS GUARD DOES NOT FIX IT. It refuses to *enter* the unsafe state
-// from the one path that can now reach it — the operator button this lane added. Any other caller of the engine is
-// exactly as exposed as it was before.
+// Per-rule closure licensing still does not exist in 0083's contract, so the engine's protection is deliberately
+// coarse: it can delay another rule's closure on a shared connection for one evaluation. That is stated in the
+// runbook rather than papered over here.
 export type EvaluationBlockReason = "matcher_never_run" | "matcher_running" | "matcher_failed";
 
 export type EvaluationGate =
@@ -109,17 +110,17 @@ const BLOCKED_BY: Record<Exclude<MatcherHeadline, "completed">, { reason: Evalua
   never_run: {
     reason: "matcher_never_run",
     message:
-      "Evaluation blocked: the application matcher has never run. Run the matcher first. Nothing was evaluated and no finding was changed.",
+      "Run the application matcher before evaluating governance. Until it has completed once, rule 5 cannot speak about this estate, so an evaluation now would return a deliberately incomplete result. Nothing was evaluated and no finding was changed.",
   },
   running: {
     reason: "matcher_running",
     message:
-      "Evaluation blocked: an application matcher run is still in flight. Wait for it to complete, then evaluate. Nothing was evaluated and no finding was changed.",
+      "The matcher is currently running. Wait for it to finish before evaluating governance — rule 5 is withheld while a run is in flight, so this evaluation would be incomplete. Nothing was evaluated and no finding was changed.",
   },
   failed: {
     reason: "matcher_failed",
     message:
-      "Evaluation blocked: the most recent application matcher run FAILED. A previous run may have completed successfully — that history does NOT authorize an evaluation, because rule 5 reads the current status. Re-run the matcher successfully first. Existing findings are deliberately left untouched: evaluating now would drop rule 5 from the payload and 0083 would close findings that are still true.",
+      "The matcher is currently failed. Governance evaluation is unavailable until a matcher run completes successfully. A previous run may have completed — that history does not make the current state healthy, because rule 5 reads the current status. The engine preserves closure safety while matcher evidence cannot be re-proven; re-run the matcher first to produce a COMPLETE governance result. Nothing was evaluated and no finding was changed.",
   },
 };
 
@@ -143,10 +144,11 @@ export function evaluationGate(state: MatcherState): EvaluationGate {
 export const CLOSURE_UNSAFE_WITHHELD_RULE = "discovered_application_unmanaged_by_idp";
 
 export const MID_RUN_STATE_CHANGE_NOTE =
-  "ANOMALY — the matcher state changed during this evaluation: the run was authorized while the matcher was `completed`, " +
-  "but the engine then read a different status and withheld rule 5. Unmanaged-application findings may have been closed " +
-  "by this run even though they are still true. Re-run the matcher to a successful completion, evaluate again to reopen " +
-  "anything that was wrongly closed, and check whether another operator was running the matcher at the same time.";
+  "INCOMPLETE — the matcher state changed while this evaluation was running: it was authorized with the matcher " +
+  "`completed`, but the engine then read a different status and withheld rule 5. Nothing was wrongly closed — the engine " +
+  "withdraws the closure licence in exactly this state — but this run does not describe unmanaged applications, and it " +
+  "may have withheld closures it would otherwise have made. Run the matcher to completion and evaluate again for a " +
+  "complete result; if this recurs, check whether another operator is running the matcher at the same time.";
 
 export function toMatcherStateView(state: MatcherState): MatcherStateView {
   // `hasEverRun` and a null status are the same fact from 0085's LEFT JOIN; either one alone means no row exists.
@@ -263,7 +265,9 @@ export function syncCountRows(summary: {
  */
 export function withheldClosureNote(withheldFromClosure: number): string | null {
   if (withheldFromClosure <= 0) return null;
-  return `${withheldFromClosure} finding(s) stayed open because this run could not prove the condition had ended — the connector evidence they rest on was not complete. This is correct behaviour, not a failure: re-run once those connectors have synced.`;
+  // The count is all 0083 reports — it does not say WHICH evidence was missing, and inventing a breakdown here would
+  // be asserting something the backend never told us. Both causes are named without claiming which applied.
+  return `${withheldFromClosure} finding(s) stayed open because this run could not prove the condition had ended — the evidence they rest on was not complete. This is correct behaviour, not a failure: complete the evidence (sync the connectors, and run the matcher to completion) and evaluate again.`;
 }
 
 /** Rules that did not run, and why. Already produced by the engine — surfaced rather than recomputed. */
