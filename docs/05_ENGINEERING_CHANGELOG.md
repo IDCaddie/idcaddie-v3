@@ -12,6 +12,114 @@ from PRs verified via `git log` / `gh pr list`.
 > **as of each PR's date** and are historical — where an older entry says "RISK-007 remains OPEN" / "Phase C remains
 > BLOCKED", that was accurate at that entry's date; this banner is the current state.
 
+### fix(governance) — Phase 18F-B review fixes: a NUL byte blinded two safety gates · 2026-08-15
+
+Two blockers from the independent exact-head review of #433. Both behaviour-preserving; the feature did not move
+(128 focused tests green before and after, and a runtime-equivalence proof for the first).
+
+**A raw NUL byte in `src/lib/canonical/application-match-review.ts` silently exempted the file from two safety gates.**
+The composite ambiguity key joins two free-text labels on U+0000 — the right separator, because U+0000 is the one
+character a label cannot contain (Postgres refuses a NUL inside `text`), so it cannot make two distinguishable records
+collide the way a space, colon or pipe would. That part stands. What was wrong is that the separator was written as the
+**raw byte**, and one raw NUL makes `grep` classify the whole file as binary. `check-auth-safety.sh` and
+`check-app-runtime-imports.sh` both scan with `grep -I`, which skips binary files — so the file was invisible to the
+credential scan and to the app↔runner import boundary, and passed both regardless of content. Proven by planting
+`SUPABASE_SERVICE_ROLE_KEY` in it: the gate said `auth safety checks passed`. The same credential in the NUL-free
+sibling module was caught immediately.
+
+`git diff` will not warn you: git samples only the first 8000 bytes for its own binary heuristic, and this NUL sat at
+offset 11490, so the file diffed as ordinary text — the raw byte even *renders as a space* in a diff, which is how it
+survived authoring and first review. The fix is the six-character escape instead of the byte; the runtime string is
+identical (proven over a 13-pair corpus including labels containing spaces, colons, pipes, commas and newlines).
+
+Two tests now hold both halves. A **separator-property** test in the pure suite feeds it the exact label pairs that
+would collide under a space, a colon, a pipe, a comma, a newline or no separator at all, so swapping U+0000 for any of
+them turns it red. A **grep-visibility tripwire** asserts no file in the lane — tests included, since the gates scan all
+of `src/` — contains a raw NUL. Restoring the byte turns the tripwire red *and* makes the credential gate go blind
+again, which is the non-vacuity control.
+
+**A scope test claimed ownership of the repository's future migration numbering.** It asserted *"no migration numbered
+above 0091 exists anywhere"* — a claim about every other lane's work, not about this one. The next unrelated migration
+from any of the concurrent branches would have turned it red on `main` and named this file for a change it has nothing
+to do with; verified by dropping in a dummy `0092`. Changed-file scope is already covered twice by machinery authorized
+to judge it (`check-migration-safety.sh`, and `git diff origin/main..HEAD -- supabase/migrations` in the gates), so the
+test now asserts only the complementary half those cannot see: that no file in this lane carries schema behaviour of its
+own — no DDL, no `security definer`, no reach into the migration directory. With a dummy `0092` present the lane's
+focused tests stay green.
+
+**Also pinned, from the review's non-blocking list:** `MATCH_PAGE`, `CANDIDATE_PARENT_PAGE` and `DIRECTORY_PAGE` are now
+tied to the ceilings the reads actually enforce, read off 0085/0090 and off the access repository's `MAX_PAGE`. Each
+walker decides "was that the last page?" by comparing what returned against what it asked for, and every one of these
+reads silently clamps its own limit — so a constant raised above its ceiling would trim the request, make the
+comparison unsatisfiable, and stop the walk after one page while believing it had finished. Nothing else tied the two
+numbers together. Raising any of the three now fails.
+
+Still open, recorded not fixed: the application-label walk has no size pre-gate (cost scales with tenant directory size,
+not match count); the only entry link sits in the parent list page's footnote, which that page skips in its
+`!ok`/`too_large` early returns; `DECIDE_STATUSES` carries three statuses 0088 cannot return (safe, documented);
+`parseRows` drops invalid rows before the page-length termination check (unreachable — all four columns are NOT NULL —
+and identical to the merged `directory-loaders.ts` walker).
+
+**Verified:** 3236 unit tests, tsc 0, runner typecheck 0, lint 0 errors, build compiled, migration safety, auth safety,
+import boundary, token scan, callback bundle, docs, `diff --check`. Author mutants and the reviewer's twelve all still
+RED. `git diff origin/main -- supabase/migrations` is empty. No hosted apply, nothing deployed.
+
+### feat(governance) — Phase 18F-B: the human review surface for application-match proposals · 2026-08-15
+
+The propose/decide boundary (**0088**), the candidate contract (**0090**) and the bounded read (**0085**) were all in
+place and staging-proven. The decision they exist for had **no way to be made**. This adds the surface and nothing
+else: **no migration** (`git diff origin/main -- supabase/migrations` is empty), no matcher change, no propose path,
+no scheduler, no provider code. The matcher, the governance loader/presenter and the whole `/access` tree are
+byte-identical to main.
+
+**`/directory/applications/review`**, reached from the directory applications list — the same shape
+`/connectors/review` has. **No nav entry and no `IMPLEMENTED_ROUTES` change**, deliberately: `nav-items.test.ts` pins
+the Directory section to exactly three labels, and Lane A (#431) owns `nav-items.ts`. This lane keeps clear of the nav
+and `/access` runtime entirely — but the directory-applications **footnote** is now a coordinated shared surface with
+Lane A, which merged first. This branch was rebased onto it and the footnote resolved to carry BOTH: Lane A's wording
+that linking is decided by cross-system governance rather than by presence in the list, and this lane's sentence
+carrying the only entry link to the review queue. Lane A's three footnote assertions are satisfied verbatim, not
+weakened. `KNOWN_ROUTES.applicationMatchReview` deliberately stays `null` here: Lane A's guard requires the route to
+be in `IMPLEMENTED_ROUTES` in the same commit that flips it, so that activation is a separate integration change
+after this lands.
+
+**THE QUESTION ON THE SCREEN, and the only one:** *"is this application from your identity provider the same thing as
+this operational record?"* Product recognition is upstream and already settled by a confirmed alias; the open question
+is the **instance**. Everything the layout does serves not answering it for the customer:
+
+- **nothing ranks.** The 0085 read returns no `confidence`, so there is nothing to rank by — and there must not be
+  (docs/79: *"neither confidence, arrival order nor arithmetic may pick one"*). Candidates are ordered
+  alphabetically on their own label, an order that asserts nothing, and one function renders every row, so there is
+  no branch in which a sibling looks different. `MatchCandidateView` carries no field a ranking could live in.
+- **"Not this record"** is the reject control, and the copy states outright that it never means *not this software*
+  and leaves every other record for that product an open question.
+- an accepted candidate **leaves its siblings as proposals**, exactly as the boundary does. Nothing is swept.
+- settled decisions render as settled, with no controls and **no way to re-open or re-run anything**.
+
+**Editors and viewers are refused BEFORE any read**, and that distinction is load-bearing: the 0085 read returns
+**zero rows** to them rather than an error, so a surface that rendered what came back would say "nothing to review" —
+a false statement about a queue they may not see. The gate is what keeps the empty state honest.
+
+**Two records of one product are told apart** by the instance discriminator (domain → workspace address → the
+provider's instance id). When the tenant's own records do not distinguish themselves, that is **reported** with a
+short reference rather than hidden: two identical rows with Accept buttons is how somebody accepts the wrong one.
+
+**The candidate walk terminates on DISTINCT PARENTS, not row count.** 0090 bounds its page at 200 parent applications
+and then expands each to its complete instance set, so row count says nothing about whether the feed is exhausted — a
+row-count walk stops early on a many-instance estate and loops on another. Two tests are the difference: a page of 600
+rows holding 2 parents must stop; a page of exactly 200 parents must continue.
+
+**A surviving mutant found a real gap.** A loader that decided a lone candidate while merely rendering the page passed
+an earlier version of this suite: the assertion was on the returned status, and the view model had already been
+assembled before the write. The B14 assertions are now on the **calls**, for every cardinality. Mutants: rank first
+candidate (ordering + identical-markup) RED · auto-accept at assembly RED · auto-accept in the loader RED · sweep
+product siblings on rejection RED · product-wide reject copy RED · direct table update RED · widen the gate to editors
+RED (against the **real** gate, so the denials are not proven by a stub) · classify `already_rejected` as a failure
+RED, in both layers · collapse many candidates into one RED · echo a raw database message RED · echo an unrecognised
+status verbatim RED.
+
+**Verified:** 3233 unit tests (122 new across four files), tsc 0, lint 0 errors, build compiled, migration safety,
+auth safety, import boundary, token scan, callback bundle, docs, `diff --check`. No hosted apply, nothing deployed.
 ### feat(governance) — Phase 18F Lane A: the first customer surface for cross-source findings · 2026-08-15
 
 **`product_governance_findings` (0083) gets its first consumer.** Everything Phase 16–18E proved on hosted staging was
