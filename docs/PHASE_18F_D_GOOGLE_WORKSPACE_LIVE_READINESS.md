@@ -127,9 +127,17 @@ state. What is established here is the wiring, not the absence of a key in the a
 
 `createHostedGoogleAssertionProvider` requires `GOOGLE_WORKSPACE_KMS_KEY_ID`,
 `GOOGLE_WORKSPACE_SA_KEY_ID`, and `GOOGLE_WORKSPACE_KMS_REGION`, with no default and no local-key
-fallback (`src/connector-sync/google-workspace-kms-adapter.ts:38-46,83-88`). With any of them absent
-it fails closed at `missing_kms_key`. Also required, and equally unverifiable from here: the task
-role granted `kms:Sign` on that key.
+fallback (`src/connector-sync/google-workspace-kms-adapter.ts:38-46,83-88`). With any required
+signing configuration absent, the path fails closed — `missing_kms_key`, `missing_kid`, or
+`missing_region` respectively.
+
+Note which branch the current templates would NOT take: the placeholders are non-empty strings, so
+they satisfy the presence checks and config resolution succeeds. A task definition registered with
+them still cannot sign — it fails later, at the KMS call against a non-existent key reference, rather
+than at `missing_kms_key`. Either way the conclusion above stands: as currently configured there is
+no usable Google signing configuration and the provider-live path cannot obtain signing capability.
+
+Also required, and equally unverifiable from here: the task role granted `kms:Sign` on that key.
 
 ### GWS-E2 — Domain-wide delegation grant not configured/verified
 
