@@ -32,7 +32,7 @@ export function visibleNavSections(sections: NavSection[], demoMode: boolean): N
 
 // The real, implemented authenticated routes that may be linked. Keep in sync with the route tree;
 // the test asserts every linked NavItem.href is one of these (so an unbuilt area can never be linked).
-export const IMPLEMENTED_ROUTES = ["/", "/apps", "/contracts", "/people", "/reports", "/audit", "/admin", "/files", "/dashboards", "/connectors", "/needs-attention", "/catalog", "/access", "/access/findings", "/connectors/manage", "/directory/people", "/directory/groups", "/directory/applications", "/saas/accounts", "/saas/groups"] as const;
+export const IMPLEMENTED_ROUTES = ["/", "/apps", "/contracts", "/people", "/reports", "/audit", "/admin", "/files", "/dashboards", "/connectors", "/needs-attention", "/catalog", "/access", "/access/findings", "/access/governance", "/connectors/manage", "/directory/people", "/directory/groups", "/directory/applications", "/saas/accounts", "/saas/groups"] as const;
 
 export const NAV_SECTIONS: NavSection[] = [
   {
@@ -65,6 +65,10 @@ export const NAV_SECTIONS: NavSection[] = [
       // Effective access + governance findings over the canonical directory graph (owner/admin, enforced server-side).
       { label: "Access", href: "/access", note: "effective access, read-only" },
       { label: "Findings", href: "/access/findings", note: "governance findings" },
+      // Phase 18F Lane A. Deliberately a SIBLING of Findings rather than part of it: that page evaluates access
+      // topology inside one directory on every request, this one lists PERSISTED findings that span connected
+      // systems and carry an age and a lifecycle. Same section, because to a customer both are governance.
+      { label: "Cross-system", href: "/access/governance", note: "ownership and coverage gaps" },
     ],
   },
   {

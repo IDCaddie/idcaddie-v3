@@ -12,6 +12,39 @@ from PRs verified via `git log` / `gh pr list`.
 > **as of each PR's date** and are historical — where an older entry says "RISK-007 remains OPEN" / "Phase C remains
 > BLOCKED", that was accurate at that entry's date; this banner is the current state.
 
+### feat(governance) — Phase 18F Lane A: the first customer surface for cross-source findings · 2026-08-15
+
+**`product_governance_findings` (0083) gets its first consumer.** Everything Phase 16–18E proved on hosted staging was
+backend-only; a customer could not see any of it. `/access/governance` lists the persisted cross-source findings for
+the signed-in tenant.
+
+**A sibling of `/access/findings`, not part of it.** That page evaluates the Phase-14 engine over the live access
+graph — how access is arranged INSIDE one directory, recomputed per request, with no lifecycle. These findings span
+connected systems, are persisted, and carry an age, a status and a reopen count that 0083 owns. Merging them would
+have meant widening that page's view models, filters and CSV allowlist, and would have blurred "your access topology"
+with "what is unowned across your estate". They sit in the same nav section and link to each other instead.
+
+**Copy comes from one authority.** `crossSourceProse` resolves every sentence; the page interpolates no governance
+prose and renders no internal enum. `product_unresolved` / `operational_instance_absent` /
+`operational_match_unaccepted` never reach a customer — they select reviewed copy and are asserted absent from the
+rendered DOM. Unknown rules and prototype-shaped keys fall back to a truthful non-empty card.
+
+**Identity is the persisted row id.** A subject moving between remediation subtypes is one finding being refreshed, so
+keying the list on the subtype would make the same problem appear to vanish and return. Pinned by a test.
+
+**Actions only point at routes that exist.** `KNOWN_ROUTES` is the single decision point, and
+`applicationMatchReview` is deliberately `null` until Lane B ships — that finding renders an honest note rather than a
+link to a 404. A test asserts every emittable href is in `IMPLEMENTED_ROUTES`.
+
+Read-only, owner/admin, server-rendered. `accessGate()` establishes the tenant and the RPC re-checks it; a denied
+caller is refused before any query runs. No service_role, no browser-side tenant id, no mutation, no export, no
+migration, no scheduler, no provider code.
+
+10 mutants RED: subtype in UI identity · raw reason rendered · undefined prose · CTA to a nonexistent route · access
+gate removed · severity by colour only · closed findings shown as open · dropped row swallowed · non-array read as an
+empty estate · raw timestamp shown instead of a phrased age. The last one initially SURVIVED — the UUID-shaped
+assertion did not cover timestamps — and the gap was closed before this shipped.
+
 ### fix(governance) — Phase 18E4: migration 0091, hosted safe-update compatibility · 2026-08-15
 
 **Found on hosted staging, not by any local gate.** `product_sync_governance_findings` (0083) cleared its
