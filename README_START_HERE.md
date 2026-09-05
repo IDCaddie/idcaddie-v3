@@ -26,6 +26,13 @@ Determine the baseline tier first (`bash scripts/pr-review-summary.sh`), then es
 never de-escalate. Speed and safety are both requirements: T3 ceremony does not belong on a T0/T1
 change unless you can name the higher-risk failure class it catches.
 
+## What a change may claim to a user
+[`DESIGN.md`](DESIGN.md) is canonical: the north star, the design principles, and the eight-state
+**truth grammar** — `loading` · `true empty` · `unavailable` · `failed` · `stale` · `partial` ·
+`proposed` · `accepted`. **Unavailable is not empty, a failed read is not zero, never-run is not
+complete-zero, stale is not absent, proposed is not accepted.** Which state a surface is in is decided
+in the data access layer, never inferred in the component. Read it before any user-visible change.
+
 ## Non-negotiables (apply to every change)
 - Do **not** run against hosted Supabase — local-first only.
 - Do **not** use service-role keys outside approved server/test paths.
@@ -73,8 +80,8 @@ bash scripts/gen-types-local.sh          # → src/lib/database.types.ts (throwa
 ## Quick starts
 - **Reviewer (Mike/Jon):** [00 Product Status](docs/00_PRODUCT_STATUS.md) → [04 Risk Register](docs/04_RISK_REGISTER.md) → [05 Changelog](docs/05_ENGINEERING_CHANGELOG.md).
 - **Security reviewer:** [02 Security & RLS](docs/02_SECURITY_AND_RLS.md) → `supabase/tests/org_rls_test.sql` → [04 Risk Register](docs/04_RISK_REGISTER.md) → [07 P0 Checklist](docs/07_P0_REVIEW_CHECKLIST.md).
-- **New engineer:** this file → [00](docs/00_PRODUCT_STATUS.md) → [01 Architecture](docs/01_ARCHITECTURE.md) → [03 Database & Migrations](docs/03_DATABASE_AND_MIGRATIONS.md) → [06 Build Sequence](docs/06_BUILD_SEQUENCE.md) → [08 Code & Docs Standard](docs/08_CODE_AND_DOCS_STANDARD.md).
-- **Coding agent:** [09 Agent Handoff](docs/09_AGENT_HANDOFF.md) → [00](docs/00_PRODUCT_STATUS.md) → [06](docs/06_BUILD_SEQUENCE.md) → [07](docs/07_P0_REVIEW_CHECKLIST.md).
+- **New engineer:** this file → [00](docs/00_PRODUCT_STATUS.md) → [01 Architecture](docs/01_ARCHITECTURE.md) → [03 Database & Migrations](docs/03_DATABASE_AND_MIGRATIONS.md) → [06 Build Sequence](docs/06_BUILD_SEQUENCE.md) → [`DESIGN.md`](DESIGN.md) → [08 Code & Docs Standard](docs/08_CODE_AND_DOCS_STANDARD.md).
+- **Coding agent:** [09 Agent Handoff](docs/09_AGENT_HANDOFF.md) → [00](docs/00_PRODUCT_STATUS.md) → [06](docs/06_BUILD_SEQUENCE.md) → [07](docs/07_P0_REVIEW_CHECKLIST.md) → [`DESIGN.md`](DESIGN.md) before any user-visible change.
 - **Database reviewer:** [03](docs/03_DATABASE_AND_MIGRATIONS.md) → [`docs/v3-data-model.md`](docs/v3-data-model.md) → `supabase/migrations/` → [`docs/migration-workflow.md`](docs/migration-workflow.md).
 
 ## Living-docs rule

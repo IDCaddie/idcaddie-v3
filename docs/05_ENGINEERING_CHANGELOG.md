@@ -54,6 +54,9 @@ targets, destructive actions, motion/reduced-motion, and evidence/provenance dis
 
 **AGENTS.md stays thin** — pointers to `DESIGN.md`, the exact-head discipline, and a six-item STOP
 list, no restatement of standards. `CLAUDE.md` already delegates via `@AGENTS.md` and was left alone.
+`README_START_HERE.md` links `DESIGN.md` directly — a canonical section beside "how much rigor a
+change earns", plus the new-engineer and coding-agent reading paths — so the doc is reachable from the
+entry point rather than only through the docs index.
 The **PR template is extended**: the old `## Risk` bullets are replaced by one `## Review record —
 risk + exact head` block carrying the fourteen fields, so those facts have a single owner
 ([§O](../ENGINEERING_STANDARDS.md)) instead of being asked twice; a five-item **Merge readiness**
