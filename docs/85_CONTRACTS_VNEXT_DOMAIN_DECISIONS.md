@@ -32,9 +32,37 @@ per topic.
 | **DEFERRED** | deliberately not built yet, with the condition that would revive it |
 | **DECISION REQUIRED** | blocked on a human product/ownership call — no schema may be written for it |
 
+These five label the **topic**. `BLOCKED`, used in the *Migration* row of several topics, labels the
+**migration** instead — a different axis: a topic can be frozen while its migration is blocked by
+something in another topic (§12 is exactly this). Never use `BLOCKED` as a topic status.
+
 **No topic below currently sits at PROPOSED, and that is the point of this exercise:** each of the 21
 either reached a frozen decision or is explicitly **DECISION REQUIRED** with the migration it blocks
 named. A topic that landed at PROPOSED would mean the decision had been dodged rather than made.
+
+### Capability has five layers, and "the schema can store it" is only the first
+
+Independent review found this document's first revision calling capabilities supported because a
+column existed. A relationship is only *supported* when all five layers below hold; where any one is
+missing the topic says so, and a topic missing a **read path** or **settled authority** may not be
+frozen. This is the same discipline ENGINEERING_STANDARDS §D applies to provider vs normalized vs
+governance fact, applied to product capability.
+
+| Layer | Question |
+|-------|----------|
+| **STORAGE EXISTS** | is there a column/table? |
+| **WRITE PATH EXISTS** | can any user-facing path actually set it? (`ContractWriteInput` is the contract answer) |
+| **READ PATH EXISTS** | does a DAL return it — **and to every reader authorized to read the parent**? |
+| **UI CONSUMES IT** | does a surface render it? |
+| **AUTHORITY IS SETTLED** | is it decided who may set it, and does RLS enforce that? |
+
+Applied to the three ownership fields, from source:
+
+| Field | Storage | Write path | Read path | UI | Authority |
+|-------|---------|-----------|-----------|-----|-----------|
+| `contracts.owner_user_id` | ✅ `0001` | ❌ **none** — no `owner*` key in `ContractWriteInput`; `parseContractWriteInput` never emits `owner_user_id` | ⚠️ boolean only (`hasOwner`) | ⚠️ boolean badge | ❌ undecided |
+| `contracts.procurement_org_id` | ✅ `0001` | ✅ `ContractWriteInput.procurementOrgId` | ✅ id → name via RLS-visible orgs | ✅ | ✅ `0002` as hardened by `0004` |
+| `contracts.renewal_responsibility` | ✅ `0001` | ⚠️ writable but **never clearable** — `contract-write.ts:178–179` sets the column only when non-null | ✅ free text | ✅ | ✅ contract-write rule |
 
 ### The two rules that govern every decision below
 
@@ -55,47 +83,50 @@ Read directly from the migrations and the DAL on 2026-09-05, not from memory:
 | `profiles` is readable **own-row only** | `0001:276` — `create policy "users can read own profile" … using (id = auth.uid())`. No later migration widens it. |
 | `people` **is** tenant-member readable | `0001:311` — `"members read people"`; carries `full_name`, `title`, `department`, `primary_email`, `manager_email`. |
 | Contract read = tenant member **∪** procurement-org **∪** paying-org member | `0003:47–63` — `"org members read related contracts"`. |
-| Contract write = tenant editor+ **or** procurement-org manager; paying org **never** | `0004`; [13](./13_CONTRACT_STEWARD_WRITE_DESIGN.md). |
+| Contract write = tenant editor+ **or** procurement-org manager; paying org **never**; no DELETE | Established across three migrations, not one: `0001:301` (tenant editor+), `0002:170` (org manager, keyed on `procurement_org_id`), both split into INSERT/UPDATE with no DELETE policy by `0004:48–51,86–91`. [13](./13_CONTRACT_STEWARD_WRITE_DESIGN.md). |
 | `organizations.type` has **no CHECK constraint** | `0001:33–41` — `type text not null default 'agency'`. |
 | Contract edits are audited on a **curated allowlist**, `before_json` deliberately NULL | `0010:36–80` — no cost, date, notes or legal text enters `audit_logs`. |
 | `files` already has `document_type`, `extraction_status` (CHECK), `extraction_result_json`, `sha256` | `0001:181–191` + `0012:35–59`; specified in [16 §4](./16_CONTRACT_PDF_AI_EXTRACTION_DESIGN.md). None is surfaced by the DAL. |
-| `contracts` has **no** `vendor_id`; `contract_entitlements` does | `0084:91,165` vs `0001:69–88`. |
+| `contracts` has **no** `vendor_id`; `contract_entitlements` does | `0084:91,165` vs `0001:70–89` (the `contracts` table body). |
 | Commercial findings are **computed per request**, not persisted | `src/lib/data/commercial-loader.ts`; contrast `governance_findings` (`0083`). |
 | Same-tenant child integrity uses composite FKs `(id, tenant_id)` | `0005:29–42` — the pattern every new child table below must follow. |
+| **READ-SCOPE ASYMMETRY — `contracts` is org-union readable; `people` and `files` are not** | `contracts` SELECT = tenant member ∪ procurement-org ∪ paying-org (`0003:47–63`). `contract_entitlements` SELECT derives from the parent contract (`0084:202–209`) so it **matches**. But `files` SELECT = `is_tenant_member(tenant_id)` (`0013:53–54`) and `people` SELECT = `is_tenant_member(tenant_id)` (`0001:311`) — **strictly narrower**. An org-scoped reader (a procurement-org manager, a paying-entity member) can read a contract and its purchased lines but **cannot read any document or any person**. Org-scoping `people` is explicitly gated by **RISK-002**, which states `people` + `identity_accounts` are *intentionally* not org-scoped. |
 
 ---
 
-## 1. Contract owner — **DECIDED VNEXT**
+## 1. Contract owner — **DECISION REQUIRED** *(reopened by review; was DECIDED VNEXT)*
 
 | | |
 |---|---|
-| **Current** | `contracts.owner_user_id → profiles`. The DAL exposes it **only** as `hasOwner: boolean`; the raw id never leaves `src/lib/data/contracts.ts`. |
-| **Problem** | Every vNext design needs "who owns this relationship" as a **name**. It cannot be rendered: `profiles` is own-row-read-only, so a user-scoped client can never resolve another member's id to a name. The instinct — widen `profiles` RLS — exposes every workspace member's email to every other member, far beyond contracts. |
-| **Decision** | **Two distinct references, not one.** Keep `owner_user_id` as the *accountable ID Caddie user* (authority + future notification hook, still surfaced as a boolean). Add `owner_person_id → people` as the *named business owner*, which is what the UI displays. |
-| **Rejected** | *Widen `profiles` RLS to tenant members* — a T3 trust-boundary change whose blast radius is the whole product, bought for one label. *Replace `owner_user_id` with a `people` reference* — loses the ability to ever act as/notify the owner. *Free text* — unjoinable, and `renewal_responsibility` already demonstrates the failure mode. |
-| **Rationale** | It matches how procurement actually thinks: the owner is a person in the organization, not necessarily a login. It gets a name on screen without turning the member directory into a lookup service, and it keeps authority and identity separable. |
-| **Cardinality** | Contract **N:1** person. A person owns many contracts. Exactly one owner per contract (co-ownership is not modelled — see Open). |
-| **Lifecycle** | `people.employee_status` already exists. An owner whose person row goes inactive must raise a **"no effective owner"** attention flag. **Do not** cascade-null the FK on departure: that they owned it stays true, and nulling destroys the only record of who to ask. |
-| **Tenancy** | `people` is already tenant-scoped and tenant-member readable — **no RLS change, no widening**. Same-tenant binding enforced by composite FK per `0005`. Ownership must **not** grant contract read: read stays the `0003` union. |
-| **Migration** | Eventually: `contracts.owner_person_id uuid` + composite FK `(owner_person_id, tenant_id) → people(id, tenant_id)`. Nullable. No backfill possible — existing rows have no person reference. |
-| **UI** | Detail → *Who owns and who pays*. Name + title + department. Where null: "No owner assigned" as an attention chip that is also the repair affordance. `hasOwner` stays the list-column signal. |
-| **Open** | Co-ownership (business owner vs technical owner) — `apps` already has both (`business_owner_user_id`, `technical_owner_user_id`). Deferred until a customer asks; one owner plus §17's renewal owner covers Flywheel today. |
+| **Current** | `contracts.owner_user_id → profiles` — **storage only**. Verified across all five layers: **no write path** (there is no `owner*` key in `ContractWriteInput`, and `parseContractWriteInput` never emits `owner_user_id`, so *nothing in the product can set an owner today*); read path is `hasOwner: boolean` only; UI renders that boolean; **authority is undecided** (nobody has ruled on who may assign an owner). |
+| **Problem** | Three problems, not one. (a) `profiles` is own-row-readable (`0001:276`), so an id can never become a name. (b) The obvious fix — point at `people` — collides with the **read-scope asymmetry**: `contracts` is org-union readable (`0003`) but `people` is tenant-member-only (`0001:311`), so an owner name would render for tenant members and silently vanish for exactly the procurement-org and paying-org readers the `0003` union exists to serve. (c) Closing (b) means org-scoping `people`, which **RISK-002 explicitly gates** ("`people` + `identity_accounts` intentionally NOT org-scoped"). The first revision of this document treated (b) and (c) as absent. |
+| **Decision** | **DECISION REQUIRED.** No schema may be written. The *shape* that survives review is still "two references with different jobs" (`owner_user_id` as the authority/notification hook; a person reference for the displayed name) — but it cannot be frozen until the three blockers below are answered, because two of them change what the column means and one changes who may see it. |
+| **Blocking requirements (must be resolved before any migration)** | **B1-a · write path.** `owner_user_id` has no writer. Either extend `ContractWriteInput` + `parseContractWriteInput` (a contract-write-path change, with its own authority question) or state that owner is set by another mechanism. Until then "keep `owner_user_id` as the authority hook" describes a column nothing can populate. **B1-b · read model.** A person reference needs a read path that serves *every* reader authorized to read the contract, or an explicit, documented decision that org-scoped readers see "Assigned" instead of a name — the `orgDisplayName` degradation pattern already in `src/lib/data/organization-display.ts`. **B1-c · RISK-002.** If the answer to B1-b is "org-scope `people`", that is a RISK-002 change requiring org-scoped read policies **and tests**, not a side effect of a contracts migration. |
+| **Rejected (still valid)** | *Widen `profiles` RLS to tenant members* — a T3 trust-boundary change whose blast radius is the whole product, bought for one label. *Free text* — unjoinable; `renewal_responsibility` already demonstrates the failure mode. |
+| **Rationale** | Reopened because the earlier decision asserted a capability the source does not support: a write-side relationship was called settled on the strength of a column existing. It also proposed a `people` read that the risk register has deliberately deferred. |
+| **Cardinality** | *Provisional, not frozen:* contract **N:1** person, one owner per contract. Co-ownership deferred (see Open). |
+| **Lifecycle** | *Provisional:* `people.employee_status` exists, so an inactive owner should raise "no effective owner" rather than cascade-nulling — a departure does not un-own the past. Cannot be frozen while B1-b is open, because a lifecycle rule the org-scoped reader cannot observe is not a product rule. |
+| **Tenancy** | **The blocker.** Same-tenant composite FK per `0005` is necessary but not sufficient. The asymmetry in §0's tenth row is the live question, and ownership must **not** grant contract read under any resolution. |
+| **Migration** | **BLOCKED** on B1-a/b/c. |
+| **UI** | *Provisional:* Detail → *Who owns and who pays*; "No owner assigned" as an attention chip that is also the repair affordance. `hasOwner` remains the only element shippable today. |
+| **Open** | B1-a, B1-b, B1-c. Also co-ownership (business vs technical owner) — `apps` already has both (`business_owner_user_id`, `technical_owner_user_id`); deferred until a customer asks. |
 
-## 2. Procurement owner — **DECIDED VNEXT**
+## 2. Procurement owner — org anchor **CURRENT** · person reference **DECISION REQUIRED** *(partially reopened)*
 
 | | |
 |---|---|
-| **Current** | `contracts.procurement_org_id → organizations`. It is doing **two jobs**: "who negotiated this" *and* "who may write to it" (`0004`: an org manager of this org may write). |
+| **Current** | `contracts.procurement_org_id → organizations` is **fully supported on all five layers** — storage (`0001`), write path (`ContractWriteInput.procurementOrgId`), read path, UI, and settled authority. It is doing **two jobs**: "who negotiated this" *and* "who may write to it" (`0002:170`, split into INSERT/UPDATE by `0004:86–91`: an org manager of `procurement_org_id` may write; there is no DELETE policy). |
 | **Problem** | The individual category manager who ran the negotiation has nowhere to live, and the obvious move — reuse the org field — would further overload a column that is load-bearing for **write authority**. |
-| **Decision** | Freeze `procurement_org_id` as the **write-authority anchor, unchanged**. Add `procured_by_person_id → people` for the individual. The two are independent: the person is descriptive, the org is authoritative. |
+| **Decision** | **Split.** (a) **FROZEN:** `procurement_org_id` stays the write-authority anchor, unchanged — this half is fully supported today and needs no migration. (b) **DECISION REQUIRED:** `procured_by_person_id → people` inherits §1's read-scope asymmetry in full and may not be frozen ahead of it. |
+| **Blocking requirement for (b)** | The same B1-b/B1-c as §1: a person reference displayed on an org-union-readable contract has no read path for org-scoped readers, and creating one is a RISK-002 decision. **(b) must be decided together with §1, not separately** — two person references resolved by different rules would be worse than either. |
 | **Rejected** | *Derive the procurer from the audit log* — `0010` records the actor of the last write, which is whoever edited a field, not who negotiated the deal. *Reuse `owner_person_id`* — they are genuinely different people (§1 vs a category manager); the prototype fixture had them differ on 6 of 15 contracts. |
-| **Rationale** | Separating authority from attribution is the same discipline `0004` already applies to `paying_org_id` (read, never write). A descriptive field must never silently become an authority field. |
-| **Cardinality** | Contract **N:1** person, nullable. Contract **N:1** organization (existing). |
-| **Lifecycle** | Historical. A procurer who leaves stays recorded — this is a fact about a past negotiation, not a live responsibility, so **no** attention flag on departure (unlike §1). |
-| **Tenancy** | As §1. Being named as procurer grants **nothing**. |
-| **Migration** | Eventually: `contracts.procured_by_person_id uuid` + composite FK. Nullable, no backfill. |
+| **Rationale** | Separating authority from attribution is the same discipline `0002`/`0004` already apply to `paying_org_id` (read, never write). A descriptive field must never silently become an authority field. The org half survives review because all five layers hold; the person half does not. |
+| **Cardinality** | Contract **N:1** organization (existing, frozen). Contract **N:1** person, nullable (*provisional*). |
+| **Lifecycle** | Historical. A procurer who leaves stays recorded — a fact about a past negotiation, not a live responsibility, so **no** attention flag on departure (unlike §1). |
+| **Tenancy** | Org half: unchanged and settled. Person half: as §1 — the blocker. Being named as procurer grants **nothing** under any resolution. |
+| **Migration** | Org half: **none needed**. Person half: **BLOCKED** with §1. |
 | **UI** | Detail → *Who owns and who pays*, visually subordinate to the owner. Never in the list. |
-| **Open** | None. |
+| **Open** | The person half, tied to §1's B1-b/B1-c. |
 
 ## 3. Paying organization — **CURRENT** (one bounded addition **DECIDED VNEXT**)
 
@@ -145,21 +176,24 @@ Read directly from the migrations and the DAL on 2026-09-05, not from memory:
 | **UI** | Detail → *What this covers*: application name, instance count, current account count, and the relationship type where it is not `primary`. |
 | **Open** | None blocking. |
 
-## 6. Allocation / chargeback — **DECIDED VNEXT** (structure and level) · extension **DEFERRED**
+## 6. Allocation / chargeback — level **DECIDED VNEXT** · basis vocabulary **DECISION REQUIRED** *(partially reopened)*
 
 | | |
 |---|---|
 | **Current** | **Nothing.** No table, no percentage, no basis. `docs/v3-data-model.md` notes `invoices` as the eventual chargeback carrier, but invoices are default-deny and out of scope (RISK-002). |
 | **Problem** | Three independent axes get conflated whenever anyone sketches this: **level** (whole contract vs a purchased line), **basis** (what kind of number 38% even is), and **time** (§7). Deciding them together produces a table nobody can validate. |
-| **Decision** | **Contract-level first**, with the basis stored explicitly as an enum: `percentage` · `fixed_amount` · `by_quantity` · `by_headcount`. Shape: `contract_allocations (contract_id, organization_id, tenant_id, basis, value, effective_from, effective_to, note)`. Entitlement-level allocation is **DEFERRED** (§21). |
+| **Decision** | **Split.** (a) **FROZEN:** allocation is **contract-level** first, effective-dated (§7), with the basis stored explicitly rather than inferred; entitlement-level allocation is **DEFERRED** (§21). (b) **DECISION REQUIRED:** the basis *vocabulary* — because two of the four proposed values collapse concepts that do not exist at contract level. |
+| **B3 — the collapse review found** | `by_quantity` and `by_headcount` were listed as contract-level bases, but **neither has a contract-level referent**. Quantities live on `contract_entitlements` (`0084`), one per purchased line, each with its own `quantity_unit`; a contract with two lines in different units has no single "quantity" to allocate by, and three of fifteen fixture contracts have **no lines at all**. Headcount exists nowhere in the schema — `people` rows are not org-attributed for this purpose, and `organizations` carries no headcount. So `basis = 'by_quantity'` on a contract-level row is a pointer to a fact that is either ambiguous or absent, which is precisely the "silently collapse two different domain concepts because the schema lacks one" failure. |
+| **Blocking requirements** | **B3-a.** Either restrict the v1 vocabulary to the two bases that *are* computable at contract level (`percentage`, `fixed_amount`) and defer the rest, **or** define what `by_quantity` resolves to when a contract has zero, one, or many entitlement lines in differing units — which is really a decision to make allocation entitlement-level (§21) and should be taken as one. **B3-b.** If `by_headcount` survives, name its source; there is none today. |
+| **Provisional shape (not frozen)** | `contract_allocations (contract_id, organization_id, tenant_id, basis, value, effective_from, effective_to, note)`. |
 | **Rejected** | *Percentages only* — the fixture alone needed four different bases ("assigned seats at the last true-up", "headcount-weighted", "metered DBU consumption", "named client retainers"); a bare 38% with no basis is unauditable. *Derive allocation from discovered accounts* — that is an access fact, not a commercial agreement, and the split is frequently negotiated against something else entirely. *Store only a computed amount* — loses the rule, so it cannot be re-based next quarter. |
 | **Rationale** | Every money figure must name the arithmetic that produced it — the rule the commercial engine already enforces for opportunity estimates. Storing the basis is what makes an allocation checkable by the agency being charged. |
 | **Cardinality** | Contract **1:N** allocation rows; each row **N:1** organization. Within an effective period, `percentage` rows must sum to 100. |
 | **Lifecycle** | See §7. Historical periods are immutable. |
 | **Tenancy** | Follows the contract; adds no read path. An organization must **not** gain contract read by being allocated a share — same rule as §4, and for the same reason. |
-| **Migration** | Eventually: one new table + a validation approach for the sum-to-100 rule (**Open**: DB constraint vs application-level check; a deferrable constraint across rows is awkward, and a partial split mid-edit is legitimate). |
+| **Migration** | **BLOCKED** on B3-a/B3-b — the basis vocabulary is part of the table's CHECK constraint, so the table cannot be written before the vocabulary is settled. Also still to decide: where sum-to-100 is validated (DB constraint vs application check; a deferrable cross-row constraint is awkward and a partial split mid-edit is legitimate). |
 | **UI** | Detail → *Money*: one compact stacked bar + legend with each organization's share **and its cash equivalent**. Absent: "No split agreed", never an implied 100% to the payer. |
-| **Open** | Where sum-to-100 is enforced. Whether a `fixed_amount` split may under-allocate deliberately (an unallocated remainder carried centrally) — assumed **yes**, and the remainder must be shown, not hidden. |
+| **Open** | B3-a (basis vocabulary), B3-b (`by_headcount` source). Where sum-to-100 is enforced. Whether a `fixed_amount` split may under-allocate deliberately (an unallocated remainder carried centrally) — assumed **yes**, and the remainder must be shown, not hidden. |
 
 > **Risk note.** Allocation is **financial authority** under ENGINEERING_STANDARDS §T3. It is T3
 > regardless of what the path-based classifier scores on the diff, and this document does not
@@ -229,23 +263,30 @@ Read directly from the migrations and the DAL on 2026-09-05, not from memory:
 | **UI** | The trail renders supersession visually; a superseded document is legible, not struck out. |
 | **Open** | Whether one document may supersede **several** (e.g. a consolidated restatement replacing an MSA *and* two amendments). If yes, this becomes an edge table. **Assumed single for v1** — revisit before writing the migration, because it changes the shape rather than extending it. |
 
-## 11. Field-level provenance — **DECIDED VNEXT**
+## 11. Field-level provenance — **DECISION REQUIRED** *(reopened by review; was DECIDED VNEXT)*
 
 | | |
 |---|---|
-| **Current** | Entitlements already have the pattern: `contract_entitlements.source` (5 bounded values), `.confidence` (high/medium/low), `.evidence_file_id`, `.evidence_note` (`0084`). The **contract header has none of it**. `audit_logs` records `contract.created`/`.updated` on a **curated allowlist** with `before_json` deliberately NULL (`0010`) — so there is no field history for dates, cost or notes, by design. |
-| **Problem** | "Where did the renewal date come from?" is unanswerable for every field on the contract header. The tempting fix — widen the `0010` allowlist — would push cost, dates and legal text into `audit_logs`, undoing an explicit security decision ([16 §8](./16_CONTRACT_PDF_AI_EXTRACTION_DESIGN.md)). |
-| **Decision** | A **separate** `contract_field_provenance (contract_id, field_name, source_file_id, page_number, text_span, extraction_confidence, verification_state, verified_by, verified_at, tenant_id)`. Provenance is a **product feature** with its own table; the audit log remains a **security** record and is not touched. |
-| **Rejected** | *Widen the `0010` audit allowlist* — reverses a deliberate security decision and puts legal text in a table read by different eyes for different reasons. *Columns on `contracts` (`renewal_date_source_file_id`, …)* — one pair of columns per field, forever. *A JSONB blob on `contracts`* — unqueryable, unconstrained, and no FK to the evidence file. |
-| **Rationale** | Provenance is per-field and sparse; a narrow table is the natural shape. Keeping it out of `audit_logs` preserves both records' meanings — one answers "what did the paper say", the other "who changed it". |
-| **Cardinality** | Contract **1:N** provenance rows, at most one **current** row per `field_name`. |
-| **Lifecycle** | A provenance row survives the value changing — it records what a document said at a point in time. Superseding evidence (§10) adds a row; it does not delete the old one. This is what makes §9's amendment deltas derivable. |
-| **Tenancy** | Follows the contract; same-tenant composite FKs to both `contracts` and `files`. Grants no read of a file the caller could not already read. |
-| **Migration** | Eventually: one new table. `field_name` must be constrained to the **writable contract field vocabulary** already defined by `parseContractWriteInput` — a provenance row for a field that cannot be written is meaningless. |
-| **UI** | A small source chip (`§3.2`) beside a value, opening an evidence panel over the Quiet Ops detail. **"no source recorded"** renders wherever provenance is absent — the strongest honesty device in the design exploration. |
-| **Open** | Whether provenance is required for a manual edit (a human typing a renewal date from an email). Assumed: allowed with `source = manual_entry` and no file — mirroring `contract_entitlements.source`. |
+| **Current** | Entitlements have *part* of the pattern: `contract_entitlements.source` (5 bounded values), `.confidence`, `.evidence_file_id`, `.evidence_note` (`0084`). But the DAL **deliberately drops the file id** — `contract-entitlements.ts:24,60` converts `evidence_file_id` to `hasEvidenceDocument: boolean`, explicitly "matching how `owner_user_id`" is handled. So even at line level there is **no read path from a fact to its document**. The contract header has none of it. `audit_logs` records `contract.created`/`.updated` on a curated allowlist with `before_json` deliberately NULL (`0010:36–80`). |
+| **Problem** | The first revision froze a table whose **read contract cannot be built today**, for two independent reasons. (a) The intended interaction is "click a source chip → open that document", but the only existing evidence pattern refuses to emit a file id, and that refusal is a deliberate DAL convention rather than an oversight. (b) **`files` is tenant-member-read-only** (`0013:53–54`) while `contracts` is org-union readable (`0003`) — so for a procurement-org or paying-org reader a provenance chip would point at a document they cannot open. A provenance model whose evidence is invisible to a third of its authorized readers is not a model, it is a broken link. |
+| **Decision** | **DECISION REQUIRED.** The *shape* still stands — a separate `contract_field_provenance` table, with `audit_logs` untouched — but lifecycle, cardinality and the read contract cannot be frozen until (a) and (b) are answered. |
+| **Blocking requirements** | **B2-a · file-id exposure.** Does provenance emit a raw `source_file_id` (reversing the established convention), or an opaque handle, or only a boolean plus a document name? This decides whether the source chip can exist at all. **B2-b · reader parity.** Either org-scope `files` (a RISK-002 change with policies **and** tests) or specify the documented degradation for org-scoped readers — provenance present, evidence unopenable — and confirm that is acceptable product behaviour. **B2-c · cardinality.** "At most one current row per `field_name`" was asserted, not derived; whether two documents may evidence the same field concurrently (an order form and an amendment both stating a quantity during an overlap) has to be decided, because it determines whether the table needs a uniqueness constraint or an effective-dated shape like §7's. |
+| **Rejected (still valid)** | *Widen the `0010` audit allowlist* — reverses a deliberate security decision and puts legal text in a table read by different eyes for different reasons. *Columns on `contracts` (`renewal_date_source_file_id`, …)* — one pair of columns per field, forever. *A JSONB blob* — unqueryable, unconstrained, no FK to the evidence file. |
+| **Rationale** | Reopened because the read contract is the substance of this feature, not a detail of it. Provenance that cannot be followed to a document is a confidence badge, which is a different and much weaker product. |
+| **Cardinality** | **Unresolved — B2-c.** |
+| **Lifecycle** | *Provisional:* a provenance row survives the value changing; superseding evidence (§10) adds a row rather than deleting one. Cannot be frozen while B2-c is open, since "adds a row" and "at most one current row" are in tension. |
+| **Tenancy** | **The blocker (B2-b).** Same-tenant composite FKs to `contracts` and `files` are necessary but do not address the asymmetry. Under every resolution, provenance must grant **no** read of a file the caller could not already read. |
+| **Migration** | **BLOCKED** on B2-a/b/c. |
+| **UI** | *Provisional:* a source chip beside a value opening an evidence panel; **"no source recorded"** wherever provenance is absent. Note that "no source recorded" is shippable **now** and is independent of the blockers. |
+| **Open** | B2-a, B2-b, B2-c. Also whether provenance is permitted for a manual edit (a human typing a date from an email) — assumed yes with `source = manual_entry` and no file, mirroring `contract_entitlements.source`. |
 
-## 12. Verification / confidence — **DECIDED VNEXT** (AI generation itself **DEFERRED**)
+## 12. Verification / confidence — **DECIDED VNEXT**, but **blocked by §11** (AI generation itself **DEFERRED**)
+
+> **Dependency added by review.** These columns live *on* §11's table. The separation decided here
+> (confidence and verification as two columns, canonical value never stored here) is sound and
+> unchanged — but it **cannot be implemented before §11's B2-a/b/c resolve**, because §11 no longer
+> has a frozen shape to carry them. `verified_by` additionally inherits §1's person-reference
+> question. Frozen as a *principle*; blocked as a *migration*.
 
 | | |
 |---|---|
@@ -294,21 +335,22 @@ Read directly from the migrations and the DAL on 2026-09-05, not from memory:
 | **UI** | *Money*, secondary to the recorded value, with the arithmetic available. Refuses where §13's basis is unknown. |
 | **Open** | Whether a ramped deal (Salesforce: 900 → 1,400 → 1,900 users) can express TCV without per-year rows. It cannot from the contract header alone — the ramp lives in the entitlement lines' terms, so a ramped TCV is entitlement-derived (§21). Marked as a known limitation, not a blocker. |
 
-## 15. Recurring amount — **DECIDED VNEXT**
+## 15. Recurring amount — **DECISION REQUIRED** *(reopened by review; was DECIDED VNEXT)*
 
 | | |
 |---|---|
-| **Current** | Not represented distinctly; conflated into `total_cost`. |
-| **Problem** | "What do we pay per period" is the question a budget holder asks, and it is not always the recorded figure. |
-| **Decision** | **Derived**, not stored: recurring amount = `total_cost` normalized to `billing_frequency` using `total_cost_basis`. Where basis is `one_time`, there is **no** recurring amount — and the correct answer is that sentence, not zero. |
-| **Rejected** | *A `recurring_amount` column* — third money column, same drift argument as §14. |
-| **Rationale** | `PERIODS_PER_YEAR` already exists in the commercial engine and bounds exactly which cadences can be normalized (`monthly`/`quarterly`/`annual`); `multi_year` and `one_time` correctly yield no figure. Reuse it rather than re-deriving. |
+| **Current** | Not represented distinctly; conflated into `total_cost`. Critically: **`contracts.billing_frequency` has no CHECK constraint** — it is unbounded nullable free text. The only bounded cadence vocabulary in the schema is on the *line* table (`contract_entitlements_billing_frequency_chk`, `0084:123`). The commercial engine's `PERIODS_PER_YEAR` covers exactly three values (`monthly`, `quarterly`, `annual`). |
+| **Problem** | The first revision stated a derivation — "normalize `total_cost` to `billing_frequency`" — that **the source cannot support at contract level**. `billing_frequency` may hold any string; a derivation over an unbounded column either silently drops rows it cannot parse or invents a period. That is product preference presented as canonical truth, which is exactly what this document must not do. |
+| **Decision** | **DECISION REQUIRED.** Recurring amount stays **derived, never stored** — that half is not in dispute. What cannot be frozen is the derivation's input domain. |
+| **Blocking requirement** | **B4 · bound the contract-level cadence, or scope the derivation.** Either (a) add a CHECK to `contracts.billing_frequency` mirroring the line-level vocabulary — which requires the same survey-existing-values step as §3 and §8, and is a data question — or (b) define the derivation as *partial by construction*: it yields a figure only for the three `PERIODS_PER_YEAR` cadences and returns the honest refusal sentence for everything else, including unrecognised free text. **(b) is shippable without a migration** and is the likely answer; it is written here as a decision to take, not one already taken. |
+| **Rejected (still valid)** | *A `recurring_amount` column* — a third money column, same drift argument as §14. |
+| **Rationale** | Reopened because the derivation was asserted against a column with no vocabulary. The distinction matters: under (b) the product must be explicit that a contract with `billing_frequency = 'Annual (in advance)'` gets no recurring figure — a real fixture-shaped value that the three-value table does not match. |
 | **Cardinality** | Derived. |
 | **Lifecycle** | n/a. |
 | **Tenancy** | None. |
-| **Migration** | **None.** |
-| **UI** | *Money*, shown only where derivable. |
-| **Open** | None. |
+| **Migration** | **None under (b); one CHECK under (a).** Blocked on B4. |
+| **UI** | *Money*, shown only where derivable; the refusal sentence otherwise. |
+| **Open** | B4. Note this is the same unbounded-vocabulary problem as §3 (`organizations.type`) and §8 (`files.document_type`) — three instances of one pattern, and they should be decided with one rule rather than three. |
 
 ## 16. Annualized value — **DECIDED VNEXT**
 
@@ -324,23 +366,24 @@ Read directly from the migrations and the DAL on 2026-09-05, not from memory:
 | **Tenancy** | **Never summed across currencies.** There is no FX source anywhere in the system; a combined total would be a fabricated conversion. Portfolio figures are per-currency, always. |
 | **Migration** | **None.** |
 | **UI** | *Money* + the per-currency committed strip on the list. |
-| **Open** | Whether an FX source is ever introduced. **DEFERRED** — out of scope, and until it exists no surface may combine currencies. |
+| **Open** | Whether an FX source is ever introduced. **DEFERRED** — out of scope, and until it exists no surface may combine currencies. **Dependency:** the derivation is only as trustworthy as §13's basis, whose backfill is `DECISION REQUIRED`; until that resolves, annualized value is derivable for *new* correctly-based rows and refuses for legacy ones. |
 
-## 17. Renewal owner — **DECIDED VNEXT**
+## 17. Renewal owner — **DECISION REQUIRED** *(reopened by review; was DECIDED VNEXT)*
 
 | | |
 |---|---|
-| **Current** | `contracts.renewal_responsibility text default 'unknown'` — **free text, not a person reference**. The fixture values are real-shaped ("Global Procurement — software category team", "EMEA procurement, with Global Procurement sign-off above EUR 500k"). |
-| **Problem** | Free text cannot be assigned, notified, filtered, or held accountable. But it is also carrying genuine nuance that a bare person FK would destroy. |
-| **Decision** | **Both, with different jobs.** Add `owner_person_id` to §18's renewal-cycle row (the person accountable **for this renewal**, which is often not the contract owner). **Keep `renewal_responsibility`** as the free-text description of the *arrangement* (approval thresholds, committee sign-off) — renamed in the UI, not dropped. |
+| **Current** | `contracts.renewal_responsibility text default 'unknown'` — **free text, not a person reference**. Across the five layers: storage ✅, write path ⚠️ **writable but not clearable** (`contract-write.ts:178–179` assigns the column only when the trimmed value is non-null, so an existing value cannot be blanked back through the form), read ✅, UI ✅, authority ✅ (the contract-write rule). The fixture values are real-shaped ("Global Procurement — software category team", "EMEA procurement, with Global Procurement sign-off above EUR 500k"). |
+| **Problem** | Free text cannot be assigned, notified, filtered, or held accountable — but it carries nuance a bare FK would destroy. The first revision resolved this as "both", which is still the right *shape*; what review found is that the FK half is a **third** person reference inheriting §1's unresolved read-scope asymmetry, and that the free-text half has a small write-path defect nobody had recorded. |
+| **Decision** | **DECISION REQUIRED**, for the person-reference half only. The free-text half is **CURRENT** and stays. No renewal-owner FK may be specified before §1 resolves, because §1, §2(b) and §17 must share one answer to "how does a person become readable on a contract". |
+| **Blocking requirement** | §1's B1-b and B1-c. Additionally: whether `renewal_responsibility` should become clearable is a **write-path** question for the contract form; recorded here so it is not lost, but it is not a domain decision and does not block. |
 | **Rejected** | *Replace the free text with an FK* — loses "with Global Procurement sign-off above EUR 500k", which is the kind of thing that decides whether a renewal is actually approved. *Reuse the contract owner* — they differ; a contract owned by Flywheel RevOps can have a renewal run by Global Procurement. |
-| **Rationale** | A structured assignee and an unstructured policy note answer different questions; forcing one to be the other loses information either way. |
-| **Cardinality** | Renewal cycle **N:1** person. |
-| **Lifecycle** | Per **cycle** — the renewal owner may change between cycles, and that history is worth keeping. |
-| **Tenancy** | As §1 (`people`, no widening). |
-| **Migration** | Eventually: a column on §18's table. `renewal_responsibility` is **unchanged**. |
-| **UI** | Detail → *Time* / renewal panel. Where absent on a contract inside its notice window: an attention flag. |
-| **Open** | None. |
+| **Rationale** | A structured assignee and an unstructured policy note answer different questions. But three person references (§1, §2b, §17) resolved by three different rules is exactly the incoherence this document exists to prevent. |
+| **Cardinality** | *Provisional:* renewal cycle **N:1** person. |
+| **Lifecycle** | *Provisional:* per **cycle** — the renewal owner may change between cycles, and that history is worth keeping. |
+| **Tenancy** | As §1 — the blocker. |
+| **Migration** | **BLOCKED** with §1. `renewal_responsibility` itself is **unchanged** and needs no migration. |
+| **UI** | Detail → *Time* / renewal panel. The free-text arrangement is shippable today; the named assignee is not. |
+| **Open** | Tied to §1 B1-b/B1-c. Separately: should `renewal_responsibility` be clearable? |
 
 ## 18. Renewal workflow / tasks / decisions — **DECIDED VNEXT** (tasks **DEFERRED**)
 
@@ -356,23 +399,24 @@ Read directly from the migrations and the DAL on 2026-09-05, not from memory:
 | **Tenancy** | Follows the contract; write authority is the existing contract write rule (`0004`), **not** a new one. Paying-org members must not gain the ability to serve notice. |
 | **Migration** | Eventually: one new table + an audit trigger following `0010`'s pattern (**and** its restraint about what enters `after_json`). Stateful workflow with an external, irreversible consequence ⇒ **T3**. |
 | **UI** | Detail → *Time*: the "if nothing is done" sentence, the derived deadline, the decision state, and a renewal panel. |
-| **Open** | Whether cycles are **generated** in advance (a row per anticipated renewal) or created on first interaction. Assumed: **on first interaction**, so the table holds decisions rather than speculation. |
+| **Open** | Whether cycles are **generated** in advance (a row per anticipated renewal) or created on first interaction. Assumed: **on first interaction**, so the table holds decisions rather than speculation. **Dependencies added by review:** two of this table's proposed columns are blocked elsewhere — `owner_person_id` by §17, `vendor_quote_id` by §19. The cycle's own decisions (per-cycle granularity, derived notice deadline, state machine, no task system) are unaffected and stay frozen; the table can be built without those two columns and gain them later. |
 
-## 19. Vendor renewal quote — **DECIDED VNEXT**
+## 19. Vendor renewal quote — separation **DECIDED VNEXT** · shape **DECISION REQUIRED** *(partially reopened)*
 
 | | |
 |---|---|
 | **Current** | **Nothing.** In the fixture the Adobe FY27 quote (EUR 703,000, +14.8%) exists only as an attached PDF with no structure — while being the most decision-relevant number on the screen. |
 | **Problem** | The obvious shortcut — put the quote in `total_cost` — would overwrite a **commitment** with a **proposal**. |
-| **Decision** | Model it explicitly: `vendor_quotes (contract_id, tenant_id, quoted_amount, currency, quoted_basis, quote_date, valid_until, source_file_id, status, note)`, `status` ∈ `received` · `under_review` · `accepted` · `rejected` · `expired`. `quoted_basis` reuses §13's vocabulary. **`total_cost` is never touched by a quote**; an accepted quote becomes a contract amendment through the normal write path. |
-| **Rejected** | *Overload `total_cost`* — destroys the record of what we are actually committed to. *A note field* — unqueryable; renewal exposure cannot see it. *Model it as a `files` row only* — a document is evidence, not a structured claim. |
-| **Rationale** | A quote is a **proposal by a counterparty** — structurally the same kind of thing as an AI extraction: a claim with a source and a status, not a fact about our commitment. Giving it the same shape keeps the three-layer separation intact. |
-| **Cardinality** | Contract **1:N** quotes (renegotiation produces several); a renewal cycle references **at most one** current quote. |
-| **Lifecycle** | `valid_until` makes expiry explicit rather than inferred. A rejected quote is retained — it is the negotiation history. |
-| **Tenancy** | Follows the contract; `source_file_id` composite-FK'd same-tenant. |
-| **Migration** | Eventually: one new table. |
+| **Decision** | **Split.** (a) **FROZEN:** a quote is a distinct object and **`total_cost` is never touched by one**; an accepted quote becomes a contract amendment through the normal write path. This separation is the load-bearing decision and it survives review. (b) **DECISION REQUIRED:** the concrete shape, for two reasons below. |
+| **B3 — the two dependencies review found** | **B3-c · `quoted_basis` depends on an unresolved decision.** It was specified as "reuses §13's vocabulary", but §13's backfill is itself `DECISION REQUIRED`; a quote's basis cannot be frozen against a vocabulary whose meaning for existing data is undecided. A quote *is* the cleaner case (it is always new data, never backfilled), so this may resolve quickly — but it must resolve, not be assumed. **B3-d · `source_file_id` inherits §11's asymmetry.** `files` is tenant-member-read-only (`0013:53–54`) while quotes hang off org-union-readable contracts, so a quote's evidence is invisible to org-scoped readers — the same B2-b hole, and it must get the same answer. |
+| **Rejected (still valid)** | *Overload `total_cost`* — destroys the record of what we are actually committed to. *A note field* — unqueryable; renewal exposure cannot see it. *Model it as a `files` row only* — a document is evidence, not a structured claim. |
+| **Rationale** | A quote is a **proposal by a counterparty** — structurally the same kind of thing as an AI extraction: a claim with a source and a status, not a fact about our commitment. That framing is frozen. What is not frozen is a shape that quietly depends on two open decisions. |
+| **Cardinality** | *Provisional:* contract **1:N** quotes (renegotiation produces several); a renewal cycle references **at most one** current quote. |
+| **Lifecycle** | *Provisional:* `valid_until` makes expiry explicit rather than inferred; a rejected quote is retained as negotiation history. |
+| **Tenancy** | Follows the contract. `source_file_id` composite-FK'd same-tenant — necessary, but see B3-d. |
+| **Migration** | **BLOCKED** on B3-c and B3-d. Provisional shape: `vendor_quotes (contract_id, tenant_id, quoted_amount, currency, quoted_basis, quote_date, valid_until, source_file_id, status, note)`, `status` ∈ `received` · `under_review` · `accepted` · `rejected` · `expired`. |
 | **UI** | *Money* → "Vendor position": the proposed figure, the delta against the recorded value, the status, and its source document. Never merged into the committed figure. |
-| **Open** | Whether a quote can exist without a contract (a proposal for something not yet bought). **DEFERRED** — out of scope; a pre-contract proposal is a draft contract, which the model already supports via `status = 'Draft'`. |
+| **Open** | B3-c (`quoted_basis` depends on §13), B3-d (`source_file_id` inherits §11's B2-b). Whether a quote can exist without a contract (a proposal for something not yet bought) stays **DEFERRED** — a pre-contract proposal is a draft contract, which the model already supports via `status = 'Draft'`. |
 
 ## 20. Negotiation target — **DECISION REQUIRED**
 
@@ -410,47 +454,71 @@ Read directly from the migrations and the DAL on 2026-09-05, not from memory:
 
 ## 22. Decision ledger
 
-### Frozen by this document (implementation may proceed once the pre-work below clears)
+> **Revised after independent review (2026-09-05).** The first revision froze decisions resting on
+> capability the source does not support — chiefly the read-scope asymmetry in §0's tenth row, and a
+> write path for `owner_user_id` that **does not exist**. Counts below are derived from this
+> document, not asserted: **21 topics · 17 frozen entries · 18 open questions across 11 topics ·
+> 10 of 21 topics now carry a `DECISION REQUIRED`** (§§1, 2, 4, 6, 11, 13, 15, 17, 19, 20), up from
+> 3 in the reviewed revision. Several topics are split, so a topic number can appear in both tables —
+> once for its frozen half, once for its blocked half.
+
+### Frozen — implementation may proceed once the pre-work below clears
 
 | # | Decision |
 |---|---|
-| 1 | Named owner = `owner_person_id → people`; `owner_user_id` retained as the authority hook; departure raises "no effective owner" |
-| 2 | `procurement_org_id` stays the write anchor; `procured_by_person_id` added for attribution |
+| 2a | `procurement_org_id` stays the write anchor, unchanged — the only ownership field supported on all five layers |
 | 3 | Paying-org relationship unchanged; `organizations.type` gains a bounded CHECK |
-| 4 | `contract_beneficiaries` join table on the **contract** (tenancy question below still open) |
+| 4a | `contract_beneficiaries` join table on the **contract** (tenancy question still open) |
 | 5 | `relationship_type` surfaced + bounded; entitlement refs stay the precise join; `contracts.vendor_id` added |
-| 6 | Allocation is **contract-level** with an explicit stored `basis` |
+| 6a | Allocation is **contract-level**, effective-dated, with the basis stored rather than inferred |
 | 7 | Allocations are **effective-dated**; re-basing closes and inserts; closed periods immutable |
 | 8 | `files.document_type` bounded to eight values and surfaced |
 | 9 | `files.effective_date` added; "terms in force" is **derived**, never stored |
 | 10 | Supersession is a **DAG** via `supersedes_file_id` (single-parent assumption flagged) |
-| 11 | `contract_field_provenance` as a separate table; `audit_logs` untouched |
-| 12 | `extraction_confidence` and `verification_state` kept as **separate** columns |
-| 13 | `total_cost_basis` + `term_months` (shape only — backfill blocked) |
+| 12 | `extraction_confidence` and `verification_state` kept as **separate** columns; canonical value never stored there — *principle frozen, migration blocked by §11* |
+| 13a | `total_cost_basis` + `term_months` as the **shape**; `total_cost` never overwritten |
 | 14 | Committed term value is **derived**; no column |
-| 15 | Recurring amount is **derived**; no column |
 | 16 | Annualized value is **derived**; never summed across currencies |
-| 17 | Renewal owner as an FK on the cycle **and** `renewal_responsibility` retained as free text |
+| 17a | `renewal_responsibility` retained as free text alongside any future assignee |
 | 18 | `contract_renewals` **per cycle**; notice deadline becomes derived; no task system |
-| 19 | `vendor_quotes` modelled explicitly; `total_cost` never overloaded |
+| 19a | A quote is a distinct object; **`total_cost` is never overloaded** by one |
 | 21 | Placement rule: varies by product ⇒ line; property of the agreement ⇒ contract |
 
-### Still open — must be answered before the corresponding migration
+### Blocked — no schema may be written until answered
 
-Two classes, deliberately distinguished. **§4, §13 and §20 carry `DECISION REQUIRED` in their
-headings**: they are product/ownership calls that block a whole topic, and no schema may be written
-for them at all. **§6, §10 and §12 are frozen decisions with an implementation question inside them**
-— the shape is settled; how to enforce or express one part of it is not. Both classes block their
-migration; only the first blocks the decision.
+Three classes, deliberately distinguished. **(P) product/ownership call** — blocks the decision
+itself. **(T) tenancy/read-model call** — blocks because it changes who can see the result, and is a
+security decision rather than a product one. **(I) implementation call inside a frozen decision** —
+the shape is settled; how to express or enforce one part is not.
 
-| # | Open question | Blocks | Owner |
-|---|---|---|---|
-| 4 | **Does beneficiary membership grant contract READ?** Changes the `0003` union — a tenant-isolation decision, not a product one. Planning default: **no**. | `contract_beneficiaries` | Sam + security review |
-| 13 | **What do existing `total_cost` rows mean?** A data decision, possibly per contract. Cannot be inferred. | `total_cost_basis`, and every annualized figure | Sam / Tim |
-| 20 | **Negotiation target: enum, free text, or both — and who may read it**, given paying-org read. | `target_outcome` on §18 | Sam / Tim |
-| 10 | May one document supersede **several**? Changes the shape (self-FK → edge table). | supersession migration | Sam |
-| 6 | Where is sum-to-100 enforced (DB constraint vs application)? | allocation migration | implementer + DB reviewer |
-| 12 | Does `verified_by` name a person, or render as an unattributed "verified"? | provenance columns | Sam (privacy posture) |
+| # | Ref | Open question | Blocks | Class | Owner |
+|---|---|---|---|---|---|
+| 1 | B1-a | **`owner_user_id` has no write path** — no `owner*` key in `ContractWriteInput`; nothing in the product can set an owner. Extend the write path, or state how owner is set. | the whole owner model | P | Sam + implementer |
+| 1 | B1-b | **Read-model parity for a person reference.** `contracts` is org-union readable; `people` is tenant-member only. Serve every authorized reader, or document the degradation. | §1, §2b, §17 | T | Sam + security review |
+| 1 | B1-c | If B1-b resolves to "org-scope `people`", that is a **RISK-002** change needing policies **and** tests — not a side effect of a contracts migration. | §1, §2b, §17 | T | security review |
+| 4 | — | **Does beneficiary membership grant contract READ?** Changes the `0003` union. Planning default: **no**. | `contract_beneficiaries` | T | Sam + security review |
+| 6 | B3-a | **`by_quantity` has no contract-level referent** — quantities are per line, in differing units, and three fixture contracts have none. Restrict the v1 vocabulary, or make allocation entitlement-level. | allocation CHECK | P | Sam |
+| 6 | B3-b | **`by_headcount` has no source** anywhere in the schema. | allocation CHECK | P | Sam |
+| 6 | — | Where is sum-to-100 enforced (DB constraint vs application)? | allocation migration | I | implementer + DB reviewer |
+| 10 | — | May one document supersede **several**? Changes self-FK → edge table. | supersession migration | I | Sam |
+| 11 | B2-a | **Does provenance emit a raw `source_file_id`?** The entitlement DAL deliberately converts it to a boolean; the source chip cannot exist without reversing that convention. | provenance read contract | P | Sam + security review |
+| 11 | B2-b | **`files` is tenant-member-read-only** while contracts are org-union readable — evidence is unopenable for org-scoped readers. | provenance + §19 evidence | T | Sam + security review |
+| 11 | B2-c | **Cardinality is unproven** — may two documents evidence one field concurrently? Decides uniqueness vs effective dating. | provenance table shape | I | Sam |
+| 13 | — | **What do existing `total_cost` rows mean?** A data decision, possibly per contract. Cannot be inferred. | `total_cost_basis` NOT NULL, every annualized figure | P | Sam / Tim |
+| 15 | B4 | **`contracts.billing_frequency` has no CHECK** — the derivation was asserted over an unbounded column. Bound it, or scope the derivation to the three known cadences and refuse the rest. | recurring-amount derivation | P | Sam |
+| 17 | — | Should `renewal_responsibility` become clearable? (`contract-write.ts:178–179` only sets it when non-null.) Write-path defect, non-blocking. | contract form | I | implementer |
+| 19 | B3-c | `quoted_basis` was specified as reusing §13's vocabulary, which is itself unresolved. | `vendor_quotes` | P | Sam / Tim |
+| 19 | B3-d | `source_file_id` inherits B2-b. | `vendor_quotes` | T | with B2-b |
+| 20 | — | **Negotiation target: enum, free text, or both — and who may read it**, given paying-org read. | `target_outcome` on §18 | P + T | Sam / Tim |
+| 12 | — | Does `verified_by` name a person, or render as an unattributed "verified"? | provenance columns | T | Sam (privacy posture) |
+
+**The three pre-existing blockers survive this revision unchanged and unresolved:** §4 tenancy, §13
+backfill, §20. None was answered here, and none may be answered without evidence.
+
+**One answer settles five rows.** B1-b, B1-c, B2-b, B3-d and §12's `verified_by` are all the same
+question — *how does a fact stored on an org-union-readable contract become visible to org-scoped
+readers when its referent lives in a tenant-member-only table?* They should be taken as one decision,
+not five.
 
 ### Deferred, with the condition that revives each
 

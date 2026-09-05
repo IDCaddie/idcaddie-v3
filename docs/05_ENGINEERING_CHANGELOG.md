@@ -26,8 +26,32 @@ decision, a vendor quote, and an unambiguous `total_cost`. Deciding those in a m
 a tenant-isolation question and a data-backfill question inside a diff that also has code in it.
 
 **Twenty-one topics, each with current truth → problem → decision → alternatives rejected → rationale
-→ cardinality → lifecycle → tenancy → eventual migration → UI → open questions.** Fifteen decisions
-are frozen; six are marked **DECISION REQUIRED** and explicitly block their own migrations.
+→ cardinality → lifecycle → tenancy → eventual migration → UI → open questions.**
+
+**Revised after independent review, before merge.** The first revision froze decisions the source
+does not support. Counts are now derived from the document rather than asserted: **21 topics · 17
+frozen entries · 18 open questions across 11 topics · 10 of 21 topics carry a `DECISION REQUIRED`**
+(§§1, 2, 4, 6, 11, 13, 15, 17, 19, 20), up from 3.
+
+**The finding that reopened the most.** Capability was being claimed on the strength of a column
+existing. §0 now separates five layers — storage / write path / read path / UI / settled authority —
+and applies them: `contracts.owner_user_id` has **no write path at all** (no `owner*` key in
+`ContractWriteInput`; `parseContractWriteInput` never emits the column), so "keep it as the authority
+hook" described a column nothing can populate. Alongside it, a **read-scope asymmetry** is now the
+truth table's tenth row: `contracts` is org-union readable (`0003:47–63`) and `contract_entitlements`
+follows it (`0084:202–209`), but `files` (`0013:53–54`) and `people` (`0001:311`) are
+**tenant-member-only**. Every named-person field (§1, §2b, §17) and every document-evidence field
+(§11, §12, §19) would therefore render for tenant members and vanish for exactly the procurement-org
+and paying-org readers the `0003` union exists to serve. Closing that gap is a **RISK-002** change
+requiring policies and tests, not a side effect of a contracts migration. One answer settles five
+open rows; the document says so rather than answering it.
+
+Also reopened: §6 (`by_quantity` / `by_headcount` had no contract-level referent — quantities are
+per line in differing units, headcount exists nowhere), §15 (a derivation asserted over
+`contracts.billing_frequency`, which has **no CHECK**; the only bounded cadence vocabulary is
+line-level, `0084:123`), §19 (`quoted_basis` depended on §13, itself unresolved), and §11 (the
+entitlement DAL deliberately converts `evidence_file_id` to a boolean, so no fact-to-document read
+path exists to build a source chip on).
 
 **The finding that shaped the largest decision.** `public.profiles` has exactly one SELECT policy —
 `"users can read own profile" … using (id = auth.uid())` (`0001:276`), unwidened by any later
@@ -35,8 +59,10 @@ migration. So `contracts.owner_user_id` can *never* be resolved to a name by the
 which is why the DAL exposes only `hasOwner: boolean`. The instinct is to widen that policy; doing so
 would expose every workspace member's email to every other member — a T3 trust-boundary change bought
 for one label. `public.people` is already tenant-member readable (`0001:311`) and carries
-`full_name`/`title`/`department`. The decision is therefore **two references with different jobs**:
-`owner_person_id → people` for the displayed name, `owner_user_id` retained as the authority hook.
+`full_name`/`title`/`department`. The shape that survives is **two references with different jobs** —
+`owner_person_id → people` for the displayed name, `owner_user_id` as the authority hook — but review
+established it **cannot be frozen**: `owner_user_id` has no write path, and `people` is not readable
+by the org-scoped users who can read the contract. §1 is therefore `DECISION REQUIRED`, not decided.
 
 **Three tenancy questions are raised rather than answered, deliberately.** Whether beneficiary
 membership grants contract READ changes the `0003` read union and is a tenant-isolation decision, not
