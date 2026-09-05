@@ -12,6 +12,58 @@ from PRs verified via `git log` / `gh pr list`.
 > **as of each PR's date** and are historical — where an older entry says "RISK-007 remains OPEN" / "Phase C remains
 > BLOCKED", that was accurate at that entry's date; this banner is the current state.
 
+### docs(engineering-os) — Engineering OS v1: universal exact-head review + canonical DESIGN.md (DOCS ONLY) · 2026-09-05
+
+**Freezes the Engineering OS. No product code, no workflow change, no migration, no RLS, no
+deployment.** `ENGINEERING_STANDARDS.md` is **extended, not replaced** — v0.1's §A–§S are untouched
+and every inbound `§letter` reference still resolves; the OS is appended as §T–§X so ID Caddie keeps
+one engineering system rather than acquiring a second one.
+
+**What the five new sections codify.** §T makes independent **exact-head** review universal (depth
+stays risk-proportional) and names the fourteen fields every PR records — `BASE_SHA`/`HEAD_SHA`,
+`BASELINE_RISK`/`SEMANTIC_RISK`, `AUTHORITY_CHANGED`, `USER_TRUTH_CHANGED`,
+`SECURITY_BOUNDARY_CHANGED`, `EXTERNAL_SIDE_EFFECT`, `MIGRATION`, `PRODUCTION_MUTATION`,
+`LOCAL_PROOF`, `CI`, `INDEPENDENT_EXACT_HEAD_REVIEW`, `HUMAN_GO` — with the rule that **any
+subsequent commit invalidates the recorded review**, and an explicit refusal to build a bot-comment
+parser: where `@codex review` has no stable check context it is a human-read exact-head artifact, not
+fake automation. §U sets cumulative review depth T0→T3. §V separates **P0/P1 → BLOCK** from **P2 →
+BLOCK only when demonstrated** (wrong business truth, wrong money/license/spend, authz or disclosure
+failure, data loss, false empty/zero/no-result, unsafe external side effect, false
+freshness/completeness) with everything else recorded as DEBT rather than silently dropped. §W is the
+**one production mover** rule — one lane at a time owns hosted DB mutation, migration apply,
+provider-live exercise, production deploy, or the next migration number; development stays parallel.
+§X writes down the authority hierarchy and its four NEVERs: memory ≠ production truth, prototype ≠
+capability, schema column ≠ supported product, green CI ≠ proof the intended behavior was tested.
+
+**§M reconciled rather than left to contradict.** v0.1 §M said exact-head verification was "not for
+ordinary low-risk PRs"; §T makes review universal. §M now states that it is *extended by* §T — review
+is universal, while the full exact-base regression comparison and production preflight stay
+high-risk-only. One document, one story ([§P](../ENGINEERING_STANDARDS.md)).
+
+**New root canonical `DESIGN.md`** — what a user is *allowed to be told*. Its centre is an
+eight-state **truth grammar**: `loading`, `true empty`, `unavailable`, `failed`, `stale`, `partial`,
+`proposed`, `accepted`, each with what the user sees and what is forbidden, plus never-run as a case
+of `unavailable` rather than `true empty`. This is the design-side statement of the same distinction
+[§D](../ENGINEERING_STANDARDS.md) draws between provider fact, normalized fact, and governance truth,
+and it generalises the defect fixed the same day: `listContractFilesForCurrentUser` returning
+`not_readable`/`query_failed` so a component cannot infer "empty or forbidden?" from `[]`. The doc
+also fixes product behavior for tables, navigation, keyboard/focus, responsive, accessibility, touch
+targets, destructive actions, motion/reduced-motion, and evidence/provenance display — and explicitly
+**forbids growing a giant component library**, holding primitives to pain-before-platform
+([§R](../ENGINEERING_STANDARDS.md)).
+
+**AGENTS.md stays thin** — pointers to `DESIGN.md`, the exact-head discipline, and a six-item STOP
+list, no restatement of standards. `CLAUDE.md` already delegates via `@AGENTS.md` and was left alone.
+The **PR template is extended**: the old `## Risk` bullets are replaced by one `## Review record —
+risk + exact head` block carrying the fourteen fields, so those facts have a single owner
+([§O](../ENGINEERING_STANDARDS.md)) instead of being asked twice; a five-item **Merge readiness**
+checklist and a truth-grammar proof line are added. The P0 checklist is unchanged.
+
+**Risk:** T0 (documentation / non-runtime). No `src/`, no `supabase/`, no `scripts/`, no
+`.github/workflows/`, no GitHub ruleset change. Nothing applied, nothing deployed. The new discipline
+is human/agent-enforced by the template and these documents — no new automation was added, because
+none has two recorded instances of pain yet ([§R](../ENGINEERING_STANDARDS.md)).
+
 ### fix(contracts) — the contract file list stops claiming "no documents" when it simply cannot look · 2026-09-05
 
 **A wrong answer, not a missing feature.** `/contracts/[id]` renders the attachment list, and `files`
