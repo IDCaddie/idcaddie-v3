@@ -200,7 +200,9 @@ export default async function ContractDetailPage({
           <ContractFiles
             contractId={result.data.id}
             files={files?.ok ? files.data : []}
-            listError={!files || !files.ok}
+            listState={
+              files?.ok ? "ok" : files?.error === "not_readable" ? "not_readable" : "error"
+            }
           />
 
           <p className="text-xs text-zinc-500">
