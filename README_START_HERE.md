@@ -26,6 +26,11 @@ Determine the baseline tier first (`bash scripts/pr-review-summary.sh`), then es
 never de-escalate. Speed and safety are both requirements: T3 ceremony does not belong on a T0/T1
 change unless you can name the higher-risk failure class it catches.
 
+**Every PR gets one independent review of its exact head**, at a depth proportional to its risk — a T0
+review is short, not skipped. Any commit after that review invalidates it, and it must be re-applied
+to the new head before merge. The fields a PR records and the full merge preconditions live in
+[`ENGINEERING_STANDARDS.md`](ENGINEERING_STANDARDS.md) §T–§U and in the PR template.
+
 ## What a change may claim to a user
 [`DESIGN.md`](DESIGN.md) is canonical: the north star, the design principles, and the eight-state
 **truth grammar** — `loading` · `true empty` · `unavailable` · `failed` · `stale` · `partial` ·

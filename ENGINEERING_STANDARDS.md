@@ -126,7 +126,8 @@ impossible.
 
 CI proves what was encoded. Independent review asks whether the right things were encoded. For
 appropriate T3: implementation → local proof → CI → independent review → production preflight →
-controlled rollout. Never imposed on T0/T1.
+controlled rollout. That **full sequence** is never imposed on T0/T1 — but the independent exact-head
+review inside it is universal (§T); only its depth is risk-proportional (§U).
 
 ## M · Exact-base / exact-head proof
 

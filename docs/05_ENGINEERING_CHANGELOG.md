@@ -15,9 +15,10 @@ from PRs verified via `git log` / `gh pr list`.
 ### docs(engineering-os) — Engineering OS v1: universal exact-head review + canonical DESIGN.md (DOCS ONLY) · 2026-09-05
 
 **Freezes the Engineering OS. No product code, no workflow change, no migration, no RLS, no
-deployment.** `ENGINEERING_STANDARDS.md` is **extended, not replaced** — v0.1's §A–§S are untouched
-and every inbound `§letter` reference still resolves; the OS is appended as §T–§X so ID Caddie keeps
-one engineering system rather than acquiring a second one.
+deployment.** `ENGINEERING_STANDARDS.md` is **extended, not replaced** — §A–§K and §N–§R retain their
+prior substantive rules verbatim; §L, §M and §S are narrowly reconciled for v1.0; the title and
+opening line are updated to v1.0; and the OS is appended as §T–§X. Every inbound `§letter` reference
+still resolves, so ID Caddie keeps one engineering system rather than acquiring a second one.
 
 **What the five new sections codify.** §T makes independent **exact-head** review universal (depth
 stays risk-proportional) and names the fourteen fields every PR records — `BASE_SHA`/`HEAD_SHA`,
@@ -35,10 +36,13 @@ provider-live exercise, production deploy, or the next migration number; develop
 §X writes down the authority hierarchy and its four NEVERs: memory ≠ production truth, prototype ≠
 capability, schema column ≠ supported product, green CI ≠ proof the intended behavior was tested.
 
-**§M reconciled rather than left to contradict.** v0.1 §M said exact-head verification was "not for
-ordinary low-risk PRs"; §T makes review universal. §M now states that it is *extended by* §T — review
-is universal, while the full exact-base regression comparison and production preflight stay
-high-risk-only. One document, one story ([§P](../ENGINEERING_STANDARDS.md)).
+**§L and §M reconciled rather than left to contradict.** Two v0.1 sentences were readable as
+exempting low-risk PRs from the review §T makes universal: §M's "not for ordinary low-risk PRs", and
+§L's "Never imposed on T0/T1". §M now states it is *extended by* §T — review is universal, while the
+full exact-base regression comparison and production preflight stay high-risk-only. §L now says the
+**full T3 sequence** is what T0/T1 never inherits, while the independent exact-head review inside it
+is universal (§T) at risk-proportional depth (§U). Tier definitions (§B) are unchanged, as are
+§V/§W/§X. One document, one story ([§P](../ENGINEERING_STANDARDS.md)).
 
 **New root canonical `DESIGN.md`** — what a user is *allowed to be told*. Its centre is an
 eight-state **truth grammar**: `loading`, `true empty`, `unavailable`, `failed`, `stale`, `partial`,
