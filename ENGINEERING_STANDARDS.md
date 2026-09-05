@@ -1,7 +1,7 @@
-# ID Caddie Engineering Standards — v0.1
+# ID Caddie Engineering Standards — v1.0
 
-**Canonical source for: how much rigor a change earns.** Governs `idcaddie-v3` and
-`idcaddie-connector-runner`. It does not restate [07 P0 Review
+**Canonical source for: how much rigor a change earns, and what a change must record before it
+merges.** Governs `idcaddie-v3` and `idcaddie-connector-runner`. It does not restate [07 P0 Review
 Checklist](docs/07_P0_REVIEW_CHECKLIST.md), [08 Code & Docs
 Standard](docs/08_CODE_AND_DOCS_STANDARD.md), or [02 Security &
 RLS](docs/02_SECURITY_AND_RLS.md) — it decides which of them a change has to satisfy.
@@ -126,13 +126,18 @@ impossible.
 
 CI proves what was encoded. Independent review asks whether the right things were encoded. For
 appropriate T3: implementation → local proof → CI → independent review → production preflight →
-controlled rollout. Never imposed on T0/T1.
+controlled rollout. That **full sequence** is never imposed on T0/T1 — but the independent exact-head
+review inside it is universal (§T); only its depth is risk-proportional (§U).
 
 ## M · Exact-base / exact-head proof
 
 For disputed regressions or sensitive merges, compare against the exact production/base commit. For
 high-risk merge gates, verify the exact PR head, CI on that exact head, a clean tree, and
-mergeability. Not for ordinary low-risk PRs.
+mergeability.
+
+**Extended by §T.** Exact-head *review* is now universal — every PR, depth proportional to risk. What
+stays high-risk-only is the rest of this section: the full exact-base regression comparison and the
+production preflight.
 
 ## N · CI portability
 
@@ -180,4 +185,129 @@ No calendar date. After **5–10 substantive PRs spanning at least two risk tier
 recorded friction evidence: what was repeatedly reconstructed? What consumed meaningful time or
 caused avoidable errors? What did classification miss? What ceremony added little value? Did T0/T1
 get faster, did T3 keep the right safeguards, and are Google, Slack, governance, and contracts moving
-faster? Only repeated, evidenced pain earns v0.2 tooling.
+faster? Only repeated, evidenced pain earns v1.1 tooling.
+
+## T · Universal exact-head review
+
+**Every PR gets one independent review of its exact head.** Universality is the rule; *depth* stays
+risk-proportional (§U). A T0 review is short — it is not skipped.
+
+Every PR records these fields (the PR template carries them; `N/A` is an answer, blank is not):
+
+```
+BASE_SHA                       HEAD_SHA
+BASELINE_RISK                  SEMANTIC_RISK
+AUTHORITY_CHANGED              USER_TRUTH_CHANGED
+SECURITY_BOUNDARY_CHANGED      EXTERNAL_SIDE_EFFECT
+MIGRATION                      PRODUCTION_MUTATION
+LOCAL_PROOF                    CI
+INDEPENDENT_EXACT_HEAD_REVIEW  HUMAN_GO
+```
+
+**Any subsequent commit invalidates the recorded review.** Push after a review and the review no
+longer applies: update `HEAD_SHA`, re-run applicable CI on the new head, and have the review
+re-applied there. A review recorded against a head that no longer exists is not evidence.
+
+**Merge requires all of:**
+
+1. applicable CI green on the **current** exact head;
+2. an independent review that applies to that **current** exact head;
+3. blocking threads disposed — fixed, or explicitly accepted as DEBT with a stated reason (§V);
+4. head unchanged since (1)–(3);
+5. human GO.
+
+**Do not build a brittle bot-comment parser.** If a review tool (e.g. `@codex review`) publishes no
+stable GitHub check context, treat its output as a **human-read exact-head artifact**: a human reads
+it and records which head it applied to. A scraper that infers a merge gate from comment prose can be
+fooled by prose, and manufactures a green signal nobody verified — strictly worse than an honest
+manual record.
+
+**§F applies to the review itself.** `INDEPENDENT_EXACT_HEAD_REVIEW: yes` with no named
+reviewer/artifact and no head SHA is a claim, not a review.
+
+## U · Review depth
+
+Cumulative: each tier adds to every tier below it. Depth is set by the **higher** of `BASELINE_RISK`
+and `SEMANTIC_RISK` (§C) — semantic judgement may raise it; the classifier may never lower it.
+
+| Tier | Adds |
+|---|---|
+| **T0** | false claims · stale docs · scope · internal contradictions |
+| **T1** | + UX · accessibility · state handling · regressions |
+| **T2** | + workflows · partial/stale evidence · pagination · concurrency · operability · false empty/zero states |
+| **T3** | + DB/RLS · credentials · tenant isolation · privilege closure (§J) · negative controls (§G) · deployment skew (§K) · production preflight |
+
+The T0 row is not a formality: "the PR says it does X, the diff does Y" and "this doc now contradicts
+that doc" are the two findings that survive every tier.
+
+## V · Blocker semantics
+
+`P0`–`P3` here are **finding severities**, distinct from the *name* of
+[07 P0 Review Checklist](docs/07_P0_REVIEW_CHECKLIST.md). Every automatic blocker listed in doc 07 is
+a P0 under this scale.
+
+- **P0 → BLOCK.**
+- **P1 → BLOCK.**
+- **P2 → BLOCK only when the finding demonstrates one of:**
+  - wrong business truth;
+  - wrong money / license / spend;
+  - an authorization or disclosure failure;
+  - data loss or destruction;
+  - a false empty / zero / no-result;
+  - an unsafe external side effect;
+  - false freshness or completeness.
+
+  *Demonstrates* means a concrete path — inputs, state, and the wrong output a user would act on. A
+  worry is not a demonstration.
+- **Ordinary maintenance / optional coverage / polish P2 → DEBT.**
+- **P3 → DEBT**, unless it disproves a stated release invariant — then it is whatever that invariant
+  was worth.
+
+DEBT is **recorded, not dropped**: the risk register ([04](docs/04_RISK_REGISTER.md)) if risk changed,
+otherwise the changelog entry or a follow-up issue. "Accepted as DEBT" with no record is a silent
+drop.
+
+## W · One production mover
+
+Development is parallel by default. At any moment **exactly one lane** may own:
+
+- hosted DB mutation;
+- migration apply;
+- provider-live exercise;
+- production deployment;
+- shared hosted-resource mutation.
+
+For migration work, **one PR owns the next migration number.** A second PR wanting that number waits
+or renumbers after the first lands — two PRs must never both claim it (`check-migration-safety.sh`
+catches the collision; the discipline avoids it).
+
+This is mutual exclusion over *shared hosted state*, not a cap on open PRs or on local work.
+
+## X · Authority hierarchy
+
+What is allowed to settle a dispute, and in what order.
+
+**CURRENT AUTHORITY** — what is true right now: GitHub `main` · reviewed migrations + RLS ·
+exact-head CI · hosted DB evidence · provider-live evidence · deployment evidence · human GO.
+
+**ENGINEERING OS** — how a change earns its way in: this file · [`AGENTS.md`](AGENTS.md) · the risk
+classifier (`scripts/change-risk-lib.mjs`) · the PR template · independent exact-head review (§T) ·
+mutation / negative controls (§F, §G) · cross-system review (§H).
+
+**PRODUCT / DESIGN** — what a user may be told: [`DESIGN.md`](DESIGN.md) · the truth grammar · small
+repeated-need primitives · browser and accessibility proof.
+
+**ARCHITECTURE** — intended shape: [01 Architecture](docs/01_ARCHITECTURE.md). Future: **Graphify** =
+the *observed* graph (what the system actually is); **Archify** = the *intended* architecture (what it
+is supposed to be). Their difference is a **drift candidate** — not automatically a defect, and not
+automatically truth. Neither one outranks CURRENT AUTHORITY.
+
+**KNOWLEDGE** — recorded reasoning: canonical docs · decision records · evidence and provenance ·
+optional historical memory.
+
+**NEVER:**
+
+- memory is not current production truth;
+- a prototype is not a capability;
+- a schema column is not a supported product;
+- green CI is not proof the intended behavior was tested (§L).

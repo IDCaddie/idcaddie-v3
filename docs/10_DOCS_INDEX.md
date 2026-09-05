@@ -32,7 +32,8 @@ apply, UAR, imports/exports are `planned`/`deferred`**.
 | Doc | Canonical for | Reader | Status |
 |-----|---------------|--------|--------|
 | [README_START_HERE](../README_START_HERE.md) | repo entry point + non-negotiables | everyone (read first) | living |
-| [ENGINEERING_STANDARDS](../ENGINEERING_STANDARDS.md) | **how much rigor a change earns** — the four gates, risk tiers T0–T3, semantic escalation, provider fact ≠ normalized fact ≠ governance truth, pain-before-platform. Governs `idcaddie-v3` **and** `idcaddie-connector-runner`. Decides *which* of 02/07/08 a change must satisfy; restates none of them | everyone, agents | living (v0.1) |
+| [ENGINEERING_STANDARDS](../ENGINEERING_STANDARDS.md) | **how much rigor a change earns, and what a change must record before it merges** — the four gates, risk tiers T0–T3, semantic escalation, provider fact ≠ normalized fact ≠ governance truth, pain-before-platform, plus the Engineering OS: universal exact-head review (§T), review depth (§U), blocker semantics P0–P3 (§V), one production mover (§W), authority hierarchy (§X). Governs `idcaddie-v3` **and** `idcaddie-connector-runner`. Decides *which* of 02/07/08 a change must satisfy; restates none of them | everyone, agents | living (v1.0) |
+| [DESIGN](../DESIGN.md) | **what a user is allowed to be told, and how a surface says it** — the north star, the design principles, and the eight-state truth grammar (loading / true empty / unavailable / failed / stale / partial / proposed / accepted) plus product behavior for tables, navigation, keyboard & focus, responsive, accessibility, touch targets, destructive actions, motion, and evidence/provenance display. Not a component library | product, design, agents, reviewers | living (v1.0) |
 
 ## Canonical docs (this set)
 | Doc | Canonical for | Reader | Status |

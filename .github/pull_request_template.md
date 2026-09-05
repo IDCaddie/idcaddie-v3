@@ -1,21 +1,40 @@
 <!--
 ID Caddie v3 PR template. Delete sections that are genuinely N/A, but say *why*.
 Rigor is proportional to risk: ../ENGINEERING_STANDARDS.md · Review framework: docs/07_P0_REVIEW_CHECKLIST.md
+What a change may claim to a user: ../DESIGN.md
 Standards: docs/08_CODE_AND_DOCS_STANDARD.md
 -->
 
 ## Summary
 <!-- What this PR does, in 1–3 sentences. -->
 
-## Risk
-<!-- Baseline comes from `bash scripts/pr-review-summary.sh`. It is deterministic path evidence, NOT semantic
-     proof — it may never justify de-escalation (ENGINEERING_STANDARDS.md §C). -->
-- **Baseline risk tier:** T0 / T1 / T2 / T3
-- **Semantic escalation:** None <!-- or: → T3, because this helper now forwards a credential -->
-- **Risk reasons:**
-- **Trust boundary changed:** No / Yes
-- **Database / migration:** No / Yes
-- **External provider side effect:** No / Yes
+## Review record — risk + exact head
+<!-- ENGINEERING_STANDARDS.md §T. These fields have ONE owner: fill them here, don't restate them below.
+     BASELINE_RISK comes from `bash scripts/pr-review-summary.sh` — deterministic path evidence, NOT
+     semantic proof; it may never justify de-escalation (§C). Fill every field; `N/A` is an answer,
+     blank is not. -->
+
+```
+BASE_SHA:
+HEAD_SHA:
+BASELINE_RISK:                  # T0 / T1 / T2 / T3 — scripts/pr-review-summary.sh
+SEMANTIC_RISK:                  # T0 / T1 / T2 / T3 — your judgement; may only escalate (§C)
+RISK_REASONS:
+AUTHORITY_CHANGED:              # no / yes + what now decides what
+USER_TRUTH_CHANGED:             # no / yes + what a user is now told that they were not (DESIGN.md)
+SECURITY_BOUNDARY_CHANGED:      # no / yes
+EXTERNAL_SIDE_EFFECT:           # no / yes
+MIGRATION:                      # none / <number> — §W: one PR owns the next number
+PRODUCTION_MUTATION:            # none / read-only / write
+LOCAL_PROOF:                    # commands actually run + their result
+CI:                             # green on HEAD_SHA? which workflows
+INDEPENDENT_EXACT_HEAD_REVIEW:  # reviewer or artifact + the head SHA it applied to
+HUMAN_GO:                       # who, when
+```
+
+> **Any commit after the independent review invalidates that review** (§T). Push again → update
+> `HEAD_SHA`, re-run applicable CI on the new head, and have the review re-applied there before merge.
+> Review depth follows the higher of `BASELINE_RISK` / `SEMANTIC_RISK` (§U).
 
 ## Why this change exists
 <!-- The problem/decision. Link the risk/issue if there is one. -->
@@ -44,6 +63,9 @@ Standards: docs/08_CODE_AND_DOCS_STANDARD.md
 - **Focused behavioral tests:**
 - **Integration / browser:**
 - **Negative control:** N/A <!-- required for T3 and selected T2: break the rule → proof goes RED → restore (§F, §G) -->
+- **Truth-grammar states:** N/A <!-- user-visible changes only: which of loading / true-empty / unavailable /
+     failed / stale / partial / proposed / accepted this surface can be in, and the test that fails if
+     `unavailable` starts rendering as empty (DESIGN.md) -->
 
 ## Production
 - **Production access:** NONE / READ-ONLY / WRITE
@@ -69,6 +91,16 @@ Standards: docs/08_CODE_AND_DOCS_STANDARD.md
 <!-- OPTIONAL. Name the failure class + why the exception is justified. -->
 
 ---
+
+### Merge readiness (ENGINEERING_STANDARDS.md §T)
+<!-- All five, on the CURRENT head. Blocker severities: §V — P0/P1 block; a P2 blocks only when it
+     demonstrates wrong truth/money, an authz or disclosure failure, data loss, a false empty/zero,
+     an unsafe external side effect, or false freshness. Everything else is recorded DEBT, not dropped. -->
+- [ ] Applicable CI green on the **current** exact head
+- [ ] Independent review applies to the **current** exact head
+- [ ] Blocking threads disposed — fixed, or accepted as DEBT **with the record** (§V)
+- [ ] Head unchanged since the above
+- [ ] Human GO
 
 ### P0 checklist (docs/07_P0_REVIEW_CHECKLIST.md)
 <!-- Applies at every tier. Where a tier makes an item structurally impossible, mark it N/A and say why. -->
