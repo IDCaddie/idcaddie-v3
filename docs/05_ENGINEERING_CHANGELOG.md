@@ -12,6 +12,41 @@ from PRs verified via `git log` / `gh pr list`.
 > **as of each PR's date** and are historical — where an older entry says "RISK-007 remains OPEN" / "Phase C remains
 > BLOCKED", that was accurate at that entry's date; this banner is the current state.
 
+### docs(contracts) — C1A: contract reference deferred; prototype ≠ capability (DOCS ONLY) · 2026-09-05
+
+**One bounded addendum to `docs/85`, plus one stale count fixed.** No schema, no migration, no RLS,
+no DAL, no production code.
+
+**The gap.** The C2 UI-delta audit found the Quiet Operations prototype displaying a human-facing
+contract reference (`OMC-2024-0417`) beside the agreement name. There is no such field in the
+source — `contracts` has no reference column — and **none of C1's 21 topics mentions the concept**.
+It was therefore neither frozen nor blocked, but *unaddressed*: a prototype element implying a
+capability the domain never decided. That is the failure mode C1 exists to prevent, arriving from
+the one direction C1 could not cover — a gap found downstream rather than during the sweep.
+
+**Recorded as `DEFERRED / DECISION REQUIRED`, with five questions named** (who issues it; unique in
+what scope; mutable; authoritative or descriptive; what happens to rows with none). None is answered
+here. **C2 is explicitly prohibited** from adding a column, deriving one from the UUID, overloading
+`po_number` or `contract_name`, inventing any display-identifier algorithm — including a "temporary"
+one — or implying anywhere in UI or export that ID Caddie holds a reference.
+
+**Deliberately NOT a 22nd topic.** The ledger and every derived count are untouched — verified:
+21 topics, 10 carrying `DECISION REQUIRED`, 17 frozen entries, 18 blocked questions, all unchanged
+against merged main; the deferred table gains exactly one row. Adding a topic to close a
+downstream-discovered gap would make the ledger's numbers a moving target, which is the opposite of
+what C1 is for.
+
+**The general rule this establishes**, worth more than the reference field itself: a prototype
+element with no corresponding C1 topic is **unaddressed, not available**, and must be given a
+decision or omitted — never inferred into existence by an implementation PR. Where doc 85 cites the
+Flywheel fixture (§§2, 4, 5, 6, 8, 9) it cites it for *shape*, never as proof a field exists.
+
+**Correction:** §23 still claimed "three decisions are explicitly blocked on human answers" — a count
+that survived the pre-merge review revision, which raised it to 10 of 21. Now derived from §22 rather
+than restated.
+
+**Risk:** T0 (documentation, non-runtime).
+
 ### docs(contracts) — Contracts vNext C1: canonical domain decisions (DOCS ONLY, no schema) · 2026-09-05
 
 **Adds `docs/85_CONTRACTS_VNEXT_DOMAIN_DECISIONS.md`.** Nothing else. No migration, no RLS change, no
