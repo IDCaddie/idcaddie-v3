@@ -530,13 +530,14 @@ not five.
 | FX / cross-currency totals (§16) | a rate source with a recorded as-of date exists |
 | AI extraction writing provenance rows (§11/§12) | [16](./16_CONTRACT_PDF_AI_EXTRACTION_DESIGN.md)'s extraction path is actually built |
 | Invoices / observed spend | RISK-002 and `docs/63`'s sequencing; unchanged by this document |
+| **Human-facing contract reference** (Addendum A) | the semantics are decided — who issues it, whether it is unique, and in what scope. **C2 may not invent one.** |
 
 ---
 
 ## 23. What this document does **not** do
 
 - **No migration, no schema.** Every "Migration" row says *eventually*. Nothing here authorizes a
-  migration, and three decisions are explicitly blocked on human answers.
+  migration, and 10 of the 21 topics are explicitly blocked on human answers (§22 derives the count).
 - **No RLS change.** The `0003` read union and `0004` write authority are unchanged. §4's tenancy
   question is raised precisely so it cannot be smuggled in as a side effect of adding a table.
 - **No AI.** [16 §7](./16_CONTRACT_PDF_AI_EXTRACTION_DESIGN.md) already governs extraction:
@@ -545,3 +546,63 @@ not five.
   references stay human — and otherwise defers to 16.
 - **No claim of readiness.** Nothing here changes the cutover posture in
   [17](./17_OMC_PRODUCTION_REPLACEMENT_PARITY_GATE.md).
+
+---
+
+## Addendum A · Human-facing contract reference — **DEFERRED / DECISION REQUIRED** (2026-09-05)
+
+> **Bounded addendum, added after C1 merged.** It records a concept the 21 topics neither froze nor
+> blocked. It is deliberately **not** a 22nd topic: the ledger, its derived counts, and every
+> existing decision are untouched. Adding a topic to close a gap discovered downstream would make
+> the ledger's numbers a moving target, which is the opposite of what C1 exists for.
+
+**The gap.** The C2 UI delta audit found that the Quiet Operations prototype displays a human-facing
+contract reference — the string `OMC-2024-0417` beside the agreement name. There is no such field
+anywhere in the source: `contracts` has no reference column, and no C1 topic mentions the concept. It
+is therefore neither `DECIDED VNEXT` nor `DECISION REQUIRED` under any of the 21 — it is simply
+**unaddressed**, and a prototype element that implies a capability the domain has never decided.
+
+**Classification: DEFERRED, and DECISION REQUIRED before any future work.** The concept is real —
+procurement organizations do carry contract references, and Omnicom's are the shape the fixture
+imitates — but nothing about its semantics has been decided.
+
+**What must be decided before it can be built** (none of these is answered here):
+
+| Question | Why it is load-bearing |
+|---|---|
+| **Who issues it?** ID Caddie, the customer's procurement system, or the vendor? | An externally-issued reference is *recorded data*; an internally-issued one is *generated identity* with a lifecycle, a format, and a collision story. They are different features. |
+| **Is it unique, and in what scope?** | Per tenant? Per procurement org? Not at all? Uniqueness implies a constraint; a constraint implies a backfill rule for every existing row. |
+| **Is it mutable?** | If it can be corrected, anything that cites it (an email, an invoice, an export) can go stale. |
+| **Is it authoritative or descriptive?** | If any workflow keys off it, it becomes an identifier and inherits identifier problems. If it is a label, it does not. |
+| **What happens to contracts that have none?** | Blank, or a generated fallback? A fallback is the invention this addendum forbids. |
+
+### The C2 prohibition
+
+**The production Quiet Operations surface must omit the contract-reference element entirely until the
+questions above are answered.** Specifically, C2 may **not**:
+
+1. add a `contract_reference` (or equivalently-named) column;
+2. **derive a reference from the row UUID** — no prefix, no truncation, no base32/hash rendering;
+3. **overload `po_number`** — a purchase order is a finance artefact issued by a different party for a
+   different purpose, and the fixture has contracts with a PO and no reference, and the reverse;
+4. **overload `contract_name`** — the name is prose and is neither unique nor stable;
+5. invent a display-identifier algorithm of any kind, including a "temporary" or "display-only" one;
+6. state or imply anywhere in the UI, an export, or a document that ID Caddie holds a contract
+   reference.
+
+A row that needs an identity in the interim uses the agreement **name** and, where a technical key is
+unavoidable, the existing UUID **as a lookup key only** — never rendered as a reference to a human.
+
+### The prototype is illustrative, not a specification
+
+This applies beyond the reference field and is worth stating once, plainly. The
+`/prototypes/flywheel-contracts` fixture was built to make design directions judgeable against
+realistic procurement shape. Its data is **invented**, and its presence in the prototype is
+**evidence of a design intention, never evidence of a capability**. Where this document cites the
+fixture — §2, §4, §5, §6, §8, §9 — it cites it for *shape* (that owners and procurers differ in
+practice; that four allocation bases occur in real life), never as proof that a field exists.
+
+**The general rule this addendum establishes:** a prototype element with no corresponding C1 topic is
+**unaddressed, not available**. It must be either given a decision or omitted from production — it
+may never be inferred into existence by an implementation PR. Any future C-lane PR that finds such an
+element should stop and add a bounded addendum here, exactly as this one does.
