@@ -10,7 +10,15 @@ vi.mock("next/link", () => ({
 vi.mock("@/lib/data/contracts", () => ({ getContractDetailForCurrentUser: vi.fn() }));
 vi.mock("@/lib/data/contract-files", () => ({ listContractFilesForCurrentUser: vi.fn() }));
 vi.mock("@/lib/data/links", () => ({ listAppsLinkedToContract: vi.fn() }));
-vi.mock("./contract-files", () => ({ ContractFiles: () => <div data-testid="contract-files" /> }));
+// Capture the props the page hands ContractFiles so the list-state wiring is testable without
+// re-rendering the component (its own states are covered in contract-files.ui.test.tsx).
+const filesProps: Record<string, unknown>[] = [];
+vi.mock("./contract-files", () => ({
+  ContractFiles: (props: Record<string, unknown>) => {
+    filesProps.push(props);
+    return <div data-testid="contract-files" />;
+  },
+}));
 vi.mock("@/lib/data/organizations", () => ({ listOrganizationsForCurrentUser: vi.fn() }));
 // Phase 10: the page now loads the commercial view. Mocked like every other loader here — without it the import chain reaches
 // access-rpc-types, whose server-only sentinel throws under jsdom.
@@ -81,5 +89,26 @@ describe("/contracts/[id] render", () => {
     expect(screen.getByText("Assigned")).toBeTruthy(); // paying org present but not visible → "Assigned"
     expect(container.textContent).not.toContain(VISIBLE);
     expect(container.textContent).not.toContain(HIDDEN);
+  });
+
+  // The page must forward the DAL's three list states verbatim. Collapsing `not_readable` into an
+  // empty list here is exactly the bug this branch fixes, so it is pinned at the wiring layer too.
+  it.each([
+    [{ ok: true, data: [] }, "ok", 0],
+    [{ ok: true, data: [{ id: "13000000-0000-0000-0000-0000000000f1", filename: "a.pdf", uploadStatus: "uploaded", createdAt: "2026-06-19T00:00:00Z" }] }, "ok", 1],
+    [{ ok: false, error: "not_readable" }, "not_readable", 0],
+    [{ ok: false, error: "query_failed" }, "error", 0],
+    [null, "error", 0],
+  ])("forwards the file list result %# as listState=%s", async (fileResult, expectedState, expectedCount) => {
+    filesProps.length = 0;
+    asMock(getContractDetailForCurrentUser).mockResolvedValue(detail);
+    asMock(listAppsLinkedToContract).mockResolvedValue({ ok: true, data: [] });
+    asMock(listContractFilesForCurrentUser).mockResolvedValue(fileResult);
+    asMock(listOrganizationsForCurrentUser).mockResolvedValue({ ok: true, data: [] });
+    asMock(loadContractCommercialView).mockResolvedValue(EMPTY_COMMERCIAL);
+
+    render(await ContractDetailPage({ params: Promise.resolve({ id: "contract-uuid-xyz" }) }));
+    expect(filesProps.at(-1)?.listState).toBe(expectedState);
+    expect((filesProps.at(-1)?.files as unknown[]).length).toBe(expectedCount);
   });
 });

@@ -26,14 +26,18 @@ const REASON_LABEL: Record<string, string> = {
 
 type Notice = { kind: "success" | "error"; msg: string } | null;
 
+// Three DISTINCT list states. `empty` may only ever be rendered for `ok` — a caller who cannot read
+// the file rows must never be told the contract has none. See listContractFilesForCurrentUser.
+export type ContractFileListState = "ok" | "error" | "not_readable";
+
 export function ContractFiles({
   contractId,
   files,
-  listError,
+  listState,
 }: {
   contractId: string;
   files: ContractFileSummary[];
-  listError: boolean;
+  listState: ContractFileListState;
 }) {
   const router = useRouter();
   const inputRef = useRef<HTMLInputElement>(null);
@@ -116,8 +120,13 @@ export function ContractFiles({
         </p>
       ) : null}
 
-      {listError ? (
+      {listState === "error" ? (
         <p className="text-zinc-600 dark:text-zinc-400">Could not load files right now.</p>
+      ) : listState === "not_readable" ? (
+        <p className="text-zinc-600 dark:text-zinc-400">
+          Documents may be attached. Your access to this contract does not include its documents, so
+          this list cannot be shown.
+        </p>
       ) : files.length === 0 ? (
         <p className="text-zinc-600 dark:text-zinc-400">No files attached yet.</p>
       ) : (

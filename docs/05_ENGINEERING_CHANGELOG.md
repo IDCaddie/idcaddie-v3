@@ -12,6 +12,38 @@ from PRs verified via `git log` / `gh pr list`.
 > **as of each PR's date** and are historical — where an older entry says "RISK-007 remains OPEN" / "Phase C remains
 > BLOCKED", that was accurate at that entry's date; this banner is the current state.
 
+### fix(contracts) — the contract file list stops claiming "no documents" when it simply cannot look · 2026-09-05
+
+**A wrong answer, not a missing feature.** `/contracts/[id]` renders the attachment list, and `files`
+SELECT is tenant-member-only (`0013:53–54`) while contract read is the wider org union — tenant member
+∪ procurement-org ∪ paying-org (`0003:47–63`). An org-scoped contract reader therefore read **0 file
+rows by construction** and the page printed **"No files attached yet."** — the product asserting a
+contract has no documents on the strength of a read it was never allowed to perform. Found while
+tracing the read model for [85 §11 B2-b](./85_CONTRACTS_VNEXT_DOMAIN_DECISIONS.md); it is a live
+defect on `main`, not a vNext concern, so it is fixed on its own rather than inside that work.
+
+**Three states, never two.** `listContractFilesForCurrentUser` gains `not_readable` alongside
+`query_failed`: readable-and-empty, readable-with-rows, unreadable, and failed are now four distinct
+outcomes and only the first may render the empty claim. The readability probe reads the contract's
+tenant (RLS-gated, the caller is on its detail page) and then `tenant_memberships`, whose policy is
+`is_tenant_member(tenant_id)` — so it returns rows **iff** the caller is an active member of that
+tenant. `tenant_id` never leaves the DAL.
+
+**No widening, and correct under either future answer.** No RLS change, no `people`/`files` policy, no
+schema, no migration, no new grant, no service-role. Whether org-scoping `files` is ever approved
+(RISK-002, a separate trust-boundary PR) does not change this: the product must not claim absence it
+cannot observe. Truthful degradation is the [85](./85_CONTRACTS_VNEXT_DOMAIN_DECISIONS.md) policy —
+the same contract `orgDisplayName` already keeps for organizations ("Assigned", never a raw id).
+
+**Proven behaviourally, then by mutation.** 34 tests across the DAL, the component and the page
+wiring cover true-empty, populated, denied, contract-hidden, transport-error, no-leak, no-widening and
+the unchanged happy path. Seven mutants were introduced and **all seven failed the suite**: denied→`[]`,
+error→`[]`, unreadable-rendered-as-empty, access-guard-bypass, raw-error-echo, page-collapses-state,
+contract-hidden→`[]`.
+
+**Risk:** T2 (contract/file read layer). Write authority is untouched — an org procurement-manager may
+still attach a file where they cannot list files (`can_write_contract`, `0013`). Nothing applied.
+
 ### docs(contracts) — C1A: contract reference deferred; prototype ≠ capability (DOCS ONLY) · 2026-09-05
 
 **One bounded addendum to `docs/85`, plus one stale count fixed.** No schema, no migration, no RLS,

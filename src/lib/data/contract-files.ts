@@ -21,7 +21,9 @@ import {
 // AUTHORIZATION (already tested — org_rls_test.sql T34 + the hosted Storage REST verifier 14/14):
 //   * READ  — `files` SELECT RLS = tenant member; the `storage.objects` SELECT policy =
 //     can_read_contract_file. A cross-tenant / non-member / org-only user reads 0 rows and cannot
-//     sign an object.
+//     sign an object. Because that read is narrower than the contract read union, an empty result is
+//     ambiguous for an org-scoped reader — see `listContractFilesForCurrentUser`, which reports
+//     `not_readable` rather than claiming the contract has no documents.
 //   * WRITE — `files` INSERT RLS = can_write_contract (tenant editor+ OR procurement-org manager;
 //     `paying_org` never; `uploaded_by = auth.uid()`); the same-tenant composite FK (`0012`) blocks
 //     any cross-tenant attach; the `storage.objects` INSERT policy = can_write_contract_file +
@@ -44,17 +46,59 @@ export type ContractFileSummary = {
   createdAt: string;
 };
 
+// `not_readable` is NOT an error and NOT an empty set: the caller may read the contract but cannot
+// observe its file rows at all, so the product must not claim the contract has no documents.
 export type ContractFileListResult =
   | { ok: true; data: ContractFileSummary[] }
-  | { ok: false; error: "query_failed" };
+  | { ok: false; error: "query_failed" | "not_readable" };
 
-// List the files attached to a contract that the current user may read. RLS (tenant-member SELECT)
-// is the authority — a cross-tenant user reads 0 rows. `contractId` is only a filter key.
+// List the files attached to a contract that the current user may read. RLS is the authority — this
+// module authorizes nothing and widens nothing.
+//
+// WHY THE READABILITY PROBE. `files` SELECT is tenant-member-only (`0013:53-54`), which is STRICTLY
+// NARROWER than the contract read union (tenant member ∪ procurement-org ∪ paying-org member,
+// `0003:47-63`). An org-scoped contract reader therefore ALWAYS reads 0 file rows — a fact about
+// their authorization, never a fact about the contract. Returning `[]` there made the UI print "No
+// files attached yet", i.e. a false claim that the contract has no documents. We detect that case and
+// say so instead.
+//
+// The probe reads only what the caller could already read: the contract row (RLS-gated, and they are
+// on its detail page) and `tenant_memberships`, whose policy is `is_tenant_member(tenant_id)` — so it
+// returns rows IFF the caller is an active member of that tenant, and returns nothing otherwise. No
+// policy changes, no service-role, no new column, and `tenant_id` never leaves this module.
 export async function listContractFilesForCurrentUser(
   contractId: string,
 ): Promise<ContractFileListResult> {
   if (!isUuid(contractId)) return { ok: false, error: "query_failed" };
   const supabase = await createClient();
+
+  // Which tenant does this contract belong to? RLS decides whether we may see the row at all.
+  const { data: contract, error: contractError } = await supabase
+    .from("contracts")
+    .select("tenant_id")
+    .eq("id", contractId)
+    .maybeSingle();
+  if (contractError) {
+    console.error("[data/contract-files] contract tenant read failed");
+    return { ok: false, error: "query_failed" };
+  }
+  // RLS hid the contract, or there is no such contract — either way the caller cannot observe its
+  // file set, so we must not describe that set. Indistinguishable by design (no enumeration).
+  if (!contract) return { ok: false, error: "not_readable" };
+
+  // Is the caller a tenant member of THAT tenant? Only a tenant member can read any `files` row.
+  const { data: membership, error: membershipError } = await supabase
+    .from("tenant_memberships")
+    .select("tenant_id")
+    .eq("tenant_id", contract.tenant_id)
+    .limit(1);
+  if (membershipError) {
+    console.error("[data/contract-files] membership probe failed");
+    return { ok: false, error: "query_failed" };
+  }
+  // An org-scoped contract reader (procurement-org / paying-org member, no tenant membership) lands
+  // here. Their empty file read proves nothing, so it is never reported as an empty document set.
+  if ((membership ?? []).length === 0) return { ok: false, error: "not_readable" };
 
   const { data, error } = await supabase
     .from("files")

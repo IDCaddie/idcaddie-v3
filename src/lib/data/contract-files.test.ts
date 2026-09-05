@@ -34,6 +34,11 @@ type SupaCfg = {
   downloadError?: unknown;
   signed?: { signedUrl: string } | null;
   signError?: unknown;
+  // Readability probe for the list path. Defaults model a tenant member of the contract's tenant.
+  contractRow?: { tenant_id: string } | null;
+  contractError?: unknown;
+  membershipRows?: unknown[];
+  membershipError?: unknown;
 };
 
 // Captures the calls we assert on.
@@ -42,29 +47,45 @@ let captured: {
   updates: Record<string, unknown>[];
   uploadArgs?: unknown[];
   signArgs?: unknown[];
+  tables: string[];
 };
 
 function makeSupabase(cfg: SupaCfg) {
-  captured = { updates: [] };
-  const from = () => ({
-    insert: (payload: Record<string, unknown>) => {
-      captured.insert = payload;
-      return Promise.resolve({ error: cfg.insertError ?? null });
-    },
-    update: (payload: Record<string, unknown>) => ({
-      eq: () => {
-        captured.updates.push(payload);
-        return Promise.resolve({ error: cfg.updateError ?? null });
+  captured = { updates: [], tables: [] };
+  // Table-aware: the list path reads `contracts` (tenant probe) and `tenant_memberships` (membership
+  // probe) before `files`, and each must be modelled separately or the probe cannot be tested.
+  const from = (table: string) => {
+    captured.tables.push(table);
+    return {
+      insert: (payload: Record<string, unknown>) => {
+        captured.insert = payload;
+        return Promise.resolve({ error: cfg.insertError ?? null });
       },
-    }),
-    select: () => ({
-      eq: () => ({
-        order: () => Promise.resolve({ data: cfg.listData ?? [], error: cfg.listError ?? null }),
-        maybeSingle: () =>
-          Promise.resolve({ data: cfg.downloadData ?? null, error: cfg.downloadError ?? null }),
+      update: (payload: Record<string, unknown>) => ({
+        eq: () => {
+          captured.updates.push(payload);
+          return Promise.resolve({ error: cfg.updateError ?? null });
+        },
       }),
-    }),
-  });
+      select: () => ({
+        eq: () => ({
+          order: () => Promise.resolve({ data: cfg.listData ?? [], error: cfg.listError ?? null }),
+          limit: () =>
+            Promise.resolve({
+              data: cfg.membershipRows ?? [{ tenant_id: TENANT }],
+              error: cfg.membershipError ?? null,
+            }),
+          maybeSingle: () =>
+            table === "contracts"
+              ? Promise.resolve({
+                  data: cfg.contractRow === undefined ? { tenant_id: TENANT } : cfg.contractRow,
+                  error: cfg.contractError ?? null,
+                })
+              : Promise.resolve({ data: cfg.downloadData ?? null, error: cfg.downloadError ?? null }),
+        }),
+      }),
+    };
+  };
   const storage = {
     from: () => ({
       upload: (...args: unknown[]) => {
@@ -241,5 +262,103 @@ describe("listContractFilesForCurrentUser", () => {
       });
       expect("storage_path" in res.data[0]).toBe(false);
     }
+  });
+
+  // ── FILE-LIST HONESTY ──────────────────────────────────────────────────────────────────────────
+  // `files` SELECT is tenant-member-only (0013) while contract read is the wider 0003 org union, so an
+  // empty read is ambiguous for an org-scoped reader. These pin the three states apart. A single
+  // `[]`-for-denied regression makes at least one of them fail.
+
+  it("(1) TRUE EMPTY — tenant member, zero rows → honest empty, not an error", async () => {
+    createClient.mockResolvedValue(makeSupabase({ listData: [] }));
+    const res = await listContractFilesForCurrentUser(CONTRACT);
+    expect(res).toEqual({ ok: true, data: [] });
+  });
+
+  it("(2) READABLE — tenant member with rows → populated", async () => {
+    createClient.mockResolvedValue(
+      makeSupabase({
+        listData: [
+          { id: "13000000-0000-0000-0000-0000000000f1", original_filename: "a.pdf", upload_status: "uploaded", created_at: "2026-06-19T00:00:00Z" },
+        ],
+      }),
+    );
+    const res = await listContractFilesForCurrentUser(CONTRACT);
+    expect(res.ok).toBe(true);
+    if (res.ok) expect(res.data).toHaveLength(1);
+  });
+
+  it("(3) DENIED — org-scoped contract reader (no tenant membership) → not_readable, NEVER an empty set", async () => {
+    createClient.mockResolvedValue(makeSupabase({ membershipRows: [], listData: [] }));
+    const res = await listContractFilesForCurrentUser(CONTRACT);
+    expect(res).toEqual({ ok: false, error: "not_readable" });
+    // The decisive assertion: an unreadable set is never reported as an empty one.
+    expect(res).not.toEqual({ ok: true, data: [] });
+  });
+
+  it("(3b) DENIED — contract itself RLS-hidden → not_readable, and files are never queried", async () => {
+    createClient.mockResolvedValue(makeSupabase({ contractRow: null, listData: [] }));
+    const res = await listContractFilesForCurrentUser(CONTRACT);
+    expect(res).toEqual({ ok: false, error: "not_readable" });
+    expect(captured.tables).not.toContain("files"); // fail closed before touching the file set
+  });
+
+  it("(4) TRANSPORT ERROR — a failed files read → query_failed, NEVER an empty set", async () => {
+    createClient.mockResolvedValue(makeSupabase({ listError: { message: "boom", code: "57014" } }));
+    const res = await listContractFilesForCurrentUser(CONTRACT);
+    expect(res).toEqual({ ok: false, error: "query_failed" });
+    expect(res).not.toEqual({ ok: true, data: [] });
+  });
+
+  it("(4b) TRANSPORT ERROR — a failed probe read → query_failed, distinct from not_readable", async () => {
+    createClient.mockResolvedValue(makeSupabase({ contractError: { message: "boom" } }));
+    expect(await listContractFilesForCurrentUser(CONTRACT)).toEqual({ ok: false, error: "query_failed" });
+    createClient.mockResolvedValue(makeSupabase({ membershipError: { message: "boom" } }));
+    expect(await listContractFilesForCurrentUser(CONTRACT)).toEqual({ ok: false, error: "query_failed" });
+  });
+
+  it("(5) no raw DB error, message, code, storage path or tenant UUID leaves the DAL", async () => {
+    createClient.mockResolvedValue(
+      makeSupabase({ listError: { message: "duplicate key value violates ...", code: "23505", details: "row (a,b)" } }),
+    );
+    const res = await listContractFilesForCurrentUser(CONTRACT);
+    const blob = JSON.stringify(res);
+    for (const forbidden of ["duplicate key", "23505", "details", "row (a,b)", TENANT, "storage_path", "contracts/"]) {
+      expect(blob).not.toContain(forbidden);
+    }
+    expect(res).toEqual({ ok: false, error: "query_failed" }); // bounded label only
+  });
+
+  it("(6) no widening — the probe reads only contracts + tenant_memberships, never a service-role or people/files policy path", async () => {
+    createClient.mockResolvedValue(makeSupabase({ membershipRows: [], listData: [] }));
+    await listContractFilesForCurrentUser(CONTRACT);
+    expect(captured.tables).toEqual(["contracts", "tenant_memberships"]);
+    expect(captured.tables).not.toContain("people");
+    expect(captured.tables).not.toContain("profiles");
+    // Read-only: the honesty path performs no write of any kind.
+    expect(captured.insert).toBeUndefined();
+    expect(captured.updates).toEqual([]);
+  });
+
+  it("(7) authorized happy path unchanged — same DTO, same order call, files still queried last", async () => {
+    createClient.mockResolvedValue(
+      makeSupabase({
+        listData: [
+          { id: "13000000-0000-0000-0000-0000000000f1", original_filename: "a.pdf", upload_status: "uploaded", created_at: "2026-06-19T00:00:00Z" },
+        ],
+      }),
+    );
+    const res = await listContractFilesForCurrentUser(CONTRACT);
+    expect(res).toEqual({
+      ok: true,
+      data: [{ id: "13000000-0000-0000-0000-0000000000f1", filename: "a.pdf", uploadStatus: "uploaded", createdAt: "2026-06-19T00:00:00Z" }],
+    });
+    expect(captured.tables).toEqual(["contracts", "tenant_memberships", "files"]);
+  });
+
+  it("a non-UUID contractId stays query_failed and touches no table", async () => {
+    createClient.mockResolvedValue(makeSupabase({}));
+    expect(await listContractFilesForCurrentUser("not-a-uuid")).toEqual({ ok: false, error: "query_failed" });
+    expect(createClient).not.toHaveBeenCalled();
   });
 });
