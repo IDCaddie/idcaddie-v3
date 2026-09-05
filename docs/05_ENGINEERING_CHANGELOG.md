@@ -12,6 +12,83 @@ from PRs verified via `git log` / `gh pr list`.
 > **as of each PR's date** and are historical — where an older entry says "RISK-007 remains OPEN" / "Phase C remains
 > BLOCKED", that was accurate at that entry's date; this banner is the current state.
 
+### docs(contracts) — Contracts vNext C1: canonical domain decisions (DOCS ONLY, no schema) · 2026-09-05
+
+**Adds `docs/85_CONTRACTS_VNEXT_DOMAIN_DECISIONS.md`.** Nothing else. No migration, no RLS change, no
+DAL change, no production route touched — this PR only decides what the contract model *means*, so
+that the migrations that follow are arguments already had rather than arguments discovered in review.
+
+**Why now.** A three-way isolated design exploration (`/prototypes/flywheel-contracts`, untracked and
+not promoted) selected **Quiet Operations** as the base direction for Contracts vNext on 2026-09-04.
+Every one of the workspace designs wanted the same nine things the schema cannot express — a named
+owner, benefiting business units, chargeback, an amendment hierarchy, per-field provenance, a renewal
+decision, a vendor quote, and an unambiguous `total_cost`. Deciding those in a migration PR would put
+a tenant-isolation question and a data-backfill question inside a diff that also has code in it.
+
+**Twenty-one topics, each with current truth → problem → decision → alternatives rejected → rationale
+→ cardinality → lifecycle → tenancy → eventual migration → UI → open questions.**
+
+**Revised after independent review, before merge.** The first revision froze decisions the source
+does not support. Counts are now derived from the document rather than asserted: **21 topics · 17
+frozen entries · 18 open questions across 11 topics · 10 of 21 topics carry a `DECISION REQUIRED`**
+(§§1, 2, 4, 6, 11, 13, 15, 17, 19, 20), up from 3.
+
+**The finding that reopened the most.** Capability was being claimed on the strength of a column
+existing. §0 now separates five layers — storage / write path / read path / UI / settled authority —
+and applies them: `contracts.owner_user_id` has **no write path at all** (no `owner*` key in
+`ContractWriteInput`; `parseContractWriteInput` never emits the column), so "keep it as the authority
+hook" described a column nothing can populate. Alongside it, a **read-scope asymmetry** is now the
+truth table's tenth row: `contracts` is org-union readable (`0003:47–63`) and `contract_entitlements`
+follows it (`0084:202–209`), but `files` (`0013:53–54`) and `people` (`0001:311`) are
+**tenant-member-only**. Every named-person field (§1, §2b, §17) and every document-evidence field
+(§11, §12, §19) would therefore render for tenant members and vanish for exactly the procurement-org
+and paying-org readers the `0003` union exists to serve. Closing that gap is a **RISK-002** change
+requiring policies and tests, not a side effect of a contracts migration. One answer settles five
+open rows; the document says so rather than answering it.
+
+Also reopened: §6 (`by_quantity` / `by_headcount` had no contract-level referent — quantities are
+per line in differing units, headcount exists nowhere), §15 (a derivation asserted over
+`contracts.billing_frequency`, which has **no CHECK**; the only bounded cadence vocabulary is
+line-level, `0084:123`), §19 (`quoted_basis` depended on §13, itself unresolved), and §11 (the
+entitlement DAL deliberately converts `evidence_file_id` to a boolean, so no fact-to-document read
+path exists to build a source chip on).
+
+**The finding that shaped the largest decision.** `public.profiles` has exactly one SELECT policy —
+`"users can read own profile" … using (id = auth.uid())` (`0001:276`), unwidened by any later
+migration. So `contracts.owner_user_id` can *never* be resolved to a name by the user-scoped client,
+which is why the DAL exposes only `hasOwner: boolean`. The instinct is to widen that policy; doing so
+would expose every workspace member's email to every other member — a T3 trust-boundary change bought
+for one label. `public.people` is already tenant-member readable (`0001:311`) and carries
+`full_name`/`title`/`department`. The shape that survives is **two references with different jobs** —
+`owner_person_id → people` for the displayed name, `owner_user_id` as the authority hook — but review
+established it **cannot be frozen**: `owner_user_id` has no write path, and `people` is not readable
+by the org-scoped users who can read the contract. §1 is therefore `DECISION REQUIRED`, not decided.
+
+**Three tenancy questions are raised rather than answered, deliberately.** Whether beneficiary
+membership grants contract READ changes the `0003` read union and is a tenant-isolation decision, not
+a product one; whether a negotiation target may be read by paying-org members (who under `0003`
+include the agency being charged) is the same class of question; and whether `verified_by` names a
+person reopens the profiles exposure in miniature. Each is listed with its blocked migration so it
+cannot be smuggled in as a side effect of adding a table.
+
+**Two corrections to earlier characterizations, recorded because they change scope.** (1) Document
+kind and extraction were described as unmodelled; in fact `files.document_type` exists (`0001:187`)
+and `0012` already added `extraction_status` (bounded CHECK), `extraction_result_json`, `sha256` and
+the rest — the *storage* exists, unbounded and unread, so §8's work is a CHECK plus a DAL projection
+rather than a new model. (2) A `target_outcome` column had been sketched onto the renewal cycle; on
+inspection that pre-judged §20's open product question, so it is pulled out and §18 ships without it.
+
+**What this PR explicitly does not do:** no migration is authorized, `0003`/`0004` are unchanged, no
+AI is implemented ([16 §7](./16_CONTRACT_PDF_AI_EXTRACTION_DESIGN.md) already governs extraction and
+is deferred to, not restated — this doc only extends its prohibition to owner and allocation), and
+nothing here changes the cutover posture in [17](./17_OMC_PRODUCTION_REPLACEMENT_PARITY_GATE.md).
+
+**Index.** `85` is registered in [10_DOCS_INDEX](./10_DOCS_INDEX.md). Docs `62`–`84` are absent from
+that index — **pre-existing drift, not introduced here**; reconciling them is a separate hygiene pass
+deliberately kept out of this PR.
+
+**Risk:** T0 (documentation, non-runtime). No code, no schema, no CI-affecting file.
+
 ### feat(governance) — Phase 18F-E: unmanaged-application findings reach the match-review queue · 2026-08-15
 
 The smallest PR in Phase 18F, and the one the previous three were shaped around. #431 shipped the findings surface with
