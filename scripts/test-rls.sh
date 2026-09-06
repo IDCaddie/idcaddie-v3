@@ -113,6 +113,10 @@ revoke all on public.governance_findings from anon, authenticated, connector_run
 -- product RPCs, and the runner has no business writing a human judgement). Same lockstep rule; the person_identity_graph_test
 -- P0 zero-privilege assertions are the backstop.
 revoke all on public.person_account_links from anon, authenticated, connector_runner;
+-- 0092's Google Workspace validation evidence is the same Tier-2 posture (RLS on, ZERO policies): the definer recording
+-- function is the only way in, and not even the runner may touch the table directly — it calls the function, which runs as
+-- owner. Same lockstep rule; google_workspace_connector_validation_test G0 is the backstop.
+revoke all on public.google_workspace_connector_validations from anon, authenticated, connector_runner;
 grant update (upload_status) on public.files to authenticated;
 
 -- The `runner_*` functions are TRUSTED-PRODUCER ONLY: their migrations grant EXECUTE to `connector_runner` and to nobody else,

@@ -87,8 +87,8 @@ describe("no runtime migration may issue a bare DELETE or UPDATE", () => {
   const files = readdirSync(M).filter(f => f.endsWith(".sql")).sort();
 
   it("scans every migration in the chain", () => {
-    expect(files.length).toBeGreaterThanOrEqual(91);
-    expect(files.at(-1)).toBe("0091_governance_finding_sync_safeupdate.sql");
+    expect(files.length).toBeGreaterThanOrEqual(92);
+    expect(files.at(-1)).toBe("0092_google_workspace_connector_validation.sql");
   });
 
   // 0083 is the ONE historical exception and is deliberately not edited: rewriting a merged migration would give two
