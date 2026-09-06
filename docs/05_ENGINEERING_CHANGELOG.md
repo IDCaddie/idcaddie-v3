@@ -12,6 +12,54 @@ from PRs verified via `git log` / `gh pr list`.
 > **as of each PR's date** and are historical — where an older entry says "RISK-007 remains OPEN" / "Phase C remains
 > BLOCKED", that was accurate at that entry's date; this banner is the current state.
 
+### docs(engineering-os) — Engineering OS foundation closed: OS-1, OS-2A, OS-3 PR-1/PR-2, OS-2B all complete (DOCS ONLY) · 2026-09-06
+
+**Records five now-completed milestones. Nothing is enabled or changed here** — no runtime, no
+workflow, no migration, no RLS, no ruleset, no dependency, no product code. This entry exists because
+the facts below are already true on `main` and were not yet written down in one place.
+
+| Milestone | Landed | State on `main` |
+|---|---|---|
+| **OS-1** — Engineering OS v1 | #440, merge `937b428`, 2026-09-05 | `ENGINEERING_STANDARDS.md` v1.0 §T–§X + canonical `DESIGN.md`; entry above |
+| **OS-2A** — exact-head record discipline | #440 audit record, 2026-09-05 | §T record completed against the reviewed head; probes #441/#442/#443 closed, never merged |
+| **OS-3 PR-1** — GitHub-owned Actions pinned | #444, merge `e4f33ca`, 2026-09-06 | 7 refs immutable; own entry at the foot of this file |
+| **OS-3 PR-2** — last mutable ref pinned | #446, merge `37cb4dc`, 2026-09-06 | `supabase/setup-cli` immutable; own entry at the foot of this file |
+| **OS-2B** — SHA pinning enforced | 2026-09-06 | `sha_pinning_required` live; enforcement proven, then reverted to a clean tree |
+
+**OS-2A.** The §T record for #440 was completed against the exact reviewed head `ca758e8` after merge
+— `INDEPENDENT_EXACT_HEAD_REVIEW` and `HUMAN_GO` replaced, with the authoritative record carried in an
+append-only PR comment rather than only in the mutable body (§O: one owner per fact). Three disposable
+acceptance probes (#441 failing-check, #442 acceptance, #443 stale) were **closed, never merged**.
+
+**OS-2B — the ordering was the whole point.** `sha_pinning_required` stayed **OFF** through both OS-3
+PRs by design: enabling it while any mutable ref remained on `main` would fail all five required
+checks under `bypass_actors: []` and freeze every merge, *including the fix*. It was turned on only
+after #446 left `main` carrying **8 of 8 immutable 40-character SHAs** — 5× `actions/checkout`, 2×
+`actions/setup-node`, 1× `supabase/setup-cli`.
+
+**Enforcement was proven, not assumed** (§F: a guard never demonstrated to fail is not yet evidence).
+Disposable PR **#447** reverted exactly one ref — `actions/checkout@11d5960a…` → `@v4` in
+`app-ci.yml`, one line — and the required `app` check went **RED at job startup** with the platform's
+own refusal:
+
+> The action `actions/checkout@v4` is not allowed in `IDCaddie/idcaddie-v3` because all actions must
+> be pinned to a full-length commit SHA.
+
+That is the mechanism-A path: the platform refuses the mutable ref, a **required** context fails, and
+the ruleset blocks the merge. #447 was **closed and never merged** (`mergedAt: null`); `main` never
+carried the mutable ref. Ruleset **`22358720 / main-protection` was not touched** — `updated_at`
+still equals its `created_at` of 2026-09-05T19:12:11 — and its five required contexts remain exactly
+`app`, `migration-safety`, `review-discipline`, `rls`, `store-it`. **No rollback was required.**
+
+**Reading the #447 evidence honestly:** two checks went red on that head, by two different mechanisms.
+`app` failed on the SHA-pinning refusal quoted above — that is the negative control. `review-discipline`
+failed separately with `exit code 1`, which is the docs-drift gate doing its normal job on a branch
+that edits a workflow without touching docs. Only the first proves the pinning policy; conflating them
+would overstate the control.
+
+**Risk:** T0 (documentation / non-runtime). One file. `sha_pinning_required` and the ruleset are
+recorded here as **already-live state**, not changed by this PR.
+
 ### docs(engineering-os) — Engineering OS v1: universal exact-head review + canonical DESIGN.md (DOCS ONLY) · 2026-09-05
 
 **Freezes the Engineering OS. No product code, no workflow change, no migration, no RLS, no
