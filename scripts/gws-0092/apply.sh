@@ -44,19 +44,21 @@ trap 'rm -f "$SQLTMP" "$OUTTMP" "$ERRTMP"' EXIT
 # Run a one-row, one-column ("v") read and echo the scalar. Fails closed on any CLI or SQL error.
 sbq() {
   printf '%s\n' "$1" > "$SQLTMP"
-  # STDOUT and STDERR are captured SEPARATELY. The CLI writes progress text ("Initialising login role...") and its
-  # update nag to stderr; merging them into the parsed text is what let a non-conforming payload look like a result.
-  if ! supabase db query --linked --workdir "$REPO" -o json -f "$SQLTMP" >"$OUTTMP" 2>"$ERRTMP"; then
+  # `--agent no` PINS THE OUTPUT SHAPE. The CLI auto-detects an AI-agent caller and, when it thinks it has one, wraps
+  # results in a safety envelope: {"boundary": ..., "rows": [...], "warning": ...}. A human operator's shell gets a bare
+  # array instead. Same CLI, same version, same query, two different JSON shapes decided by who is watching — which is
+  # exactly how a parser validated in one environment refused in the other. Pinning the mode makes the shape a property
+  # of this script rather than of its caller.
+  #
+  # STDOUT and STDERR are captured SEPARATELY and only STDOUT is parsed: the CLI writes "Using workdir",
+  # "Initialising login role..." and its update nag to stderr, which must never be able to manufacture a success.
+  if ! supabase db query --linked --workdir "$REPO" --agent no -o json -f "$SQLTMP" >"$OUTTMP" 2>"$ERRTMP"; then
     sed 's/^/    cli: /' "$ERRTMP" >&2
     die "privileged read failed through the Supabase CLI connection"
   fi
-  # STRICT parse of STDOUT ONLY, against the shape this CLI (2.102.0) actually emits:
-  #   {"boundary": "...", "rows": [ { "v": <value> } ], "warning": "..."}
-  # Exactly one row, exactly the field `v`. Every other shape — a bare array, zero rows, several rows, a missing field,
-  # malformed JSON — is a REFUSAL, never an empty string. The previous parser sliced from the first "{" to the last "}"
-  # and then looked for a `rows` key; given a bare array it silently parsed the inner ROW object, found no `rows`, and
-  # returned empty with exit 0, which surfaced as "did not answer a trivial read" while the database had in fact
-  # answered correctly.
+  # STRICT parse of STDOUT ONLY, against the shape the real CLI 2.102.0 emits with `--agent no`, read rather than
+  # assumed:  [ { "v": <value> } ]  — a top-level ARRAY of exactly one single-key object. Anything else is a refusal
+  # naming what was actually seen. No wrapper fallback, no brace slicing, no grep, no guessing among schemas.
   python3 - "$OUTTMP" <<'PARSE' || die "the Supabase CLI returned an unexpected result shape for a privileged read"
 import json, sys
 
@@ -65,18 +67,15 @@ try:
     doc = json.loads(raw)
 except Exception:
     sys.exit("    parse: query output is not valid JSON")
-if not isinstance(doc, dict):
-    sys.exit(f"    parse: expected a JSON object at the top level, got {type(doc).__name__}")
-rows = doc.get("rows")
-if not isinstance(rows, list):
-    sys.exit("    parse: query output carries no 'rows' array")
-if len(rows) != 1:
-    sys.exit(f"    parse: expected exactly 1 row, got {len(rows)}")
-row = rows[0]
+if not isinstance(doc, list):
+    sys.exit(f"    parse: expected a JSON array at the top level, got {type(doc).__name__}")
+if len(doc) != 1:
+    sys.exit(f"    parse: expected exactly 1 row, got {len(doc)}")
+row = doc[0]
 if not isinstance(row, dict):
     sys.exit(f"    parse: row is {type(row).__name__}, expected an object")
-if "v" not in row:
-    sys.exit("    parse: row does not carry the expected field 'v'")
+if set(row) != {"v"}:
+    sys.exit(f"    parse: row keys are {sorted(row)}, expected exactly ['v']")
 value = row["v"]
 if value is None:
     sys.exit("    parse: field 'v' is null")
@@ -149,7 +148,18 @@ echo "    0086 applied, 0092 absent, remote head 0091"
 
 # ── G5. 0092 is the ONLY thing that will be applied ──────────────────────────────────────────────────────────────────
 step "confirming 0092 is the only pending migration"
-PENDING="$(supabase migration list --linked --workdir "$REPO" 2>/dev/null | awk -F'|' '$2 ~ /^[[:space:]]*$/ && $1 ~ /[0-9]{4}/ {gsub(/ /,"",$1); print $1}')"
+# Computed from DATA, never from the CLI's human-rendered table: that table's column padding also varies with agent
+# detection, and awk over it returned the right answer in one environment and NOTHING in the other. The pending set is
+# the local migration versions absent from the remote ledger — both read directly.
+REMOTE_VERSIONS="$(sbq "select coalesce(string_agg(version, ',' order by version), '')::text as v from supabase_migrations.schema_migrations")"
+LOCAL_VERSIONS="$(find "$REPO/supabase/migrations" -name '*.sql' -maxdepth 1 | sed 's|.*/||' | grep -oE '^[0-9]{4}' | sort | paste -sd, -)"
+PENDING="$(python3 - "$LOCAL_VERSIONS" "$REMOTE_VERSIONS" <<'PENDSET'
+import sys
+local = [v for v in sys.argv[1].split(",") if v]
+remote = {v for v in sys.argv[2].split(",") if v}
+print(",".join(v for v in local if v not in remote))
+PENDSET
+)"
 [ "$PENDING" = "0092" ] || die "pending set is '${PENDING:-<none>}', expected exactly 0092"
 echo "    pending = 0092 only"
 
