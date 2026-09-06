@@ -37,10 +37,23 @@ ACTUAL_SHA256="$(shasum -a 256 "$REPO/$MIGRATION" | cut -d' ' -f1)"
 [ "$ACTUAL_SHA256" = "$EXPECT_SHA256" ] || die "0092 sha256 mismatch: expected $EXPECT_SHA256, got $ACTUAL_SHA256"
 echo "    sha256 $ACTUAL_SHA256 OK"
 
-# ── G3. the target is STAGING, proven from the link and from the credential ──────────────────────────────────────────
+# ── G3. the target is STAGING, established by LINKING here and then re-proven ────────────────────────────────────────
+#
+# The package used to assume the operator had already linked, and refused otherwise. It now performs the link itself, so
+# the target is pinned by this script rather than inherited from whatever local state happened to exist. Linking touches
+# LOCAL CLI STATE ONLY: it writes supabase/.temp/, runs no migration, changes no connector state, and makes no AWS or
+# Google call.
+#
+# The ref is never taken from an argument or the environment. It is the constant below, self-checked against the
+# production ref before use, so this script cannot be pointed at production by any input it is given.
+read_linked_ref() {
+  python3 -c "import json;print(json.load(open('$REPO/supabase/.temp/linked-project.json'))['ref'])" 2>/dev/null || true
+}
+
 step "pinning the target project"
-LINKED="$(python3 -c "import json;print(json.load(open('$REPO/supabase/.temp/linked-project.json'))['ref'])" 2>/dev/null || true)"
-[ "$LINKED" = "$STAGING_REF" ] || die "linked project is '${LINKED:-<none>}', expected staging $STAGING_REF"
+[ "$STAGING_REF" != "$PRODUCTION_REF" ] || die "the staging and production refs are equal — refusing to guess"
+case "$STAGING_REF" in "$PRODUCTION_REF") die "the pinned ref IS the production ref" ;; esac
+
 [ -n "${SUPABASE_DB_URL:-}" ] || die "SUPABASE_DB_URL is not set"
 # The credential must name staging and must NOT name production. Compared without ever printing the URL.
 case "$SUPABASE_DB_URL" in
@@ -48,7 +61,28 @@ case "$SUPABASE_DB_URL" in
   *"$STAGING_REF"*) : ;;
   *) die "SUPABASE_DB_URL does not name the staging project ref" ;;
 esac
-echo "    linked=$STAGING_REF, credential names staging and not production"
+
+LINKED="$(read_linked_ref)"
+if [ "$LINKED" = "$STAGING_REF" ]; then
+  echo "    already linked to $STAGING_REF"
+else
+  [ "$LINKED" = "$PRODUCTION_REF" ] && die "currently linked to the PRODUCTION project — refusing to re-link from here"
+  step "linking to staging (local CLI state only; no migration, no connector state, no AWS, no Google)"
+  echo "    was: ${LINKED:-<not linked>}  ->  linking: $STAGING_REF"
+  # The ref is the pinned constant, never an argument. `supabase link` may prompt for the database password; that is an
+  # operator-interactive step and no credential is read, written or echoed by this script.
+  (cd "$REPO" && supabase link --project-ref "$STAGING_REF") || die "supabase link failed"
+fi
+
+# Re-read from disk AFTER linking and prove the result. Trusting the exit code of `link` would be trusting the thing
+# this gate exists to check.
+LINKED="$(read_linked_ref)"
+[ -n "$LINKED" ] || die "no linked project after linking"
+[ "$LINKED" != "$PRODUCTION_REF" ] || die "linked project is the PRODUCTION ref"
+[ "$LINKED" = "$STAGING_REF" ] || die "linked project is '$LINKED', expected staging $STAGING_REF"
+echo "    linked project verified: $LINKED"
+
+echo "    credential names staging and not production"
 
 PSQL=(psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -qtA)
 

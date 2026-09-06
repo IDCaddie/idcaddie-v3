@@ -19,10 +19,35 @@ No connector row is created. No lifecycle state is advanced. No run is opened. N
 
 1. `IDCADDIE_APPLY_0092_CONFIRM` set to the exact confirm phrase.
 2. The migration file's SHA256 equals the pin above.
-3. Linked project is the staging ref; `SUPABASE_DB_URL` names staging and **not** the production ref.
+3. **The script links to staging itself** — `supabase link --project-ref ycdpzduxugdsffjqyoai` — then re-reads
+   `supabase/.temp/linked-project.json` from disk and proves the result equals that ref and is not the production
+   ref. `SUPABASE_DB_URL` must likewise name staging and **not** production.
 4. `0086` is applied (GWS-E4) and `0092` is **not**.
 5. Remote chain head is `0091` — nothing applied out of order.
 6. `0092` is the only pending migration.
+
+### The link step
+
+Earlier the package assumed the operator had already linked and refused otherwise. It now performs the link itself, so
+the target is pinned by this script rather than inherited from whatever local state happened to exist.
+
+```
+supabase link --project-ref ycdpzduxugdsffjqyoai
+```
+
+- The ref is a **constant in the script**, never an argument or environment value, so the script cannot be pointed at
+  another project by any input it is given. It is self-checked against the production ref before use.
+- If already linked to staging, no re-link occurs. If currently linked to **production**, it refuses outright rather
+  than re-linking away from it.
+- The result is **re-read from disk and proved** after linking; trusting `link`'s exit code would be trusting the very
+  thing this gate exists to check.
+- Linking touches **local CLI state only**: it writes `supabase/.temp/`, runs no migration, changes no connector state,
+  and makes no AWS or Google call. It happens before any mutation, and only after the confirm-phrase and SHA256 gates
+  have passed.
+- `supabase link` may prompt for the database password. That is an operator-interactive step; this script reads, writes
+  and echoes no credential.
+
+No manual `supabase link` beforehand is required — the script does it, and proves it.
 
 ## Run
 
@@ -44,6 +69,7 @@ record the version. There is no partial state to clean up.
 | Symptom | Meaning | Action |
 |---|---|---|
 | `REFUSED: …` before the apply line | A precondition failed. Nothing was sent. | Fix the named precondition and re-run. Never bypass a gate. |
+| `REFUSED: supabase link failed` / `linked project is …` | The link did not produce the staging ref. **Local CLI state only** — no database was touched. | Resolve the CLI auth/link problem and re-run. Never hand-edit `supabase/.temp/` to satisfy the gate. |
 | Migration errors mid-apply | Whole transaction rolled back; ledger unchanged. | Re-run after fixing. Confirm with `select count(*) from supabase_migrations.schema_migrations where version='0092'` → `0`. |
 | Apply succeeds, baseline delta fails | Row counts moved across the apply — 0092 is pure DDL, so something else wrote concurrently. | Do **not** proceed. Investigate the concurrent writer before running anything downstream. |
 | Apply succeeds, `verify.sql` fails | Objects landed but a guarantee is wrong. | Do **not** hand-fix with `GRANT`/`REVOKE`/`ALTER` — that drifts the database from the file and the next environment reproduces the defect. Author a follow-up migration, review it, apply it. |
