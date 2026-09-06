@@ -19,12 +19,26 @@ No connector row is created. No lifecycle state is advanced. No run is opened. N
 
 1. `IDCADDIE_APPLY_0092_CONFIRM` set to the exact confirm phrase.
 2. The migration file's SHA256 equals the pin above.
-3. **The script links to staging itself** — `supabase link --project-ref ycdpzduxugdsffjqyoai` — then re-reads
-   `supabase/.temp/linked-project.json` from disk and proves the result equals that ref and is not the production
-   ref. `SUPABASE_DB_URL` must likewise name staging and **not** production.
+3. **The script links to staging itself** — `supabase link --project-ref ycdpzduxugdsffjqyoai --workdir <repo>` — then
+   re-reads `supabase/.temp/linked-project.json` from disk, proves it equals that ref and is not the production ref, and
+   proves the connection answers a trivial read before any further gate.
 4. `0086` is applied (GWS-E4) and `0092` is **not**.
 5. Remote chain head is `0091` — nothing applied out of order.
 6. `0092` is the only pending migration.
+
+### How privileged reads happen — no credential
+
+Every privileged read runs through `supabase db query --linked --workdir <repo>`, which executes against the linked
+project **via the Management API using the CLI's existing authentication**. Derived from the installed CLI
+(`supabase 2.102.0`), not assumed: `supabase db query` supports `--linked`, `--file`, and JSON output, and it **exits
+non-zero on any SQL error**, which is the `ON_ERROR_STOP` equivalent this package relies on. Verified by running a
+passing `DO $$ … assert … $$` (exit 0) and a failing one (exit 1, assertion message surfaced).
+
+- No `SUPABASE_DB_URL`, no database password, no new stored credential, no new environment variable.
+- SQL is passed **by file**, never in argv.
+- `--workdir` pins which link is used: the CLI resolves `--linked` from that directory's
+  `supabase/.temp/linked-project.json` — the file the link step below writes and proves. An unlinked workdir refuses
+  with *"Cannot find project ref"* rather than falling back to some other project.
 
 ### The link step
 
@@ -52,12 +66,13 @@ No manual `supabase link` beforehand is required — the script does it, and pro
 ## Run
 
 ```bash
-export SUPABASE_DB_URL='postgresql://...'          # operator's own credential; never stored, never echoed
 IDCADDIE_APPLY_0092_CONFIRM='APPLY 0092 GOOGLE WORKSPACE VALIDATION STAGING' \
   bash scripts/gws-0092/apply.sh
 
-psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -f scripts/gws-0092/verify.sql
+supabase db query --linked --workdir "$(pwd)" -f scripts/gws-0092/verify.sql
 ```
+
+**No database URL, no database password, no new environment variable.** The only input is the confirm phrase.
 
 **The apply is not complete until `verify.sql` prints `GWS-0092 POST-APPLY PROOF PASSED`.**
 
@@ -70,6 +85,7 @@ record the version. There is no partial state to clean up.
 |---|---|---|
 | `REFUSED: …` before the apply line | A precondition failed. Nothing was sent. | Fix the named precondition and re-run. Never bypass a gate. |
 | `REFUSED: supabase link failed` / `linked project is …` | The link did not produce the staging ref. **Local CLI state only** — no database was touched. | Resolve the CLI auth/link problem and re-run. Never hand-edit `supabase/.temp/` to satisfy the gate. |
+| `REFUSED: privileged read failed through the Supabase CLI connection` | The CLI could not execute a read against the linked project. Nothing was applied. | Re-authenticate the CLI (`supabase login`) and re-run. Do **not** substitute a database URL — the package deliberately requires no credential. |
 | Migration errors mid-apply | Whole transaction rolled back; ledger unchanged. | Re-run after fixing. Confirm with `select count(*) from supabase_migrations.schema_migrations where version='0092'` → `0`. |
 | Apply succeeds, baseline delta fails | Row counts moved across the apply — 0092 is pure DDL, so something else wrote concurrently. | Do **not** proceed. Investigate the concurrent writer before running anything downstream. |
 | Apply succeeds, `verify.sql` fails | Objects landed but a guarantee is wrong. | Do **not** hand-fix with `GRANT`/`REVOKE`/`ALTER` — that drifts the database from the file and the next environment reproduces the defect. Author a follow-up migration, review it, apply it. |

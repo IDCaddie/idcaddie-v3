@@ -7,8 +7,10 @@
 --   (A) every object, grant and authority boundary 0092 promised actually exists on THIS database;
 --   (B) applying it created no data and advanced no state — no connector row, no lifecycle change, no audit entry.
 --
--- Run:  psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -f scripts/gws-0092/verify.sql
--- Any failed assertion aborts with the assertion's own message.
+-- Run:  supabase db query --linked --workdir "$(pwd)" -f scripts/gws-0092/verify.sql
+-- No database URL and no password: this executes through the CLI's existing authenticated connection to the linked
+-- staging project. `supabase db query` exits non-zero on any SQL error, so a failed assertion aborts with the
+-- assertion's own message — the ON_ERROR_STOP equivalent.
 
 begin;
 set local transaction read only;

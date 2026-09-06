@@ -9,8 +9,12 @@
 # It creates no connector row, advances no lifecycle state, and makes no AWS or Google call. 0092 itself is additive
 # DDL + GRANT/REVOKE only.
 #
+# All privileged reads go through the ALREADY-AUTHORIZED Supabase CLI connection to the linked staging project
+# (`supabase db query --linked`, which runs via the Management API using the CLI's existing auth). The package requires
+# NO database URL, NO database password, and introduces NO new credential or environment variable. No secret is ever
+# placed in argv: every statement is passed by file.
+#
 # Usage:
-#   export SUPABASE_DB_URL='postgresql://...'   # the operator's own staging credential; never stored, never echoed
 #   IDCADDIE_APPLY_0092_CONFIRM='APPLY 0092 GOOGLE WORKSPACE VALIDATION STAGING' bash scripts/gws-0092/apply.sh
 set -euo pipefail
 
@@ -26,6 +30,32 @@ PRODUCTION_REF="dzbfxulvxchdemcettrx"
 
 die() { echo "REFUSED: $*" >&2; exit 1; }
 step() { echo "==> $*"; }
+
+# Every privileged read runs through the CLI's own authenticated connection to the LINKED project. `--workdir` pins
+# which link is used: the CLI resolves `--linked` from that directory's supabase/.temp/linked-project.json, which G3
+# below writes and then proves. The SQL is passed by FILE, never in argv.
+#
+# `supabase db query` exits non-zero on any SQL error, which is the ON_ERROR_STOP-equivalent this package relies on.
+SQLTMP="$(mktemp -t gws0092)"
+trap 'rm -f "$SQLTMP"' EXIT
+
+# Run a one-row, one-column ("v") read and echo the scalar. Fails closed on any CLI or SQL error.
+sbq() {
+  printf '%s\n' "$1" > "$SQLTMP"
+  local out
+  if ! out="$(supabase db query --linked --workdir "$REPO" -o json -f "$SQLTMP" 2>&1)"; then
+    echo "$out" >&2
+    die "privileged read failed through the Supabase CLI connection"
+  fi
+  printf '%s' "$out" | python3 -c "
+import json, sys
+t = sys.stdin.read()
+i, j = t.find('{'), t.rfind('}')
+if i < 0 or j < i: sys.exit('unparseable query output')
+rows = (json.loads(t[i:j+1]).get('rows') or [])
+print(rows[0]['v'] if rows else '')
+"
+}
 
 # ── G1. explicit operator confirm ────────────────────────────────────────────────────────────────────────────────────
 [ "${IDCADDIE_APPLY_0092_CONFIRM:-}" = "$EXPECT_CONFIRM" ] || die "confirm phrase not set (IDCADDIE_APPLY_0092_CONFIRM)"
@@ -54,14 +84,6 @@ step "pinning the target project"
 [ "$STAGING_REF" != "$PRODUCTION_REF" ] || die "the staging and production refs are equal — refusing to guess"
 case "$STAGING_REF" in "$PRODUCTION_REF") die "the pinned ref IS the production ref" ;; esac
 
-[ -n "${SUPABASE_DB_URL:-}" ] || die "SUPABASE_DB_URL is not set"
-# The credential must name staging and must NOT name production. Compared without ever printing the URL.
-case "$SUPABASE_DB_URL" in
-  *"$PRODUCTION_REF"*) die "SUPABASE_DB_URL names the PRODUCTION project ref" ;;
-  *"$STAGING_REF"*) : ;;
-  *) die "SUPABASE_DB_URL does not name the staging project ref" ;;
-esac
-
 LINKED="$(read_linked_ref)"
 if [ "$LINKED" = "$STAGING_REF" ]; then
   echo "    already linked to $STAGING_REF"
@@ -71,7 +93,7 @@ else
   echo "    was: ${LINKED:-<not linked>}  ->  linking: $STAGING_REF"
   # The ref is the pinned constant, never an argument. `supabase link` may prompt for the database password; that is an
   # operator-interactive step and no credential is read, written or echoed by this script.
-  (cd "$REPO" && supabase link --project-ref "$STAGING_REF") || die "supabase link failed"
+  supabase link --project-ref "$STAGING_REF" --workdir "$REPO" || die "supabase link failed"
 fi
 
 # Re-read from disk AFTER linking and prove the result. Trusting the exit code of `link` would be trusting the thing
@@ -82,23 +104,25 @@ LINKED="$(read_linked_ref)"
 [ "$LINKED" = "$STAGING_REF" ] || die "linked project is '$LINKED', expected staging $STAGING_REF"
 echo "    linked project verified: $LINKED"
 
-echo "    credential names staging and not production"
-
-PSQL=(psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -qtA)
+# The link file is proved; now prove the CONNECTION works and is the one that file names. A read that cannot execute is
+# a target that cannot be trusted, so this fails closed before any further gate.
+PROBE="$(sbq "select 'reachable'::text as v")"
+[ "$PROBE" = "reachable" ] || die "the linked staging connection did not answer a trivial read"
+echo "    privileged read path verified through the Supabase CLI (no DB URL, no password)"
 
 # ── G4. the database is in exactly the expected pre-state ────────────────────────────────────────────────────────────
 step "checking the hosted chain"
-HAS_0086="$("${PSQL[@]}" -c "select count(*) from supabase_migrations.schema_migrations where version = '0086'")"
+HAS_0086="$(sbq "select count(*)::text as v from supabase_migrations.schema_migrations where version = '0086'")"
 [ "$HAS_0086" = "1" ] || die "0086 is NOT applied to this database (GWS-E4 precondition)"
-HAS_0092="$("${PSQL[@]}" -c "select count(*) from supabase_migrations.schema_migrations where version = '0092'")"
+HAS_0092="$(sbq "select count(*)::text as v from supabase_migrations.schema_migrations where version = '0092'")"
 [ "$HAS_0092" = "0" ] || die "0092 is ALREADY applied — nothing to do"
-MAX_REMOTE="$("${PSQL[@]}" -c "select coalesce(max(version), '<none>') from supabase_migrations.schema_migrations")"
+MAX_REMOTE="$(sbq "select coalesce(max(version), '<none>')::text as v from supabase_migrations.schema_migrations")"
 [ "$MAX_REMOTE" = "0091" ] || die "remote chain head is '$MAX_REMOTE', expected 0091 (out-of-order state)"
 echo "    0086 applied, 0092 absent, remote head 0091"
 
 # ── G5. 0092 is the ONLY thing that will be applied ──────────────────────────────────────────────────────────────────
 step "confirming 0092 is the only pending migration"
-PENDING="$(cd "$REPO" && supabase migration list --linked 2>/dev/null | awk -F'|' '$2 ~ /^[[:space:]]*$/ && $1 ~ /[0-9]{4}/ {gsub(/ /,"",$1); print $1}')"
+PENDING="$(supabase migration list --linked --workdir "$REPO" 2>/dev/null | awk -F'|' '$2 ~ /^[[:space:]]*$/ && $1 ~ /[0-9]{4}/ {gsub(/ /,"",$1); print $1}')"
 [ "$PENDING" = "0092" ] || die "pending set is '${PENDING:-<none>}', expected exactly 0092"
 echo "    pending = 0092 only"
 
@@ -106,10 +130,10 @@ echo "    pending = 0092 only"
 step "recording pre-apply state"
 BASELINE="$REPO/scripts/gws-0092/.preapply-baseline"
 {
-  echo "connectors_total=$("${PSQL[@]}" -c "select count(*) from public.connectors")"
-  echo "connectors_google=$("${PSQL[@]}" -c "select count(*) from public.connectors where provider = 'google_workspace'")"
-  echo "connectors_verified=$("${PSQL[@]}" -c "select count(*) from public.connectors where connection_state = 'verified'")"
-  echo "audit_total=$("${PSQL[@]}" -c "select count(*) from public.audit_logs")"
+  echo "connectors_total=$(sbq "select count(*)::text as v from public.connectors")"
+  echo "connectors_google=$(sbq "select count(*)::text as v from public.connectors where provider = 'google_workspace'")"
+  echo "connectors_verified=$(sbq "select count(*)::text as v from public.connectors where connection_state = 'verified'")"
+  echo "audit_total=$(sbq "select count(*)::text as v from public.audit_logs")"
   echo "captured_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 } > "$BASELINE"
 echo "    baseline written to $BASELINE"
@@ -117,30 +141,29 @@ cat "$BASELINE" | sed 's/^/      /'
 
 # ── APPLY ────────────────────────────────────────────────────────────────────────────────────────────────────────────
 step "APPLYING 0092 to hosted staging"
-cd "$REPO"
-supabase migration up --linked
+supabase migration up --linked --workdir "$REPO"
 
 step "confirming the ledger recorded exactly 0092"
-NOW_0092="$("${PSQL[@]}" -c "select count(*) from supabase_migrations.schema_migrations where version = '0092'")"
+NOW_0092="$(sbq "select count(*)::text as v from supabase_migrations.schema_migrations where version = '0092'")"
 [ "$NOW_0092" = "1" ] || die "0092 is still not recorded after apply"
-NEW_HEAD="$("${PSQL[@]}" -c "select max(version) from supabase_migrations.schema_migrations")"
+NEW_HEAD="$(sbq "select max(version)::text as v from supabase_migrations.schema_migrations")"
 [ "$NEW_HEAD" = "0092" ] || die "chain head is '$NEW_HEAD' after apply, expected 0092"
 
 step "comparing against the pre-apply baseline — a pure DDL apply creates no rows anywhere"
 . "$BASELINE"
 for pair in "connectors_total:public.connectors" "audit_total:public.audit_logs"; do
   key="${pair%%:*}"; tbl="${pair##*:}"
-  now="$("${PSQL[@]}" -c "select count(*) from $tbl")"
+  now="$(sbq "select count(*)::text as v from $tbl")"
   before="$(eval echo \$$key)"
   [ "$now" = "$before" ] || die "$tbl row count changed across the apply: $before -> $now"
   echo "    $tbl unchanged at $now"
 done
-NOW_GOOGLE="$("${PSQL[@]}" -c "select count(*) from public.connectors where provider = 'google_workspace'")"
+NOW_GOOGLE="$(sbq "select count(*)::text as v from public.connectors where provider = 'google_workspace'")"
 [ "$NOW_GOOGLE" = "$connectors_google" ] || die "google_workspace connector count changed: $connectors_google -> $NOW_GOOGLE"
-NOW_VERIFIED="$("${PSQL[@]}" -c "select count(*) from public.connectors where connection_state = 'verified'")"
+NOW_VERIFIED="$(sbq "select count(*)::text as v from public.connectors where connection_state = 'verified'")"
 [ "$NOW_VERIFIED" = "$connectors_verified" ] || die "verified connector count changed: $connectors_verified -> $NOW_VERIFIED"
 echo "    google_workspace connectors unchanged at $NOW_GOOGLE; verified connectors unchanged at $NOW_VERIFIED"
 
 echo
 echo "0092 APPLIED. Now run the post-apply proof — the apply is not complete until it passes:"
-echo "  psql \"\$SUPABASE_DB_URL\" -v ON_ERROR_STOP=1 -f scripts/gws-0092/verify.sql"
+echo "  supabase db query --linked --workdir \"$REPO\" -f scripts/gws-0092/verify.sql"
