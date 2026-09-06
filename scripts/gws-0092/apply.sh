@@ -36,25 +36,52 @@ step() { echo "==> $*"; }
 # below writes and then proves. The SQL is passed by FILE, never in argv.
 #
 # `supabase db query` exits non-zero on any SQL error, which is the ON_ERROR_STOP-equivalent this package relies on.
-SQLTMP="$(mktemp -t gws0092)"
-trap 'rm -f "$SQLTMP"' EXIT
+SQLTMP="$(mktemp -t gws0092sql)"
+OUTTMP="$(mktemp -t gws0092out)"
+ERRTMP="$(mktemp -t gws0092err)"
+trap 'rm -f "$SQLTMP" "$OUTTMP" "$ERRTMP"' EXIT
 
 # Run a one-row, one-column ("v") read and echo the scalar. Fails closed on any CLI or SQL error.
 sbq() {
   printf '%s\n' "$1" > "$SQLTMP"
-  local out
-  if ! out="$(supabase db query --linked --workdir "$REPO" -o json -f "$SQLTMP" 2>&1)"; then
-    echo "$out" >&2
+  # STDOUT and STDERR are captured SEPARATELY. The CLI writes progress text ("Initialising login role...") and its
+  # update nag to stderr; merging them into the parsed text is what let a non-conforming payload look like a result.
+  if ! supabase db query --linked --workdir "$REPO" -o json -f "$SQLTMP" >"$OUTTMP" 2>"$ERRTMP"; then
+    sed 's/^/    cli: /' "$ERRTMP" >&2
     die "privileged read failed through the Supabase CLI connection"
   fi
-  printf '%s' "$out" | python3 -c "
+  # STRICT parse of STDOUT ONLY, against the shape this CLI (2.102.0) actually emits:
+  #   {"boundary": "...", "rows": [ { "v": <value> } ], "warning": "..."}
+  # Exactly one row, exactly the field `v`. Every other shape — a bare array, zero rows, several rows, a missing field,
+  # malformed JSON — is a REFUSAL, never an empty string. The previous parser sliced from the first "{" to the last "}"
+  # and then looked for a `rows` key; given a bare array it silently parsed the inner ROW object, found no `rows`, and
+  # returned empty with exit 0, which surfaced as "did not answer a trivial read" while the database had in fact
+  # answered correctly.
+  python3 - "$OUTTMP" <<'PARSE' || die "the Supabase CLI returned an unexpected result shape for a privileged read"
 import json, sys
-t = sys.stdin.read()
-i, j = t.find('{'), t.rfind('}')
-if i < 0 or j < i: sys.exit('unparseable query output')
-rows = (json.loads(t[i:j+1]).get('rows') or [])
-print(rows[0]['v'] if rows else '')
-"
+
+raw = open(sys.argv[1], encoding="utf-8").read()
+try:
+    doc = json.loads(raw)
+except Exception:
+    sys.exit("    parse: query output is not valid JSON")
+if not isinstance(doc, dict):
+    sys.exit(f"    parse: expected a JSON object at the top level, got {type(doc).__name__}")
+rows = doc.get("rows")
+if not isinstance(rows, list):
+    sys.exit("    parse: query output carries no 'rows' array")
+if len(rows) != 1:
+    sys.exit(f"    parse: expected exactly 1 row, got {len(rows)}")
+row = rows[0]
+if not isinstance(row, dict):
+    sys.exit(f"    parse: row is {type(row).__name__}, expected an object")
+if "v" not in row:
+    sys.exit("    parse: row does not carry the expected field 'v'")
+value = row["v"]
+if value is None:
+    sys.exit("    parse: field 'v' is null")
+print(value)
+PARSE
 }
 
 # ── G1. explicit operator confirm ────────────────────────────────────────────────────────────────────────────────────
